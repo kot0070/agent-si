@@ -1,0 +1,15 @@
+﻿venv/
+.venv/
+__pycache__/
+.pytest_cache/
+node_modules/
+dist/
+build/
+*.db
+*.sqlite*
+.env*
+*.key
+*.pem
+secrets/
+logs/
+tmp/
