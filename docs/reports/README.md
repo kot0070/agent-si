@@ -6,3 +6,4 @@ cost/tokens).
 
 A final development report summarises the whole build once all packages
 are accepted.
+K01: APP/docs/reports/K01.md - Day 0 report.
