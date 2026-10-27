@@ -1,16 +1,21 @@
-"""Watcher rules: rule-card evaluation over stored facts (lane A STEP2).
+"""Watcher rules: rule-card evaluation over stored facts.
 
 Owns the REALIZATION_MAP entry ``watcher.evaluate_rule``
-(:func:`evaluate`). Each evaluation of a known card records exactly one
-WATCH_DECISION journal row and returns the decision; unknown cards raise.
+(:func:`evaluate`). Every rule card carries its own area, model and hang
+window; each verdict is a pure function of the card record, the stored
+journal facts and the clock. Each evaluation of a known card records
+exactly one WATCH_DECISION journal row and returns the decision; unknown
+cards raise.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
+from typing import Dict, Tuple
 
+from agent_si.watcher import journal as journal_store
 from agent_si.watcher.journal import ERROR_CODES, WatcherError, append_event
 
 __all__ = (
@@ -18,7 +23,12 @@ __all__ = (
     "WatcherError",
     "WatchVerdict",
     "WatchDecision",
+    "RuleCard",
+    "MODELS",
+    "HANG_DEFAULT_MINUTES",
     "RULES",
+    "describe",
+    "verdict_for",
     "evaluate",
     "reset_state",
 )
@@ -44,10 +54,37 @@ class WatchDecision:
     decided_at: str = ""
 
 
-#: Stored rule cards: card id to its decided verdict.
-RULES = {
-    "rule-tamper": WatchVerdict.ALLOW,
-    "rule-guard": WatchVerdict.BLOCK,
+@dataclass(frozen=True)
+class RuleCard:
+    """Stored rule card: own area, model, hang window, base verdict."""
+
+    rule_id: str
+    area: str
+    model: str = "local"
+    hang_minutes: int = 20
+    base_verdict: WatchVerdict = WatchVerdict.ALLOW
+
+
+#: Models a rule card may run under: local model, API model, or OFF.
+MODELS = (
+    "local",
+    "API",
+    "OFF",
+)
+
+#: Default hang window in minutes carried by every rule card.
+HANG_DEFAULT_MINUTES = 20
+
+#: Stored rule cards: card id to its card record.
+RULES: Dict[str, RuleCard] = {
+    "rule-tamper": RuleCard(
+        "rule-tamper", "tamper", "local",
+        HANG_DEFAULT_MINUTES, WatchVerdict.ALLOW,
+    ),
+    "rule-guard": RuleCard(
+        "rule-guard", "guard", "local",
+        HANG_DEFAULT_MINUTES, WatchVerdict.BLOCK,
+    ),
 }
 
 #: Decision sequence; restarted by reset_state for probe isolation.
@@ -64,17 +101,60 @@ def _utcnow() -> str:
     )
 
 
+def _parse_stamp(stamp: str) -> datetime:
+    """Parse one frozen-style UTC stamp."""
+    return datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+
+
+def _heartbeat_stale(rows: Tuple, hang_minutes: int, moment: datetime) -> bool:
+    """True when no fresh SERVICE_STATE heartbeat covers the moment."""
+    beats = []
+    for row in rows:
+        if row.kind != "SERVICE_STATE":
+            continue
+        try:
+            beats.append(_parse_stamp(row.timestamp))
+        except ValueError:
+            continue
+    if not beats:
+        return True
+    return (moment - max(beats)) > timedelta(minutes=hang_minutes)
+
+
+def verdict_for(card: RuleCard, rows: Tuple, now: str) -> WatchVerdict:
+    """Pure verdict of one card record over stored facts at one reading."""
+    kinds = {row.kind for row in rows}
+    if card.area == "tamper" and "TAMPER_ATTEMPT" in kinds:
+        return WatchVerdict.BLOCK
+    if card.area == "guard" and "GUARD_BLOCK" in kinds:
+        return WatchVerdict.BLOCK
+    if _heartbeat_stale(rows, card.hang_minutes, _parse_stamp(now)):
+        return WatchVerdict.ESCALATE
+    return card.base_verdict
+
+
+def describe(rule_id: str) -> RuleCard:
+    """Return the stored card record; raise RULE_NOT_FOUND when unknown."""
+    try:
+        return RULES[str(rule_id)]
+    except KeyError:
+        raise WatcherError(
+            "RULE_NOT_FOUND", "unknown rule %r" % (rule_id,)
+        ) from None
+
+
 def reset_state() -> None:
-    """Restart decision ids."""
+    """Restart decision ids; the card registry is definitions, not state."""
     global _SEQ
     _SEQ = 0
 
 
 def evaluate(project_id: str, rule_id: str) -> WatchDecision:
     """Decide one stored rule card; record one WATCH_DECISION row."""
-    verdict = RULES.get(rule_id)
-    if verdict is None:
-        raise WatcherError("RULE_NOT_FOUND", "unknown rule %r" % (rule_id,))
+    card = describe(rule_id)
+    verdict = verdict_for(
+        card, journal_store.stored_rows(str(project_id)), _utcnow()
+    )
     global _SEQ
     _SEQ += 1
     entry = append_event(

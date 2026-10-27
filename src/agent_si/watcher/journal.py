@@ -20,8 +20,10 @@ __all__ = (
     "ERROR_CODES",
     "KINDS",
     "JournalEntry",
+    "StoredRow",
     "append_event",
     "list_events",
+    "stored_rows",
     "reset_state",
 )
 
@@ -144,3 +146,39 @@ def list_events(project_id: str, kind: str = "") -> Tuple[JournalEntry, ...]:
             )
         return tuple(row["entry"] for row in rows if row["kind"] == kind)
     return tuple(row["entry"] for row in rows)
+
+
+@dataclass(frozen=True)
+class StoredRow:
+    """One stored journal row: the kind plus the facts a pin covers."""
+
+    kind: str
+    source: str = ""
+    summary: str = ""
+    refs: Tuple[str, ...] = ()
+    entry_id: str = ""
+    timestamp: str = ""
+    digest: str = ""
+
+
+def stored_rows(project_id: str, kind: str = "") -> Tuple[StoredRow, ...]:
+    """Serve stored row facts only; empty kind reads all kinds."""
+    rows = _ROWS.get(str(project_id), [])
+    if kind:
+        if kind not in KINDS:
+            raise WatcherError(
+                "JOURNAL_KIND_UNKNOWN", "unknown journal kind %r" % (kind,)
+            )
+        rows = [row for row in rows if row["kind"] == kind]
+    return tuple(
+        StoredRow(
+            kind=row["kind"],
+            source=row["source"],
+            summary=row["summary"],
+            refs=row["refs"],
+            entry_id=row["entry"].entry_id,
+            timestamp=row["entry"].timestamp,
+            digest=row["entry"].hash,
+        )
+        for row in rows
+    )

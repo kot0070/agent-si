@@ -1,5 +1,9 @@
 """Lane B STEP2 context register: verbatim append-only store (K13 45A/45B).
 
+K08 SPEC 0A user-requirement register (verbatim text per requirement id
+plus the PRESERVED audit gate) lives in
+:mod:`agent_si.context_keeper.requirements` and is re-exported here.
+
 Frozen shapes are reused from
 :mod:`agent_si.context_keeper.interface` (never redefined here):
 :data:`CONTEXT_VIOLATION_TYPES` order, ``IncidentSeverity``
@@ -13,6 +17,13 @@ import dataclasses
 import sys
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
+
+from agent_si.context_keeper.requirements import (
+    RequirementAudit,
+    RequirementRegister,
+    RequirementRow,
+    audit_requirements,
+)
 
 if TYPE_CHECKING:
     from agent_si.context_keeper import interface as ck
@@ -51,6 +62,9 @@ def __getattr__(name):
 
 #: Reused frozen violation row (identity with the contract module;
 #: provided late through __getattr__ above, never redefined here).
+
+#: K08 SPEC 0A user-requirement register names (same class objects as
+#: agent_si.context_keeper.requirements, never copies).
 
 #: Cancel keeps history; only the logical scope exists (K13 45B, SPEC 4).
 CANCEL_SCOPE_DEFAULT = "LOGICAL_ONLY"

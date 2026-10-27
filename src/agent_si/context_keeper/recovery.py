@@ -9,10 +9,12 @@ CRITICAL incident stays unresolved after recovery. Standard library only.
 
 from __future__ import annotations
 
+import datetime
 import sys
 from typing import Callable, Optional, TYPE_CHECKING
 
 from agent_si.context_keeper import checkpoints as keeper_checkpoints
+from agent_si.context_keeper import project_state as keeper_project_state
 
 if TYPE_CHECKING:
     from agent_si.context_keeper import interface as ck
@@ -58,8 +60,11 @@ RECOVERY_SOURCE = "agent_si.context_keeper.recovery"
 #: Stop-all reason when CRITICAL stays unresolved after recovery.
 STOP_REASON = "critical context incident unresolved after recovery"
 
-#: Resolution stamp recorded for rows restored from a checkpoint.
-_RECOVERY_STAMP = "2026-01-01T00:00:00Z"
+
+def _utc_now_iso() -> str:
+    """Call-time UTC stamp in ISO form (never a fixed value)."""
+    return datetime.datetime.now(
+        datetime.timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 class Recovery:
@@ -116,11 +121,25 @@ class Recovery:
             code=contract.OK_CODE if ok else contract.RECOVERY_FAILED_CODE,
         )
 
+    def regenerate_project_state(self, project_id: str):
+        """Regenerate PROJECT_STATE from keeper records before continuation.
+
+        Read-only R176 assembly over the unresolved register rows, the
+        latest validated checkpoint and this recovery's verify outcome.
+        """
+        return keeper_project_state.regenerate_project_state(
+            project_id,
+            self._register,
+            checkpoints=self._checkpoints,
+            verify_report=self.verify(project_id),
+        )
+
     def recover(
         self, project_id: str, checkpoint_id: str
     ) -> ck.VerifyReport:
         """Load the checkpoint, restore covered refs, then verify."""
         contract = _ck()
+        self.regenerate_project_state(project_id)
         target = None
         if self._checkpoints is not None:
             target = self._checkpoints.read_checkpoint(checkpoint_id)
@@ -129,12 +148,13 @@ class Recovery:
             return contract.VerifyReport(
                 ok=False, code=contract.RECOVERY_FAILED_CODE
             )
+        resolved_at = _utc_now_iso()
         for row in self._register.list_unresolved(project_id):
             if set(row.expected_context_refs) <= set(target.context_refs):
                 self._register.mark_resolved(
                     row.context_event_id,
                     "recovered from %s" % checkpoint_id,
-                    _RECOVERY_STAMP,
+                    resolved_at,
                 )
         report = self.verify(project_id)
         if not report.ok:

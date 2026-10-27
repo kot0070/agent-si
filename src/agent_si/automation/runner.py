@@ -10,6 +10,7 @@ import json
 import sys
 import time
 
+from agent_si.automation import cleanup as cleanup_mod
 from agent_si.automation import pause as pause_flags
 
 
@@ -40,11 +41,12 @@ _finals = {}
 _next_seq = 0
 _journal = None
 _budget = None
+_run_temp_base = None
 
 
 def reset_state():
-    """Clear templates, runs, histories, counters and hooks."""
-    global _next_seq, _journal, _budget
+    """Clear templates, runs, histories, turns, counters and hooks."""
+    global _next_seq, _journal, _budget, _run_temp_base
     _templates.clear()
     _runs.clear()
     _histories.clear()
@@ -52,6 +54,7 @@ def reset_state():
     _next_seq = 0
     _journal = None
     _budget = None
+    _run_temp_base = None
 
 
 def set_journal_hook(hook):
@@ -135,6 +138,9 @@ def start_run(project_id, template_id, now=None, resume_window_s=None):
         "started_at": at,
         "updated_at": at,
         "resume_window_s": window,
+        "turn_seq": 0,
+        "open_turn": None,
+        "pending_cancel": None,
     }
     _histories[run_id] = [{"event": "created", "at": at}]
     _finals.pop(run_id, None)
@@ -155,6 +161,9 @@ def create_pending(project_id, template_id="", trigger_id=None, now=None):
         "started_at": at,
         "updated_at": at,
         "resume_window_s": _DEFAULT_RESUME_WINDOW_S,
+        "turn_seq": 0,
+        "open_turn": None,
+        "pending_cancel": None,
     }
     _histories[run_id] = [{"event": "created", "at": at}]
     _finals.pop(run_id, None)
@@ -197,20 +206,176 @@ def get_finalization(project_id, run_id):
     return dict(final)
 
 
-def cancel_run(project_id, run_id, reason="", now=None):
-    """Cancel a run; history is kept and the receipt is stored.
+def set_run_temp_base(base):
+    """Set the run-temp base override (None clears it to the default)."""
+    global _run_temp_base
+    _run_temp_base = base
 
-    Cancel is a lifecycle move, so it works even while paused.
-    """
+
+def begin_turn(project_id, run_id, now=None):
+    """Open a new turn on a running run and record the move."""
     rec = _get_record(project_id, run_id)
     at = now if now is not None else time.time()
+    if rec["state"] != "RUNNING":
+        raise _auto_iface().AutomationError(
+            code="AUTOMATION_RUN_ACTIVE",
+            detail="run %s is not running" % run_id,
+        )
+    if rec.get("open_turn") is not None:
+        raise _auto_iface().AutomationError(
+            code="AUTOMATION_RUN_ACTIVE",
+            detail="run %s already has an open turn" % run_id,
+        )
+    turn = int(rec.get("turn_seq", 0)) + 1
+    rec["turn_seq"] = turn
+    rec["open_turn"] = {"turn": turn, "started_at": at}
+    rec["updated_at"] = at
+    _histories[run_id].append({"event": "turn-started:%d" % turn, "at": at})
+    _notify(
+        project_id,
+        "run turn started %s #%d" % (run_id, turn),
+        refs=(run_id,),
+    )
+    return {
+        "run_id": run_id,
+        "project_id": project_id,
+        "turn": turn,
+        "started_at": at,
+    }
+
+
+def complete_turn(project_id, run_id, now=None):
+    """Complete the open turn; a flagged after-turn cancel stops the run."""
+    rec = _get_record(project_id, run_id)
+    at = now if now is not None else time.time()
+    opened = rec.get("open_turn")
+    if rec["state"] != "RUNNING" or opened is None:
+        raise _auto_iface().AutomationError(
+            code="AUTOMATION_RUN_ACTIVE",
+            detail="run %s has no open turn" % run_id,
+        )
+    turn = opened["turn"]
+    rec["open_turn"] = None
+    rec["updated_at"] = at
+    _histories[run_id].append({"event": "turn-completed:%d" % turn, "at": at})
+    _notify(
+        project_id,
+        "run turn completed %s #%d" % (run_id, turn),
+        refs=(run_id,),
+    )
+    pending = rec.get("pending_cancel")
+    if pending is not None:
+        rec["pending_cancel"] = None
+        _mark_cancelled(project_id, rec, pending, at)
+    return {
+        "run_id": run_id,
+        "project_id": project_id,
+        "turn": turn,
+        "completed_at": at,
+        "state": rec["state"],
+    }
+
+
+def _mark_cancelled(project_id, rec, reason, at):
+    """Stop a run at once: history is kept and the receipt is stored."""
+    run_id = rec["run_id"]
     rec["state"] = "CANCELLED"
     rec["updated_at"] = at
+    rec["pending_cancel"] = None
     event = "cancelled:%s" % reason if reason else "cancelled"
     _histories[run_id].append({"event": event, "at": at})
     _finals[run_id] = {"reason": reason, "finalized": True}
     _notify(project_id, "run cancelled %s" % run_id, refs=(run_id,))
+    _clean_owned_temp(project_id, rec)
+
+
+def _clean_owned_temp(project_id, rec):
+    """Clean the run's own temp folder via the standard cleanup script.
+
+    Cancel never breaks on cleanup: a refused or unusable folder only
+    records a journal notice.
+    """
+    run_id = rec["run_id"]
+    try:
+        receipt = cleanup_mod.clean_run_temp(
+            cleanup_mod.resolve_base(_run_temp_base), run_id
+        )
+    except Exception as exc:
+        _notify(
+            project_id,
+            "run temp clean skipped %s: %s" % (run_id, exc),
+            refs=(run_id,),
+        )
+        return None
+    _notify(
+        project_id,
+        "run temp cleaned %s removed=%d" % (run_id, len(receipt["removed"])),
+        refs=(run_id,),
+    )
+    return receipt
+
+
+def cancel_run(project_id, run_id, reason="", now=None, mode="immediate"):
+    """Cancel a run now (immediate, the default) or after the open turn.
+
+    Immediate cancellation stops at once and leaves an open turn
+    uncompleted. After-turn cancellation flags a run that has an open
+    turn and stops it when that turn completes; with no open turn it
+    stops at once. History is kept and the receipt is stored either way.
+
+    Cancel is a lifecycle move, so it works even while paused.
+    """
+    if mode not in ("immediate", "after-turn"):
+        raise ValueError("cancel mode is immediate or after-turn")
+    rec = _get_record(project_id, run_id)
+    at = now if now is not None else time.time()
+    if (
+        mode == "after-turn"
+        and rec["state"] == "RUNNING"
+        and rec.get("open_turn") is not None
+    ):
+        rec["pending_cancel"] = reason
+        rec["updated_at"] = at
+        event = (
+            "cancel-requested:%s" % reason if reason else "cancel-requested"
+        )
+        _histories[run_id].append({"event": event, "at": at})
+        _notify(
+            project_id, "run cancel after turn %s" % run_id, refs=(run_id,)
+        )
+        return _record_to_run(rec)
+    _mark_cancelled(project_id, rec, reason, at)
     return _record_to_run(rec)
+
+
+def disk_check_runs(project_id, base=None):
+    """Probe the run-temp base disk (free/total/ok) and record the move."""
+    info = cleanup_mod.disk_check(
+        cleanup_mod.resolve_base(base if base is not None else _run_temp_base)
+    )
+    _notify(
+        project_id,
+        "run temp disk %s free=%d total=%d ok=%s"
+        % (info["path"], info["free"], info["total"], info["ok"]),
+        refs=(),
+    )
+    return info
+
+
+def cleanup_run_temp(project_id, run_id, base=None):
+    """Remove files inside one run's own temp folder; record the move."""
+    resolved = cleanup_mod.resolve_base(
+        base if base is not None else _run_temp_base
+    )
+    cleanup_mod.run_dir_for(resolved, run_id)
+    _get_record(project_id, run_id)
+    receipt = cleanup_mod.clean_run_temp(resolved, run_id)
+    _notify(
+        project_id,
+        "run temp cleaned %s removed=%d" % (run_id, len(receipt["removed"])),
+        refs=(run_id,),
+    )
+    return receipt
 
 
 def resume(project_id, run_id, now=None):
@@ -257,6 +422,9 @@ def save_state(path):
                 "started_at": rec["started_at"],
                 "updated_at": rec["updated_at"],
                 "resume_window_s": rec.get("resume_window_s", _DEFAULT_RESUME_WINDOW_S),
+                "turn_seq": int(rec.get("turn_seq", 0)),
+                "open_turn": dict(rec["open_turn"]) if rec.get("open_turn") else None,
+                "pending_cancel": rec.get("pending_cancel"),
                 "history": [dict(entry) for entry in _histories.get(run_id, [])],
                 "finalization": dict(_finals[run_id]) if run_id in _finals else None,
             }
@@ -288,6 +456,9 @@ def load_state(path):
             "started_at": row.get("started_at", 0.0),
             "updated_at": row.get("updated_at", row.get("started_at", 0.0)),
             "resume_window_s": row.get("resume_window_s", _DEFAULT_RESUME_WINDOW_S),
+            "turn_seq": int(row.get("turn_seq", 0)),
+            "open_turn": dict(row["open_turn"]) if row.get("open_turn") else None,
+            "pending_cancel": row.get("pending_cancel"),
         }
         _histories[run_id] = [dict(entry) for entry in row.get("history", [])]
         if row.get("finalization") is not None:

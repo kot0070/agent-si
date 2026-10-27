@@ -58,6 +58,10 @@ __all__ = (
     "observe_budget",
     "service_ids",
     "services_for_project",
+    "declare_service",
+    "record_usage",
+    "record_egress",
+    "declare_container_descriptor",
 )
 
 
@@ -210,14 +214,147 @@ def services_for_project(project_id: str) -> Tuple[str, ...]:
     )
 
 
+#: Service kinds a declared row may carry. Container rows accept only the
+#: read-only container check; every other kind accepts HTTP/TCP checks.
+_ALLOWED_KINDS = ("http", "tcp", "container")
+
+
+def declare_service(
+    service_id: str,
+    *,
+    kind: str = "http",
+    host: str = "127.0.0.1",
+    http_port: int = 0,
+    tcp_port: int = 0,
+    path: str = "/",
+    protected: bool = False,
+    project_id: str = "",
+) -> str:
+    """Declare (add or refresh) a stored service row from caller inputs.
+
+    New rows start fail-closed (``DOWN``) with a computed UTC declaration
+    stamp until the first :func:`run_check` records a real observation;
+    refreshing an existing row replaces its declared endpoint config but
+    keeps its last observed ``state``/``timestamp``. Usage metadata and
+    container descriptors are left untouched (see :func:`record_usage`,
+    :func:`record_egress`, :func:`declare_container_descriptor`).
+    ``ValueError`` for bad inputs.
+    """
+    if not isinstance(service_id, str) or not service_id:
+        raise ValueError("service_id must be a non-empty string")
+    if kind not in _ALLOWED_KINDS:
+        raise ValueError("unknown service kind %r" % (kind,))
+    if not isinstance(project_id, str) or not project_id:
+        raise ValueError("project_id must be a non-empty string")
+    row = _SERVICES.get(service_id)
+    if row is None:
+        _SERVICES[service_id] = {
+            "kind": kind,
+            "host": str(host),
+            "http_port": int(http_port),
+            "tcp_port": int(tcp_port),
+            "path": str(path),
+            "protected": bool(protected),
+            "project_id": project_id,
+            "state": "DOWN",
+            "timestamp": _utcnow(),
+        }
+    else:
+        row["kind"] = kind
+        row["host"] = str(host)
+        row["http_port"] = int(http_port)
+        row["tcp_port"] = int(tcp_port)
+        row["path"] = str(path)
+        row["protected"] = bool(protected)
+        row["project_id"] = project_id
+    return service_id
+
+
+def record_usage(
+    service_id: str,
+    *,
+    active: bool,
+    last_agent: str,
+    last_used: Optional[str] = None,
+) -> Dict[str, object]:
+    """Record dispatch metadata for a declared service from caller inputs.
+
+    ``last_used`` defaults to the current UTC time when omitted. Raises
+    ``SERVICE_NOT_FOUND`` for undeclared ids.
+    """
+    if service_id not in _SERVICES:
+        raise _auto_iface().AutomationError(
+            "SERVICE_NOT_FOUND", "unknown service %r" % (service_id,)
+        )
+    stamp = _utcnow() if last_used is None else str(last_used)
+    _DISPATCH_META[service_id] = {
+        "active": bool(active),
+        "last_used": stamp,
+        "last_agent": str(last_agent),
+    }
+    return dict(_DISPATCH_META[service_id])
+
+
+def record_egress(
+    service_id: str, *, last_egress: Optional[str] = None
+) -> Dict[str, object]:
+    """Record egress metadata for a declared service from caller inputs.
+
+    ``last_egress`` defaults to the current UTC time when omitted. Raises
+    ``SERVICE_NOT_FOUND`` for undeclared ids.
+    """
+    if service_id not in _SERVICES:
+        raise _auto_iface().AutomationError(
+            "SERVICE_NOT_FOUND", "unknown service %r" % (service_id,)
+        )
+    stamp = _utcnow() if last_egress is None else str(last_egress)
+    _EGRESS_META[service_id] = {"last_egress": stamp}
+    return dict(_EGRESS_META[service_id])
+
+
+def declare_container_descriptor(
+    service_id: str, *, env: Dict[str, object], files: object = ()
+) -> Dict[str, object]:
+    """Store a declared container descriptor from caller inputs (stored facts).
+
+    Secret-looking entries must carry ``secretref:`` references only; a raw
+    value raises ``ValueError`` before anything is stored. Raises
+    ``SERVICE_NOT_FOUND`` for undeclared ids.
+    """
+    if service_id not in _SERVICES:
+        raise _auto_iface().AutomationError(
+            "SERVICE_NOT_FOUND", "unknown service %r" % (service_id,)
+        )
+    if not isinstance(env, dict):
+        raise ValueError("descriptor env must be a mapping")
+    if not isinstance(files, (tuple, list)):
+        raise ValueError("descriptor files must be a tuple or list")
+    stored_env: Dict[str, object] = {}
+    for name, value in env.items():
+        if _looks_secret(name) and not (
+            isinstance(value, str) and value.startswith(SECRETREF_PREFIX)
+        ):
+            raise ValueError(
+                "descriptor entry %r must be a secret reference" % (name,)
+            )
+        stored_env[str(name)] = value
+    stored_files = tuple(str(path) for path in files)
+    _CONTAINER_DESCRIPTORS[service_id] = {
+        "env": stored_env,
+        "files": stored_files,
+    }
+    return {"env": dict(stored_env), "files": stored_files}
+
+
 def reset_state() -> None:
     """Restore the seed service states and timestamps (test isolation).
 
     Real checks mutate the stored rows in place; without a reset, a
     suite that runs a check on a service before a status assertion on
-    the same service observes the mutated row (order-dependent). Only
-    the seed rows' ``state``/``timestamp`` values are restored; no row
-    is added or removed.
+    the same service observes the mutated row (order-dependent). The
+    seed rows' ``state``/``timestamp`` values are restored, and rows
+    plus metadata added through :func:`declare_service` (and its
+    companion record APIs) are dropped; no seed row is added or removed.
     """
     for service_id, (state, stamp) in _SEED_STATES.items():
         row = _SERVICES.get(service_id)
@@ -225,6 +362,11 @@ def reset_state() -> None:
             continue
         row["state"] = state
         row["timestamp"] = stamp
+    for service_id in [key for key in _SERVICES if key not in _SEED_STATES]:
+        del _SERVICES[service_id]
+    for registry in (_DISPATCH_META, _EGRESS_META, _CONTAINER_DESCRIPTORS):
+        for service_id in [key for key in registry if key not in _SEED_STATES]:
+            del registry[service_id]
 
 
 def observe_budget(service_id: str) -> Optional[object]:

@@ -38,6 +38,7 @@ def _auto_iface():
 
 __all__ = (
     "MODEL_ID",
+    "CALLER_PROJECT",
     "ACTION_CATALOG",
     "BUILTIN_TEMPLATE_IDS",
     "list_templates",
@@ -68,6 +69,13 @@ def _steps(*specs: Tuple[str, Dict[str, Any], Tuple[str, ...]]) -> List[Dict[str
     ]
 
 
+#: Sentinel for the caller's project inside builtin step params: builtin
+#: steps never hardcode a caller project id; :func:`materialize` resolves
+#: this to its ``project_id`` argument. Step service refs stay declared
+#: endpoint references (``svc-*`` ids owned by the service registry).
+CALLER_PROJECT = "$caller_project"
+
+
 _BUILTINS: Dict[str, Dict[str, Any]] = {
     "tpl-nightly": {
         "name": "nightly",
@@ -76,7 +84,7 @@ _BUILTINS: Dict[str, Dict[str, Any]] = {
         "changes, notify the journal.",
         "steps": _steps(
             ("service.check", {"service_id": "svc-api"}, ("service_id", "state", "checked_at")),
-            ("service.watch", {"project_id": "proj-a"}, ("project_id", "changed", "checked_at")),
+            ("service.watch", {"project_id": CALLER_PROJECT}, ("project_id", "changed", "checked_at")),
             ("journal.notify", {"kind": "AUTOMATION_RUN"}, ("entry_id", "timestamp")),
         ),
     },
@@ -87,7 +95,7 @@ _BUILTINS: Dict[str, Dict[str, Any]] = {
         "apps card facts.",
         "steps": _steps(
             ("service.check", {"service_id": "svc-api"}, ("service_id", "state", "checked_at")),
-            ("apps.card.read", {"project_id": "proj-a"}, ("project_id", "service_ids", "paused")),
+            ("apps.card.read", {"project_id": CALLER_PROJECT}, ("project_id", "service_ids", "paused")),
         ),
     },
     "tpl-container-audit": {
@@ -106,7 +114,7 @@ _BUILTINS: Dict[str, Dict[str, Any]] = {
         "description": "Usage rollup: read apps card facts, notify the "
         "journal.",
         "steps": _steps(
-            ("apps.card.read", {"project_id": "proj-a"}, ("project_id", "service_ids", "paused")),
+            ("apps.card.read", {"project_id": CALLER_PROJECT}, ("project_id", "service_ids", "paused")),
             ("journal.notify", {"kind": "AUTOMATION_RUN"}, ("entry_id", "timestamp")),
         ),
     },
@@ -116,7 +124,7 @@ _BUILTINS: Dict[str, Dict[str, Any]] = {
         "description": "Watch sweep: observe service states for changes, "
         "notify the journal.",
         "steps": _steps(
-            ("service.watch", {"project_id": "proj-a"}, ("project_id", "changed", "checked_at")),
+            ("service.watch", {"project_id": CALLER_PROJECT}, ("project_id", "changed", "checked_at")),
             ("journal.notify", {"kind": "SERVICE_STATE"}, ("entry_id", "timestamp")),
         ),
     },
@@ -243,7 +251,13 @@ def instantiate(
 
 
 def materialize(project_id: str, template_id: str) -> Dict[str, Any]:
-    """Expand a template into a working automation plan (outputs declared)."""
+    """Expand a template into a working automation plan (outputs declared).
+
+    The ``CALLER_PROJECT`` sentinel in stored step params resolves to the
+    ``project_id`` argument, so builtin plans always scope project reads
+    (``service.watch``, ``apps.card.read``) to the calling project and the
+    stored specs never hardcode a caller project id.
+    """
     spec = _lookup(template_id)
     steps: List[Dict[str, Any]] = []
     for index, step in enumerate(spec["steps"]):
@@ -253,9 +267,11 @@ def materialize(project_id: str, template_id: str) -> Dict[str, Any]:
             raise ValueError(
                 "template %r step %d is not runnable" % (template_id, index)
             )
-        steps.append(
-            {"action": action, "with": dict(step["with"]), "outputs": outputs}
-        )
+        params = {
+            key: (project_id if value == CALLER_PROJECT else value)
+            for key, value in step["with"].items()
+        }
+        steps.append({"action": action, "with": params, "outputs": outputs})
     return {
         "template_id": template_id,
         "project_id": project_id,

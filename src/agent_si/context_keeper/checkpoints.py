@@ -8,6 +8,7 @@ Writes emit the CONTEXT_CHECKPOINT journal row and consult the guard
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import sys
 from dataclasses import dataclass
@@ -59,8 +60,11 @@ CHECKPOINT_SOURCE = "agent_si.context_keeper.checkpoints"
 #: Guard identity used for workspace writes.
 GUARD_AGENT_ID = "context-keeper"
 
-#: Deterministic creation stamp; writes are idempotent by content.
-_CREATED_AT = "2026-01-01T00:00:00Z"
+
+def _utc_now_iso() -> str:
+    """Call-time UTC stamp in ISO form; idempotent writes keep the first."""
+    return datetime.datetime.now(
+        datetime.timezone.utc).isoformat().replace("+00:00", "Z")
 
 _HEX_DIGITS = frozenset("0123456789abcdef")
 
@@ -156,7 +160,7 @@ class Checkpoints:
             run_id=run_id,
             contract_hash=contract_hash,
             context_refs=refs,
-            created_at=_CREATED_AT,
+            created_at=_utc_now_iso(),
             hash=digest,
         )
         self._by_id[checkpoint_id] = record
