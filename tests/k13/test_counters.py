@@ -160,7 +160,9 @@ def test_atomic_persist_leaves_valid_state(tmp_path):
 
 def test_counter_store_port_shape(tmp_path):
     port = counters.FileCounterStore(tmp_path / "port.json")
-    assert isinstance(port, manifest.CounterStore)
+    # CounterStore is a non-runtime-checkable Protocol in the frozen stub:
+    # check the port shape structurally instead of isinstance.
+    assert callable(getattr(port, "increment", None))
     assert port.increment("s1", "retry", 2) == 1
     assert port.increment("s1", "retry", 2) == 2
     with pytest.raises(counters.BudgetExhaustedError):

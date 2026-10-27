@@ -92,7 +92,9 @@ def test_every_domain_has_repo():
         repo = cls() if cls is not repositories.RetryFallbackCounterStore else cls()
         for op in ("load", "append", "list_by"):
             assert callable(getattr(repo, op, None)), (domain, op)
-        if isinstance(repo, manifest.RepositoryPort):
+        # RepositoryPort is a non-runtime-checkable Protocol in the frozen
+        # stub: branch on the structural port shape instead of isinstance.
+        if hasattr(repo, "compare_and_set"):
             assert callable(repo.compare_and_set)
         else:  # counter port shape
             assert callable(repo.increment)
