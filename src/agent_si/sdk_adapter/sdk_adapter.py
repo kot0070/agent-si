@@ -212,13 +212,14 @@ def revalidate_agent_builder_workflow(
     return replace(workflow, revalidated=True)
 
 
-def _echo_runner(call: Dict[str, Any]) -> Dict[str, Any]:
-    """Deterministic local stand-in runner: no network, no side effects.
+# BEGIN K13R1 (M-ECHO)
+SDK_RUNNER_UNBOUND = "SDK_RUNNER_UNBOUND"
 
-    The real SDK is wired by passing runner=... to the adapter; this default
-    keeps the adapter importable and testable without credentials.
-    """
-    return {"ok": True, "output_text": "echo:%s" % call.get("input_ref", "")}
+
+class RunnerUnboundError(RuntimeError):
+    """run() called with no runner wired; pass runner=... explicitly."""
+
+    code = SDK_RUNNER_UNBOUND
 
 
 class OpenAIAgentsSDKAdapter:
@@ -242,7 +243,7 @@ class OpenAIAgentsSDKAdapter:
                 % (config.max_retries,)
             )
         self._client_config = config
-        self._runner = runner if runner is not None else _echo_runner
+        self._runner = runner
         self._calls_made = 0
 
     @property
@@ -281,6 +282,11 @@ class OpenAIAgentsSDKAdapter:
                     "secret_refs must be SecretRef records; "
                     "inline values are never accepted"
                 )
+        if self._runner is None:
+            raise RunnerUnboundError(
+                "OpenAIAgentsSDKAdapter has no runner wired; pass runner=..."
+            )
+# END K13R1 (M-ECHO)
         transport = transport_for_provider(run_config.selected_provider)
         secret_ids = tuple(ref.secret_id for ref in (secret_refs or ()))
         attempts = 0

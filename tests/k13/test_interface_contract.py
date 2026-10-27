@@ -1260,11 +1260,16 @@ def test_behaviour_gate_health_failure_in_own_condition():
     assert decision.side_effects_allowed is False
 
 
+def _explicit_test_runner(call):
+    """TEST DOUBLE (contract test only): deterministic stand-in runner; never product code."""
+    return {"ok": True, "output_text": "echo:%s" % call.get("input_ref", "")}
+
+
 def _real_bound_interface():
     from agent_si.sdk_adapter import orchestration_interface as oi
     from agent_si.sdk_adapter import sdk_adapter as sdk
 
-    adapter = sdk.OpenAIAgentsSDKAdapter()
+    adapter = sdk.OpenAIAgentsSDKAdapter(runner=_explicit_test_runner)
     return oi.OrchestrationInterface(adapter=adapter), adapter
 
 
@@ -1394,6 +1399,20 @@ def test_behaviour_sdk_run_config_required_raised():
     with pytest.raises(sdk.RunConfigRequiredError) as excinfo:
         adapter.run(run_config=None, input_ref="input:hello")
     assert excinfo.value.code == "SDK_RUN_CONFIG_REQUIRED"
+
+
+def test_behaviour_sdk_runner_unbound_raised():
+    # Its own condition: adapter.run with no runner wired raises carrying
+    # SDK_RUNNER_UNBOUND; the runner must be passed explicitly.
+    from agent_si.sdk_adapter import sdk_adapter as sdk
+
+    adapter = sdk.OpenAIAgentsSDKAdapter()
+    with pytest.raises(sdk.RunnerUnboundError) as excinfo:
+        adapter.run(
+            run_config=_real_run_config("local_draft"), input_ref="input:hello"
+        )
+    assert excinfo.value.code == "SDK_RUNNER_UNBOUND"
+    assert isinstance(excinfo.value, RuntimeError)
 
 
 def test_behaviour_sdk_secret_refs_must_be_records_raised():

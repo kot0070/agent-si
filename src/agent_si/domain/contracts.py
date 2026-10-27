@@ -106,6 +106,26 @@ class ContractActivationRecord:
         object.__setattr__(self, "evidence_refs", _as_tuple(self.evidence_refs))
 
 
+@dataclass(frozen=True)
+class ArtifactRef:
+    """Manifest section 40 artifact reference (implementation side)."""
+
+    artifact_id: str = ""
+    path: str = ""
+    version: int = 0
+    hash: str = ""
+    hash_algorithm: str = ""
+    media_type: str = ""
+    size: int = 0
+    created_at: str = ""
+    source: str = ""
+    owner: str = ""
+    read_scope: str = ""
+    range: str = ""
+    trust_level: str = ""
+    provenance_ref: str = ""
+
+
 def _canonical(value: Any) -> Any:
     if isinstance(value, manifest.RiskLevel) or hasattr(value, "value"):
         enum_value = getattr(value, "value", value)
@@ -216,6 +236,7 @@ def replace_with_new_version(old: TaskContract, **changes: Any) -> TaskContract:
 __all__ = [
     "TaskContract",
     "ContractActivationRecord",
+    "ArtifactRef",
     "compute_contract_hash",
     "activate",
     "resolve_active",

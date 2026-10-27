@@ -30,6 +30,7 @@ from agent_si.sdk_adapter.sdk_adapter import (
     RoutingDecisionBinding,
     RunConfig,
     RunConfigRequiredError,
+    RunnerUnboundError,
     SdkClientConfig,
     SdkClientConfigError,
     SdkRunResult,
@@ -384,3 +385,23 @@ def test_error_conditions_carry_codes_and_unbound_adapter_raises():
         == orchestration_interface.ORCHESTRATION_ADAPTER_UNBOUND
     )
     assert isinstance(exc_info.value, RuntimeError)
+
+
+def test_unwired_adapter_raises_named_runner_error():
+    adapter = OpenAIAgentsSDKAdapter()
+    config = adapter.build_run_config(_make_decision(), executor_attempt_max=1)
+    with pytest.raises(RunnerUnboundError) as excinfo:
+        adapter.run(run_config=config, input_ref="in-unwired")
+    assert excinfo.value.code == sdk_adapter.SDK_RUNNER_UNBOUND
+    assert isinstance(excinfo.value, RuntimeError)
+
+
+def test_wired_runner_returns_its_output():
+    calls = []
+    adapter = _make_adapter(calls)
+    run_config = _make_run_config(adapter)
+    result = adapter.run(run_config=run_config, input_ref="in-echo")
+    assert isinstance(result, SdkRunResult)
+    assert result.status == manifest.ExecutionAttemptStatus.SUCCEEDED
+    assert result.output_ref == "artifact:run/run-1/output"
+    assert calls[0]["input_ref"] == "in-echo"
