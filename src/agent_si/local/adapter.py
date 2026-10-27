@@ -194,18 +194,34 @@ def _carries_routing_eligibility(ref_lowered: str) -> bool:
     return "routing-eligib" in normalized or "routingeligib" in normalized
 
 
+def _carries_static_capability(ref_lowered: str) -> bool:
+    """True exactly for branch-B evidence: a structured store evidence ref
+    (stable ``cap:`` refs, contract ``store-ref-`` refs) carrying a
+    verified-static-capability signal. A bare static label alone is not
+    evidence and never qualifies, mirroring branch A."""
+    text = ref_lowered.strip().replace("_", "-")
+    if "static-verified" not in text:
+        return False
+    return text.startswith("cap:") or text.startswith("store-ref")
+
+
 def check_eligibility(capability_store_ref: str, gateway_state_ref: str) -> EligibilityVerdict:
     """Eligibility from routing-eligibility evidence plus gateway state.
 
-    A bare MEASURED (or PROXY) tier label is not routing eligibility and
-    never yields eligible=True; eligible only on routing-eligibility
-    evidence (a structured store evidence ref carrying a MEASURED signal,
-    or an explicit ROUTING_ELIGIBILITY stage marker) with an idle gateway.
-    UNKNOWN is never picked. The verdict records the evidence refs used.
+    Branch A is benchmark evidence (a structured store evidence ref
+    carrying a MEASURED signal, or an explicit ROUTING_ELIGIBILITY stage
+    marker); branch B is verified static capability (a structured store
+    evidence ref carrying a static-verified signal, no benchmark needed).
+    A bare tier label (``measured``/``proxy``/``static-verified`` alone) is
+    not routing eligibility and never yields eligible=True; MEASURED is not
+    ROUTING_ELIGIBLE. UNKNOWN is never picked. The verdict records the
+    evidence refs used. A non-idle gateway refuses every branch.
     """
     _reject_role_config_ref(capability_store_ref, "capability store ref")
     store_text = capability_store_ref if isinstance(capability_store_ref, str) else ""
     lowered = store_text.lower()
+    static_capability = _carries_static_capability(lowered)
+    static_signal = "static-verified" in lowered.replace("_", "-")
     if "measured" in lowered:
         tier = EvidenceTier.MEASURED
     elif "proxy" in lowered:
@@ -217,7 +233,7 @@ def check_eligibility(capability_store_ref: str, gateway_state_ref: str) -> Elig
     gateway_allowed = "idle" in gateway_lowered and "running" not in gateway_lowered
     evidence_refs = (capability_store_ref, gateway_state_ref)
     eligibility_source = "capability-store/gateway"
-    if tier is EvidenceTier.UNKNOWN:
+    if tier is EvidenceTier.UNKNOWN and not static_signal:
         return EligibilityVerdict(
             eligible=False,
             reason=(
@@ -241,7 +257,9 @@ def check_eligibility(capability_store_ref: str, gateway_state_ref: str) -> Elig
             gateway_allowed=gateway_allowed,
             eligibility_source=eligibility_source,
         )
-    if tier is EvidenceTier.PROXY or not _carries_routing_eligibility(lowered):
+    if tier is EvidenceTier.PROXY or not (
+        _carries_routing_eligibility(lowered) or static_capability
+    ):
         return EligibilityVerdict(
             eligible=False,
             reason=(
@@ -250,6 +268,18 @@ def check_eligibility(capability_store_ref: str, gateway_state_ref: str) -> Elig
                 "but no routing-eligibility evidence; MEASURED is not "
                 "ROUTING_ELIGIBLE, eligible only on evidence that reached "
                 "the ROUTING_ELIGIBILITY lifecycle stage"
+            ),
+            evidence_refs=evidence_refs,
+            gateway_allowed=gateway_allowed,
+            eligibility_source=eligibility_source,
+        )
+    if static_capability and tier is not EvidenceTier.MEASURED:
+        return EligibilityVerdict(
+            eligible=True,
+            reason=(
+                "eligible: branch-B verified static capability in "
+                f"store ref {capability_store_ref!r} with an idle gateway; "
+                "UNKNOWN is never picked"
             ),
             evidence_refs=evidence_refs,
             gateway_allowed=gateway_allowed,

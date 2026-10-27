@@ -14,6 +14,7 @@ modules only; real local runs happen only via the HD gateway, never here.
 from __future__ import annotations
 
 import itertools
+import json
 import os
 import socket
 import time
@@ -322,6 +323,7 @@ def _reconcile_slot_on_skip() -> None:
         if progress is not None:
             progress.stopped = True
         _ACTIVE_RUN_ID = None
+    _journal_append("slot_reconciled")
 
 
 def start_run(model_id: str, level: BenchLevel, authorized: bool) -> RunHandle | RunSkip:
@@ -360,6 +362,7 @@ def start_run(model_id: str, level: BenchLevel, authorized: bool) -> RunHandle |
     )
     _RUN_ROWS[run_id] = []
     _ACTIVE_RUN_ID = run_id
+    _journal_append("start_run")
     return handle
 
 
@@ -376,6 +379,7 @@ def pause_run(run_id: str) -> None:
     if progress.stopped:
         raise BenchRefusedError(f"pause refused: run '{run_id}' already stopped")
     progress.paused = True
+    _journal_append("pause_run")
 
 
 def resume_run(run_id: str) -> None:
@@ -384,6 +388,7 @@ def resume_run(run_id: str) -> None:
     if progress.stopped:
         raise BenchRefusedError(f"resume refused: run '{run_id}' already stopped")
     progress.paused = False
+    _journal_append("resume_run")
 
 
 def stop_run(run_id: str) -> None:
@@ -393,6 +398,7 @@ def stop_run(run_id: str) -> None:
     progress.stopped = True
     if _ACTIVE_RUN_ID == run_id:
         _ACTIVE_RUN_ID = None
+    _journal_append("stop_run")
 
 
 def run_progress(run_id: str) -> RunProgress:
@@ -559,6 +565,7 @@ def queue_run(
         handle = start_run(model_id, lvl, True)
         assert isinstance(handle, RunHandle)
         _create_lease(handle.run_id, owner, lease_ttl, now)
+        _journal_append("queue_run_started")
         return handle
     if len(live) >= MAX_QUEUED_RESERVATIONS:
         raise BenchBusyError(
@@ -578,6 +585,7 @@ def queue_run(
     )
     _RESERVATIONS[reservation_id] = reservation
     _QUEUE.append(reservation_id)
+    _journal_append("reservation_queued")
     return reservation
 
 
@@ -607,7 +615,9 @@ def pump_queue(lease_ttl_s: float = DEFAULT_LEASE_TTL_S) -> RunHandle | None:
         assert isinstance(handle, RunHandle)
         rsv.status = "promoted"
         _create_lease(handle.run_id, rsv.owner, lease_ttl, _now_s())
+        _journal_append("pump_promoted")
         return handle
+    _journal_append("pump_sweep")
     return None
 
 
@@ -632,6 +642,7 @@ def cancel_reservation(reservation_id: str, owner: str) -> RunReservation:
         _QUEUE.remove(reservation_id)
     except ValueError:
         pass
+    _journal_append("reservation_cancelled")
     return rsv
 
 
@@ -681,6 +692,7 @@ def renew_lease(
             "state unchanged"
         )
     lease.expires_at = _now_s() + _require_ttl(ttl_s, "ttl_s")
+    _journal_append("lease_renewed")
     return lease
 
 
@@ -693,4 +705,375 @@ def release_lease(lease_id: str, owner: str) -> RunLease:
             f"'{lease.owner}'; state unchanged"
         )
     lease.released = True
+    _journal_append("lease_released")
     return lease
+
+
+#: --- Additive M-BENCH restart journal (K05R5 M-BENCH leak 1; new names only).
+#: Scheduler state above lives in module dicts: a process exit loses the
+#: active run, the FIFO queue and every lease/reservation. This section
+#: persists that state to a journal file (one JSON snapshot line per
+#: mutation) and rebuilds it after a restart. Existing dicts, counters and
+#: every public signature above are unchanged. Journal durability is
+#: best-effort: an unwritable journal never breaks scheduling; recovery
+#: reads the last complete snapshot line and ignores torn tail lines.
+JOURNAL_ENV_VAR = "AGENT_SI_BENCH_JOURNAL"
+
+_JOURNAL_SCHEMA_V = 1
+
+#: Explicit journal path override (tests); None means read the env var.
+_JOURNAL_PATH_OVERRIDE: str | None = None
+
+
+def set_journal_path(path: str | None) -> None:
+    """Point the scheduler journal at a file; None clears the override.
+
+    The override wins over $AGENT_SI_BENCH_JOURNAL for the process. The env
+    var (read live on every access) is the restart-proof channel: it
+    survives module reloads and process restarts, the override does not.
+    """
+    global _JOURNAL_PATH_OVERRIDE
+    if path is not None and (not isinstance(path, str) or not path):
+        raise ValueError(f"journal path must be a non-empty string, got {path!r}")
+    _JOURNAL_PATH_OVERRIDE = path
+
+
+def journal_path() -> str | None:
+    """Active journal file: the override, else $AGENT_SI_BENCH_JOURNAL, else None."""
+    if _JOURNAL_PATH_OVERRIDE is not None:
+        return _JOURNAL_PATH_OVERRIDE
+    env = os.environ.get(JOURNAL_ENV_VAR)
+    if isinstance(env, str) and env:
+        return env
+    return None
+
+
+def _journal_snapshot_dict(event: str) -> dict:
+    """Full scheduler snapshot with TTLs stored as remaining seconds."""
+    now = _now_s()
+    return {
+        "v": _JOURNAL_SCHEMA_V,
+        "event": event,
+        "wall_at": time.time(),
+        "active_run_id": _ACTIVE_RUN_ID,
+        "runs": [
+            {
+                "run_id": rid,
+                "model_id": handle.model_id,
+                "level": handle.level.value,
+            }
+            for rid, handle in _RUNS.items()
+        ],
+        "progress": [
+            {
+                "run_id": rid,
+                "done_cases": prog.done_cases,
+                "total_cases": prog.total_cases,
+                "paused": prog.paused,
+                "stopped": prog.stopped,
+            }
+            for rid, prog in _PROGRESS.items()
+        ],
+        "reservations": [
+            {
+                "reservation_id": rsv.reservation_id,
+                "owner": rsv.owner,
+                "model_id": rsv.model_id,
+                "level": rsv.level.value,
+                "expires_in_s": rsv.expires_at - now,
+                "status": rsv.status,
+            }
+            for rsv in _RESERVATIONS.values()
+        ],
+        "queue": [rid for rid in _QUEUE],
+        "leases": [
+            {
+                "lease_id": lease.lease_id,
+                "run_id": lease.run_id,
+                "owner": lease.owner,
+                "expires_in_s": lease.expires_at - now,
+                "released": lease.released,
+            }
+            for lease in _LEASES.values()
+        ],
+        "run_lease": {run_id: lease_id for run_id, lease_id in _RUN_LEASE.items()},
+    }
+
+
+def _journal_append(event: str) -> None:
+    """Append one snapshot line; best-effort, never raises into scheduling."""
+    path = journal_path()
+    if path is None:
+        return
+    try:
+        line = json.dumps(_journal_snapshot_dict(event), sort_keys=True)
+    except (TypeError, ValueError):
+        return
+    try:
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(line + "\n")
+    except OSError:
+        return
+
+
+def _journal_id_num(prefix: str, value: object) -> int | None:
+    """Numeric suffix of a generated id (run-0007 -> 7), else None."""
+    if not isinstance(value, str) or not value.startswith(prefix):
+        return None
+    try:
+        return int(value[len(prefix):])
+    except ValueError:
+        return None
+
+
+def _journal_finite(value: object) -> float | None:
+    """Finite float of a journal TTL-ish value, else None (fail-closed)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    if number != number or number in (float("inf"), float("-inf")):
+        return None
+    return number
+
+
+def _journal_rebind_counters(run_max: int, rsv_max: int, lease_max: int) -> None:
+    """Move the id counters past every restored id (no post-restart clash)."""
+    global _RUN_SEQ, _RESERVATION_SEQ, _LEASE_SEQ
+    if run_max >= 1:
+        _RUN_SEQ = itertools.count(run_max + 1)
+    if rsv_max >= 1:
+        _RESERVATION_SEQ = itertools.count(rsv_max + 1)
+    if lease_max >= 1:
+        _LEASE_SEQ = itertools.count(lease_max + 1)
+
+
+def recover_journal() -> dict:
+    """Rebuild scheduler state from the journal file; reconcile restart effects.
+
+    Last complete snapshot wins; torn tail lines are ignored. Queued
+    reservations whose TTL survived the restart (decayed by wall clock)
+    return to the FIFO; the rest expire. The interrupted active run is
+    restored to history but settled stopped with the serial slot freed:
+    nothing executes after a kill (same settlement as
+    _reconcile_slot_on_skip). Leases restore with decayed TTLs. A missing,
+    empty or fully torn journal touches nothing. Replaces live scheduler
+    memory (restart use): call once at startup before scheduling. Returns
+    {"restored_runs", "restored_queued", "expired", "interrupted_run_id"}.
+    """
+    report: dict = {
+        "restored_runs": 0,
+        "restored_queued": 0,
+        "expired": 0,
+        "interrupted_run_id": None,
+    }
+    path = journal_path()
+    if path is None:
+        return report
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            raw_lines = fh.read().splitlines()
+    except OSError:
+        return report
+    snap: dict | None = None
+    for line in raw_lines:
+        if not line.strip():
+            continue
+        try:
+            cand = json.loads(line)
+        except ValueError:
+            continue
+        if (
+            isinstance(cand, dict)
+            and cand.get("v") == _JOURNAL_SCHEMA_V
+            and isinstance(cand.get("runs"), list)
+            and isinstance(cand.get("progress"), list)
+            and isinstance(cand.get("reservations"), list)
+            and isinstance(cand.get("queue"), list)
+            and isinstance(cand.get("leases"), list)
+            and isinstance(cand.get("run_lease"), dict)
+        ):
+            snap = cand
+    if snap is None:
+        return report
+    now = _now_s()
+    try:
+        wall_at = float(snap.get("wall_at", 0.0))
+    except (TypeError, ValueError):
+        wall_at = 0.0
+    elapsed = max(0.0, time.time() - wall_at) if wall_at > 0 else 0.0
+    runs: dict[str, RunHandle] = {}
+    prog: dict[str, RunProgress] = {}
+    run_max = 0
+    for entry in snap["runs"]:
+        try:
+            rid = entry["run_id"]
+            mid = entry["model_id"]
+            lvl = BenchLevel(entry["level"])
+        except (KeyError, TypeError, ValueError, AttributeError):
+            continue
+        if not isinstance(rid, str) or not rid:
+            continue
+        if not isinstance(mid, str) or not mid:
+            continue
+        runs[rid] = RunHandle(run_id=rid, model_id=mid, level=lvl)
+        num = _journal_id_num("run-", rid)
+        if num is not None and num > run_max:
+            run_max = num
+    for entry in snap["progress"]:
+        try:
+            rid = entry["run_id"]
+            done = entry["done_cases"]
+            total = entry["total_cases"]
+            paused = entry["paused"]
+            stopped = entry["stopped"]
+        except (KeyError, TypeError, ValueError, AttributeError):
+            continue
+        if not isinstance(rid, str) or rid not in runs:
+            continue
+        if (
+            not isinstance(done, int)
+            or isinstance(done, bool)
+            or not isinstance(total, int)
+            or isinstance(total, bool)
+            or not isinstance(paused, bool)
+            or not isinstance(stopped, bool)
+        ):
+            continue
+        prog[rid] = RunProgress(
+            run_id=rid,
+            done_cases=done,
+            total_cases=total,
+            paused=paused,
+            stopped=stopped,
+        )
+    for rid, handle in runs.items():
+        if rid not in prog:
+            prog[rid] = RunProgress(
+                run_id=rid,
+                done_cases=0,
+                total_cases=len(_bench_cases.list_cases(handle.level)),
+                paused=False,
+                stopped=True,
+            )
+    reservations: dict[str, RunReservation] = {}
+    rsv_max = 0
+    expired = 0
+    for entry in snap["reservations"]:
+        try:
+            rsid = entry["reservation_id"]
+            owner = entry["owner"]
+            mid = entry["model_id"]
+            lvl = BenchLevel(entry["level"])
+            remain_raw = entry["expires_in_s"]
+            status = entry["status"]
+        except (KeyError, TypeError, ValueError, AttributeError):
+            continue
+        remain = _journal_finite(remain_raw)
+        if remain is None:
+            continue
+        if (
+            not isinstance(rsid, str)
+            or not rsid
+            or not isinstance(owner, str)
+            or not owner
+            or not isinstance(mid, str)
+            or not mid
+            or status not in ("queued", "promoted", "cancelled", "expired")
+        ):
+            continue
+        if status == "queued" and remain - elapsed <= 0:
+            status = "expired"
+            expired += 1
+        created_at = now - elapsed
+        reservations[rsid] = RunReservation(
+            reservation_id=rsid,
+            owner=owner,
+            model_id=mid,
+            level=lvl,
+            created_at=created_at,
+            expires_at=created_at + remain,
+            status=status,
+        )
+        num = _journal_id_num("rsv-", rsid)
+        if num is not None and num > rsv_max:
+            rsv_max = num
+    queue = [
+        rid
+        for rid in snap["queue"]
+        if isinstance(rid, str)
+        and rid in reservations
+        and reservations[rid].status == "queued"
+    ]
+    leases: dict[str, RunLease] = {}
+    lease_max = 0
+    for entry in snap["leases"]:
+        try:
+            lid = entry["lease_id"]
+            run_id = entry["run_id"]
+            owner = entry["owner"]
+            remain_raw = entry["expires_in_s"]
+            released = entry["released"]
+        except (KeyError, TypeError, ValueError, AttributeError):
+            continue
+        remain = _journal_finite(remain_raw)
+        if remain is None:
+            continue
+        if (
+            not isinstance(lid, str)
+            or not lid
+            or not isinstance(run_id, str)
+            or not run_id
+            or not isinstance(owner, str)
+            or not owner
+            or not isinstance(released, bool)
+        ):
+            continue
+        created_at = now - elapsed
+        leases[lid] = RunLease(
+            lease_id=lid,
+            run_id=run_id,
+            owner=owner,
+            created_at=created_at,
+            expires_at=created_at + remain,
+            released=released,
+        )
+        num = _journal_id_num("lease-", lid)
+        if num is not None and num > lease_max:
+            lease_max = num
+    run_lease = {
+        run_id: lease_id
+        for run_id, lease_id in snap["run_lease"].items()
+        if isinstance(run_id, str)
+        and isinstance(lease_id, str)
+        and run_id in runs
+        and lease_id in leases
+    }
+    _RUNS.clear()
+    _RUNS.update(runs)
+    _PROGRESS.clear()
+    _PROGRESS.update(prog)
+    _RESERVATIONS.clear()
+    _RESERVATIONS.update(reservations)
+    _QUEUE[:] = queue
+    _LEASES.clear()
+    _LEASES.update(leases)
+    _RUN_LEASE.clear()
+    _RUN_LEASE.update(run_lease)
+    global _ACTIVE_RUN_ID
+    _ACTIVE_RUN_ID = None
+    interrupted = None
+    snap_active = snap.get("active_run_id")
+    if isinstance(snap_active, str) and snap_active in _RUNS:
+        current = _PROGRESS.get(snap_active)
+        if current is not None:
+            current.stopped = True
+        interrupted = snap_active
+    report = {
+        "restored_runs": len(runs),
+        "restored_queued": len(queue),
+        "expired": expired,
+        "interrupted_run_id": interrupted,
+    }
+    _journal_rebind_counters(run_max, rsv_max, lease_max)
+    _journal_append("recovered")
+    return report

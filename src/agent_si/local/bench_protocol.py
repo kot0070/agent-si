@@ -1,8 +1,8 @@
 """K05 M3 STEP2 implementation: bench output contract v1 (csv+manifest+hardware).
 
 Real bodies behind the frozen STEP1 signatures. Level floors are the
-staged minima (Quick 10-15 min @8B, Standard 30-60, Deep 120+), scaled
-linearly by model size. Standard library only.
+BUILD_PLAN staged minima (Quick ~10-15min@8B, Standard 30-60, Deep 120+),
+scaled linearly by model size. Standard library only.
 """
 
 from __future__ import annotations
@@ -56,8 +56,9 @@ class BenchResultRow:
     hardware: HardwareProfile
 
 
-#: Reference minima in minutes at 8B params: Quick (10, 15),
-#: Standard (30, 60), Deep (120, 180); Deep lower bound stays >= 120 at 8B.
+#: BUILD_PLAN reference minima in minutes at 8B params (Quick ~10-15min@8B,
+#: Standard 30-60, Deep 120+): Quick (10, 15), Standard (30, 60),
+#: Deep (120, 180); Deep lower bound stays >= 120 at 8B.
 _BASE_FLOORS: dict[BenchLevel, tuple[float, float]] = {
     BenchLevel.Quick: (10.0, 15.0),
     BenchLevel.Standard: (30.0, 60.0),

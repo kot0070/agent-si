@@ -19,6 +19,9 @@ import threading
 from dataclasses import dataclass
 from typing import Dict, Tuple
 
+from agent_si.local import bench_runner as _discovery
+from agent_si.local.adapter import EvidenceTier, STATUS_NOT_CONFIGURED
+
 
 #: Frozen HTTP surface: (method, path) pairs.
 HTTP_ROUTES = (
@@ -55,6 +58,9 @@ _ATTACHED_RUNTIME: str | None = None
 
 _STATE_LOCK = threading.Lock()
 
+#: Status reported when an attached runtime is discovered reachable.
+_STATUS_READY = "READY"
+
 
 def _require_session_token(session_token: str) -> str:
     """USER-write gate: UI session token first; None/empty/mismatch refuses."""
@@ -79,9 +85,22 @@ def _require_session_token(session_token: str) -> str:
 
 def get_status() -> LocalStatus:
     """Read the local runtime status; capability base absent yields NOT_CONFIGURED."""
+    with _STATE_LOCK:
+        attached = _ATTACHED_RUNTIME
+    if attached is None:
+        return LocalStatus(
+            status=STATUS_NOT_CONFIGURED,
+            reason="capability base absent; routing continues normally",
+        )
+    probe = _discovery.passive_gateway_check(attached)
+    if probe.reachable:
+        return LocalStatus(
+            status=_STATUS_READY,
+            reason=f"runtime {attached!r} discovered ({probe.reason}); routing continues",
+        )
     return LocalStatus(
-        status="NOT_CONFIGURED",
-        reason="capability base absent; routing continues normally",
+        status=STATUS_NOT_CONFIGURED,
+        reason=f"runtime {attached!r} undiscovered ({probe.reason}); routing continues normally",
     )
 
 
@@ -113,7 +132,20 @@ def disconnect(session_token: str) -> LocalStatus:
 
 def list_models() -> Tuple[LocalModelRow, ...]:
     """Read the known local models with their evidence tier and status."""
-    return ()
+    with _STATE_LOCK:
+        attached = _ATTACHED_RUNTIME
+    if attached is None:
+        return ()
+    probe = _discovery.passive_gateway_check(attached)
+    if not probe.reachable:
+        return ()
+    return (
+        LocalModelRow(
+            model=attached,
+            evidence_tier=EvidenceTier.PROXY.value,
+            status=_STATUS_READY,
+        ),
+    )
 
 
 #: Every route reaches its real implementation through one entry point.

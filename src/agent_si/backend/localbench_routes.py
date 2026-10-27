@@ -9,20 +9,32 @@ K02 seam — x-actor + x-ui-session-token must match the app's bound token
 mapping), missing -> 401, wrong/unverifiable -> 403, both carrying
 SESSION_TOKEN_REFUSED and changing nothing. Reads need no token.
 Fail-closed: with no bound token configured, every write is refused.
-Stdlib + fastapi only in this module.
+Stdlib + fastapi + the own-package capability_store import path in this module.
 """
 
 from __future__ import annotations
 
+import csv
+import json
+import math
 import os
+import tempfile
 from dataclasses import asdict
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from agent_si.capability_store.import_store import import_measured_capability
+from agent_si.capability_store.store import CapabilityEvidenceRecord
 from agent_si.local import bench_runner as _runner
-from agent_si.local.bench_protocol import BenchEstimate, BenchLevel, BenchResultRow
+from agent_si.local.bench_protocol import (
+    BenchEstimate,
+    BenchLevel,
+    BenchResultRow,
+    ResultKind,
+)
 from agent_si.local.bench_runner import (
     BenchBusyError,
     BenchRefusedError,
@@ -286,11 +298,100 @@ def history_route() -> list[str]:
     return _runner.list_run_ids()
 
 
-def import_route(path: str, authorized: bool) -> None:
-    """Entry: stage a results file for import (rows enter via capability_store).
+#: Task-class prefix for localbench imports; the level names the bundle.
+_IMPORT_TASK_CLASS_PREFIX = "localbench:"
 
-    Unauthorized calls raise BenchRefusedError carrying
-    SESSION_TOKEN_REFUSED. Missing files raise FileNotFoundError.
+#: z for the Wilson 95% interval used as the import confidence.
+_WILSON_Z_95 = 1.96
+
+
+def _wilson_lower_95(measured: int, total: int) -> float:
+    """Wilson 95% lower bound for a measured share (stdlib math only)."""
+    if not isinstance(total, int) or isinstance(total, bool) or total <= 0:
+        raise ValueError(f"total must be a positive integer, got {total!r}")
+    if not isinstance(measured, int) or isinstance(measured, bool):
+        raise ValueError(f"measured must be an integer, got {measured!r}")
+    if not 0 <= measured <= total:
+        raise ValueError(f"measured {measured!r} outside 0..{total!r}")
+    z = _WILSON_Z_95
+    share = measured / total
+    denom = 1.0 + z * z / total
+    center = share + z * z / (2.0 * total)
+    margin = z * math.sqrt(share * (1.0 - share) / total + z * z / (4.0 * total * total))
+    return max(0.0, (center - margin) / denom)
+
+
+def _read_results_rows(path: str) -> tuple[list[dict[str, str]], str]:
+    """Read a results.csv bundle: (row dicts, run dir). Refuses foreign shapes."""
+    with open(path, "r", encoding="utf-8", newline="") as fh:
+        reader = csv.DictReader(fh)
+        fieldnames = reader.fieldnames or []
+        missing = {"case_id", "kind", "model_id"} - set(fieldnames)
+        if missing:
+            raise ValueError(
+                f"results csv {path!r} misses columns: {sorted(missing)!r}"
+            )
+        rows = []
+        for raw in reader:
+            row = {key: (value or "") for key, value in dict(raw).items() if key is not None}
+            rows.append(row)
+    if not rows:
+        raise ValueError(f"results csv {path!r} holds no result rows")
+    for row in rows:
+        if not row.get("case_id", "").strip():
+            raise ValueError(f"results csv {path!r} holds a row without case_id")
+        if not row.get("model_id", "").strip():
+            raise ValueError(f"results csv {path!r} holds a row without model_id")
+        try:
+            ResultKind(row.get("kind", ""))
+        except ValueError:
+            raise ValueError(
+                f"results csv {path!r} holds unknown kind {row.get('kind')!r}"
+            ) from None
+    models = {row["model_id"].strip() for row in rows}
+    if len(models) != 1:
+        raise ValueError(
+            f"results csv {path!r} mixes model ids: {sorted(models)!r}"
+        )
+    return rows, os.path.dirname(os.path.abspath(path))
+
+
+def _import_task_class(rows: list[dict[str, str]], run_dir: str) -> str:
+    """Task class for the bundle: sibling manifest level, else case-id slice."""
+    manifest_path = os.path.join(run_dir, "manifest.json")
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except (OSError, ValueError):
+        doc = None
+    if isinstance(doc, dict):
+        try:
+            return _IMPORT_TASK_CLASS_PREFIX + BenchLevel(doc.get("level")).value
+        except (ValueError, TypeError, AttributeError):
+            pass
+    prefixes = {row["case_id"].strip()[:1].lower() for row in rows}
+    slice_by_prefix = {
+        "q": BenchLevel.Quick,
+        "s": BenchLevel.Standard,
+        "d": BenchLevel.Deep,
+    }
+    if len(prefixes) == 1:
+        level = slice_by_prefix.get(next(iter(prefixes)))
+        if level is not None:
+            return _IMPORT_TASK_CLASS_PREFIX + level.value
+    raise ValueError(
+        f"cannot derive a bench level for import in {run_dir!r}: no usable "
+        "sibling manifest.json and mixed or unknown case-id prefixes"
+    )
+
+
+def import_route(path: str, authorized: bool) -> CapabilityEvidenceRecord | None:
+    """Entry: convert a results csv bundle into a capability measurement.
+
+    Rows enter via the real capability_store import path (never seeded:
+    model, score, sample count, confidence, fingerprint and provenance all
+    derive from the csv). Unauthorized calls raise BenchRefusedError
+    carrying SESSION_TOKEN_REFUSED. Missing files raise FileNotFoundError.
     """
     if not authorized:
         raise BenchRefusedError(
@@ -301,7 +402,45 @@ def import_route(path: str, authorized: bool) -> None:
         raise ValueError(f"path must be a non-empty string, got {path!r}")
     if not os.path.isfile(path):
         raise FileNotFoundError(f"import file not found: {path!r}")
-    return None
+    rows, run_dir = _read_results_rows(path)
+    model_id = rows[0]["model_id"].strip()
+    task_class = _import_task_class(rows, run_dir)
+    measured = sum(1 for row in rows if ResultKind(row["kind"]) is ResultKind.MEASURED)
+    total = len(rows)
+    first = rows[0]
+    fingerprint_parts = [
+        first.get(key, "") or ""
+        for key in ("gpu_vendor", "gpu_model", "vram_mb", "ram_mb", "cpu_only")
+    ]
+    document = {
+        "model_id": model_id,
+        "task_class": task_class,
+        "score": measured / total,
+        "score_type": "measured_share",
+        "sample_count": total,
+        "confidence": _wilson_lower_95(measured, total),
+        "measured_at": datetime.now(timezone.utc).isoformat(),
+        "runtime": "localbench",
+        "source": os.path.abspath(path),
+        "environment_fingerprint": "|".join(fingerprint_parts)
+        if any(fingerprint_parts)
+        else None,
+    }
+    staged_path: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", dir=run_dir, delete=False, encoding="utf-8"
+        ) as fh:
+            json.dump(document, fh, indent=2, sort_keys=True)
+            fh.write("\n")
+            staged_path = fh.name
+        return import_measured_capability(staged_path, task_class)
+    finally:
+        if staged_path is not None:
+            try:
+                os.remove(staged_path)
+            except OSError:
+                pass
 
 
 def check_route(endpoint: str) -> GatewayStatus:
