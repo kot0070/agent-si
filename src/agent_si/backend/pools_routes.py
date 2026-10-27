@@ -1167,7 +1167,11 @@ def _provider_served(name, fn, *, write):
             denial = _require_user_write_session(ctx, query, body)
             if denial is not None:
                 return denial
-        pctx = _provider_routes.ProviderCtx(models=_provider_models(ctx))
+        facade = getattr(ctx, "provider_facade", None)
+        if facade is None:
+            facade = _provider_routes._default_facade
+        pctx = _provider_routes.ProviderCtx(
+            facade=facade, models=_provider_models(ctx))
         return fn(pctx, query or {}, body)
     wrapper.__name__ = "served_" + name
     wrapper.__wrapped__ = fn

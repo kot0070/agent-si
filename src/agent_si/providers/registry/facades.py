@@ -108,6 +108,20 @@ def _current() -> ProviderAPI:
     )
 
 
+def ephemeral_stack() -> tuple:
+    """Provision one app-scoped ProviderAPI stack (ephemeral store+sink).
+
+    For integration hosts (e.g. backend create_app) that own the whole
+    stack's lifecycle: a fresh ProviderRegistry plus the sanctioned
+    ephemeral credential store and audit sink. Entries are seeded
+    explicitly after provisioning (same rule as the lazy default).
+    Returns (api, credential_store, audit_sink).
+    """
+    store = _MemoryCredentialStore()
+    sink = _MemoryAuditSink()
+    return ProviderAPI(ProviderRegistry(), store, sink), store, sink
+
+
 def register_provider(descriptor: ProviderContracts,
                       secret_ref: SecretRef) -> ProviderContracts:
     """Key-only connect; the model travels inside the descriptor mapping."""

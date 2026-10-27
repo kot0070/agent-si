@@ -246,13 +246,19 @@ def test_d08_kb_loader_signatures_exact():
 
 
 def test_d09_http_routes_exact_set(tmp_path):
+    # HD RULING K04 TESTS (owner 2026-10-27): the real composed app also
+    # serves K02 routes plus FastAPI docs routes, so d09 is the subset
+    # 'all K04 routes are present in create_app', not the exact set.
     client = _served_entry("GET", "/api/v1/providers", tmp_path)
     app = client.app
     real = set()
     for route in getattr(app, "routes", []):
         for m in (getattr(route, "methods", None) or set()):
             real.add((m.upper(), getattr(route, "path", "")))
-    assert set(IF.HTTP_ROUTES) == real
+    missing = set(IF.HTTP_ROUTES) - real
+    assert not missing, "K04 routes missing from create_app: %r" % (
+        sorted(missing),)
+    assert set(IF.HTTP_ROUTES) <= real
 
 
 def test_d10_registry_module_fns_exact():
@@ -754,20 +760,48 @@ def test_c02_connect_entry(tmp_path):
 
 def test_c03_disconnect_entry(tmp_path):
     # K04.md row 66 -> frozen POST /api/v1/providers/{id}/disconnect
-    # via the served app.
+    # via the served app. HD RULING K04 TESTS (owner 2026-10-27): the
+    # provider is seeded through the REAL import/write path at setup
+    # (served key-only connect, then explicit credential provisioning
+    # exactly like w03's store.seed), so the probe hits a real id and
+    # the forwarded {id} disconnects it (200).
+    headers = {"x-actor": "ui-test-c03",
+               "x-ui-session-token": "ui-test-c03"}
     client = _served_entry(
         "POST", "/api/v1/providers/{id}/disconnect", tmp_path)
-    resp = client.post("/api/v1/providers/p1/disconnect", json={})
-    assert resp.status_code != 404, resp.text
+    setup = client.post("/api/v1/providers/connect", json={
+        "preset_id": "openai", "model": "m-c03",
+        "key_ref": {"secret_id": "s-c03", "provider_id": "openai"}},
+        headers=headers)
+    assert setup.status_code == 200, setup.text
+    client.app.state.k04_ctx.credential_store.seed("s-c03")
+    resp = client.post("/api/v1/providers/openai/disconnect", json={},
+                       headers=headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"removed": True,
+                           "provider_id": "openai"}, resp.text
 
 
 def test_c04_models_entry(tmp_path):
     # K04.md row 67 -> frozen GET /api/v1/providers/{id}/models?query
-    # via the served app.
+    # via the served app. HD RULING K04 TESTS (owner 2026-10-27): the
+    # provider is seeded through the REAL import/write path at setup
+    # (served key-only connect), so the probe hits a real id whose
+    # models come from the real bound-catalog KB (200).
+    headers = {"x-actor": "ui-test-c04",
+               "x-ui-session-token": "ui-test-c04"}
     client = _served_entry(
         "GET", "/api/v1/providers/{id}/models", tmp_path)
-    resp = client.get("/api/v1/providers/p1/models")
-    assert resp.status_code != 404, resp.text
+    setup = client.post("/api/v1/providers/connect", json={
+        "preset_id": "openai", "model": "m-c04",
+        "key_ref": {"secret_id": "s-c04", "provider_id": "openai"}},
+        headers=headers)
+    assert setup.status_code == 200, setup.text
+    resp = client.get("/api/v1/providers/openai/models")
+    assert resp.status_code == 200, resp.text
+    payload = resp.json()
+    assert payload["provider_id"] == "openai", payload
+    assert isinstance(payload["models"], list), payload
 
 
 def test_c05_chatmodels_entry(tmp_path):
@@ -810,31 +844,46 @@ def test_c07_roles_pools_put_entry(tmp_path):
 
 def test_c08_routing_why_concrete_id_dispatch(tmp_path):
     # K04.md row 71 -> frozen GET /api/v1/routing/decision/{id}/why via
-    # the served app. The template is registered, but a concrete decision
-    # id must route to it (template/concrete routing unwired =
-    # HD-request candidate).
+    # the served app. HD RULING K04 TESTS (owner 2026-10-27): the
+    # decision is seeded through the REAL import/write path at setup
+    # (the real post_decide handler over the same store dir with the
+    # real bound-catalog KB), so the concrete id replays persisted
+    # evidence (200).
+    from agent_si.model_kb import kb_reader as _kbr
+    setup_ctx = PR.RoutingCtx(
+        store=_RoutingStore(str(tmp_path)),
+        role_table=_RL.RoleTable(), kb=_kbr.CatalogKbReader())
+    status, payload = PR.post_decide(
+        setup_ctx, {},
+        {"project_id": "p1", "task_id": "t-c08", "run_id": "r-c08",
+         "role": "worker", "task_class": "coding", "candidates": []})
+    assert status == 200, payload
+    decision_id = payload["decision_id"]
     client = _served_entry(
         "GET", "/api/v1/routing/decision/{id}/why", tmp_path)
     routes = {(m.upper(), getattr(route, "path", ""))
               for route in getattr(client.app, "routes", [])
               for m in (getattr(route, "methods", None) or set())}
     assert ("GET", "/api/v1/routing/decision/{id}/why") in routes
-    concrete = "/api/v1/routing/decision/rd-1/why"
-    resp = client.get(concrete)
-    assert resp.status_code != 404, (
-        "HD-request candidate: frozen why route is template-registered but "
-        "the served app cannot route concrete ids like %r "
-        "(template/concrete routing unwired): %s" % (concrete, resp.text))
+    resp = client.get("/api/v1/routing/decision/%s/why" % (decision_id,))
+    assert resp.status_code == 200, resp.text
+    assert "decision" in resp.json(), resp.text
 
 
 def test_c09_budget_entry(tmp_path):
     # K04.md row 72 -> frozen GET /api/v1/budget via the served app
-    # (reads are open). NOTE 2026-10-26: lane B2 mounted it
-    # (budget/routes.py merged into PR.ROUTES via budget/__init__);
-    # this test pins the completed wiring, so it is GREEN.
+    # (reads are open). HD RULING K04 TESTS (owner 2026-10-27): budget
+    # state is seeded through the REAL import/write path at setup (the
+    # real BudgetGate.configure_project, the same write b05 uses), so
+    # the probe names the seeded project and reads real state (200).
     client = _served_entry("GET", "/api/v1/budget", tmp_path)
-    resp = client.get("/api/v1/budget")
-    assert resp.status_code != 404, resp.text
+    gate = client.app.state.k04_ctx.budget_state
+    gate.configure_project(project_id="p1", currency="USD",
+                           budget_limit="10.00", soft_limit="7.00",
+                           hard_limit="10.00")
+    resp = client.get("/api/v1/budget", params={"project_id": "p1"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["project_id"] == "p1", resp.text
 
 
 def test_c10_kb_status_entry(tmp_path):

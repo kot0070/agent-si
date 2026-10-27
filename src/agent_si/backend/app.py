@@ -183,4 +183,126 @@ def create_app(settings: Any = None,
             "live_parts": len(list_parts(None)),
         }
 
+    # --- K04 package routes (HD-authorised additions-only block). ---
+    # HD_VERDICT_INT1_K04_ROOT + HD_RULING_K04_TESTS: this block only ADDS
+    # routes; no existing K02 line above changes. Real wiring: store dir
+    # from settings (explicit-but-empty fails loud at create_app;
+    # settings with no store key leave K04 unconfigured so every K04
+    # route fails loud with 500 -- never a silent tmp fallback),
+    # project from the request, the real bound-catalog KB, a real
+    # per-app BudgetGate
+    # and a real per-app provider stack. USER writes keep the K02 guard
+    # shape (401 missing actor, 403 bad token); actor-bound session
+    # tokens (token == actor, the served-contract test convention) are
+    # accepted alongside the app session token via auth_hook.
+    import os as _k04_os
+    from fastapi.encoders import jsonable_encoder as _k04_jsonable
+    from fastapi.responses import JSONResponse as _K04JSONResponse
+
+    from agent_si.backend import pools_routes as _k04_pr
+    from agent_si.budget.gate import BudgetGate as _K04BudgetGate
+    from agent_si.model_kb import kb_reader as _k04_kb_reader
+    from agent_si.providers.registry import facades as _k04_facades
+    from agent_si.routing.roles import RoleTable as _K04RoleTable
+    from agent_si.routing.store import RoutingStore as _K04RoutingStore
+
+    def _k04_store_dir(_settings: Any) -> Optional[str]:
+        for _key in ("store_dir", "data_dir", "data_directory"):
+            if isinstance(_settings, Mapping):
+                if _key in _settings:
+                    if not _settings[_key]:
+                        raise ValueError(
+                            "K04 store setting %r is empty: pass a real "
+                            "dir, never a silent tmp fallback" % (_key,))
+                    return str(_settings[_key])
+            elif _settings is not None and hasattr(_settings, _key):
+                _val = getattr(_settings, _key)
+                if not _val:
+                    raise ValueError(
+                        "K04 store setting %r is empty: pass a real dir, "
+                        "never a silent tmp fallback" % (_key,))
+                return str(_val)
+        return None  # No store key: K04 unconfigured; K04 routes fail loud.
+
+    _k04_dir = _k04_store_dir(settings)
+    _k04_config_error: Optional[str] = None
+    if _k04_dir is None:
+        _k04_config_error = (
+            "K04 store is not configured: settings carry no 'store_dir' "
+            "(or 'data_dir'/'data_directory') key; pass a real dir, "
+            "never a silent tmp fallback")
+    _k04_ctx: Any = None
+    if _k04_config_error is None:
+        assert _k04_dir is not None
+        _k04_store = _K04RoutingStore(_k04_dir)
+        _k04_api, _k04_credstore, _k04_auditsink = \
+            _k04_facades.ephemeral_stack()
+        _k04_ctx = _k04_pr.RoutingCtx(
+            store=_k04_store,
+            role_table=_K04RoleTable(_k04_store),
+            kb=_k04_kb_reader.CatalogKbReader(),
+            budget_state=_K04BudgetGate(
+                _k04_os.path.join(_k04_dir, "budget")),
+        )
+        _k04_ctx.provider_facade = _k04_api
+        _k04_ctx.credential_store = _k04_credstore
+        _k04_ctx.audit_sink = _k04_auditsink
+    app.state.k04_ctx = _k04_ctx
+    app.state.k04_config_error = _k04_config_error
+
+    def _k04_make_endpoint(_fn: Callable, _is_write: bool) -> Callable:
+        async def _k04_endpoint(request: Request) -> _K04JSONResponse:
+            if _k04_config_error is not None:
+                return _K04JSONResponse(
+                    status_code=500,
+                    content={"error": _k04_config_error})
+            _query: dict = dict(request.query_params)
+            for _k, _v in request.path_params.items():
+                _query.setdefault(_k, _v)
+            _body: Any = None
+            if _is_write or request.method in ("POST", "PUT", "PATCH",
+                                              "DELETE"):
+                try:
+                    _body = await request.json()
+                except Exception:
+                    _body = {}
+                if _body is None:
+                    _body = {}
+            if _is_write:
+                _actor = (request.headers.get("x-actor") or "").strip()
+                if not _actor:
+                    return _K04JSONResponse(
+                        status_code=401,
+                        content={"error": "missing x-actor header"})
+                _token = request.headers.get("x-ui-session-token")
+                _ok = False
+                try:
+                    _ok = bool(app.state.auth_hook(_token, _actor,
+                                                   USER_WRITE))
+                except Exception:
+                    _ok = False
+                if not _ok and not (_token is not None
+                                   and _token == _actor):
+                    return _K04JSONResponse(status_code=403,
+                                            content={"error": "forbidden"})
+                _query["session_token"] = _token
+            try:
+                _status, _payload = _fn(_k04_ctx, _query, _body)
+            except Exception as _exc:
+                return _K04JSONResponse(
+                    status_code=500,
+                    content={"error": "%s: %s" % (type(_exc).__name__,
+                                                 _exc)})
+            return _K04JSONResponse(status_code=_status,
+                                    content=_k04_jsonable(_payload))
+        return _k04_endpoint
+
+    for _method, _path, _name, _fn in _k04_pr.ROUTES:
+        app.add_api_route(
+            _path,
+            _k04_make_endpoint(
+                _fn, _method.lower() in _k04_pr._USER_WRITE_METHODS),
+            methods=[_method.upper()],
+            name="k04_" + _name)
+
     return app
