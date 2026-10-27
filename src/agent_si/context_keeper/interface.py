@@ -140,6 +140,10 @@ class Register:
         """Return rows of project_id whose resolved_at is None."""
         ...
 
+    def blocking_incidents(self, project_id: str) -> List[ContextIntegrityRecord]:
+        """Return unresolved HIGH/CRITICAL rows of project_id."""
+        ...
+
 
 @dataclass(frozen=True)
 class Recovery:

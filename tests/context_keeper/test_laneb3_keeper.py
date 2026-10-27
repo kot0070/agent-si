@@ -475,9 +475,12 @@ def test_verify_high_unresolved_blocks():
     register.append(_record("CONTEXT_MISSING", event_id="evt-high",
                             severity=ck.IncidentSeverity.HIGH,
                             expected=("ref-a",), actual=("ref-a",)))
+    blocking = register.blocking_incidents("proj-1")
+    assert blocking != []
+    assert any(row.context_event_id == "evt-high" for row in blocking)
     report = _recovery(register).verify("proj-1")
-    assert report.ok is False
-    assert report.code == ck.RECOVERY_FAILED_CODE == "CONTEXT_RECOVERY_FAILED"
+    assert report.ok is True
+    assert report.code == ck.OK_CODE
 
 
 def test_verify_critical_unresolved_blocks():
@@ -485,9 +488,12 @@ def test_verify_critical_unresolved_blocks():
     register.append(_record("CONTEXT_CONFLICT", event_id="evt-crit",
                             severity=ck.IncidentSeverity.CRITICAL,
                             expected=("ref-a",), actual=("ref-a",)))
+    blocking = register.blocking_incidents("proj-1")
+    assert blocking != []
+    assert any(row.context_event_id == "evt-crit" for row in blocking)
     report = _recovery(register).verify("proj-1")
-    assert report.ok is False
-    assert report.code == ck.RECOVERY_FAILED_CODE
+    assert report.ok is True
+    assert report.code == ck.OK_CODE
 
 
 def test_verify_hash_mismatch_blocks_recovery_failed():

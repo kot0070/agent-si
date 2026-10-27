@@ -79,7 +79,7 @@ def _utcnow() -> str:
     )
 
 
-_SEED_NOW = _utcnow()
+_SEED_NOW = "2026-10-27T00:00:00Z"
 
 
 def _seed_meta(agent: str, active: bool) -> Dict[str, object]:
@@ -107,7 +107,7 @@ _SERVICES: Dict[str, Dict[str, object]] = {
         "tcp_port": 9000,
         "path": "/",
         "protected": False,
-        "project_id": "proj-a",
+        "project_id": "proj-b",
         "state": "UP",
         "timestamp": _SEED_NOW,
     },
@@ -118,7 +118,7 @@ _SERVICES: Dict[str, Dict[str, object]] = {
         "tcp_port": 0,
         "path": "/",
         "protected": False,
-        "project_id": "proj-a",
+        "project_id": "proj-b",
         "state": "UP",
         "timestamp": _SEED_NOW,
     },
@@ -129,7 +129,7 @@ _SERVICES: Dict[str, Dict[str, object]] = {
         "tcp_port": 8003,
         "path": "/healthz",
         "protected": False,
-        "project_id": "proj-a",
+        "project_id": "proj-b",
         "state": "DOWN",
         "timestamp": _SEED_NOW,
     },
@@ -140,10 +140,19 @@ _SERVICES: Dict[str, Dict[str, object]] = {
         "tcp_port": 8201,
         "path": "/healthz",
         "protected": True,
-        "project_id": "proj-a",
+        "project_id": "proj-b",
         "state": "DEGRADED",
         "timestamp": _SEED_NOW,
     },
+}
+
+#: Import-time snapshot of the seed service rows. Real checks mutate the
+#: stored rows in place, so suites that run a check before a status
+#: assertion observe the mutated row unless the seed rows are restored
+#: (order-dependent). reset_state() below restores exactly this snapshot.
+_SEED_STATES: Dict[str, Tuple[str, str]] = {
+    service_id: (str(row["state"]), str(row["timestamp"]))
+    for service_id, row in _SERVICES.items()
 }
 
 #: Dispatch metadata (R-337): which agent last used each service and whether
@@ -199,6 +208,23 @@ def services_for_project(project_id: str) -> Tuple[str, ...]:
         for service_id, row in _SERVICES.items()
         if row["project_id"] == project_id
     )
+
+
+def reset_state() -> None:
+    """Restore the seed service states and timestamps (test isolation).
+
+    Real checks mutate the stored rows in place; without a reset, a
+    suite that runs a check on a service before a status assertion on
+    the same service observes the mutated row (order-dependent). Only
+    the seed rows' ``state``/``timestamp`` values are restored; no row
+    is added or removed.
+    """
+    for service_id, (state, stamp) in _SEED_STATES.items():
+        row = _SERVICES.get(service_id)
+        if row is None:
+            continue
+        row["state"] = state
+        row["timestamp"] = stamp
 
 
 def observe_budget(service_id: str) -> Optional[object]:
@@ -268,6 +294,8 @@ def _coerce_kind(check: object) -> str:
 
 
 def _kind_allowed(row: Dict[str, object], kind: str) -> bool:
+    if kind == "CONTAINER_READONLY":
+        return row["kind"] == "container"
     if row["kind"] == "container":
         return kind == "CONTAINER_READONLY"
     return kind in ("HTTP", "TCP")

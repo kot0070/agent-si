@@ -40,17 +40,30 @@ class _SharedCheckpoints(_keeper_checkpoints.Checkpoints):
 
 
 class _SharedRecovery:
-    """Recovery over a private register plus the shared checkpoint store."""
+    """Recovery over the shared register plus the shared checkpoint store."""
 
     def __init__(self):
         self._impl = _keeper_recovery.Recovery(
-            _keeper_register.Register(), checkpoints=_SharedCheckpoints())
+            _SharedRegister(), checkpoints=_SharedCheckpoints())
 
     def verify(self, project_id):
         return self._impl.verify(project_id)
 
     def recover(self, project_id, checkpoint_id):
         return self._impl.recover(project_id, checkpoint_id)
+
+
+_register_by_id = {}
+_register_order = []
+
+
+class _SharedRegister(_keeper_register.Register):
+    """Register over the shared lane store (isolated per test)."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._by_id = _register_by_id
+        self._order = _register_order
 
 
 ck.Register = _keeper_register.Register
@@ -62,14 +75,19 @@ ck.Checkpoints = _SharedCheckpoints
 def _reset_lane_state():
     _checkpoint_by_id.clear()
     _checkpoint_order.clear()
+    _register_by_id.clear()
+    _register_order.clear()
     yield
 
 
 class _SeededRegister:
-    """In-memory context rows staging preconditions for verify/recover.
+    """Seed rows into the shared lane register that Recovery reads.
     FAKE-OF: agent_si.context_keeper.register"""
 
     def __init__(self, rows):
+        store = _SharedRegister()
+        for row in rows:
+            store.append(row)
         self.rows = list(rows)
 
     def unresolved(self, project_id):

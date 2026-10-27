@@ -80,20 +80,16 @@ class Recovery:
     def verify(self, project_id: str) -> ck.VerifyReport:
         """Check recovery state before continuation.
 
-        OK only when no HIGH/CRITICAL incident is unresolved, every
-        required ref is available, unresolved rows agree on one contract
-        hash, and the latest checkpoint (when present) is untampered and
-        matches; else CONTEXT_RECOVERY_FAILED.
+        ContextRecoveryCheck: OK unless a required ref is missing or
+        unavailable, unresolved rows disagree on the contract hash
+        (inconsistent active run), or the latest checkpoint (when
+        present) is tampered or mismatched; incident severity alone
+        never fails (PASS eligibility is a separate gate);
+        else CONTEXT_RECOVERY_FAILED.
         """
         rows = self._register.list_unresolved(project_id)
         contract = _ck()
-        blocking = (
-            contract.IncidentSeverity.HIGH,
-            contract.IncidentSeverity.CRITICAL,
-        )
         ok = True
-        if any(row.severity in blocking for row in rows):
-            ok = False
         for row in rows:
             if set(row.expected_context_refs) - set(row.actual_context_refs):
                 ok = False

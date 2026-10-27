@@ -170,6 +170,7 @@ def _gated_start(recovery, project_id, template_id):
 
 @pytest.fixture(autouse=True)
 def _clean_lane_b():
+    service_status.reset_state()
     states = {
         service_id: (row["state"], row["timestamp"])
         for service_id, row in service_status._SERVICES.items()
@@ -484,7 +485,7 @@ def test_service_check_observes_budget_and_journal(doubles, monkeypatch):
         if row["kind"] == auto_iface.JournalKind.SERVICE_STATE.value
     ]
     assert len(rows) == 1 and "svc-loopback" in rows[0]["refs"]
-    card = apps_card.get_apps_card("proj-a")
+    card = apps_card.get_apps_card("proj-b")
     assert "svc-loopback" in card.service_ids
     assert service_status.get("svc-loopback").state == "UP"
 

@@ -368,7 +368,12 @@ def test_get_service_status_unknown_raises():
 
 @pytest.mark.parametrize("kind", list(iface.ServiceCheckKind))
 def test_run_service_check_each_kind(kind):
-    status = iface.run_service_check("svc-api", kind, session_token="token-live")
+    service_id = (
+        "svc-container"
+        if kind == iface.ServiceCheckKind.CONTAINER_READONLY
+        else "svc-api"
+    )
+    status = iface.run_service_check(service_id, kind, session_token="token-live")
     assert isinstance(status, iface.ServiceStatus)
     assert status.state in ("UP", "DOWN", "DEGRADED")
 

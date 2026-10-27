@@ -106,6 +106,7 @@ def _age_seconds(stamp):
 
 @pytest.fixture(autouse=True)
 def _clean_lane_state():
+    service_status.reset_state()
     states = {
         service_id: (row["state"], row["timestamp"])
         for service_id, row in service_status._SERVICES.items()
@@ -296,10 +297,10 @@ def test_watch_tick_quiet_without_changes(journal, budget):
 def test_watch_tick_notifies_single_change(monkeypatch, journal, budget):
     service_watch.tick("proj-a")
     before = len(journal.calls)
-    monkeypatch.setattr(service_status, "_probe_tcp", lambda *a: (False, False))
-    service_status.run_check("svc-loopback", auto_iface.ServiceCheckKind.TCP)
+    monkeypatch.setattr(service_status, "_probe_http", lambda *a: (True, True))
+    service_status.run_check("svc-api", auto_iface.ServiceCheckKind.HTTP)
     summary = service_watch.tick("proj-a")
-    assert summary.changed == ("svc-loopback",)
+    assert summary.changed == ("svc-api",)
     assert len(journal.calls) == before + 2
 
 
