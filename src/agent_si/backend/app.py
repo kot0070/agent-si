@@ -183,4 +183,17 @@ def create_app(settings: Any = None,
             "live_parts": len(list_parts(None)),
         }
 
+    # M-WIRE R1: K03 + K09 + K05 routes through their real entry points
+    # (function-local imports keep the composition root cycle-free; the
+    # bound UI session token and hooks travel on app.state, never hardcoded).
+    from agent_si.backend import kb_routes as _kb_routes
+    from agent_si.backend import local_connect as _local_connect
+    from agent_si.backend import localbench_routes as _localbench_routes
+    from agent_si.test_runners import stage_runner as _stage_runner
+
+    _kb_routes.register_kb_routes(app)
+    _local_connect.register_local_connect_routes(app)
+    _localbench_routes.register_localbench_routes(app)
+    _stage_runner.register_stage_routes(app)
+
     return app

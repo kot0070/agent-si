@@ -163,3 +163,98 @@ REALIZATION_MAP = {
     "disconnect": "agent_si.local.service.LocalRuntimeService.disconnect",
     "list_models": "agent_si.local.service.LocalRuntimeService.list_models",
 }
+
+
+def _bind(app, http_method, path):
+    """Duck-type binder (same shape as kb_routes._bind)."""
+    binder = None
+    try:
+        binder = app.get if http_method == "GET" else app.post
+    except AttributeError:
+        binder = None
+    if binder is None:
+        return app.route(path, methods=[http_method])
+    return binder(path)
+
+
+def _http_status_for(exc: BaseException) -> int:
+    """Map an entry failure to HTTP: 4xx client/refused, else 500; text preserved."""
+    if isinstance(exc, KeyError):
+        return 404
+    if isinstance(exc, (ValueError, TypeError)):
+        return 400
+    if "SESSION_TOKEN_REFUSED" in str(exc):
+        return 403
+    return 500
+
+
+async def _read_json_body(request):
+    """Best-effort JSON body read; unparseable or missing bodies become {}."""
+    try:
+        body = await request.json()
+    except Exception:
+        return {}
+    return body if isinstance(body, dict) else {}
+
+
+def register_local_connect_routes(app):
+    """Mount the four local runtime routes on a FastAPI app; returns the app.
+
+    Every handler calls exactly its declared entry in ROUTE_ENTRY_POINTS
+    (resolved through this module's globals at request time, so wraps-spies
+    on the entry observe the call). Reads need no token. Writes forward the
+    x-ui-session-token header when present, else the body's session_token,
+    and the entry itself enforces the USER-write gate; entry failures map to
+    4xx/500 with the message text preserved.
+    """
+    from fastapi import HTTPException, Request
+
+    # NOTE: this module uses `from __future__ import annotations`, so the
+    # closure annotations below would stay strings invisible to FastAPI's
+    # resolver (it sees module globals, not these locals). Assign the real
+    # objects before binding so `request` injects the Request.
+    @_bind(app, "GET", "/api/v1/local/status")
+    def _serve_local_status() -> LocalStatus:
+        try:
+            return get_status()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=_http_status_for(exc), detail=str(exc)) from exc
+
+    @_bind(app, "GET", "/api/v1/local/models")
+    def _serve_local_models() -> Tuple[LocalModelRow, ...]:
+        try:
+            return list_models()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=_http_status_for(exc), detail=str(exc)) from exc
+
+    async def _serve_local_connect(request):
+        params = await _read_json_body(request)
+        token = request.headers.get("x-ui-session-token") or params.get(
+            "session_token")
+        try:
+            return connect(params.get("runtime_ref"), token)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=_http_status_for(exc), detail=str(exc)) from exc
+
+    _serve_local_connect.__annotations__ = {
+        "request": Request, "return": LocalStatus}
+    _bind(app, "POST", "/api/v1/local/connect")(_serve_local_connect)
+
+    async def _serve_local_disconnect(request):
+        params = await _read_json_body(request)
+        token = request.headers.get("x-ui-session-token") or params.get(
+            "session_token")
+        try:
+            return disconnect(token)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=_http_status_for(exc), detail=str(exc)) from exc
+
+    _serve_local_disconnect.__annotations__ = {
+        "request": Request, "return": LocalStatus}
+    _bind(app, "POST", "/api/v1/local/disconnect")(_serve_local_disconnect)
+
+    return app
