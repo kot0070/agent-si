@@ -6,10 +6,10 @@
 import { describe, expect, it } from 'vitest';
 import { approveAsk, createAskCard, listSessions, resumeAsk } from './index';
 import { SNAKE_TO_CAMEL } from './types';
-import type { SecretRef } from './types';
+import { SecretRef } from './types';
 
 // Tests-only placeholder secret handle. Never a real credential.
-const FAKE_SECRET_REF = 'FAKE-OF-secret-ref-for-contract-test-only' as SecretRef;
+const FAKE_SECRET_REF = SecretRef.create('FAKE-OF-secret-ref-for-contract-test-only');
 
 describe('Lane A ASK-UI contract (STEP1: expected RED)', () => {
   it('createAskCard returns a G4 ASK card', async () => {
@@ -67,7 +67,7 @@ describe('Lane A ASK-UI contract (STEP1: expected RED)', () => {
 
   it('SecretRef stays opaque and never leaks into logs', async () => {
     const raw = 'FAKE-OF-secret-ref-for-contract-test-only';
-    const ref = raw as SecretRef;
+    const ref = SecretRef.create(raw);
     expect(JSON.stringify({ ref })).not.toContain(raw);
   });
 
