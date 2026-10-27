@@ -66,6 +66,7 @@ class RoutingRequest:
     verification_policy_ref: object = None
     audit_policy_ref: object = None
     override_policy_ref: object = None
+    max_tokens: object = None
 
     def __post_init__(self):
         if self.role not in T.ROLES:
@@ -518,6 +519,24 @@ def _route_for(ev: _Eval) -> str:
     return "CLOUD"
 
 
+def _estimated_tokens(request: RoutingRequest):
+    """Real estimated_tokens derivation (ARCH-412).
+
+    Token-denominated hard budget is max_tokens-based when price is
+    UNAVAILABLE: the estimate is the request max_tokens plus the policy
+    overhead. Negative inputs are rejected, never silently summed.
+    """
+    max_tokens = request.max_tokens
+    overhead = request.optimization_policy.token_overhead
+    if max_tokens is not None and max_tokens < 0:
+        raise ValueError("estimated_tokens: negative max_tokens %r"
+                         % (max_tokens,))
+    if overhead is not None and overhead < 0:
+        raise ValueError("estimated_tokens: negative token_overhead %r"
+                         % (overhead,))
+    return (max_tokens or 0) + (overhead or 0)
+
+
 def _select_single(request, deps, survivors, rejected, removed, traces,
                    manager_forced: bool) -> RoutingOutcome:
     eligible = [ev for ev in survivors
@@ -727,7 +746,8 @@ def _finish(request: RoutingRequest, deps: RoutingDeps,
         optimization_score=winner.score,
         fallback_chain=tuple({"provider": ev.candidate.provider,
                                "model": ev.candidate.model}
-                              for ev in runners))
+                              for ev in runners),
+        estimated_tokens=_estimated_tokens(request))
     snapshot = replace(snapshot, hash=T.stable_hash({
         "providers": snapshot.provider_health_snapshot,
         "models": snapshot.model_health_snapshot,
@@ -778,7 +798,8 @@ def blocked_outcome(request: RoutingRequest, deps: RoutingDeps,
         model_health_ref="mh:%s" % decision_id,
         resource_state_ref=_ref(deps.resource_state, "resource:not-provided"),
         risk_override=False, estimated_cost=None, estimated_latency=None,
-        optimization_score=None, fallback_chain=())
+        optimization_score=None, fallback_chain=(),
+        estimated_tokens=_estimated_tokens(request))
     snapshot = T.RoutingEvidenceSnapshot(
         routing_snapshot_id=snapshot_id,
         project_id=request.project_id, task_id=request.task_id,
@@ -959,7 +980,8 @@ def select(task_contract_ref: str, candidates: List[CandidateView],
         required_modalities=tuple(
             _contract_field(task, "required_modalities", ("text",)) or ()),
         task_risk=_contract_field(task, "task_risk", "LOW") or "LOW",
-        exclude_pairs=tuple(rejected))
+        exclude_pairs=tuple(rejected),
+        max_tokens=_contract_field(task, "max_tokens", None))
     deps = RoutingDeps(
         kb=kb,
         provider_health=ctx.get("provider_health"),

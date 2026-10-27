@@ -204,6 +204,7 @@ class OptimizationPolicy:
     local_preference: bool
     deadline: object
     budget_limit: object
+    token_overhead: int = 0
 
     def __post_init__(self):
         check_enum("max_risk", self.max_risk, RISK_LEVELS)
@@ -330,6 +331,7 @@ class RoutingDecision:
     estimated_latency: object
     optimization_score: object
     fallback_chain: tuple
+    estimated_tokens: object = None
 
 
 # --------------------------------------------------------------------------

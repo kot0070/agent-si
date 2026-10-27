@@ -156,6 +156,7 @@ class OptimizationPolicy:
     local_preference: bool
     deadline: Any
     budget_limit: Any
+    token_overhead: int = 0
 
 
 @dataclass(frozen=True)
@@ -253,6 +254,7 @@ class RoutingDecision:
     estimated_latency: Any
     optimization_score: Any
     fallback_chain: tuple
+    estimated_tokens: Any = None
 
 
 @dataclass(frozen=True)
