@@ -30,14 +30,28 @@ describe('Lane A ASK-UI contract (STEP1: expected RED)', () => {
   });
 
   it('approveAsk returns a resolution', async () => {
-    const result = await approveAsk({
-      askId: 'ask-1',
-      optionId: 'yes',
-      resumeToken: 'resume-1',
+    const card = await createAskCard({
+      kind: 'approval',
+      summary: 'Approve the migration plan?',
+      options: [
+        { optionId: 'yes', label: 'Yes' },
+        { optionId: 'no', label: 'No' },
+      ],
     });
-    expect(result.askId).toBe('ask-1');
+    const result = await approveAsk({
+      askId: card.askId,
+      optionId: 'yes',
+      resumeToken: card.resumeToken,
+    });
+    expect(result.askId).toBe(card.askId);
     expect(result.approvedOptionId).toBe('yes');
-    expect(result.resumeToken).toBeTruthy();
+    expect(result.resumeToken).toBe(card.resumeToken);
+  });
+
+  it('approveAsk rejects unissued ids without a canned answer', async () => {
+    await expect(
+      approveAsk({ askId: 'ask-9000', optionId: 'yes', resumeToken: 'resume-9000' }),
+    ).rejects.toThrow('ask: unknown or forged resume token');
   });
 
   it('resumeAsk returns the ASK card (chat + run view click-resume)', async () => {

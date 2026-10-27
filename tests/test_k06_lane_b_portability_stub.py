@@ -35,12 +35,12 @@ EXPECTED_COMMAND_ROUTES = (
 )
 
 ERROR_CONDITIONS = {
-    "PORT_UNKNOWN_ENVIRONMENT": {"route": "detect", "keys": ["gpu"]},
-    "PORT_GUARD_DENIED": {"route": "detect", "denied": True},
-    "PORT_RUNNER_UNKNOWN": {"route": "runners", "runner": "nope"},
-    "PORT_RUNNER_NOT_ENABLED": {"route": "check", "script": "disabled"},
-    "PORT_MERGE_UNAVAILABLE": {"route": "merge", "project": "missing"},
-    "PORT_COMMAND_UNKNOWN": {"route": "nope"},
+    "PORT_UNKNOWN_ENVIRONMENT": {"route": "detect", "argv": ["detect", "gpu"]},
+    "PORT_GUARD_DENIED": {"route": "detect", "argv": ["detect"], "guard": "deny"},
+    "PORT_RUNNER_UNKNOWN": {"route": "runners", "argv": ["runners", "nope"]},
+    "PORT_RUNNER_NOT_ENABLED": {"route": "check", "argv": ["check", "disabled"]},
+    "PORT_MERGE_UNAVAILABLE": {"route": "merge", "argv": ["merge", "missing"]},
+    "PORT_COMMAND_UNKNOWN": {"route": "nope", "argv": ["nope"]},
 }
 
 
@@ -65,6 +65,16 @@ class _FakeGuard:
             "decision": "allow",
             "reason": "fake-allow",
             "evidence_ref": "fake-ref",
+        }
+
+
+# FAKE-OF: src.agent_si.toolguard.guard
+class _DenyGuard:
+    def __call__(self, argv, action_class, auth):
+        return {
+            "decision": "deny",
+            "reason": "fake-deny",
+            "evidence_ref": "fake-deny-ref",
         }
 
 
@@ -160,13 +170,33 @@ def test_every_error_code_in_own_condition():
     commands = _load("port_commands_errors", COMMANDS_FILE)
     errors = _load("port_errors_check", ERRORS_FILE)
     assert tuple(errors.ERROR_CODES) == tuple(ERROR_CONDITIONS)
-    guard = _FakeGuard()
     for code, condition in ERROR_CONDITIONS.items():
+        if condition.get("guard") == "deny":
+            guard = _DenyGuard()
+        else:
+            guard = _FakeGuard()
         result = commands.run_command(
-            [condition["route"]], "R0", {"case": condition}, guard
+            list(condition.get("argv", [condition["route"]])), "R0", {}, guard
         )
         assert isinstance(result, dict)
         assert result["error"] == code
+
+
+def test_auth_case_fixture_key_ignored():
+    """leak2 regression: auth['case'] must not steer routes; argv does."""
+    mod = _load("port_commands_nocase", COMMANDS_FILE)
+    guard = _FakeGuard()
+    denied = mod.run_command(
+        ["detect"], "R0", {"case": {"denied": True}}, guard
+    )
+    assert isinstance(denied, dict)
+    assert denied.get("error") != "PORT_GUARD_DENIED"
+    merged = mod.run_command(
+        ["merge", "real-proj"], "R0", {"case": {"project": "missing"}}, guard
+    )
+    assert isinstance(merged, dict)
+    assert merged.get("project_id") == "real-proj"
+    assert "error" not in merged
 
 
 def test_guard_receives_argv_only():

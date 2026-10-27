@@ -36,7 +36,6 @@ const sessionSummaries: SessionSummary[] = [];
 let askCounter = 0;
 let resumeCounter = 0;
 
-const DEMO_ASK_PATTERN = /^ask-\d+$/;
 const DEMO_RESUME_PATTERN = /^resume-\d+$/;
 
 const ASK_KINDS: readonly AskKind[] = ['approval', 'choice', 'confirm'];
@@ -116,9 +115,6 @@ export async function approveAsk(input: {
     if (!stored.card.options.some((option) => option.optionId === optionId)) {
       throw new PermissionError('ask: unknown option for this ask');
     }
-    return { askId, approvedOptionId: optionId, resumeToken };
-  }
-  if (DEMO_ASK_PATTERN.test(askId) && DEMO_RESUME_PATTERN.test(resumeToken)) {
     return { askId, approvedOptionId: optionId, resumeToken };
   }
   throw new PermissionError('ask: unknown or forged resume token');

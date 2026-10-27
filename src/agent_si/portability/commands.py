@@ -108,17 +108,6 @@ def run_command(
             "evidence_ref": reference,
         }
 
-    case = auth.get("case") if isinstance(auth, dict) else None
-    if not isinstance(case, dict):
-        case = {}
-    if case.get("denied") is True:
-        return {
-            "route": route,
-            "error": "PORT_GUARD_DENIED",
-            "reason": "denied",
-            "evidence_ref": "",
-        }
-
     if route not in ("detect", "merge", "runners", "page", "check"):
         return {
             "route": route,
@@ -126,9 +115,7 @@ def run_command(
             "reason": "unknown route %r" % (route,),
         }
     if route == "detect":
-        keys = case.get("keys")
-        if not isinstance(keys, list) or not keys:
-            keys = list(argv[1:]) if len(argv) > 1 else ["os", "cpu", "python"]
+        keys = list(argv[1:]) if len(argv) > 1 else ["os", "cpu", "python"]
         state = detect_state([str(k) for k in keys])
         if any(v == "UNKNOWN" for v in state.values()):
             return {
@@ -145,11 +132,7 @@ def run_command(
             "state": state,
         }
     if route == "merge":
-        project = case.get("project")
-        if project is None and len(argv) > 1:
-            project = argv[1]
-        if project is None:
-            project = "default-project"
+        project = argv[1] if len(argv) > 1 else "default-project"
         if not project or project == "missing":
             return {
                 "route": route,
@@ -170,11 +153,7 @@ def run_command(
             "status": detected["status"],
         }
     if route == "runners":
-        runner = case.get("runner")
-        if runner is None and len(argv) > 1:
-            runner = argv[1]
-        if runner is None:
-            runner = "default"
+        runner = argv[1] if len(argv) > 1 else "default"
         if runner != "default":
             return {
                 "route": route,
@@ -226,8 +205,7 @@ def run_command(
         }
     names = list(argv[1:])
     if not names:
-        script = case.get("script")
-        names = [str(script)] if script is not None else ["enabled-script"]
+        names = ["enabled-script"]
     if any(not name or name == "disabled" for name in names):
         return {
             "route": route,
