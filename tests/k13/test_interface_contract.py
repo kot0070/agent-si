@@ -64,7 +64,7 @@ def _enum_values(enum_cls):
 def test_manifest_verified_first():
     manifest = _manifest()
     assert manifest.MANIFEST_SHA256 == MANIFEST_SHA
-    assert manifest.verify_manifest(ROOT / "RECORDS" / "day0" / "K13_MANIFEST.md") is True
+    assert manifest.verify_manifest(ROOT / "iface" / "frozen_manifest" / "K13_MANIFEST.md") is True
     stub = _stub()
     assert stub.MANIFEST_SHA256 == MANIFEST_SHA
     assert stub.verify_manifest is not None

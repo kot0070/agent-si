@@ -24,13 +24,13 @@ from iface.frozen_manifest import manifest
 from agent_si.domain import incidents
 from agent_si.runtime.scheduler import cancellation
 
-MANIFEST_DOC = ROOT / "RECORDS" / "day0" / "K13_MANIFEST.md"
+MANIFEST_DOC = ROOT / "iface" / "frozen_manifest" / "K13_MANIFEST.md"
 
 
 def test_manifest_sha_pins_file():
     assert manifest.MANIFEST_SHA256 == "f256bab4d31be3cd9e86c22a1bdcef90b08ad62500a8eca2051705cc0a9b0690"
     assert manifest.verify_manifest(MANIFEST_DOC) is True
-    assert manifest.verify_manifest(ROOT / "RECORDS" / "day0" / "NOPE.md") is False
+    assert manifest.verify_manifest(ROOT / "iface" / "frozen_manifest" / "NOPE.md") is False
 
 
 def test_canonical_reasons_accepted():

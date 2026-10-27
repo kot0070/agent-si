@@ -50,7 +50,7 @@ def test_manifest_sha_pins_file():
         == "f256bab4d31be3cd9e86c22a1bdcef90b08ad62500a8eca2051705cc0a9b0690"
     )
     assert (
-        manifest.verify_manifest(ROOT / "RECORDS" / "day0" / "K13_MANIFEST.md")
+        manifest.verify_manifest(ROOT / "iface" / "frozen_manifest" / "K13_MANIFEST.md")
         is True
     )
     assert manifest.is_attempt_transition_allowed("CREATED", "RUNNING") is True

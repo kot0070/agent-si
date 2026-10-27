@@ -18,7 +18,7 @@ from agent_si.runtime.scheduler import scheduler as sched
 
 def test_manifest_verifies():
     assert manifest.verify_manifest(
-        ROOT / "RECORDS" / "day0" / "K13_MANIFEST.md"
+        ROOT / "iface" / "frozen_manifest" / "K13_MANIFEST.md"
     ) is True
 
 
