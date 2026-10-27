@@ -68,12 +68,22 @@ _BASE_FLOORS: dict[BenchLevel, tuple[float, float]] = {
 #: Params reference point for size scaling.
 _REFERENCE_PARAMS_B = 8.0
 
+#: Hard minima in minutes per level, applied to BOTH bounds after scaling.
+#: Floors only raise minima; they never lower a scaled bound.
+_HARD_FLOORS: dict[BenchLevel, float] = {
+    BenchLevel.Quick: 5.0,
+    BenchLevel.Standard: 15.0,
+    BenchLevel.Deep: 30.0,
+}
+
 
 def level_floor_minutes(level: BenchLevel, model_params_b: float) -> tuple[float, float]:
     """Floor (lo, hi) minutes for a level, scaled linearly by model size.
 
     Unknown/non-positive sizes fall back to the 8B reference floors
-    (fail-closed: never report a zero-minute floor).
+    (fail-closed: never report a zero-minute floor). Hard minima per
+    level then apply to BOTH bounds: each bound is the max of its
+    scaled value and the level's hard floor.
     """
     lvl = BenchLevel(level)
     try:
@@ -82,7 +92,8 @@ def level_floor_minutes(level: BenchLevel, model_params_b: float) -> tuple[float
         raise ValueError(f"model_params_b must be a number, got {model_params_b!r}") from exc
     scale = params / _REFERENCE_PARAMS_B if params > 0 else 1.0
     lo, hi = _BASE_FLOORS[lvl]
-    return (lo * scale, hi * scale)
+    hard = _HARD_FLOORS[lvl]
+    return (max(lo * scale, hard), max(hi * scale, hard))
 
 
 def build_prestart_warnings(estimate: BenchEstimate, pc_in_use: bool) -> list[BenchWarning]:
