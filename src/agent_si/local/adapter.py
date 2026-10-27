@@ -122,8 +122,88 @@ def _run_identity() -> tuple:
     return project_id, task_id, run_id
 
 
+#: Role-config field names are never capability task classes
+#: (B0B-UNCOVERED_MVP_ACCEPT-223): a ref naming one of these is refused,
+#: never accepted as capability evidence. Grounded in the local settings
+#: module (EXPLICIT_CONFIG_FIELDS, LocalAIConfig fields, dotted
+#: settings.localAi view keys and their trailing segments). Entries are
+#: lowercase: candidates are lowercased before comparison.
+_ROLE_CONFIG_FIELDS = frozenset(
+    {
+        "endpoint_url",
+        "model_id",
+        "permission_scope",
+        "local_only_mode",
+        "project_key",
+        "capability_evidence",
+        "title",
+        "purpose",
+        "needitnow",
+        "settings.localai.title",
+        "settings.localai.purpose",
+        "settings.localai.needitnow",
+    }
+)
+
+#: Refusal code shared with the capability-store side guard: a role-config
+#: field presented where a task class or model ref is required.
+_ROLE_CONFIG_AS_TASK_CLASS_REFUSED = "CAPABILITY_ROLE_CONFIG_AS_TASK_CLASS_REFUSED"
+
+
+def _ref_task_candidate(ref_text: str) -> str:
+    """Task-class candidate carried by a store ref: the whole ref, or the
+    task segment of a stable ``cap:<model>:<task>:v1`` ref, or the tail of a
+    ``head:tail`` ref. Compared lowercased against _ROLE_CONFIG_FIELDS."""
+    text = ref_text.strip().lower()
+    if text.startswith("cap:"):
+        body = text[len("cap:"):]
+        if body.endswith(":v1"):
+            body = body[: -len(":v1")]
+        if ":" in body:
+            _model, task = body.split(":", 1)
+            return task.strip()
+        return body.strip()
+    if ":" in text:
+        _head, tail = text.split(":", 1)
+        return tail.strip()
+    return text
+
+
+def _reject_role_config_ref(value: object, kind: str) -> None:
+    """Refuse a role-config field where a task class or model ref is required."""
+    text = value if isinstance(value, str) else ""
+    candidate = _ref_task_candidate(text)
+    if candidate in _ROLE_CONFIG_FIELDS:
+        raise Exception(
+            f"{_ROLE_CONFIG_AS_TASK_CLASS_REFUSED}: {kind} "
+            f"{value!r} names a role-config field, never a capability "
+            "task class; role config fields are not capability evidence"
+        )
+
+
+def _carries_routing_eligibility(ref_lowered: str) -> bool:
+    """True exactly for routing-eligibility evidence: a structured store
+    evidence ref (stable ``cap:`` refs, contract ``store-ref-`` refs) or an
+    explicit ROUTING_ELIGIBILITY lifecycle-stage marker. A bare tier label
+    (``measured``/``proxy`` alone) is not evidence and never qualifies:
+    MEASURED is not ROUTING_ELIGIBLE."""
+    text = ref_lowered.strip()
+    if text.startswith("cap:") or text.startswith("store-ref"):
+        return True
+    normalized = text.replace("_", "-")
+    return "routing-eligib" in normalized or "routingeligib" in normalized
+
+
 def check_eligibility(capability_store_ref: str, gateway_state_ref: str) -> EligibilityVerdict:
-    """Eligibility from store evidence plus gateway state; the verdict records the evidence refs used."""
+    """Eligibility from routing-eligibility evidence plus gateway state.
+
+    A bare MEASURED (or PROXY) tier label is not routing eligibility and
+    never yields eligible=True; eligible only on routing-eligibility
+    evidence (a structured store evidence ref carrying a MEASURED signal,
+    or an explicit ROUTING_ELIGIBILITY stage marker) with an idle gateway.
+    UNKNOWN is never picked. The verdict records the evidence refs used.
+    """
+    _reject_role_config_ref(capability_store_ref, "capability store ref")
     store_text = capability_store_ref if isinstance(capability_store_ref, str) else ""
     lowered = store_text.lower()
     if "measured" in lowered:
@@ -161,11 +241,25 @@ def check_eligibility(capability_store_ref: str, gateway_state_ref: str) -> Elig
             gateway_allowed=gateway_allowed,
             eligibility_source=eligibility_source,
         )
+    if tier is EvidenceTier.PROXY or not _carries_routing_eligibility(lowered):
+        return EligibilityVerdict(
+            eligible=False,
+            reason=(
+                f"{tier.value}_NOT_ROUTING_ELIGIBLE: store ref "
+                f"{capability_store_ref!r} carries a {tier.value} tier label "
+                "but no routing-eligibility evidence; MEASURED is not "
+                "ROUTING_ELIGIBLE, eligible only on evidence that reached "
+                "the ROUTING_ELIGIBILITY lifecycle stage"
+            ),
+            evidence_refs=evidence_refs,
+            gateway_allowed=gateway_allowed,
+            eligibility_source=eligibility_source,
+        )
     return EligibilityVerdict(
         eligible=True,
         reason=(
-            f"eligible: {tier.value} capability evidence in store ref "
-            f"{capability_store_ref!r}; gateway idle"
+            f"eligible: routing-eligibility evidence ({tier.value} tier) in "
+            f"store ref {capability_store_ref!r}; gateway idle"
         ),
         evidence_refs=evidence_refs,
         gateway_allowed=gateway_allowed,
@@ -199,6 +293,7 @@ def advance_lifecycle(current: LifecycleStage, target: LifecycleStage) -> Lifecy
 
 def record_explicit_pin(model_ref: str) -> LocalDecision:
     """User pin: route EXPLICIT_MODEL_PIN, UNVERIFIED quality, zero measured evidence."""
+    _reject_role_config_ref(model_ref, "pin model ref")
     project_id, task_id, run_id = _run_identity()
     return LocalDecision(
         decision_id=f"local-decision-{next(_DECISION_SEQ):06d}",

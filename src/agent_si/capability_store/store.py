@@ -40,6 +40,12 @@ ERROR_CODES_K05 = (
     "CAPABILITY_STALE_AS_CURRENT_REFUSED",
 )
 
+#: Further K05 capability error codes (own prefix only).
+ERROR_CODES_K05_EXTENDED = (
+    "CAPABILITY_UNKNOWN_EVIDENCE_REFUSED",
+    "CAPABILITY_ROLE_CONFIG_AS_TASK_CLASS_REFUSED",
+)
+
 
 @dataclass(frozen=True)
 class CapabilityStoreError(Exception):
@@ -90,27 +96,39 @@ def _stable_ref(model_id: str, task_class: str) -> str:
     return f"cap:{model_id}:{task_class}:v1"
 
 
-def _default_measured_row(
-    model_id: str, task_class: str
-) -> CapabilityEvidenceRecord:
-    """Seed row served when no imported row exists for the key."""
-    return CapabilityEvidenceRecord(
-        model_id=model_id,
-        task_class=task_class,
-        tier=EvidenceTier.MEASURED,
-        score=0.85,
-        score_type="pass_rate",
-        sample_count=100,
-        confidence=0.9,
-        benchmark_version="contract-v1",
-        measured_at=None,
-        runtime=None,
-        runtime_version=None,
-        environment_fingerprint=None,
-        freshness_state=FreshnessState.CURRENT.value,
-        evidence_ref=_stable_ref(model_id, task_class),
-        source=None,
-    )
+#: Role-config field names are not capability task classes
+#: (B0B-UNCOVERED_MVP_ACCEPT-223). Names discovered read-only from
+#: src/agent_si/local/config.py (EXPLICIT_CONFIG_FIELDS plus the
+#: LocalAIConfig / LocalAISettingsView fields) and the K07B
+#: settings.localAi view keys served by get_local_ai_view.
+_ROLE_CONFIG_TASK_CLASSES = frozenset(
+    {
+        "endpoint_url",
+        "model_id",
+        "permission_scope",
+        "local_only_mode",
+        "project_key",
+        "capability_evidence",
+        "title",
+        "purpose",
+        "needItNow",
+        "settings.localAi.title",
+        "settings.localAi.purpose",
+        "settings.localAi.needItNow",
+    }
+)
+
+
+def _reject_role_config_task_class(task_class: str) -> None:
+    """Refuse a role-config field passed as a capability task class."""
+    if task_class in _ROLE_CONFIG_TASK_CLASSES:
+        raise CapabilityStoreError(
+            code="CAPABILITY_ROLE_CONFIG_AS_TASK_CLASS_REFUSED",
+            reason=(
+                "role config field %r is not a capability task class"
+                % (task_class,)
+            ),
+        )
 
 
 def _register_row(record: CapabilityEvidenceRecord) -> CapabilityEvidenceRecord:
@@ -138,11 +156,13 @@ def _parse_stable_ref(evidence_ref: str) -> Optional[Tuple[str, str]]:
 
 
 def get_evidence(model_id: str, task_class: str) -> Optional[CapabilityEvidenceRecord]:
-    """Frozen M4 read: (model_id, task_class) -> record | None."""
-    record = _RECORDS.get((model_id, task_class))
-    if record is None:
-        record = _register_row(_default_measured_row(model_id, task_class))
-    return record
+    """Frozen M4 read: (model_id, task_class) -> record | None.
+
+    Evidence comes from real measurements only: no imported row for the
+    key means no row (None), never a seeded MEASURED row.
+    """
+    _reject_role_config_task_class(task_class)
+    return _RECORDS.get((model_id, task_class))
 
 
 def require_current(evidence_ref: str) -> CapabilityEvidenceRecord:
@@ -157,25 +177,14 @@ def require_current(evidence_ref: str) -> CapabilityEvidenceRecord:
         return record
     parsed = _parse_stable_ref(evidence_ref)
     if parsed is not None:
-        current = get_evidence(parsed[0], parsed[1])
+        _reject_role_config_task_class(parsed[1])
+        current = _RECORDS.get((parsed[0], parsed[1]))
         if current is not None and current.evidence_ref == evidence_ref:
             return current
-    return _register_by_ref(
-        CapabilityEvidenceRecord(
-            model_id=evidence_ref,
-            task_class="current",
-            tier=EvidenceTier.MEASURED,
-            score=0.85,
-            score_type="pass_rate",
-            sample_count=100,
-            confidence=0.9,
-            benchmark_version="contract-v1",
-            measured_at=None,
-            runtime=None,
-            runtime_version=None,
-            environment_fingerprint=None,
-            freshness_state=FreshnessState.CURRENT.value,
-            evidence_ref=evidence_ref,
-            source=None,
-        )
+    raise CapabilityStoreError(
+        code="CAPABILITY_UNKNOWN_EVIDENCE_REFUSED",
+        reason=(
+            "no current row for evidence_ref %r; evidence comes from "
+            "real measurements only" % (evidence_ref,)
+        ),
     )

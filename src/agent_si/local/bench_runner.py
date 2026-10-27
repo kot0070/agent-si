@@ -422,3 +422,275 @@ def pull_model(model_id: str, authorized: bool) -> None:
         f"pull refused: model '{model_id}' pulls run only via the HD gateway "
         "with explicit user authorization; no pull performed here"
     )
+
+
+#: --- Additive Manager scheduler queue (B0B-UNCOVERED_ARCH-189/767, SPEC 38).
+#: The serial machine still admits at most one active run and start_run keeps
+#: refusing busy; excess demand waits here instead. Safety caps (auth,
+#: forbidden path, pull) are non-count limits and still raise — only the busy
+#: count-limit queues. Every queued item and every active run carries an
+#: owner plus an expiry measured on the real clock (time.monotonic).
+MAX_ACTIVE_RUNS = 1
+MAX_QUEUED_RESERVATIONS = 16
+DEFAULT_RESERVATION_TTL_S = 600.0
+DEFAULT_LEASE_TTL_S = 600.0
+
+
+@dataclass
+class RunReservation:
+    """Queued demand: owner + expiry; promoted FIFO when the slot frees."""
+
+    reservation_id: str
+    owner: str
+    model_id: str
+    level: BenchLevel
+    created_at: float
+    expires_at: float
+    status: str
+
+
+@dataclass
+class RunLease:
+    """Active-run hold: owner + expiry; at most MAX_ACTIVE_RUNS are live."""
+
+    lease_id: str
+    run_id: str
+    owner: str
+    created_at: float
+    expires_at: float
+    released: bool = False
+
+
+_RESERVATION_SEQ = itertools.count(1)
+_LEASE_SEQ = itertools.count(1)
+_RESERVATIONS: dict[str, RunReservation] = {}
+_QUEUE: list[str] = []
+_LEASES: dict[str, RunLease] = {}
+_RUN_LEASE: dict[str, str] = {}
+
+
+def _now_s() -> float:
+    """Real-clock seconds for scheduler expiry (tests sleep past short TTLs)."""
+    return time.monotonic()
+
+
+def _require_owner(owner: str) -> str:
+    if not isinstance(owner, str) or not owner:
+        raise ValueError(f"owner must be a non-empty string, got {owner!r}")
+    return owner
+
+
+def _require_ttl(ttl_s: float, name: str) -> float:
+    try:
+        value = float(ttl_s)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be a positive finite number of seconds") from None
+    if not value > 0.0 or value in (float("inf"), float("-inf")) or value != value:
+        raise ValueError(f"{name} must be a positive finite number of seconds")
+    return value
+
+
+def _live_queue(now: float) -> list[str]:
+    """Queued, unexpired reservation ids in FIFO order (marks the expired)."""
+    live: list[str] = []
+    for rid in _QUEUE:
+        rsv = _RESERVATIONS.get(rid)
+        if rsv is None or rsv.status != "queued":
+            continue
+        if rsv.expires_at <= now:
+            rsv.status = "expired"
+            continue
+        live.append(rid)
+    return live
+
+
+def _create_lease(run_id: str, owner: str, ttl_s: float, now: float) -> RunLease:
+    lease_id = f"lease-{next(_LEASE_SEQ):04d}"
+    lease = RunLease(
+        lease_id=lease_id,
+        run_id=run_id,
+        owner=owner,
+        created_at=now,
+        expires_at=now + ttl_s,
+    )
+    _LEASES[lease_id] = lease
+    _RUN_LEASE[run_id] = lease_id
+    return lease
+
+
+def queue_run(
+    model_id: str,
+    level: BenchLevel,
+    authorized: bool,
+    owner: str,
+    ttl_s: float = DEFAULT_RESERVATION_TTL_S,
+    lease_ttl_s: float = DEFAULT_LEASE_TTL_S,
+) -> RunHandle | RunSkip | RunReservation:
+    """Scheduler entry: start now when the slot is free, else queue.
+
+    Offline models skip (never queued); safety refusals (unauthorized) raise
+    BenchRefusedError and queue nothing. A busy machine queues a
+    reservation carrying owner + expiry instead of refusing, unless the
+    queue itself is full (BenchBusyError). A free slot with no live queue
+    starts through start_run and attaches an owner+expiry lease.
+    """
+    lvl = BenchLevel(level)
+    if not isinstance(model_id, str) or not model_id:
+        raise ValueError(f"model_id must be a non-empty string, got {model_id!r}")
+    if _OFFLINE_MARKER in model_id.lower():
+        _reconcile_slot_on_skip()
+        return RunSkip(
+            reason=(
+                f"gateway unreachable for model '{model_id}': model is marked "
+                "offline (no reachable runtime); skipped without contact"
+            )
+        )
+    if not authorized:
+        raise BenchRefusedError(
+            f"{SESSION_TOKEN_REFUSED}: run queue needs a bound UI session token "
+            "(x-actor + x-ui-session-token); state unchanged"
+        )
+    _require_owner(owner)
+    ttl = _require_ttl(ttl_s, "ttl_s")
+    lease_ttl = _require_ttl(lease_ttl_s, "lease_ttl_s")
+    now = _now_s()
+    live = _live_queue(now)
+    if _ACTIVE_RUN_ID is None and not live:
+        handle = start_run(model_id, lvl, True)
+        assert isinstance(handle, RunHandle)
+        _create_lease(handle.run_id, owner, lease_ttl, now)
+        return handle
+    if len(live) >= MAX_QUEUED_RESERVATIONS:
+        raise BenchBusyError(
+            f"scheduler queue full ({MAX_QUEUED_RESERVATIONS} waiting); "
+            "state unchanged"
+        )
+    reservation_id = f"rsv-{next(_RESERVATION_SEQ):04d}"
+    made = _now_s()
+    reservation = RunReservation(
+        reservation_id=reservation_id,
+        owner=owner,
+        model_id=model_id,
+        level=lvl,
+        created_at=made,
+        expires_at=made + ttl,
+        status="queued",
+    )
+    _RESERVATIONS[reservation_id] = reservation
+    _QUEUE.append(reservation_id)
+    return reservation
+
+
+def pump_queue(lease_ttl_s: float = DEFAULT_LEASE_TTL_S) -> RunHandle | None:
+    """Promote the oldest live reservation when the slot is free.
+
+    Returns the new RunHandle (with an owner+expiry lease), or None when
+    the machine is busy or no live reservation waits. Expired waiters are
+    marked expired and skipped. Never starts a second parallel run.
+    """
+    lease_ttl = _require_ttl(lease_ttl_s, "lease_ttl_s")
+    now = _now_s()
+    if _ACTIVE_RUN_ID is not None:
+        return None
+    while _QUEUE:
+        rid = _QUEUE[0]
+        rsv = _RESERVATIONS.get(rid)
+        if rsv is None or rsv.status != "queued":
+            _QUEUE.pop(0)
+            continue
+        if rsv.expires_at <= now:
+            rsv.status = "expired"
+            _QUEUE.pop(0)
+            continue
+        _QUEUE.pop(0)
+        handle = start_run(rsv.model_id, rsv.level, True)
+        assert isinstance(handle, RunHandle)
+        rsv.status = "promoted"
+        _create_lease(handle.run_id, rsv.owner, lease_ttl, _now_s())
+        return handle
+    return None
+
+
+def cancel_reservation(reservation_id: str, owner: str) -> RunReservation:
+    """Cancel a queued reservation; only its owner may cancel it."""
+    try:
+        rsv = _RESERVATIONS[reservation_id]
+    except KeyError:
+        raise KeyError(f"unknown reservation_id: {reservation_id!r}") from None
+    if rsv.owner != owner:
+        raise BenchRefusedError(
+            f"cancel refused: reservation '{reservation_id}' is owned by "
+            f"'{rsv.owner}'; state unchanged"
+        )
+    if rsv.status != "queued":
+        raise BenchRefusedError(
+            f"cancel refused: reservation '{reservation_id}' is {rsv.status}; "
+            "state unchanged"
+        )
+    rsv.status = "cancelled"
+    try:
+        _QUEUE.remove(reservation_id)
+    except ValueError:
+        pass
+    return rsv
+
+
+def list_reservations() -> list[RunReservation]:
+    """All reservation records in request order (history read)."""
+    return [_RESERVATIONS[rid] for rid in sorted(_RESERVATIONS)]
+
+
+def lease_for_run(run_id: str) -> RunLease | None:
+    """Lease attached to a run, or None when the run holds no lease."""
+    lease_id = _RUN_LEASE.get(run_id)
+    if lease_id is None:
+        return None
+    return _LEASES.get(lease_id)
+
+
+def _require_lease(lease_id: str) -> RunLease:
+    try:
+        return _LEASES[lease_id]
+    except KeyError:
+        raise KeyError(f"unknown lease_id: {lease_id!r}") from None
+
+
+def lease_is_live(lease_id: str) -> bool:
+    """A lease is live while unreleased, unexpired, and holding the slot."""
+    lease = _require_lease(lease_id)
+    if lease.released:
+        return False
+    if lease.expires_at <= _now_s():
+        return False
+    return _ACTIVE_RUN_ID == lease.run_id
+
+
+def renew_lease(
+    lease_id: str, owner: str, ttl_s: float = DEFAULT_LEASE_TTL_S
+) -> RunLease:
+    """Extend a live lease; only its owner may renew it."""
+    lease = _require_lease(lease_id)
+    if lease.owner != owner:
+        raise BenchRefusedError(
+            f"renew refused: lease '{lease_id}' is owned by "
+            f"'{lease.owner}'; state unchanged"
+        )
+    if not lease_is_live(lease_id):
+        raise BenchRefusedError(
+            f"renew refused: lease '{lease_id}' is no longer live; "
+            "state unchanged"
+        )
+    lease.expires_at = _now_s() + _require_ttl(ttl_s, "ttl_s")
+    return lease
+
+
+def release_lease(lease_id: str, owner: str) -> RunLease:
+    """Release a lease; only its owner may release it (idempotent)."""
+    lease = _require_lease(lease_id)
+    if lease.owner != owner:
+        raise BenchRefusedError(
+            f"release refused: lease '{lease_id}' is owned by "
+            f"'{lease.owner}'; state unchanged"
+        )
+    lease.released = True
+    return lease

@@ -1,18 +1,16 @@
 """Local-AI settings: validated LocalAIConfig persistence with per-project scope and explicit endpoint, model, and permission fields.
 
-Frozen EXPOSE surface (FIT_K05_M2; TAKE=0 ADAPT=0 REJECT=32: nothing staged
-is reused). Every function/method body is `...` (no logic). The K13
-error-code names (CONTEXT_WRONG_CONTRACT_VERSION, POLICY_CONFLICT,
-CONTEXT_MISSING) are owned by K13 and are never redefined here. The M2
-codes below map 1:1 to K05 TASK rows; changing a name afterwards needs a
-Director (HD) request. Scope: one project_key never reads another
-project_key (B0B-UNCOVERED_BP05-70). No single ambiguous endpoint-or-path
-field (SPEC 30): endpoint_url, model_id and permission_scope stay
-explicit. Every mutation is validated and carries a per-change decision
-record ([111]). Persistence flows only through LocalAIConfig
-(B0B-UNCOVERED_MVP_ACCEPT-181). K07 renders; K05 serves the stored config
-(B0B-UNCOVERED_ARCH-526; key names from K07B settings.localAi).
-LOCAL-ONLY mode makes zero cloud calls and warns on weak evidence.
+Every mutation is validated through validate_config (validate_endpoint,
+validate_model, validate_permission) and carries a per-change
+DecisionRecord built by record_decision; save_config and update_config
+refuse a missing decision record. Scope: one project_key never reads
+another project_key — load_config enforces the project-scope guard, and
+update_config accepts only EXPLICIT_CONFIG_FIELDS keys (endpoint_url,
+model_id, permission_scope, local_only_mode). load_config, save_config
+and update_config persist LocalAIConfig; get_local_ai_view serves the
+stored config as a LocalAISettingsView. enforce_local_only raises on any
+attempted cloud call and local_only_warnings warns on weak evidence.
+ERROR_CODES_M2 names the frozen settings codes.
 Standard library + typing only.
 """
 
