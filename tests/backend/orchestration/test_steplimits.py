@@ -5,12 +5,14 @@ import dataclasses
 import os
 import sys
 
-_ROOT = os.path.dirname(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-)
-sys.path.insert(0, os.path.join(_ROOT, "src"))
-
 import pytest
+
+sys.path.insert(
+    0,
+    os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "..", "src")
+    ),
+)
 
 from agent_si.backend.orchestration import offload as offload_mod
 from agent_si.backend.orchestration import steplimits as sl
@@ -30,7 +32,9 @@ def _clean():
     sl._reset_state()
 
 
-def _change(project: str, task: object = None, chat: object = None, **extra: object) -> dict:
+def _change(
+    project: str, task: object = None, chat: object = None, **extra: object
+) -> dict:
     change: dict = {
         "project_id": project,
         "authority": "manager-b",

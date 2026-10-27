@@ -1,4 +1,3 @@
-import copy
 import os
 import sys
 
@@ -89,7 +88,8 @@ def test_close_broken_link_blocked():
     closed = dl.close_with_linkcheck(pkg, verdict)
     assert closed["gate"] == "BLOCKED"
     assert closed["package_id"] == pkg["delta_id"]
-    assert isinstance(closed["evidence_refs"], list) and len(closed["evidence_refs"]) > 0
+    assert isinstance(closed["evidence_refs"], list)
+    assert len(closed["evidence_refs"]) > 0
 
 
 def test_close_non_pass_gate_blocked():

@@ -23,11 +23,11 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 def is_compact_english(text: str) -> bool:
@@ -88,7 +88,7 @@ class DecisionLog:
     def __len__(self) -> int:
         return len(self.rows)
 
-    def __iter__(self):  # type: ignore[no-untyped-def]
+    def __iter__(self):
         return iter(self.rows)
 
     def to_list(self) -> list:
@@ -96,16 +96,16 @@ class DecisionLog:
 
     def next_id(self, scope: str) -> str:
         count = sum(
-            1 for row in self.rows if isinstance(row, dict) and row.get("scope") == scope
+            1 for r in self.rows if isinstance(r, dict) and r.get("scope") == scope
         )
-        return "%s-%04d" % (scope, count + 1)
+        return f"{scope}-{count + 1:04d}"
 
     def add(self, scope: str, statement: str, reason: str, authority: str) -> dict:
         decision_id = self.next_id(scope)
         for row in self.rows:
             if isinstance(row, dict) and row.get("decision_id") == decision_id:
                 raise ValueError(
-                    "POLICY_CONFLICT: duplicate decision_id %s" % decision_id
+                    f"POLICY_CONFLICT: duplicate decision_id {decision_id}"
                 )
         row = {
             "decision_id": decision_id,
@@ -118,7 +118,7 @@ class DecisionLog:
         self.rows.append(row)
         return row
 
-    def __getitem__(self, index):  # type: ignore[no-untyped-def]
+    def __getitem__(self, index):
         return self.rows[index]
 
 

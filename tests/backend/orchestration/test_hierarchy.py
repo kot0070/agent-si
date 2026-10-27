@@ -1,9 +1,16 @@
-import os, sys; sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__),"..","..","..","src")))
 """R-302/R-303: real hierarchy, sizing WHY, invalid chain blocked intact."""
-
 import copy
+import os
+import sys
 
 import pytest
+
+sys.path.insert(
+    0,
+    os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "..", "src")
+    ),
+)
 
 from agent_si.backend.orchestration.graph import (
     HierarchyChain,
@@ -125,7 +132,9 @@ def test_routing_subordinate_to_manager_hierarchy():
 def test_staged_rows_to_hierarchy_are_refs():
     staged = stage_rows_to_hierarchy([{"row_id": "r1"}, {"row_id": "r2"}])
     assert [s["row_id"] for s in staged] == ["r1", "r2"]
-    assert all(v.startswith("ARTIFACT_REF:") for s in staged for v in [s["hierarchy_ref"]])
+    assert all(
+        v.startswith("ARTIFACT_REF:") for s in staged for v in [s["hierarchy_ref"]]
+    )
 
 
 def test_graph_api_names_no_provider_or_model():

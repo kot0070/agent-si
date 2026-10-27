@@ -1,9 +1,16 @@
-import os, sys; sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__),"..","..","..","src")))
 """ROW22/M-P1-42: control-plane mapping documented, control-plane only."""
+import os
+import sys
 
 import pytest
 
-from agent_si.backend.orchestration import graph
+sys.path.insert(
+    0,
+    os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "..", "src")
+    ),
+)
+
 from agent_si.backend.orchestration.graph import (
     DIRECTOR_RUNTIME,
     DirectorControlOnly,

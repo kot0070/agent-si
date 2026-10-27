@@ -10,7 +10,8 @@ AI-generated. Product code uses only parts.py + ledger.py.
 from __future__ import annotations
 
 import secrets
-from typing import Any, Callable, Mapping, Optional
+from collections.abc import Callable, Mapping
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 
@@ -20,11 +21,11 @@ from agent_si.backend.orchestration.parts import PartRow, list_parts
 
 USER_WRITE = "USER_WRITE"
 
-AuthHook = Callable[[Optional[str], str, str], bool]
+AuthHook = Callable[[str | None, str, str], bool]
 RateHook = Callable[[str], bool]
 
 
-def _read_token(settings: Any) -> Optional[str]:
+def _read_token(settings: Any) -> str | None:
     """Read an optional UI session token from test settings.
 
     Accepts None, a dict, or an attribute object; returns None when the
@@ -75,8 +76,8 @@ def _ledger_row_payload(package_id: str, agents: int, peak_concurrency: int,
 
 
 def create_app(settings: Any = None,
-               auth_hook: Optional[AuthHook] = None,
-               rate_hook: Optional[RateHook] = None,
+               auth_hook: AuthHook | None = None,
+               rate_hook: RateHook | None = None,
                model_factory: Any = None) -> FastAPI:
     """Build the seam FastAPI app over pure in-memory orchestration state.
 
@@ -95,7 +96,7 @@ def create_app(settings: Any = None,
     ledgers: dict[str, PackageLedger] = {}
     app.state.ledgers = ledgers
 
-    def default_auth_hook(token: Optional[str], actor: str, action: str) -> bool:
+    def default_auth_hook(token: str | None, actor: str, action: str) -> bool:
         if action != USER_WRITE:
             return True
         return bool(actor and actor.strip()) and token == app_token
@@ -135,7 +136,7 @@ def create_app(settings: Any = None,
         return {"rows": rows}
 
     def _find_ledger_with(package_id: str,
-                          project_id: Optional[str]) -> Optional[PackageLedger]:
+                          project_id: str | None) -> PackageLedger | None:
         if project_id is not None:
             ledger = ledgers.get(project_id)
             if ledger is not None and ledger.get_row(package_id) is not None:
@@ -148,7 +149,7 @@ def create_app(settings: Any = None,
 
     @app.get("/api/v1/reports/next-package-nudge")
     def next_package_nudge(package_id: str,
-                           project_id: Optional[str] = None) -> dict[str, Any]:
+                           project_id: str | None = None) -> dict[str, Any]:
         ledger = _find_ledger_with(package_id, project_id)
         if ledger is None:
             raise HTTPException(status_code=404,

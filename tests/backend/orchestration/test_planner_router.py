@@ -1,10 +1,17 @@
-import os, sys; sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__),"..","..","..","src")))
 """Planner builds graph, router picks class only; neither names a model."""
-
 import dataclasses
 import inspect
+import os
+import sys
 
 import pytest
+
+sys.path.insert(
+    0,
+    os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "..", "src")
+    ),
+)
 
 from agent_si.backend.orchestration.graph import (
     CycleError,
@@ -66,8 +73,12 @@ def test_planner_picks_no_provider_or_model():
 
 def test_planner_idempotent_on_package_and_goal():
     planner = TaskPlanner()
-    first_ref, first_graph = planner.plan("pkg-idem", "same goal", specs_two("pkg-idem"))
-    second_ref, second_graph = planner.plan("pkg-idem", "same goal", specs_two("pkg-idem"))
+    first_ref, first_graph = planner.plan(
+        "pkg-idem", "same goal", specs_two("pkg-idem")
+    )
+    second_ref, second_graph = planner.plan(
+        "pkg-idem", "same goal", specs_two("pkg-idem")
+    )
     assert first_ref == second_ref
     assert list(first_graph.nodes) == list(second_graph.nodes)
 

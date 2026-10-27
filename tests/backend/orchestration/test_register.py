@@ -1,7 +1,15 @@
-import os, sys; sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__),"..","..","..","src")))
 """ROW33 / M-P1-15: served part register rows plus status filter and update."""
+import os
+import sys
 
 import pytest
+
+sys.path.insert(
+    0,
+    os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "..", "src")
+    ),
+)
 
 from agent_si.backend.orchestration.parts import (
     PartRow,
@@ -15,7 +23,7 @@ def make_row(scope, agent="agent-1", deliverable=None, status="QUEUED"):
     return PartRow(
         agent=agent,
         scope=scope,
-        deliverable=deliverable or "artifact://pkg/%s" % scope,
+        deliverable=deliverable or f"artifact://pkg/{scope}",
         status=status,
     )
 
@@ -80,7 +88,12 @@ def test_inline_deliverable_rejected():
 
 def test_unknown_status_rejected():
     with pytest.raises(ValueError):
-        PartRow(agent="a", scope="unk-0001", deliverable="artifact://pkg/unk-0001", status="NOPE")  # type: ignore[arg-type]
+        PartRow(
+            agent="a",
+            scope="unk-0001",
+            deliverable="artifact://pkg/unk-0001",
+            status="NOPE",
+        )
     with pytest.raises(ValueError):
         list_parts("NOPE")  # type: ignore[arg-type]
     register_part(make_row("unk-0002"))
@@ -105,19 +118,26 @@ def test_update_status_changes_served_row():
 def test_b0b_arch_distinct_scopes():
     register_part(make_row("b0b-arch-456-0001"))
     register_part(make_row("b0b-arch-766-0001"))
-    got = [row for row in list_parts(None) if row.scope in ("b0b-arch-456-0001", "b0b-arch-766-0001")]
-    assert sorted(row.scope for row in got) == ["b0b-arch-456-0001", "b0b-arch-766-0001"]
+    got = [
+        row
+        for row in list_parts(None)
+        if row.scope in ("b0b-arch-456-0001", "b0b-arch-766-0001")
+    ]
+    assert sorted(row.scope for row in got) == [
+        "b0b-arch-456-0001",
+        "b0b-arch-766-0001",
+    ]
 
 
 def test_served_rows_are_copies():
     out = register_part(make_row("copy-0001"))
     out.status = "REJECTED"
     out.agent = "mutated"
-    got = [row for row in list_parts(None) if row.scope == "copy-0001"][0]
+    got = next(row for row in list_parts(None) if row.scope == "copy-0001")
     assert (got.agent, got.status) == ("agent-1", "QUEUED")
     updated = update_status("copy-0001", "RETURNED")
     updated.status = "BLOCKED"
-    again = [row for row in list_parts(None) if row.scope == "copy-0001"][0]
+    again = next(row for row in list_parts(None) if row.scope == "copy-0001")
     assert again.status == "RETURNED"
 
 
@@ -275,7 +295,9 @@ def test_ledger_row_frozen_shape_m_p1_17():
     ledger.record_row("pkg-l-1", 2, 2, 3.0)
     assert ledger.package_ids() == ["pkg-l-1"]
     with pytest.raises(ValueError):
-        LedgerRow(package_id="pkg-l-1", agents=True, peak_concurrency=1, wall_time_s=1.0)
+        LedgerRow(
+            package_id="pkg-l-1", agents=True, peak_concurrency=1, wall_time_s=1.0
+        )
     with pytest.raises(ValueError):
         LedgerRow(package_id="pkg-l-1", agents=1, peak_concurrency=-1, wall_time_s=1.0)
     with pytest.raises(ValueError):

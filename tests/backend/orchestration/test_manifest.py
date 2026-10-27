@@ -153,10 +153,10 @@ def test_canonical_stability_key_order():
 def _part_refs(manifest, tag="pkg-a", total=2):
     return [
         {
-            "package_id": "%s-%d" % (tag, idx),
+            "package_id": f"{tag}-{idx}",
             "contract_hash": manifest["hash"],
-            "gate_verdict_ref": "gate-%s-%d" % (tag, idx),
-            "audit_verdict_ref": "audit-%s-%d" % (tag, idx),
+            "gate_verdict_ref": f"gate-{tag}-{idx}",
+            "audit_verdict_ref": f"audit-{tag}-{idx}",
         }
         for idx in range(total)
     ]
@@ -218,10 +218,10 @@ def test_build_manifest_hash_canonical_field_order():
 def _sealed_with_refs(manifest_id="m-ok", version=1, tag="pkg-ok", total=2):
     draft = [
         {
-            "package_id": "%s-%d" % (tag, idx),
+            "package_id": f"{tag}-{idx}",
             "contract_hash": "placeholder",
-            "gate_verdict_ref": "gate-%s-%d" % (tag, idx),
-            "audit_verdict_ref": "audit-%s-%d" % (tag, idx),
+            "gate_verdict_ref": f"gate-{tag}-{idx}",
+            "audit_verdict_ref": f"audit-{tag}-{idx}",
         }
         for idx in range(total)
     ]
@@ -276,7 +276,7 @@ def test_load_manifest_hash_mismatch_rejected(tmp_path):
     manifest = mf.build_manifest("m-tamper", 1, [])
     path = str(tmp_path / "manifest.json")
     mf.save_manifest(manifest, path)
-    with open(path, "r", encoding="utf-8") as handle:
+    with open(path, encoding="utf-8") as handle:
         data = json.load(handle)
     data["version"] = 999
     with open(path, "w", encoding="utf-8", newline="\n") as handle:

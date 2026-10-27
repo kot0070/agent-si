@@ -44,10 +44,10 @@ def _mm_parts(tag, total):
     for idx in range(total):
         parts.append(
             {
-                "package_id": "%s-part-%03d" % (tag, idx),
-                "contract_hash": "%s-hash-%03d" % (tag, idx),
-                "gate_verdict_ref": "%s-gate-%03d" % (tag, idx),
-                "audit_verdict_ref": "%s-audit-%03d" % (tag, idx),
+                "package_id": f"{tag}-part-{idx:03d}",
+                "contract_hash": f"{tag}-hash-{idx:03d}",
+                "gate_verdict_ref": f"{tag}-gate-{idx:03d}",
+                "audit_verdict_ref": f"{tag}-audit-{idx:03d}",
             }
         )
     return parts
@@ -81,7 +81,9 @@ def test_validate_accepts_valid_settings():
 
 def test_mode_off_single_manager():
     parts = _mm_parts("pkg-mm-off", 3)
-    running, queued = sp.fanout(parts, fanout_settings(settings(multi_manager_mode=False)))
+    running, queued = sp.fanout(
+        parts, fanout_settings(settings(multi_manager_mode=False))
+    )
     assert running == parts[:1]
     assert queued == parts[1:]
     assert running + queued == parts
@@ -89,7 +91,9 @@ def test_mode_off_single_manager():
 
 def test_mode_off_single_part():
     parts = _mm_parts("pkg-mm-single", 1)
-    running, queued = sp.fanout(parts, fanout_settings(settings(multi_manager_mode=False)))
+    running, queued = sp.fanout(
+        parts, fanout_settings(settings(multi_manager_mode=False))
+    )
     assert running == parts
     assert queued == []
 
@@ -97,7 +101,8 @@ def test_mode_off_single_part():
 def test_mode_off_ignores_capacity():
     parts = _mm_parts("pkg-mm-offcap", 4)
     running, queued = sp.fanout(
-        parts, fanout_settings(settings(multi_manager_mode=False, max_parallel_managers=3))
+        parts,
+        fanout_settings(settings(multi_manager_mode=False, max_parallel_managers=3)),
     )
     assert running == parts[:1]
     assert queued == parts[1:]
@@ -107,7 +112,9 @@ def test_over_capacity_queues_never_drops():
     # moved-caller proof: over-capacity fanout via the v2 home split.fanout.
     parts = _mm_parts("pkg-mm-overcap", 7)
     before = copy.deepcopy(parts)
-    running, queued = sp.fanout(parts, fanout_settings(settings(max_parallel_managers=2)))
+    running, queued = sp.fanout(
+        parts, fanout_settings(settings(max_parallel_managers=2))
+    )
     assert running == parts[:2]
     assert queued == parts[2:]
     assert running + queued == parts
@@ -116,14 +123,18 @@ def test_over_capacity_queues_never_drops():
 
 def test_capacity_one_serializes():
     parts = _mm_parts("pkg-mm-serial", 2)
-    running, queued = sp.fanout(parts, fanout_settings(settings(max_parallel_managers=1)))
+    running, queued = sp.fanout(
+        parts, fanout_settings(settings(max_parallel_managers=1))
+    )
     assert running == parts[:1]
     assert queued == parts[1:]
 
 
 def test_capacity_above_total_runs_all():
     parts = _mm_parts("pkg-mm-all", 2)
-    running, queued = sp.fanout(parts, fanout_settings(settings(max_parallel_managers=5)))
+    running, queued = sp.fanout(
+        parts, fanout_settings(settings(max_parallel_managers=5))
+    )
     assert running == parts
     assert queued == []
 
@@ -187,21 +198,23 @@ def test_empty_policy_rejected():
 
 
 def test_non_bool_mode_rejected():
-    ok, reason = ov.validate_multi_manager_settings(
+    ok, _reason = ov.validate_multi_manager_settings(
         settings(multi_manager_mode="yes")
     )
     assert ok is False
     # v2 home split.fanout takes the settings object as-is: truthy mode
     # behaves as mode-on and nothing is dropped.
     parts = _mm_parts("pkg-mm-mode", 1)
-    running, queued = sp.fanout(parts, fanout_settings(settings(multi_manager_mode="yes")))
+    running, queued = sp.fanout(
+        parts, fanout_settings(settings(multi_manager_mode="yes"))
+    )
     assert running + queued == parts
     assert running == parts
     assert queued == []
 
 
 def test_non_dict_settings_rejected():
-    ok, reason = ov.validate_multi_manager_settings(None)
+    ok, _reason = ov.validate_multi_manager_settings(None)
     assert ok is False
     # v2 home split.fanout requires a settings object: None has no attributes.
     with pytest.raises(AttributeError):
