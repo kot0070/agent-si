@@ -91,8 +91,8 @@ def test_manifest_sha_pins_file():
         manifest.MANIFEST_SHA256
         == "f256bab4d31be3cd9e86c22a1bdcef90b08ad62500a8eca2051705cc0a9b0690"
     )
-    assert manifest.verify_manifest(ROOT / "RECORDS" / "day0" / "K13_MANIFEST.md") is True
-    assert manifest.verify_manifest(ROOT / "RECORDS" / "day0" / "NOPE.md") is False
+    assert manifest.verify_manifest(ROOT / "iface" / "frozen_manifest" / "K13_MANIFEST.md") is True
+    assert manifest.verify_manifest(ROOT / "iface" / "frozen_manifest" / "NOPE.md") is False
 
 
 def test_single_engine_entry_point():

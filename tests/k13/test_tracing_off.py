@@ -26,7 +26,7 @@ def isolated_secret_store(monkeypatch):
 
 
 def test_manifest_verified():
-    assert manifest.verify_manifest(ROOT / "RECORDS" / "day0" / "K13_MANIFEST.md") is True
+    assert manifest.verify_manifest(ROOT / "iface" / "frozen_manifest" / "K13_MANIFEST.md") is True
 
 
 def test_tracing_defaults_off_and_telemetry_complete():

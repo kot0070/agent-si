@@ -25,3 +25,6 @@
 *.gif binary
 *.ico binary
 *.zip binary
+
+# Frozen K13 manifest: byte-exact (its sha256 is frozen), no line-ending conversion
+iface/frozen_manifest/K13_MANIFEST.md -text

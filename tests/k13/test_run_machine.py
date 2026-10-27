@@ -70,7 +70,7 @@ def _run_at(status, reason, run_id="run-x"):
 
 def test_manifest_pin_and_shared_names():
     assert manifest.MANIFEST_SHA256 == "f256bab4d31be3cd9e86c22a1bdcef90b08ad62500a8eca2051705cc0a9b0690"
-    assert manifest.verify_manifest(ROOT / "RECORDS" / "day0" / "K13_MANIFEST.md") is True
+    assert manifest.verify_manifest(ROOT / "iface" / "frozen_manifest" / "K13_MANIFEST.md") is True
     assert run_machine.manifest is manifest
     assert run_machine.TERMINAL is manifest.RUN_TERMINAL
     assert run_machine.ALLOWED is manifest.RUN_ALLOWED

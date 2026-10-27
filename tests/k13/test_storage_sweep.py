@@ -18,7 +18,7 @@ from agent_si.reports import report_dataset
 from agent_si.storage import repositories
 from iface.frozen_manifest import manifest
 
-MANIFEST_DOC = ROOT / "RECORDS" / "day0" / "K13_MANIFEST.md"
+MANIFEST_DOC = ROOT / "iface" / "frozen_manifest" / "K13_MANIFEST.md"
 MIGRATION_SQL = ROOT / "src" / "agent_si" / "adapters" / "sqlite" / "migrations_k13.sql"
 
 # domain -> (repository class, migration table)
