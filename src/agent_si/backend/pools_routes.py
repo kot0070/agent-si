@@ -169,8 +169,9 @@ def _pools_deps(ctx) -> Tuple[Any, Any]:
 def _frozen_value(value):
     """Unwrap a frozen enum member to its plain string value (duck-typed).
 
-    The frozen interface module is never imported here (it stays a shape
-    stub); enum members are recognized by their ``value`` attribute only.
+    The frozen interface module is never imported here (it stays a
+    shape-only declaration); enum members are recognized by their
+    ``value`` attribute only.
     """
     return getattr(value, "value", value)
 
@@ -990,7 +991,7 @@ def serve(ctx: RoutingCtx, host: str = "127.0.0.1", port: int = 0):
     """Start a stdlib HTTP server for probes; returns (server, thread, url)."""
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):  # keep probe output clean
-            pass
+            return None
 
         def _handle(self):
             parsed = urlparse(self.path)

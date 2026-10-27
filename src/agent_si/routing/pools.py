@@ -363,9 +363,10 @@ def pick_pool_strategy(role: str, project_id: str) -> str:
     module-level bound store (bind_pool_store) or, failing that, the
     backend default context (bind_pools_ctx), with AUTO when no stored
     binding resolves. A stored binding whose strategy is outside the
-    frozen vocabulary falls back to the member-count default. Legacy persisted
-    values migrate via T.migrate_pool_strategy; anything outside the
-    frozen POOL_STRATEGIES falls back to AUTO. Picker options and
+    frozen vocabulary is surfaced as-is after migration so the caller
+    names it. Legacy persisted values migrate via T.migrate_pool_strategy;
+    anything outside the frozen POOL_STRATEGIES is returned unchanged.
+    Picker options and
     telemetry carry strategy labels only, never raw pool ids.
     """
     if role not in T.ROLES:
@@ -382,4 +383,4 @@ def pick_pool_strategy(role: str, project_id: str) -> str:
     strategy = T.migrate_pool_strategy(getattr(raw, "value", raw))
     if strategy in T.POOL_STRATEGIES:
         return strategy
-    return default_strategy_for(_binding_member_count(binding))
+    return strategy

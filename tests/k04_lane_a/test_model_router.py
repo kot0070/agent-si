@@ -1044,8 +1044,9 @@ def test_d13_pick_pool_strategy_store_and_explicit_binding(tmp_path):
 
 def test_d13_pick_pool_strategy_legacy_string_migrates(tmp_path):
     # Legacy / unknown rows bypass the frozen-value write guard via a raw
-    # row write (save_pool rejects them); the read path migrates or
-    # defaults them, resolved through the bound store with exact params.
+    # row write (save_pool rejects them); the read path migrates legacy
+    # values, and unresolvable values surface as-is, resolved through
+    # the bound store with exact params.
     store = RoutingStore(str(tmp_path))
 
     def _read_as(row):
@@ -1068,10 +1069,10 @@ def test_d13_pick_pool_strategy_legacy_string_migrates(tmp_path):
                    "strategy": None, "version": 1,
                    "members": [{"provider": "t1", "model": "t1/m1"},
                                {"provider": "t2", "model": "t2/m2"}]}
-    assert _read_as(two_unknown) == "DIRECTOR_PER_TASK"
+    assert _read_as(two_unknown) is None
     one_unknown = dict(two_unknown, strategy="bogus",
                        members=[{"provider": "t1", "model": "t1/m1"}])
-    assert _read_as(one_unknown) == "AUTO"
+    assert _read_as(one_unknown) == "bogus"
 
 
 # ---------------------------------------------------------------- K04R1 STEP2-1: pool strategy behaviour through the real entry
@@ -1326,7 +1327,10 @@ def test_pick_router_consults_facade_for_every_role(tmp_path, monkeypatch):
                    for e in by_role[role]), role
 
 
-def test_pick_unresolvable_stored_strategy_routes_by_member_count(tmp_path):
+def test_pick_unresolvable_stored_strategy_blocks_naming_it(tmp_path):
+    # Unresolvable stored strategy (None) surfaces as-is from the facade;
+    # the pool branch then records one BLOCKED decision naming it instead
+    # of falling back to the member-count default.
     store = RoutingStore(str(tmp_path / "data"))
     store._save_table("profiles", {"roles": {}, "manager": None,
                                    "pools": {"p1\x00worker": {
@@ -1349,20 +1353,42 @@ def test_pick_unresolvable_stored_strategy_routes_by_member_count(tmp_path):
              store=store)
     P.bind_pool_store(store)
     try:
-        assert P.pick_pool_strategy("worker", "p1") == "DIRECTOR_PER_TASK"
+        assert P.pick_pool_strategy("worker", "p1") is None
     finally:
         P.unbind_pool_store()
     out = R.decide_and_record(req([], role="worker", mode="pool"), d)
     assert out.status == "BLOCKED"
-    assert "unknown pool strategy" not in out.decision.reason
-    assert T.STRATEGY_LABELS["DIRECTOR_PER_TASK"] in out.decision.reason
-    P.bind_pool_store(store)
-    try:
-        out2 = R.decide_and_record(req([], role="worker", mode="pool",
-                                       director_pick_provider="pa",
-                                       director_pick_model="pa/a-1"), d)
-    finally:
-        P.unbind_pool_store()
-    assert out2.status == "ROUTED"
-    assert out2.decision.selected_model == "pa/a-1"
-    assert out2.decision.strategy == "DIRECTOR_PER_TASK"
+    assert "unknown pool strategy None" in out.decision.reason
+    assert len(store._load_table("decisions")) == 1
+
+
+def test_f3_facade_corrupt_stored_strategy_blocks_naming_it(tmp_path):
+    # Facade path: a raw corrupt stored strategy 'ROUND_ROBIN' (save_pool
+    # rejects corrupt values, so written via a raw row like the legacy
+    # tests) through the real R.decide_and_record -> BLOCKED naming the
+    # surfaced strategy, with exactly one decision record persisted.
+    store = RoutingStore(str(tmp_path / "data"))
+    store._save_table("profiles", {"roles": {}, "manager": None,
+                                   "pools": {"p1\x00worker": {
+                                       "role": "worker",
+                                       "project_id": "p1",
+                                       "strategy": "ROUND_ROBIN",
+                                       "version": 1,
+                                       "members": [
+                                           {"provider": "pa",
+                                            "model": "pa/a-1"},
+                                           {"provider": "pb",
+                                            "model": "pb/b-1"}]}}})
+    kb = FakeKb({
+        ("pa", "pa/a-1"): make_facts("pa", "pa/a-1"),
+        ("pb", "pb/b-1"): make_facts("pb", "pb/b-1"),
+    })
+    d = deps(kb, {"pa": "ONLINE", "pb": "ONLINE"},
+             {("pa", "pa/a-1"): "READY", ("pb", "pb/b-1"): "READY"},
+             {"pa": ("text", "tools", "coding"),
+              "pb": ("text", "tools", "coding")},
+             store=store)
+    out = R.decide_and_record(req([], role="worker", mode="pool"), d)
+    assert out.status == "BLOCKED"
+    assert "unknown pool strategy 'ROUND_ROBIN'" in out.decision.reason
+    assert len(store._load_table("decisions")) == 1

@@ -10,12 +10,14 @@ from __future__ import annotations
 import threading
 import uuid
 from dataclasses import dataclass, replace
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Tuple
 
 from . import types as T
-from .interface import CandidateView, RoutingDecision
 from .kb_port import KbModelFacts, KbReader
 from .telemetry_port import TelemetryEmitter, routing_event
+
+if TYPE_CHECKING:
+    from .interface import CandidateView, RoutingDecision
 
 UNKNOWN_PRICE_PENALTY = 1e12
 LOCAL_DRAFT_MIN_RATE = 0.50

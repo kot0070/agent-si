@@ -1057,3 +1057,53 @@ def test_a2use2_strategy_label_in_telemetry_reason(tmp_path):
     assert payload["strategy"] == "FALLBACK_ORDER"
     assert len(events) == 1
     assert (T.STRATEGY_LABELS["FALLBACK_ORDER"] in events[0]["reason"])
+
+
+# ------------------------------------------------- F3 HTTP parity: corrupt stored strategy
+
+def test_f3_http_corrupt_stored_strategy_blocks_naming_it(tmp_path):
+    # HTTP path: a raw corrupt stored strategy 'ROUND_ROBIN' (save_pool
+    # rejects corrupt values, so written via a raw profiles-table row like
+    # the facade F3 test) + pool-mode profile, through the REAL served
+    # POST /api/v1/routing/decide entry over HTTP with a session token
+    # -> http 200 BLOCKED naming "unknown pool strategy 'ROUND_ROBIN'",
+    # with exactly one decision record persisted.
+    import json as _json
+    import urllib.request as _urlrequest
+    ctx = make_ctx(tmp_path)
+    ctx.session_token = "f3-http-probe-token"
+    old = PR._DEFAULT_POOLS_CTX
+    PR.bind_pools_ctx(ctx)
+    try:
+        PR.set_role_pool(
+            "p1", "worker", "pool", None, None,
+            [{"provider": "pa", "model": "pa/a-1", "use_mode": "primary"},
+             {"provider": "pb", "model": "pb/b-1", "use_mode": "fallback"}],
+            "FALLBACK_ORDER")
+    finally:
+        PR._DEFAULT_POOLS_CTX = old
+    table = ctx.store._load_table("profiles")
+    key = "p1\x00worker"
+    row = dict(table["pools"][key])
+    row["strategy"] = "ROUND_ROBIN"
+    table["pools"][key] = row
+    ctx.store._save_table("profiles", table)
+    server, thread, url = PR.serve(ctx, "127.0.0.1", 0)
+    try:
+        raw = _json.dumps({
+            "project_id": "p1", "task_id": "t1", "run_id": "r1",
+            "role": "worker", "task_class": "coding"}).encode("utf-8")
+        req = _urlrequest.Request(
+            "%s/api/v1/routing/decide?session_token=f3-http-probe-token" % url,
+            data=raw, headers={"Content-Type": "application/json"},
+            method="POST")
+        with _urlrequest.urlopen(req) as resp:
+            assert resp.status == 200
+            payload = _json.loads(resp.read().decode("utf-8"))
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
+    assert payload["status"] == "BLOCKED"
+    assert "unknown pool strategy 'ROUND_ROBIN'" in payload["reason"]
+    assert len(ctx.store._load_table("decisions")) == 1

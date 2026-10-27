@@ -180,7 +180,7 @@ def apply_proposal(proposal_id: str,
 # trigger-path fetcher), status/apply read the module registries above.
 # Method names are lowercase because hosts expose `.get`/`.post` and
 # stdlib dispatch lowercases the verb. NOTE: PR.ROUTES wiring
-# (merging these paths into the served app) belongs to the pools/stub
+# (merging these paths into the served app) belongs to the pools-route
 # owner; this module only defines the routes.
 
 

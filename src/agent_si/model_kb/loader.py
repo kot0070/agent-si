@@ -302,7 +302,7 @@ __all__ = ["IN_BASE", "NOT_IN_BASE", "find_row", "lookup", "bridge",
 # --- frozen D8 facades (server-side catalog binding) --------------------------
 #
 # Exact frozen signatures from routing/interface.py; verified with
-# inspect against the stub. They read the bound catalog
+# inspect against the frozen interface. They read the bound catalog
 # (kb.bind_catalog / kb.bound_catalog, SEED_CATALOG until bound) and
 # delegate every KB rule to the choice-point functions above, so the
 # 35 owned tests keep passing unchanged. updater.propose_update keeps

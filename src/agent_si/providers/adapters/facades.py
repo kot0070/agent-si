@@ -16,7 +16,7 @@ extra parameters and no defaults:
 Both bindings are server-side: transports and secrets are registered
 here by the host process, never by the caller, and tests inject fakes
 only (no network). Unknown ids and missing stream transports fail
-closed with ValueError, never silent stub data. Standard library plus
+closed with ValueError, never silent placeholder data. Standard library plus
 ``agent_si`` only.
 """
 
@@ -79,7 +79,7 @@ def _default_probe_transport(provider_id, instance_id, chat_transport,
     request over the bound chat transport and reshapes its real reply
     into the probe reply shape (usage plus the safe raw reference).
     Secret identity travels id-only; transport failures propagate so the
-    probe maps them to UNSUPPORTED/UNKNOWN (fail closed, never stub data,
+    probe maps them to UNSUPPORTED/UNKNOWN (fail closed, never fabricated data,
     never network).
     """
     def probe_transport(request):
