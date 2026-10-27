@@ -1,0 +1,28 @@
+{
+  "productName": "Agent SI",
+  "version": "0.1.0",
+  "identifier": "com.agentsi.app",
+  "build": {
+    "frontendDist": "../../frontend/dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "",
+    "beforeBuildCommand": ""
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Agent SI",
+        "width": 1280,
+        "height": 800
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "externalBin": ["binaries/agent-si-sidecar"]
+  }
+}

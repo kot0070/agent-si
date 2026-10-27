@@ -1,0 +1,21 @@
+/* provenance: authored for K07 Lane A STEP2 wave 1 (ui kit); no copied content. */
+:root,
+[data-theme="dark"] {
+  --agent-si-surface: #14161a;
+  --agent-si-ink: #f2f4f8;
+  --agent-si-accent: #6aa8ff;
+  --agent-si-card-border: #2a2f3a;
+  --agent-si-chart-a: #6aa8ff;
+  --agent-si-chart-b: #7fd08a;
+  --agent-si-chart-c: #e0a35f;
+}
+
+[data-theme="light"] {
+  --agent-si-surface: #ffffff;
+  --agent-si-ink: #16181d;
+  --agent-si-accent: #2456c6;
+  --agent-si-card-border: #dfe3ea;
+  --agent-si-chart-a: #2456c6;
+  --agent-si-chart-b: #2e7d46;
+  --agent-si-chart-c: #b06a1a;
+}
