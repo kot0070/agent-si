@@ -1077,3 +1077,64 @@ def recover_journal() -> dict:
     _journal_rebind_counters(run_max, rsv_max, lease_max)
     _journal_append("recovered")
     return report
+
+
+#: --- Additive K05R7 M-PROBE bench seam (M-D-D15/M-D-D41; new names only). ---
+#: Offline probe envs live in agent_si.local.k05r7_probe_envs and resolve
+#: ONLY from AGENT_SI_PROBE_* entries; product-infra env
+#: (AGENT_SI_BENCH_JOURNAL and every other non-probe AGENT_SI_* name) never
+#: affects probe resolution. Every probe target/socket is loopback-only and
+#: the host check below fails closed before any external contact. This
+#: section only adds new names; every existing name/signature above is
+#: unchanged.
+from agent_si.local import k05r7_probe_envs as _k05r7_probe_envs
+
+
+class K05R7ProbeRefusedError(BenchRefusedError):
+    """Fail-closed K05R7 probe refusal: non-loopback/unparsable/unreachable."""
+
+
+@dataclass
+class K05R7ProbeSkip:
+    """Skip-style K05R7 probe outcome; no contact was made."""
+
+    reason: str
+
+
+def k05r7_resolve_probe_env(
+    environ=None,
+) -> _k05r7_probe_envs.ProbeEnv:
+    """Probe knobs from AGENT_SI_PROBE_* only; product infra env ignored."""
+    return _k05r7_probe_envs.resolve_probe_env(environ)
+
+
+def k05r7_probe_snapshot(environ=None) -> dict:
+    """Only the AGENT_SI_PROBE_* entries; product infra env never appears."""
+    return _k05r7_probe_envs.probe_env_snapshot(environ)
+
+
+def k05r7_probe_targets(environ=None) -> tuple[tuple[str, int, str], ...]:
+    """Loopback-only probe targets; non-loopback env yields no targets."""
+    return _k05r7_probe_envs.probe_targets(environ)
+
+
+def k05r7_guard_probe_endpoint(
+    endpoint: str | None = None,
+    environ=None,
+) -> str:
+    """Fail-closed host check before any contact; raises K05R7ProbeRefusedError."""
+    try:
+        return _k05r7_probe_envs.guard_probe_endpoint(endpoint, environ)
+    except _k05r7_probe_envs.ProbeRefusedError as exc:
+        raise K05R7ProbeRefusedError(str(exc)) from None
+
+
+def k05r7_check_probe_endpoint(
+    endpoint: str | None = None,
+    environ=None,
+) -> str | K05R7ProbeSkip:
+    """Skip-style guard: normalized endpoint, or K05R7ProbeSkip (never raises)."""
+    try:
+        return _k05r7_probe_envs.guard_probe_endpoint(endpoint, environ)
+    except _k05r7_probe_envs.ProbeRefusedError as exc:
+        return K05R7ProbeSkip(reason=str(exc))

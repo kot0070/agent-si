@@ -358,6 +358,254 @@ def routing_continues(status: str) -> bool:
     return status == STATUS_NOT_CONFIGURED
 
 
+#: --- Additive M-ADMIT admission gate (B0B-BP02-63/68/77/88; new names only).
+#: Four hard gates in a fixed order, every one fail-closed: tier (63,
+#: UNKNOWN is never admitted and only routing-eligibility evidence
+#: admits), health (68, only a healthy signal admits), gateway (77, idle
+#: only, never forced), permission (88, only the allowlisted scope
+#: admits). A refusal names its gate and records every ref supplied.
+#: Pure: no IO, no mutation, standard library only.
+
+#: Permission scopes that admit local contact (88; mirrors the frozen
+#: settings allowlist: only this scope is servable).
+ADMISSION_ALLOWED_PERMISSION_SCOPES = ("local-contact-allowed",)
+
+#: SPEC 26 ROUTING_POLICY decision thresholds, highest branch first. A
+#: score at or above a threshold takes that branch; a missing score or a
+#: score below every threshold takes the NO-DATA branch.
+ROUTING_POLICY_THRESHOLDS = (100, 85, 50)
+
+#: SPEC 26 ROUTING_POLICY branch names aligned with the thresholds above.
+ROUTING_POLICY_BRANCHES = ("A", "B", "C")
+
+#: SPEC 26 branch taken with no usable score.
+ROUTING_POLICY_NO_DATA_BRANCH = "NO-DATA"
+
+
+@dataclass(frozen=True)
+class AdmissionVerdict:
+    admitted: bool
+    reason: str
+    admission_refs: tuple
+    gate_allowed: bool
+    admission_source: str
+
+
+@dataclass(frozen=True)
+class VerifierRecord:
+    verifier_ref: str
+    draft_ref: str
+    draft_hash: str
+
+
+def _is_healthy_signal(health_ref: object) -> bool:
+    """True exactly for a healthy signal: carries ``healthy`` without an
+    ``unhealthy`` marker. Anything else is refused, fail-closed."""
+    lowered = health_ref.lower() if isinstance(health_ref, str) else ""
+    return "healthy" in lowered and "unhealthy" not in lowered
+
+
+def check_admission(
+    capability_store_ref: str,
+    health_ref: str,
+    gateway_state_ref: str,
+    permission_scope: str,
+) -> AdmissionVerdict:
+    """Admission from tier plus health plus gateway plus permission.
+
+    Tier (63) admits only routing-eligibility evidence, mirroring
+    check_eligibility so this gate is never weaker: UNKNOWN is never
+    admitted and a bare tier label never admits. Health (68) admits
+    only a healthy signal. Gateway (77) admits only an idle machine,
+    never forced. Permission (88) admits only the allowlisted scope.
+    The verdict records every ref supplied.
+    """
+    _reject_role_config_ref(capability_store_ref, "capability store ref")
+    _reject_role_config_ref(permission_scope, "permission scope")
+    store_text = capability_store_ref if isinstance(capability_store_ref, str) else ""
+    lowered = store_text.lower()
+    static_capability = _carries_static_capability(lowered)
+    static_signal = "static-verified" in lowered.replace("_", "-")
+    if "measured" in lowered:
+        tier = EvidenceTier.MEASURED
+    elif "proxy" in lowered:
+        tier = EvidenceTier.PROXY
+    else:
+        tier = EvidenceTier.UNKNOWN
+    gateway_text = gateway_state_ref if isinstance(gateway_state_ref, str) else ""
+    gateway_lowered = gateway_text.lower()
+    gateway_allowed = "idle" in gateway_lowered and "running" not in gateway_lowered
+    admission_refs = (
+        capability_store_ref,
+        health_ref,
+        gateway_state_ref,
+        permission_scope,
+    )
+    admission_source = "capability-store/health/gateway/permission"
+    if tier is EvidenceTier.UNKNOWN and not static_signal:
+        return AdmissionVerdict(
+            admitted=False,
+            reason=(
+                "UNKNOWN_TIER_INELIGIBLE: store ref "
+                f"{capability_store_ref!r} carries only UNKNOWN evidence; "
+                "UNKNOWN is never admitted"
+            ),
+            admission_refs=admission_refs,
+            gate_allowed=gateway_allowed,
+            admission_source=admission_source,
+        )
+    if tier is EvidenceTier.PROXY or not (
+        _carries_routing_eligibility(lowered) or static_capability
+    ):
+        return AdmissionVerdict(
+            admitted=False,
+            reason=(
+                f"{tier.value}_NOT_ROUTING_ELIGIBLE: store ref "
+                f"{capability_store_ref!r} carries a {tier.value} tier label "
+                "but no routing-eligibility evidence; MEASURED is not "
+                "ROUTING_ELIGIBLE, admission only on evidence that reached "
+                "the ROUTING_ELIGIBILITY lifecycle stage"
+            ),
+            admission_refs=admission_refs,
+            gate_allowed=gateway_allowed,
+            admission_source=admission_source,
+        )
+    if not _is_healthy_signal(health_ref):
+        return AdmissionVerdict(
+            admitted=False,
+            reason=(
+                "ADMISSION_HEALTH_REFUSED: health ref "
+                f"{health_ref!r} does not report a healthy model; "
+                "admission needs a healthy signal"
+            ),
+            admission_refs=admission_refs,
+            gate_allowed=gateway_allowed,
+            admission_source=admission_source,
+        )
+    if not gateway_allowed:
+        return AdmissionVerdict(
+            admitted=False,
+            reason=(
+                "GATEWAY_BUSY: gateway state ref "
+                f"{gateway_state_ref!r} does not report an idle machine; "
+                "local contact skipped, never forced"
+            ),
+            admission_refs=admission_refs,
+            gate_allowed=gateway_allowed,
+            admission_source=admission_source,
+        )
+    if not isinstance(permission_scope, str) or (
+        permission_scope not in ADMISSION_ALLOWED_PERMISSION_SCOPES
+    ):
+        return AdmissionVerdict(
+            admitted=False,
+            reason=(
+                "ADMISSION_PERMISSION_REFUSED: permission scope "
+                f"{permission_scope!r} is not allowlisted for local "
+                "contact; admission needs the servable scope"
+            ),
+            admission_refs=admission_refs,
+            gate_allowed=gateway_allowed,
+            admission_source=admission_source,
+        )
+    if static_capability and tier is not EvidenceTier.MEASURED:
+        return AdmissionVerdict(
+            admitted=True,
+            reason=(
+                "admitted: branch-B verified static capability with healthy "
+                "signal, idle gateway and allowlisted permission; "
+                "UNKNOWN is never admitted"
+            ),
+            admission_refs=admission_refs,
+            gate_allowed=gateway_allowed,
+            admission_source=admission_source,
+        )
+    return AdmissionVerdict(
+        admitted=True,
+        reason=(
+            f"admitted: routing-eligibility evidence ({tier.value} tier) "
+            "with healthy signal, idle gateway and allowlisted permission"
+        ),
+        admission_refs=admission_refs,
+        gate_allowed=gateway_allowed,
+        admission_source=admission_source,
+    )
+
+
+def record_verifier_decision(
+    verifier_ref: str, draft_ref: str, draft_hash: str
+) -> VerifierRecord:
+    """Verifier record (B0B-UNCOVERED_MVP_ACCEPT-19): binds the verifier
+    ref to the draft ref through the draft hash. Every field must be a
+    non-empty string; role-config fields are refused where refs belong."""
+    for name, value in (
+        ("verifier_ref", verifier_ref),
+        ("draft_ref", draft_ref),
+        ("draft_hash", draft_hash),
+    ):
+        if not isinstance(value, str) or not value:
+            raise ValueError(
+                f"verifier refs must be non-empty strings: {name} is {value!r}"
+            )
+    _reject_role_config_ref(verifier_ref, "verifier ref")
+    _reject_role_config_ref(draft_ref, "verifier draft ref")
+    return VerifierRecord(
+        verifier_ref=verifier_ref,
+        draft_ref=draft_ref,
+        draft_hash=draft_hash,
+    )
+
+
+def reexamine_verifier_content(
+    record: VerifierRecord, content_text: str, content_hash: str
+) -> bool:
+    """Re-examine content (B0B-UNCOVERED_MVP_ACCEPT-57): True exactly
+    when the supplied content is non-empty and its hash still equals the
+    recorded draft hash. A mismatch or empty content is False, never an
+    admission; misuse of the record shape raises ValueError."""
+    if not isinstance(record, VerifierRecord):
+        raise ValueError(f"record must be a VerifierRecord, got {record!r}")
+    if not isinstance(content_text, str) or not content_text:
+        return False
+    if not isinstance(content_hash, str) or not content_hash:
+        return False
+    if not (record.verifier_ref and record.draft_ref and record.draft_hash):
+        return False
+    return content_hash == record.draft_hash
+
+
+def confirm_verifier_link(record: VerifierRecord, draft_ref: str) -> bool:
+    """Confirm link (B0B-UNCOVERED_MVP_ACCEPT-57): True exactly when the
+    record carries complete refs and its draft ref equals the supplied
+    draft ref. Anything else is False; misuse of the record shape raises
+    ValueError."""
+    if not isinstance(record, VerifierRecord):
+        raise ValueError(f"record must be a VerifierRecord, got {record!r}")
+    if not isinstance(draft_ref, str) or not draft_ref:
+        return False
+    if not (record.verifier_ref and record.draft_ref and record.draft_hash):
+        return False
+    return record.draft_ref == draft_ref
+
+
+def route_by_policy(score: object) -> str:
+    """SPEC 26 ROUTING_POLICY branch for a score: at or above 100 takes
+    A, at or above 85 takes B, at or above 50 takes C; a missing score
+    (None), a non-numeric score marker such as NaN, or a score below
+    every threshold takes the NO-DATA branch. Booleans and other
+    non-numeric types raise ValueError."""
+    if score is None:
+        return ROUTING_POLICY_NO_DATA_BRANCH
+    if isinstance(score, bool) or not isinstance(score, (int, float)):
+        raise ValueError(f"score must be a number or None, got {score!r}")
+    if score != score:
+        return ROUTING_POLICY_NO_DATA_BRANCH
+    for threshold, branch in zip(ROUTING_POLICY_THRESHOLDS, ROUTING_POLICY_BRANCHES):
+        if score >= threshold:
+            return branch
+    return ROUTING_POLICY_NO_DATA_BRANCH
+
+
 #: Frozen function name to owning lane implementation (dotted path).
 REALIZATION_MAP = {
     "check_eligibility": "agent_si.local.service.LocalAdapter.check_eligibility",
@@ -366,4 +614,9 @@ REALIZATION_MAP = {
     "record_explicit_pin": "agent_si.local.service.LocalAdapter.record_explicit_pin",
     "record_split_decision": "agent_si.local.service.LocalAdapter.record_split_decision",
     "routing_continues": "agent_si.local.service.LocalAdapter.routing_continues",
+    "check_admission": "agent_si.local.service.LocalAdapter.check_admission",
+    "record_verifier_decision": "agent_si.local.service.LocalAdapter.record_verifier_decision",
+    "reexamine_verifier_content": "agent_si.local.service.LocalAdapter.reexamine_verifier_content",
+    "confirm_verifier_link": "agent_si.local.service.LocalAdapter.confirm_verifier_link",
+    "route_by_policy": "agent_si.local.service.LocalAdapter.route_by_policy",
 }

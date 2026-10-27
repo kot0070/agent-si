@@ -286,3 +286,145 @@ def local_only_warnings(config: LocalAIConfig) -> List[str]:
             "for project %r" % (evidence, config.project_key)
         ]
     return []
+
+
+#: Used-level identity keys tried in order for messages and evidence
+#: (B0B-UNCOVERED_BP06-44; additive, names only).
+_LOCAL_LEVEL_ID_KEYS = ("level", "role", "id", "name")
+
+#: Optional per-level resource-cap mapping key (B0B-UNCOVERED_BP06-44).
+_LOCAL_LEVEL_RESOURCE_CAP_KEY = "resource_cap"
+
+
+def _used_level_id(level: Any, index: int) -> str:
+    """Evidence label for one used level (mapping keys, else position)."""
+    get = getattr(level, "get", None)
+    if callable(get):
+        try:
+            for key in _LOCAL_LEVEL_ID_KEYS:
+                value = get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+        except Exception:
+            pass
+    for key in _LOCAL_LEVEL_ID_KEYS:
+        value = getattr(level, key, "")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return "used-level-%d" % (index,)
+
+
+def _used_level_field(level: Any, name: str) -> Any:
+    """One declared per-level field or None when the level declares none."""
+    get = getattr(level, "get", None)
+    if callable(get):
+        try:
+            value = get(name)
+        except Exception:
+            value = None
+        if value is not None:
+            return value
+    value = getattr(level, name, None)
+    return value
+
+
+def _used_level_allows_local(level: Any) -> bool:
+    """True only when the level explicitly sets local_ai_allowed True.
+
+    Fail-closed: a missing flag, or any non-True value, denies.
+    """
+    return _used_level_field(level, "local_ai_allowed") is True
+
+
+def _validate_used_level_identity(level_id: str, level: Any) -> None:
+    """Validate a used level's declared endpoint/model with frozen checks."""
+    endpoint = _used_level_field(level, "endpoint_url")
+    if endpoint is not None:
+        validate_endpoint(endpoint)
+    model = _used_level_field(level, "model_id")
+    if model is not None:
+        validate_model(model)
+
+
+def _validate_used_level_resource_cap(project_key: str, level_id: str,
+                                       level: Any) -> None:
+    """Validate a used level's declared resource_cap mapping when present.
+
+    Absent caps need no check; a present cap must be a non-empty mapping
+    of positive numeric limits, else LOCAL_ONLY_VIOLATION (fail-closed).
+    """
+    cap = _used_level_field(level, _LOCAL_LEVEL_RESOURCE_CAP_KEY)
+    if cap is None:
+        return
+    get = getattr(cap, "get", None)
+    items = None
+    if callable(get) and hasattr(cap, "__len__") and hasattr(cap, "keys"):
+        try:
+            items = list(cap.items())
+        except Exception:
+            items = None
+    if not items:
+        raise LocalAISettingsError(
+            LOCAL_AI_LOCAL_ONLY_VIOLATION,
+            "local-only project %r refuses level %r with an empty "
+            "or invalid resource_cap" % (project_key, level_id),
+        )
+    for name, value in items:
+        if (isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not value > 0):
+            raise LocalAISettingsError(
+                LOCAL_AI_LOCAL_ONLY_VIOLATION,
+                "local-only project %r refuses level %r with a "
+                "non-positive resource_cap %r" % (project_key, level_id, name),
+            )
+
+
+def require_local_ai_allowed_at_used_levels(
+        config: LocalAIConfig, used_levels: List[Any]) -> List[str]:
+    """LOCAL-ONLY gate (B0B-UNCOVERED_BP06-44): every used level carries
+    local_ai_allowed, and local identities plus resource caps validate
+    before activation. Violations raise LOCAL_ONLY_VIOLATION (fail-closed,
+    default deny); a non-local-only config passes its level ids through.
+    """
+    if not config.local_only_mode:
+        return [_used_level_id(level, index)
+                for index, level in enumerate(used_levels or [])]
+    validate_config(config)
+    try:
+        items = list(used_levels)
+    except TypeError:
+        items = []
+    if not items:
+        raise LocalAISettingsError(
+            LOCAL_AI_LOCAL_ONLY_VIOLATION,
+            "local-only project %r activates zero used levels: "
+            "default deny" % (config.project_key,),
+        )
+    checked: List[str] = []
+    for index, level in enumerate(items):
+        level_id = _used_level_id(level, index)
+        if not _used_level_allows_local(level):
+            raise LocalAISettingsError(
+                LOCAL_AI_LOCAL_ONLY_VIOLATION,
+                "local-only project %r refuses used level %r without "
+                "local_ai_allowed" % (config.project_key, level_id),
+            )
+        _validate_used_level_identity(level_id, level)
+        _validate_used_level_resource_cap(config.project_key, level_id, level)
+        checked.append(level_id)
+    return checked
+
+
+def check_local_only_activation(project_key: str,
+                                used_levels: List[Any]) -> bool:
+    """Activation gate over stored config (B0B-UNCOVERED_BP06-48): block
+    activation when local_only_mode is true and any used level disallows
+    local AI, without mutating stored configuration. Reads the stored
+    config, enforces require_local_ai_allowed_at_used_levels, returns True
+    when activation is allowed; raises LOCAL_ONLY_VIOLATION otherwise.
+    This function never writes _STORE on any path.
+    """
+    config = load_config(project_key, project_key)
+    require_local_ai_allowed_at_used_levels(config, used_levels)
+    return True
