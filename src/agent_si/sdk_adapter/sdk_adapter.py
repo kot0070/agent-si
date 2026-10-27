@@ -1,0 +1,366 @@
+"""OpenAI Agents SDK adapter (Manifest sections 6, 14B, 20A, 43).
+
+SDK calls live ONLY in this module. The orchestration interface never calls
+the SDK directly and never rebuilds SDK client configuration.
+
+Frozen rules honored here:
+
+- Non-OpenAI providers always use the Chat Completions endpoint; no other
+  conversational endpoint is ever assumed.
+- Provider clients use max_retries 0 (no hidden recovery); the constructor
+  refuses any other value. Runner retries come ONLY from the
+  RoutingDecision-bound RunConfig.
+- Every result is posted as SdkRunResult carrying output_ref.
+- Agent Builder imports are untrusted input until revalidated against an
+  expected content hash; unrevalidated workflows are never executed.
+- SecretRefs only: secret_refs entries must be SecretRef records; inline
+  values are never accepted and never touch output refs.
+
+Module default: USE_SDK_UNLESS_DOCUMENTED_CRITICAL_BLOCKER. The SDK is used
+unless a documented critical blocker (evidence + decision record +
+independent audit, per section 43) selects a replacement.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, replace
+from typing import Any, Callable, Dict, Tuple
+
+try:
+    from iface.frozen_manifest import manifest
+except ImportError:  # alternate layout: the iface/ directory itself on sys.path
+    from frozen_manifest import manifest
+
+try:  # real SDK when present; the adapter never needs it at import time
+    import agents as _agents_sdk
+
+    if not hasattr(_agents_sdk, "Agent"):
+        _agents_sdk = None
+except ImportError:
+    _agents_sdk = None
+
+SDK_AVAILABLE = _agents_sdk is not None
+"""True when the real SDK package is importable; the fallback echo runner otherwise."""
+
+USE_SDK_UNLESS_DOCUMENTED_CRITICAL_BLOCKER = True
+"""Module default (Manifest section 43): stay on the SDK unless a documented
+critical blocker (evidence + decision record + independent audit) says otherwise."""
+
+CHAT_COMPLETIONS_TRANSPORT = "chat_completions"
+SDK_DEFAULT_TRANSPORT = "sdk_default"
+
+_OPENAI_PROVIDER_NAMES = frozenset({"openai"})
+
+
+def transport_for_provider(provider: str) -> str:
+    """Return the SDK transport for *provider* (Manifest section 43).
+
+    OpenAI providers use the SDK default path; every other provider uses the
+    Chat Completions endpoint. No other conversational endpoint is assumed.
+    """
+    if str(provider).strip().lower() in _OPENAI_PROVIDER_NAMES:
+        return SDK_DEFAULT_TRANSPORT
+    return CHAT_COMPLETIONS_TRANSPORT
+
+
+# Error codes (Manifest 21A pattern: module constant + Exception.code).
+# Task-ordered (HD 17:26): every error condition in this module raises an
+# error carrying one of these codes. Subclasses keep the builtin base type
+# so existing ValueError/TypeError pins still hold.
+SDK_CLIENT_MAX_RETRIES_NONZERO = "SDK_CLIENT_MAX_RETRIES_NONZERO"
+SDK_RUN_CONFIG_REQUIRED = "SDK_RUN_CONFIG_REQUIRED"
+SDK_SECRET_REFS_MUST_BE_RECORDS = "SDK_SECRET_REFS_MUST_BE_RECORDS"
+BUILDER_WORKFLOW_HASH_MISMATCH = "BUILDER_WORKFLOW_HASH_MISMATCH"
+BUILDER_WORKFLOW_NOT_REVALIDATED = "BUILDER_WORKFLOW_NOT_REVALIDATED"
+
+
+class SdkClientConfigError(ValueError):
+    """Provider client built with max_retries != 0 (Manifest 14B)."""
+
+    code = SDK_CLIENT_MAX_RETRIES_NONZERO
+
+
+class RunConfigRequiredError(ValueError):
+    """run() called without its RoutingDecision-bound RunConfig (14B)."""
+
+    code = SDK_RUN_CONFIG_REQUIRED
+
+
+class SecretRefTypeError(TypeError):
+    """secret_refs entry is not a SecretRef record (Manifest 20A)."""
+
+    code = SDK_SECRET_REFS_MUST_BE_RECORDS
+
+
+class BuilderWorkflowHashMismatchError(ValueError):
+    """Agent Builder workflow hash mismatch; still untrusted (section 6)."""
+
+    code = BUILDER_WORKFLOW_HASH_MISMATCH
+
+
+@dataclass(frozen=True)
+class SecretRef:
+    """Manifest section 20A SecretRef. Agents receive refs, never raw values."""
+
+    secret_id: str
+    provider_id: str = ""
+    type: str = ""
+    scope: str = ""
+    source: str = ""
+    created_at: str = ""
+    last_rotated_at: str = ""
+
+
+@dataclass(frozen=True)
+class SdkClientConfig:
+    """Provider client configuration. max_retries stays 0 (section 14B)."""
+
+    max_retries: int = 0
+
+
+@dataclass(frozen=True)
+class RoutingDecisionBinding:
+    """RoutingDecision fields this adapter consumes (Manifest section 28)."""
+
+    decision_id: str
+    project_id: str
+    task_id: str
+    run_id: str
+    routing_snapshot_id: str = ""
+    selected_provider: str = ""
+    selected_model: str = ""
+    route: str = ""
+    strategy: str = ""
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class RunConfig:
+    """Runner configuration bound to exactly one RoutingDecision (section 14B).
+
+    Runner retries come ONLY from max_runner_retries, which the caller binds
+    from the active RetryPolicy budget (executor_attempt_max) for the bound
+    decision. The adapter never invents a retry budget.
+    """
+
+    decision_id: str
+    project_id: str
+    task_id: str
+    run_id: str
+    selected_provider: str
+    selected_model: str
+    route: str
+    strategy: str
+    max_runner_retries: int
+
+    @classmethod
+    def from_routing_decision(
+        cls, decision: RoutingDecisionBinding, *, executor_attempt_max: int
+    ) -> "RunConfig":
+        """Bind a RoutingDecision plus its RetryPolicy budget (section 14B)."""
+        return cls(
+            decision_id=decision.decision_id,
+            project_id=decision.project_id,
+            task_id=decision.task_id,
+            run_id=decision.run_id,
+            selected_provider=decision.selected_provider,
+            selected_model=decision.selected_model,
+            route=decision.route,
+            strategy=decision.strategy,
+            max_runner_retries=int(executor_attempt_max),
+        )
+
+
+@dataclass(frozen=True)
+class SdkRunResult:
+    """Adapter result shape (Manifest ports section). Always carries output_ref."""
+
+    run_id: str
+    output_ref: str
+    provider: str = ""
+    model: str = ""
+    status: Any = manifest.ExecutionAttemptStatus.SUCCEEDED
+    error_ref: str = ""
+
+
+@dataclass(frozen=True)
+class AgentBuilderWorkflow:
+    """An imported Agent Builder workflow: untrusted input until revalidated."""
+
+    workflow_ref: str
+    content_hash: str
+    revalidated: bool = False
+
+
+class WorkflowNotRevalidatedError(Exception):
+    """An Agent Builder workflow was executed before revalidation (section 6)."""
+
+    code = BUILDER_WORKFLOW_NOT_REVALIDATED
+
+
+def revalidate_agent_builder_workflow(
+    workflow: AgentBuilderWorkflow, *, expected_hash: str
+) -> AgentBuilderWorkflow:
+    """Return a revalidated copy iff the content hash matches (section 6).
+
+    The input stays untouched; a mismatch raises instead of trusting.
+    """
+    if workflow.content_hash != expected_hash:
+        raise BuilderWorkflowHashMismatchError(
+            "Agent Builder workflow hash mismatch; still untrusted"
+        )
+    return replace(workflow, revalidated=True)
+
+
+# BEGIN K13R1 (M-ECHO)
+SDK_RUNNER_UNBOUND = "SDK_RUNNER_UNBOUND"
+
+
+class RunnerUnboundError(RuntimeError):
+    """run() called with no runner wired; pass runner=... explicitly."""
+
+    code = SDK_RUNNER_UNBOUND
+
+
+class OpenAIAgentsSDKAdapter:
+    """The single SDK-call boundary (Manifest section 43).
+
+    The client configuration is built ONCE here in __init__ and never rebuilt
+    per call; per-call behavior varies only through the RoutingDecision-bound
+    RunConfig passed to run().
+    """
+
+    def __init__(
+        self,
+        *,
+        client_config: SdkClientConfig | None = None,
+        runner: Callable[[Dict[str, Any]], Dict[str, Any]] | None = None,
+    ) -> None:
+        config = client_config if client_config is not None else SdkClientConfig()
+        if config.max_retries != 0:
+            raise SdkClientConfigError(
+                "provider clients use max_retries 0 (Manifest 14B); got %r"
+                % (config.max_retries,)
+            )
+        self._client_config = config
+        self._runner = runner
+        self._calls_made = 0
+
+    @property
+    def client_config(self) -> SdkClientConfig:
+        """The single client configuration built at construction."""
+        return self._client_config
+
+    @property
+    def calls_made(self) -> int:
+        """SDK runner invocations so far (core accounting input, never a total)."""
+        return self._calls_made
+
+    def build_run_config(
+        self, decision: RoutingDecisionBinding, *, executor_attempt_max: int
+    ) -> RunConfig:
+        """Bind a RoutingDecision plus its retry budget into a RunConfig."""
+        return RunConfig.from_routing_decision(
+            decision, executor_attempt_max=executor_attempt_max
+        )
+
+    def run(
+        self,
+        *,
+        run_config: RunConfig,
+        input_ref: str,
+        secret_refs: Tuple[SecretRef, ...] = (),
+    ) -> SdkRunResult:
+        """Run one SDK invocation chain; return SdkRunResult with output_ref."""
+        if run_config is None:
+            raise RunConfigRequiredError(
+                "run_config is required; retries bind to it (14B)"
+            )
+        for ref in secret_refs or ():
+            if not isinstance(ref, SecretRef):
+                raise SecretRefTypeError(
+                    "secret_refs must be SecretRef records; "
+                    "inline values are never accepted"
+                )
+        if self._runner is None:
+            raise RunnerUnboundError(
+                "OpenAIAgentsSDKAdapter has no runner wired; pass runner=..."
+            )
+# END K13R1 (M-ECHO)
+        transport = transport_for_provider(run_config.selected_provider)
+        secret_ids = tuple(ref.secret_id for ref in (secret_refs or ()))
+        attempts = 0
+        while True:
+            attempts += 1
+            self._calls_made += 1
+            outcome = self._runner(
+                {
+                    "transport": transport,
+                    "provider": run_config.selected_provider,
+                    "model": run_config.selected_model,
+                    "input_ref": input_ref,
+                    "secret_ids": secret_ids,
+                    "attempt": attempts,
+                }
+            )
+            if outcome.get("ok"):
+                return SdkRunResult(
+                    run_id=run_config.run_id,
+                    output_ref="artifact:run/%s/output" % run_config.run_id,
+                    provider=run_config.selected_provider,
+                    model=run_config.selected_model,
+                    status=manifest.ExecutionAttemptStatus.SUCCEEDED,
+                )
+            if attempts > run_config.max_runner_retries:
+                return SdkRunResult(
+                    run_id=run_config.run_id,
+                    output_ref="artifact:run/%s/output" % run_config.run_id,
+                    provider=run_config.selected_provider,
+                    model=run_config.selected_model,
+                    status=manifest.ExecutionAttemptStatus.FAILED,
+                    error_ref=str(outcome.get("error", "sdk_run_failed")),
+                )
+
+    def execute_builder_workflow(
+        self,
+        workflow: AgentBuilderWorkflow,
+        *,
+        run_config: RunConfig,
+        input_ref: str,
+        secret_refs: Tuple[SecretRef, ...] = (),
+    ) -> SdkRunResult:
+        """Execute an Agent Builder workflow only after revalidation (section 6)."""
+        if not isinstance(workflow, AgentBuilderWorkflow) or not workflow.revalidated:
+            raise WorkflowNotRevalidatedError(
+                "Agent Builder import is untrusted until revalidated"
+            )
+        return self.run(
+            run_config=run_config, input_ref=input_ref, secret_refs=secret_refs
+        )
+
+
+__all__ = [
+    "SDK_AVAILABLE",
+    "USE_SDK_UNLESS_DOCUMENTED_CRITICAL_BLOCKER",
+    "CHAT_COMPLETIONS_TRANSPORT",
+    "SDK_DEFAULT_TRANSPORT",
+    "transport_for_provider",
+    "SecretRef",
+    "SdkClientConfig",
+    "RoutingDecisionBinding",
+    "RunConfig",
+    "SdkRunResult",
+    "AgentBuilderWorkflow",
+    "BuilderWorkflowHashMismatchError",
+    "RunConfigRequiredError",
+    "SdkClientConfigError",
+    "SecretRefTypeError",
+    "WorkflowNotRevalidatedError",
+    "revalidate_agent_builder_workflow",
+    "BUILDER_WORKFLOW_HASH_MISMATCH",
+    "BUILDER_WORKFLOW_NOT_REVALIDATED",
+    "SDK_CLIENT_MAX_RETRIES_NONZERO",
+    "SDK_RUN_CONFIG_REQUIRED",
+    "SDK_SECRET_REFS_MUST_BE_RECORDS",
+    "OpenAIAgentsSDKAdapter",
+]
