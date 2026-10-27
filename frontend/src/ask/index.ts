@@ -31,12 +31,9 @@ interface StoredAsk {
 
 const issuedCards = new Map<string, StoredAsk>();
 const tokenToAskId = new Map<string, string>();
-const sessionSummaries: SessionSummary[] = [];
 
 let askCounter = 0;
 let resumeCounter = 0;
-
-const DEMO_RESUME_PATTERN = /^resume-\d+$/;
 
 const ASK_KINDS: readonly AskKind[] = ['approval', 'choice', 'confirm'];
 const REDACTED_SECRET_MARKER = '[secret-ref-redacted]';
@@ -131,19 +128,6 @@ export async function resumeAsk(input: {
       return copyCard(stored.card);
     }
   }
-  if (DEMO_RESUME_PATTERN.test(resumeToken)) {
-    const n = resumeToken.slice('resume-'.length);
-    return {
-      askId: `ask-${n}`,
-      kind: 'approval',
-      summary: `Resumed ask ask-${n}`,
-      options: [
-        { optionId: 'yes', label: 'Yes' },
-        { optionId: 'no', label: 'No' },
-      ],
-      resumeToken,
-    };
-  }
   throw new PermissionError('ask: unknown or forged resume token');
 }
 
@@ -151,5 +135,7 @@ export async function listSessions(input: {
   storePath: string;
 }): Promise<SessionSummary[]> {
   requireNonEmpty(input.storePath, 'storePath');
-  return sessionSummaries.map((session) => ({ ...session }));
+  return [...issuedCards.values()]
+    .map((stored) => ({ sessionId: stored.card.askId, title: stored.card.summary }))
+    .sort((a, b) => (a.sessionId < b.sessionId ? -1 : a.sessionId > b.sessionId ? 1 : 0));
 }

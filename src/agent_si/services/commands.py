@@ -60,3 +60,42 @@ def run_command(
         "reason": verdict["reason"],
         "evidence_ref": verdict["evidence_ref"],
     }
+
+
+def run_declared_service_via_belt(
+    argv: list[str],
+    action_class: str,
+    auth: dict[str, Any],
+    *,
+    tool: str | None = None,
+    registry: Any | None = None,
+) -> dict[str, Any]:
+    """Run one declared services command through the real tool belt.
+
+    Validation failures return {"error": <code>} without touching the
+    belt (E_BAD_ARGV, E_BAD_ACTION_CLASS, E_BAD_AUTH, plus
+    E_UNKNOWN_SERVICE when the route is outside list_commands()).
+    Valid calls resolve the route through the worker_tools registry
+    and execute it via guarded_dispatch, so every call passes the
+    Lane A guard. The belt is imported lazily so this module never
+    takes a top-level dependency on Lane A.
+    """
+    if (
+        not isinstance(argv, (list, tuple))
+        or len(argv) == 0
+        or any(not isinstance(item, str) or item == "" for item in argv)
+    ):
+        return {"error": "E_BAD_ARGV"}
+    if not isinstance(action_class, str) or action_class not in ACTION_CLASSES:
+        return {"error": "E_BAD_ACTION_CLASS"}
+    if not isinstance(auth, dict) or len(auth) == 0:
+        return {"error": "E_BAD_AUTH"}
+    name = tool if tool is not None else list(argv)[0]
+    if name not in list_commands():
+        return {"error": "E_UNKNOWN_SERVICE"}
+    from agent_si.worker_tools.dispatcher import get_registry, guarded_dispatch
+    target = registry if registry is not None else get_registry()
+    target.load(name)
+    return guarded_dispatch(
+        list(argv), action_class, dict(auth), tool=name, registry=target
+    )

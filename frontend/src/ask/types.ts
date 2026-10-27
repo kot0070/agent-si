@@ -32,10 +32,38 @@ export interface SessionSummary {
   title: string;
 }
 
-// G5: opaque handle; the real implementation must keep the raw value out of
-// logs and serialised payloads. Branded so it cannot be confused with plain
-// strings at compile time (still just a string at runtime until STEP2).
-export type SecretRef = string & { readonly __secretRefBrand: unique symbol };
+// G5: opaque handle; the raw value never leaves through coercion or
+// serialisation. Construct only via SecretRef.create; read only via reveal.
+export class SecretRef {
+  #raw: string;
+
+  private constructor(raw: string) {
+    this.#raw = raw;
+  }
+
+  static create(raw: unknown): SecretRef {
+    if (typeof raw !== 'string' || raw.length === 0) {
+      throw new Error('ask: secretRef must be a non-empty string');
+    }
+    return new SecretRef(raw);
+  }
+
+  reveal(): string {
+    return this.#raw;
+  }
+
+  toJSON(): string {
+    return '[secret]';
+  }
+
+  toString(): string {
+    return '[secret]';
+  }
+
+  [Symbol.toPrimitive](): string {
+    return '[secret]';
+  }
+}
 
 // Frozen snake<->camel field map (data only, no logic). Backend (Python)
 // field name on the left, TS (camelCase) field name on the right.
