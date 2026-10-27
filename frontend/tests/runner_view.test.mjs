@@ -41,7 +41,7 @@ beforeEach(() => {
 
 describe("runner view: counters", () => {
   // laneB: 246 — flips when STEP2 lands runner_view.js.
-  it.fails("shows active / passed / remaining counters", async () => {
+  it("shows active / passed / remaining counters", async () => {
     const view = await runnerView();
     expect(view.runnerCounters()).toEqual({
       active: 0,
@@ -53,7 +53,7 @@ describe("runner view: counters", () => {
 
 describe("runner view: per-test status plus openable outputs", () => {
   // laneB: 246 — flips when STEP2 lands runner_view.js.
-  it.fails("lists one row per test with status", async () => {
+  it("lists one row per test with status", async () => {
     const view = await runnerView();
     expect(view.runnerTestRows().map((row) => row.test_id)).toEqual([
       "t-login",
@@ -68,7 +68,7 @@ describe("runner view: per-test status plus openable outputs", () => {
   });
 
   // laneB: M-P4-155 — flips when STEP2 lands runner_view.js.
-  it.fails("opens each recorded output by ref", async () => {
+  it("opens each recorded output by ref", async () => {
     const view = await runnerView();
     const opened = view.openTestOutput("out://t-login");
     expect(opened.test_id).toBe("t-login");

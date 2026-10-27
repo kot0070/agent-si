@@ -41,7 +41,7 @@ beforeEach(() => {
 
 describe("local tests: one switch in project settings", () => {
   // laneB: M-P4-155 — flips when STEP2 lands stage_view.js.
-  it.fails("the switch alone turns local tests on and off", async () => {
+  it("the switch alone turns local tests on and off", async () => {
     const view = await stageView();
     expect(await view.localTestsEnabled()).toBe(false);
     expect(await view.setLocalTestsEnabled(true)).toBe(true);
@@ -51,7 +51,7 @@ describe("local tests: one switch in project settings", () => {
 
 describe("Tests tab is informational", () => {
   // laneB: R-347 — flips when STEP2 lands stage_view.js.
-  it.fails("holds no settings controls", async () => {
+  it("holds no settings controls", async () => {
     const view = await stageView();
     expect(view.testsTabDescriptor().settings_controls).toEqual([]);
   });
