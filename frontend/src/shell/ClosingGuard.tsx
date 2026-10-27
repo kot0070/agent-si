@@ -2,14 +2,41 @@
 // blocks router navigation plus tab close behind a confirm dialog with
 // Stay and Leave actions.
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { ReactElement } from "react";
-import { useBlocker } from "react-router-dom";
+import { useBlocker, useLocation, useNavigate } from "react-router-dom";
 import type { ClosingGuardProps } from "../app/iface";
 import { t } from "../locale/index";
 
 export function ClosingGuard(props: ClosingGuardProps): ReactElement {
-  const blocker = useBlocker(props.armed);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [departed, setDeparted] = useState(false);
+  const [guardedPath, setGuardedPath] = useState<string | null>(null);
+  const blocker = useBlocker(props.armed && !departed);
+
+  useEffect(() => {
+    if (blocker.state === "blocked") {
+      setGuardedPath(location.pathname);
+    }
+  }, [blocker.state, location.pathname]);
+
+  function leave(): void {
+    if (blocker.state === "blocked") {
+      blocker.proceed();
+    }
+    setDeparted(true);
+  }
+
+  function undoLeave(): void {
+    const target = guardedPath;
+    setDeparted(false);
+    if (target !== null) {
+      navigate(target);
+    } else {
+      navigate(-1);
+    }
+  }
 
   useEffect(() => {
     if (!props.armed) {
@@ -46,13 +73,17 @@ export function ClosingGuard(props: ClosingGuardProps): ReactElement {
           <button
             type="button"
             data-testid="closing-leave"
-            onClick={() => {
-              blocker.proceed();
-            }}
+            autoFocus
+            onClick={leave}
           >
             {t("shell.closing.leave")}
           </button>
         </div>
+      ) : null}
+      {blocker.state !== "blocked" && departed ? (
+        <button type="button" data-testid="closing-undo" onClick={undoLeave}>
+          {t("ui.error.retry")}
+        </button>
       ) : null}
     </>
   );

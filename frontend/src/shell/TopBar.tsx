@@ -77,6 +77,14 @@ export function TopBar(props: TopBarProps): ReactElement {
 
   return (
     <header data-testid="topbar">
+      <div data-testid="pairing-strip">
+        <span>{t("shell.topbar.watcher")}</span>
+        <span>
+          {effective === null
+            ? t("agents.badge.cloud")
+            : t("agents.badge.local")}
+        </span>
+      </div>
       <label>
         {t("shell.topbar.project")}
         <select

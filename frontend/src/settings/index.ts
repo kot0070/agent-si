@@ -35,6 +35,89 @@ export interface RoleProfileValidation {
   errors: string[];
 }
 
+export interface RoleModelProfile {
+  mode: RoleMode;
+  provider?: string;
+  model?: string;
+}
+
+export type RoleProfileMap = Record<string, RoleModelProfile>;
+
+export function roleProfilesKey(projectId: string): string {
+  return `agentsi.roleProfiles.${projectId}`;
+}
+
+function isRoleMode(value: unknown): value is RoleMode {
+  return value === 'PINNED' || value === 'pool' || value === 'AUTO';
+}
+
+export function readRoleProfiles(projectId: string): RoleProfileMap {
+  try {
+    const raw = window.localStorage.getItem(roleProfilesKey(projectId));
+    if (raw === null) {
+      return {};
+    }
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {};
+    }
+    const map: RoleProfileMap = {};
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+        continue;
+      }
+      const record = value as Record<string, unknown>;
+      if (!isRoleMode(record.mode)) {
+        continue;
+      }
+      const profile: RoleModelProfile = { mode: record.mode };
+      if (typeof record.provider === 'string' && record.provider.length > 0) {
+        profile.provider = record.provider;
+      }
+      if (typeof record.model === 'string' && record.model.length > 0) {
+        profile.model = record.model;
+      }
+      map[key] = profile;
+    }
+    return map;
+  } catch {
+    return {};
+  }
+}
+
+export function readRoleProfile(projectId: string, role: string): RoleModelProfile | undefined {
+  const profile = readRoleProfiles(projectId)[role];
+  if (profile === undefined) {
+    return undefined;
+  }
+  return { ...profile };
+}
+
+export function saveRoleProfile(projectId: string, input: RoleProfileInput): RoleProfileValidation {
+  const validation = validateRoleProfile(input);
+  if (!validation.ok) {
+    return validation;
+  }
+  const role = input.role.trim();
+  const profile: RoleModelProfile = { mode: input.mode };
+  const provider = (input.provider ?? '').trim();
+  const model = (input.model ?? '').trim();
+  if (provider.length > 0) {
+    profile.provider = provider;
+  }
+  if (model.length > 0) {
+    profile.model = model;
+  }
+  const map = readRoleProfiles(projectId);
+  map[role] = profile;
+  try {
+    window.localStorage.setItem(roleProfilesKey(projectId), JSON.stringify(map));
+  } catch {
+    // Storage unavailable: the in-memory edit still re-renders.
+  }
+  return { ok: true, errors: [] };
+}
+
 export interface RoleProfileEditorProps {
   projectId: string;
   role: string;
@@ -75,12 +158,13 @@ export function validateRoleProfile(input: RoleProfileInput): RoleProfileValidat
 }
 
 export function RoleProfileEditor(props: RoleProfileEditorProps): ReactElement {
+  const saved = readRoleProfile(props.projectId, props.role);
   const [roleText, setRoleText] = useState(props.role);
-  const [mode, setMode] = useState<RoleMode>('AUTO');
-  const [provider, setProvider] = useState('');
-  const [model, setModel] = useState('');
+  const [mode, setMode] = useState<RoleMode>(saved?.mode ?? 'AUTO');
+  const [provider, setProvider] = useState(saved?.provider ?? '');
+  const [model, setModel] = useState(saved?.model ?? '');
   const validation = validateRoleProfile({ role: roleText, mode, provider, model });
-  const baseId = `role-profile-${props.projectId}`;
+  const baseId = `role-profile-${props.projectId}-${props.role}`;
   return createElement(
     'form',
     null,
@@ -90,7 +174,11 @@ export function RoleProfileEditor(props: RoleProfileEditorProps): ReactElement {
       id: `${baseId}-role`,
       type: 'text',
       value: roleText,
-      onChange: (event: { target: { value: string } }) => setRoleText(event.target.value),
+      onChange: (event: { target: { value: string } }) => {
+        const next = event.target.value;
+        setRoleText(next);
+        saveRoleProfile(props.projectId, { role: next, mode, provider, model });
+      },
     }),
     createElement('label', { htmlFor: `${baseId}-mode` }, t('settings.roleProfile.modeLabel')),
     createElement(
@@ -98,7 +186,11 @@ export function RoleProfileEditor(props: RoleProfileEditorProps): ReactElement {
       {
         id: `${baseId}-mode`,
         value: mode,
-        onChange: (event: { target: { value: string } }) => setMode(event.target.value as RoleMode),
+        onChange: (event: { target: { value: string } }) => {
+          const next = event.target.value as RoleMode;
+          setMode(next);
+          saveRoleProfile(props.projectId, { role: roleText, mode: next, provider, model });
+        },
       },
       ROLE_MODES.map((option) =>
         createElement('option', { key: option, value: option }, t(modeLabelKey(option))),
@@ -109,14 +201,22 @@ export function RoleProfileEditor(props: RoleProfileEditorProps): ReactElement {
       id: `${baseId}-provider`,
       type: 'text',
       value: provider,
-      onChange: (event: { target: { value: string } }) => setProvider(event.target.value),
+      onChange: (event: { target: { value: string } }) => {
+        const next = event.target.value;
+        setProvider(next);
+        saveRoleProfile(props.projectId, { role: roleText, mode, provider: next, model });
+      },
     }),
     createElement('label', { htmlFor: `${baseId}-model` }, t('settings.roleProfile.modelLabel')),
     createElement('input', {
       id: `${baseId}-model`,
       type: 'text',
       value: model,
-      onChange: (event: { target: { value: string } }) => setModel(event.target.value),
+      onChange: (event: { target: { value: string } }) => {
+        const next = event.target.value;
+        setModel(next);
+        saveRoleProfile(props.projectId, { role: roleText, mode, provider, model: next });
+      },
     }),
     createElement(
       'ul',

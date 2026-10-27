@@ -34,6 +34,8 @@ import {
   PROJECT_VIEWS,
   buildReportNarrative,
   computeAgeDays,
+  CONTEXT_SOURCE,
+  contextUsage,
   exportProjectReport,
   projectMenuTestId,
   projectViewTitleKey,
@@ -43,6 +45,10 @@ import {
 } from "./projectsApi";
 import type { ProjectViewName } from "./projectsApi";
 import { RunHistory } from "./RunHistory";
+import { HealthView } from "./observe/HealthView";
+import { MatrixView } from "./observe/MatrixView";
+import { VerifierView } from "./observe/VerifierView";
+import { classifyScope } from "./scope";
 
 export type { ProjectViewName };
 export { PROJECT_VIEWS };
@@ -301,6 +307,7 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
               labelKey="projects.time.title"
               value={sums.wall}
             />
+            <MatrixView rows={data.live} />
           </div>
         );
       }
@@ -314,8 +321,15 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
         );
       }
       case "cost": {
+        const usage = contextUsage(data.budget);
         return (
           <div>
+            <div data-testid="context-card">
+              <span>{t("projects.tokens.title")}</span>
+              <span data-testid="context-remaining">{usage.remaining}</span>
+              <span data-testid="context-total">{usage.total}</span>
+              <span data-testid="context-source">{CONTEXT_SOURCE}</span>
+            </div>
             <Fact
               testId="cost-spent"
               labelKey="telemetry.cost"
@@ -336,6 +350,7 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
               labelKey="projects.derived.label"
               value={remainingBudget(data.budget)}
             />
+            <HealthView ledger={data.ledger} budget={data.budget} />
           </div>
         );
       }
@@ -358,6 +373,9 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
               <div key={row.agent} data-testid={`place-row-${row.agent}`}>
                 <span>{row.agent}</span>
                 <span>{row.scope}</span>
+                <span data-testid={`scope-kind-${row.agent}`}>
+                  {classifyScope(row.scope)}
+                </span>
                 <span>
                   {resolveStatusHuman(
                     readStatusHuman(row),
@@ -417,11 +435,39 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
                 <span key={name}>{name}</span>
               ))}
             </div>
+            <div data-testid="why-version">
+              <span>{t("projects.routing.title")}</span>
+              <span>{data.why.decision.policy_ref}</span>
+            </div>
+            <div data-testid="why-candidates">
+              <span>{t("projects.models.title")}</span>
+              {data.why.assignments.length === 0 ? (
+                <EmptyState
+                  stateKey="ui.table.empty"
+                  actionKey={null}
+                  onAction={null}
+                />
+              ) : (
+                data.why.assignments.map((assignment, index) => (
+                  <div key={index} data-testid={`why-candidate-${index}`}>
+                    <span>
+                      {assignment.provider_id}/{assignment.model}{" "}
+                      {assignment.role}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+            <div data-testid="why-provenance">
+              <span>{data.why.snapshot.snapshot_ref}</span>
+              <span>{data.why.snapshot.captured_at}</span>
+            </div>
             <div data-testid="why-this-model-decision">
               <span>{data.why.decision.decision_id}</span>
               <span>{data.why.decision.policy_ref}</span>
               <span>{data.why.snapshot.snapshot_ref}</span>
             </div>
+            <VerifierView why={data.why} />
           </div>
         );
       }

@@ -42,6 +42,7 @@ import {
   readProjectTime,
   readWhyThisModel,
 } from "../api/projectsApi";
+import { ENDPOINTS } from "../api/endpoints";
 import { placementForRow } from "../agents/agentsApi";
 import type { Placement } from "../agents/agentsApi";
 
@@ -151,6 +152,21 @@ export function sumLedger(rows: LedgerRow[]): LedgerSums {
 export function remainingBudget(budget: BudgetState): number {
   return budget.hard_limit - budget.spent - budget.reserved;
 }
+
+// M-P4-159 context card: remaining context of the served budget total. Both
+// numbers trace to the served BudgetState (hard_limit stored, remaining
+// derived by the K04 rule); the view labels them with the serving route so
+// no number is ever invented.
+export interface ContextUsage {
+  remaining: number;
+  total: number;
+}
+
+export function contextUsage(budget: BudgetState): ContextUsage {
+  return { remaining: remainingBudget(budget), total: budget.hard_limit };
+}
+
+export const CONTEXT_SOURCE = ENDPOINTS.budget;
 
 // Age in whole days from the stored created_at stamp; null when the stamp
 // does not parse, so the view shows an empty state instead of a guess.

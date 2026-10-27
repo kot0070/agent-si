@@ -4,17 +4,32 @@
 // ApiClient entry; draft chip plus spinner plus timestamp; an offline queue
 // dot while disconnected (prompts queue and flush on reconnect); abort
 // cancels the stream cleanly. Background failures toast; blocking errors
-// render inline. Production caller: wave-3 App chat route
+// render inline. Channel meta shows the channel locale policy plus the tags
+// served inside assistant deltas; rapid sends raise a flooding warning with
+// a compact re-issue action; stream failure marks the channel degraded and
+// an offline-to-online return marks it reconnecting until the next stream
+// verifies the route. Production caller: wave-3 App chat route
 // (CODER-5-Vale frontend/src/app/App.tsx); owned test mounts this component.
 
 import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { useApiClient } from "../app/ApiClientProvider";
 import { ApiError, apiErrorLocaleKey } from "../api/errors";
-import { formatDate, t } from "../locale/index";
+import {
+  DEFAULT_LOCALE,
+  LOCALE_STORAGE_KEY,
+  formatDate,
+  t,
+} from "../locale/index";
 import { ErrorPanel } from "../ui/ErrorPanel";
 import { ApprovalCard } from "./ApprovalCard";
-import { streamChat } from "./chatApi";
+import {
+  CHAT_FLOOD_WINDOW_MS,
+  compactPrompt,
+  extractChatTags,
+  isFlooding,
+  streamChat,
+} from "./chatApi";
 import type { ChatRunner } from "./chatApi";
 
 export interface ChatAreaProps {
@@ -55,6 +70,18 @@ function readOnline(): boolean {
   return true;
 }
 
+function readChannelLocale(): string {
+  try {
+    const stored = window.localStorage.getItem(LOCALE_STORAGE_KEY);
+    if (stored === "en" || stored === "uk") {
+      return stored;
+    }
+  } catch {
+    return DEFAULT_LOCALE;
+  }
+  return DEFAULT_LOCALE;
+}
+
 export function ChatArea(props: ChatAreaProps): ReactElement {
   const client = useApiClient();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -64,6 +91,12 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
   const [toast, setToast] = useState<string | null>(null);
   const [online, setOnline] = useState(readOnline);
   const [queue, setQueue] = useState<string[]>([]);
+  const [flooded, setFlooded] = useState(false);
+  const [health, setHealth] = useState<"ok" | "degraded" | "reconnecting">(
+    "ok",
+  );
+  const sendTimesRef = useRef<number[]>([]);
+  const offlineRef = useRef(!readOnline());
   const runnerRef = useRef<ChatRunner | null>(null);
   const cancelRef = useRef(false);
   const streamingRef = useRef(false);
@@ -72,8 +105,13 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
   useEffect(() => {
     const onOnline = (): void => {
       setOnline(true);
+      if (offlineRef.current) {
+        offlineRef.current = false;
+        setHealth("reconnecting");
+      }
     };
     const onOffline = (): void => {
+      offlineRef.current = true;
       setOnline(false);
     };
     window.addEventListener("online", onOnline);
@@ -105,6 +143,15 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
     }
     cancelRef.current = false;
     lastSentRef.current = prompt;
+    const sentAt = Date.now();
+    const recentSends = [
+      ...sendTimesRef.current.filter((at) => sentAt - at < CHAT_FLOOD_WINDOW_MS),
+      sentAt,
+    ];
+    sendTimesRef.current = recentSends;
+    if (isFlooding(recentSends, sentAt)) {
+      setFlooded(true);
+    }
     setBlocking(null);
     setToast(null);
     const userId = nextMessageId();
@@ -139,6 +186,9 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
         runnerRef.current = null;
         streamingRef.current = false;
         setStreaming(false);
+        if (!aborted) {
+          setHealth("ok");
+        }
         setMessages((prev) =>
           prev.map((message) =>
             message.id === assistantId
@@ -162,6 +212,7 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
               (message) => message.id !== assistantId || message.text !== "",
             ),
         );
+        setHealth("degraded");
         if (error instanceof ApiError) {
           setBlocking({ errorKey: apiErrorLocaleKey(error.code), code: error.code });
         } else {
@@ -224,6 +275,22 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
     sendPrompt(prompt);
   };
 
+  const handleCompactResend = (): void => {
+    const prompt = lastSentRef.current;
+    if (prompt === null || streaming) {
+      return;
+    }
+    const compacted = compactPrompt(prompt);
+    sendTimesRef.current = [];
+    setFlooded(false);
+    setBlocking(null);
+    if (!online) {
+      setQueue((prev) => [...prev, compacted]);
+      return;
+    }
+    sendPrompt(compacted);
+  };
+
   const decide = (id: string, decided: "accepted" | "rejected"): void => {
     setMessages((prev) =>
       prev.map((message) =>
@@ -231,6 +298,12 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
       ),
     );
   };
+
+  const channelLocale = readChannelLocale();
+  const channelTags = messages.flatMap((message) =>
+    message.role === "assistant" ? extractChatTags(message.text) : [],
+  );
+  const visibleTags = [...new Set(channelTags)];
 
   return (
     <section data-testid="chat-area" aria-label={t("shell.sidebar.chat")}>
@@ -272,6 +345,23 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
             </div>
           ))}
         </div>
+        {visibleTags.length > 0 ? (
+          <div data-testid="chat-channel-meta">
+            <span
+              data-testid="chat-policy"
+              aria-label={t("shell.sidebar.chat")}
+            >
+              {channelLocale}
+            </span>
+            <div data-testid="chat-tags">
+              {visibleTags.map((tag, index) => (
+                <span key={`${tag}-${index}`} data-testid={`chat-tag-${index}`}>
+                  {tag}
+                </span>
+              ))}
+            </div>
+          </div>
+        ) : null}
         <div data-testid="chat-composer">
           {draft !== "" ? (
             <span data-testid="chat-draft-chip">{t("chat.composer.draft")}</span>
@@ -314,7 +404,30 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
               {t("chat.stream.offline")}
             </span>
           )}
+          {health === "degraded" ? (
+            <span data-testid="chat-health-degraded" role="status">
+              {t("errors.generic")}
+            </span>
+          ) : null}
+          {health === "reconnecting" ? (
+            <span data-testid="chat-health-reconnecting" role="status">
+              {t("chat.stream.offline")}
+            </span>
+          ) : null}
         </div>
+        {flooded ? (
+          <div data-testid="chat-flood-warning" role="alert">
+            <p>{t("api.error.delta_over_bound")}</p>
+            <button
+              type="button"
+              data-testid="chat-compact-resend"
+              disabled={streaming}
+              onClick={handleCompactResend}
+            >
+              {t("ui.error.retry")}
+            </button>
+          </div>
+        ) : null}
         {blocking !== null ? (
           <ErrorPanel
             errorKey={blocking.errorKey}

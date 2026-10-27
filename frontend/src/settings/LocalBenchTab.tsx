@@ -3,7 +3,9 @@
 // from the M3 estimate accepted for the run; per-model results render from
 // the M3 result rows; the per-change decision record logs each finished
 // run. Every visible string resolves through the locale; record data
-// arrives only through LocalBenchClient.
+// arrives only through LocalBenchClient. The tab persists its scan result
+// and decision record in window.localStorage (see STORED_*_KEY) so the
+// Local AI view renders the stored config without re-running the flow.
 
 import { useState } from "react";
 import type { ReactElement } from "react";
@@ -20,6 +22,7 @@ import {
 } from "./LocalBenchTypes";
 import type {
   BenchmarkLevel,
+  EvidenceTier,
   LocalBenchDecisionRecord,
   LocalBenchHardwareProfile,
   LocalBenchModel,
@@ -29,6 +32,196 @@ import type {
 
 export interface LocalBenchTabProps {
   client: LocalBenchClient;
+}
+
+// localStorage keys for the stored local-AI config (same namespaced style
+// as the accepted-risk key in settings/index.ts). Values are written only
+// by the bench flow below and validated on every read.
+const STORED_SCAN_KEY = "agentsi.localbench.scan";
+const STORED_DECISIONS_KEY = "agentsi.localbench.decisions";
+
+export interface StoredLocalBench {
+  path: string | null;
+  models: Array<LocalBenchModel>;
+  decisions: Array<LocalBenchDecisionRecord>;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+function isStoredTier(value: unknown): value is EvidenceTier {
+  return typeof value === "string" && value in EVIDENCE_LOCALE_KEYS;
+}
+
+function isStoredLevel(value: unknown): value is BenchmarkLevel {
+  return typeof value === "string" && value in LEVEL_LOCALE_KEYS;
+}
+
+function readStoredModels(value: unknown): Array<LocalBenchModel> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const models: Array<LocalBenchModel> = [];
+  for (const entry of value) {
+    const fields = asRecord(entry);
+    if (fields === null) {
+      continue;
+    }
+    const { model_id: modelId, display_name: displayName, evidence } = fields;
+    if (
+      typeof modelId === "string" &&
+      modelId.length > 0 &&
+      typeof displayName === "string" &&
+      isStoredTier(evidence)
+    ) {
+      models.push({
+        model_id: modelId,
+        display_name: displayName,
+        evidence,
+      });
+    }
+  }
+  return models;
+}
+
+function readStoredDecisions(
+  value: unknown,
+): Array<LocalBenchDecisionRecord> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const records: Array<LocalBenchDecisionRecord> = [];
+  for (const entry of value) {
+    const fields = asRecord(entry);
+    if (fields === null) {
+      continue;
+    }
+    const {
+      decision_id: decisionId,
+      change,
+      run_id: runId,
+      model_id: modelId,
+      level,
+      evidence,
+      duration_s: durationS,
+      recorded_at: recordedAt,
+    } = fields;
+    if (
+      typeof decisionId === "string" &&
+      decisionId.length > 0 &&
+      change === "run" &&
+      typeof runId === "string" &&
+      runId.length > 0 &&
+      typeof modelId === "string" &&
+      modelId.length > 0 &&
+      isStoredLevel(level) &&
+      isStoredTier(evidence) &&
+      typeof durationS === "number" &&
+      Number.isFinite(durationS) &&
+      durationS >= 0 &&
+      typeof recordedAt === "string" &&
+      recordedAt.length > 0
+    ) {
+      records.push({
+        decision_id: decisionId,
+        change: "run",
+        run_id: runId,
+        model_id: modelId,
+        level,
+        evidence,
+        duration_s: durationS,
+        recorded_at: recordedAt,
+      });
+    }
+  }
+  return records;
+}
+
+// Reads the stored local-AI config written by the bench flow. Every field
+// is validated; corrupt or missing entries fall back to empty state, so a
+// bad stored value never crashes a view.
+export function readStoredLocalBench(): StoredLocalBench {
+  const empty: StoredLocalBench = { path: null, models: [], decisions: [] };
+  let scan: unknown = null;
+  let decisions: unknown = null;
+  try {
+    scan = JSON.parse(
+      window.localStorage.getItem(STORED_SCAN_KEY) ?? "null",
+    );
+    decisions = JSON.parse(
+      window.localStorage.getItem(STORED_DECISIONS_KEY) ?? "null",
+    );
+  } catch {
+    return empty;
+  }
+  const scanRecord = asRecord(scan);
+  const path = scanRecord?.path;
+  return {
+    path: typeof path === "string" && path.length > 0 ? path : null,
+    models: readStoredModels(scanRecord?.models),
+    decisions: readStoredDecisions(decisions),
+  };
+}
+
+function storeScanState(path: string, models: Array<LocalBenchModel>): void {
+  try {
+    window.localStorage.setItem(
+      STORED_SCAN_KEY,
+      JSON.stringify({ path, models }),
+    );
+  } catch {
+    // Storage unavailable: the Local AI view shows its empty state.
+  }
+}
+
+function storeDecisionRecords(
+  decisions: Array<LocalBenchDecisionRecord>,
+): void {
+  try {
+    window.localStorage.setItem(
+      STORED_DECISIONS_KEY,
+      JSON.stringify(decisions),
+    );
+  } catch {
+    // Storage unavailable: the Local AI view shows its empty state.
+  }
+}
+
+// Per-change decision record rendering shared by the bench tab and the
+// Local AI view: one block, no forked copy.
+export function LocalBenchDecisionList(props: {
+  decisions: Array<LocalBenchDecisionRecord>;
+}): ReactElement {
+  const { decisions } = props;
+  return (
+    <div>
+      <h3>{t("settings.localbench.decisionTitle")}</h3>
+      {decisions.length === 0 ? (
+        <p>{t("settings.localbench.decisionEmpty")}</p>
+      ) : (
+        <ul data-testid="localbench-decisions">
+          {decisions.map((record) => (
+            <li
+              key={record.decision_id}
+              data-testid={`localbench-decision-${record.decision_id}`}
+            >
+              {t("settings.localbench.decisionLine", {
+                model: record.model_id,
+                level: t(LEVEL_LOCALE_KEYS[record.level]),
+                evidence: t(EVIDENCE_LOCALE_KEYS[record.evidence]),
+                seconds: formatNumber(record.duration_s),
+                at: record.recorded_at,
+              })}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 type ScanState =
@@ -83,6 +276,7 @@ export function LocalBenchTab(props: LocalBenchTabProps): ReactElement {
       const first = result.models[0];
       setModelId(first === undefined ? "" : first.model_id);
       setRun({ status: "idle" });
+      storeScanState(result.path, result.models);
     } catch {
       setScan({ status: "error" });
     }
@@ -116,7 +310,9 @@ export function LocalBenchTab(props: LocalBenchTabProps): ReactElement {
         duration_s: accepted.estimated_duration_s,
         recorded_at: new Date().toISOString(),
       };
-      setDecisions((records) => [...records, record]);
+      const next = [...decisions, record];
+      setDecisions(next);
+      storeDecisionRecords(next);
     } catch {
       setRun({ status: "error" });
     }
@@ -248,29 +444,7 @@ export function LocalBenchTab(props: LocalBenchTabProps): ReactElement {
           )}
         </div>
       )}
-      <div>
-        <h3>{t("settings.localbench.decisionTitle")}</h3>
-        {decisions.length === 0 ? (
-          <p>{t("settings.localbench.decisionEmpty")}</p>
-        ) : (
-          <ul data-testid="localbench-decisions">
-            {decisions.map((record) => (
-              <li
-                key={record.decision_id}
-                data-testid={`localbench-decision-${record.decision_id}`}
-              >
-                {t("settings.localbench.decisionLine", {
-                  model: record.model_id,
-                  level: t(LEVEL_LOCALE_KEYS[record.level]),
-                  evidence: t(EVIDENCE_LOCALE_KEYS[record.evidence]),
-                  seconds: formatNumber(record.duration_s),
-                  at: record.recorded_at,
-                })}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      <LocalBenchDecisionList decisions={decisions} />
     </div>
   );
 }

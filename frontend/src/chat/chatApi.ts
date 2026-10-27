@@ -69,3 +69,35 @@ export function streamChat(
     },
   };
 }
+
+export const CHAT_FLOOD_WINDOW_MS = 30000;
+export const CHAT_FLOOD_COUNT = 4;
+
+export function isFlooding(
+  sendTimes: readonly number[],
+  now: number,
+): boolean {
+  let recent = 0;
+  for (const at of sendTimes) {
+    if (now - at < CHAT_FLOOD_WINDOW_MS) {
+      recent += 1;
+    }
+  }
+  return recent >= CHAT_FLOOD_COUNT;
+}
+
+export function compactPrompt(prompt: string): string {
+  return prompt.replace(/\s+/g, " ").trim().slice(0, 140);
+}
+
+export function extractChatTags(text: string): string[] {
+  const pattern = /#[\p{L}\p{N}_-]+/gu;
+  const tags: string[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text)) !== null) {
+    if (!tags.includes(match[0])) {
+      tags.push(match[0]);
+    }
+  }
+  return tags;
+}

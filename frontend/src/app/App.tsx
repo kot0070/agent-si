@@ -18,6 +18,7 @@ import {
 } from "react-router-dom";
 import type { RouteTable } from "./iface";
 import type { ApiClient } from "../api/iface";
+import { ENDPOINTS } from "../api/endpoints";
 import {
   useApiClient,
   useCurrentProject,
@@ -31,6 +32,11 @@ import {
 } from "../locale/index";
 import type { SupportedLocale } from "../locale/index";
 import { SETTINGS_ROUTES, AcceptedRiskSwitch, RoleProfileEditor } from "../settings/index";
+import {
+  LocalBenchDecisionList,
+  readStoredLocalBench,
+} from "../settings/LocalBenchTab";
+import { EVIDENCE_LOCALE_KEYS } from "../settings/LocalBenchTypes";
 import { SettingsLayout } from "../shell/SettingsLayout";
 import { EmptyState } from "../ui/EmptyState";
 import { LoadingState } from "../ui/LoadingState";
@@ -104,6 +110,45 @@ const MigrationViewPage = lazy(() =>
     default: module.MigrationView,
   })),
 );
+
+// Stored local-AI config panel: the bench-stored scan path and models with
+// evidence, the endpoint string from the ENDPOINTS registry, and the bench
+// per-change decision record. Read-only; the bench tab owns the flow that
+// writes the stored state. Every label resolves through the locale; the
+// stored values and the registry string render raw.
+function LocalAiStoredPanel(): ReactElement {
+  const stored = readStoredLocalBench();
+  return (
+    <div data-testid="localai-stored">
+      <h3>{t("settings.localbench.modelsTitle")}</h3>
+      {stored.path === null ? null : (
+        <p data-testid="localai-path">
+          <span>{t("settings.localbench.pathLabel")}</span>
+          <span>{stored.path}</span>
+        </p>
+      )}
+      {stored.models.length === 0 ? (
+        <p data-testid="localai-models-empty">
+          {t("settings.localbench.modelsEmpty")}
+        </p>
+      ) : (
+        <ul data-testid="localai-models">
+          {stored.models.map((model) => (
+            <li
+              key={model.model_id}
+              data-testid={`localai-model-${model.model_id}`}
+            >
+              <span>{model.display_name}</span>
+              <span>{t(EVIDENCE_LOCALE_KEYS[model.evidence])}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p data-testid="localai-endpoint">{ENDPOINTS.agentsLive}</p>
+      <LocalBenchDecisionList decisions={stored.decisions} />
+    </div>
+  );
+}
 
 function useOptionalApiClient(): ApiClient | null {
   try {
@@ -256,6 +301,15 @@ function ModelsRoute(props: {
   );
 }
 
+function LocalAiRoute(props: { projectId: string }): ReactElement {
+  return (
+    <>
+      <ProjectViewPage projectId={props.projectId} view="local-ai" />
+      <LocalAiStoredPanel />
+    </>
+  );
+}
+
 function ProjectSubview(props: { view: ProjectViewName }): ReactElement {
   const params = useParams();
   const [search] = useSearchParams();
@@ -269,6 +323,9 @@ function ProjectSubview(props: { view: ProjectViewName }): ReactElement {
   }
   if (props.view === "models") {
     return <ModelsRoute projectId={projectId} decisionId={decisionId} />;
+  }
+  if (props.view === "local-ai") {
+    return <LocalAiRoute projectId={projectId} />;
   }
   return (
     <ProjectViewPage
@@ -328,6 +385,8 @@ function SettingsSectionRoute(): ReactElement {
           <RoleProfileEditor projectId={projectId} role="manager" />
           <AcceptedRiskSwitch projectId={projectId} />
         </>
+      ) : route.path === "localAI" ? (
+        <LocalAiStoredPanel />
       ) : (
         <span data-testid="settings-section-body" />
       )}
@@ -479,7 +538,3 @@ export function App(): ReactElement {
     </LocaleProvider>
   );
 }
-
-
-
-

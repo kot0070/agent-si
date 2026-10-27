@@ -17,6 +17,8 @@ import { EmptyState } from "../ui/EmptyState";
 import { ErrorPanel } from "../ui/ErrorPanel";
 import { LoadingState } from "../ui/LoadingState";
 
+export const TASK_SUBMIT_TIMEOUT_MS = 30000;
+
 export interface TaskComposerProps {
   projectId: string;
   initialTaskId?: string | null;
@@ -66,6 +68,13 @@ export function TaskComposer(props: TaskComposerProps): ReactElement {
   const [created, setCreated] = useState<TaskRecord | null>(null);
   const [blocking, setBlocking] = useState<BlockingError | null>(null);
   const dirtyTitleRef = useRef(false);
+  const submitSeqRef = useRef(0);
+
+  useEffect(() => {
+    return () => {
+      submitSeqRef.current += 1;
+    };
+  }, []);
 
   useEffect(() => {
     let live = true;
@@ -101,6 +110,14 @@ export function TaskComposer(props: TaskComposerProps): ReactElement {
     };
   }, [client, props.initialTaskId]);
 
+  const handleCancel = (): void => {
+    if (!posting) {
+      return;
+    }
+    submitSeqRef.current += 1;
+    setPosting(false);
+  };
+
   const handleCreate = (): void => {
     if (posting) {
       return;
@@ -113,15 +130,38 @@ export function TaskComposer(props: TaskComposerProps): ReactElement {
       });
       return;
     }
+    const seq = submitSeqRef.current + 1;
+    submitSeqRef.current = seq;
     setPosting(true);
     setBlocking(null);
+    let finished = false;
+    const timer = window.setTimeout(() => {
+      if (finished || submitSeqRef.current !== seq) {
+        return;
+      }
+      finished = true;
+      submitSeqRef.current += 1;
+      setPosting(false);
+      setBlocking({ errorKey: "errors.generic", code: "UNKNOWN" });
+    }, TASK_SUBMIT_TIMEOUT_MS);
     client
       .createTask(props.projectId, { title: nextTitle, scope: parseScope(scopeText) })
       .then(
         (task) => {
+          if (finished || submitSeqRef.current !== seq) {
+            return;
+          }
+          finished = true;
+          window.clearTimeout(timer);
           setCreated(task);
+          setPosting(false);
         },
         (error: unknown) => {
+          if (finished || submitSeqRef.current !== seq) {
+            return;
+          }
+          finished = true;
+          window.clearTimeout(timer);
           if (error instanceof ApiError) {
             setBlocking({
               errorKey: apiErrorLocaleKey(error.code),
@@ -130,11 +170,9 @@ export function TaskComposer(props: TaskComposerProps): ReactElement {
           } else {
             setBlocking({ errorKey: "errors.generic", code: "UNKNOWN" });
           }
+          setPosting(false);
         },
-      )
-      .finally(() => {
-        setPosting(false);
-      });
+      );
   };
 
   return (
@@ -175,6 +213,14 @@ export function TaskComposer(props: TaskComposerProps): ReactElement {
         onClick={handleCreate}
       >
         {t("tasks.creator.create")}
+      </button>
+      <button
+        type="button"
+        data-testid="composer-cancel"
+        disabled={!posting}
+        onClick={handleCancel}
+      >
+        {t("chat.abort.cancel")}
       </button>
       {created !== null ? (
         <div data-testid="composer-result">

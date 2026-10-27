@@ -15,6 +15,9 @@ export function SettingsLayout(props: SettingsLayoutProps): ReactElement {
       <h2>{t(props.titleKey)}</h2>
       <p>{t(props.purposeKey)}</p>
       <p>{t(props.needItNowKey)}</p>
+      <span data-testid="settings-why-chip">
+        {t('projects.why_this_model.title')}
+      </span>
       {props.children}
       {props.advanced}
     </section>
