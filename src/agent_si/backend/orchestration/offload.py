@@ -13,7 +13,7 @@ Manager dedups it into common. The change mapping carries no secrets.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 AUDIT_INDEPENDENCE_REJECTED = "AUDIT_INDEPENDENCE_REJECTED"
 BUDGET_CAPPED = "BUDGET_CAPPED"
@@ -97,7 +97,7 @@ def _reset_state() -> None:
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _is_compact_english(text: object) -> bool:
@@ -218,7 +218,7 @@ def apply_offload_config_change(change: dict) -> ApplyOutcome:
         return _refuse(
             AUDIT_INDEPENDENCE_REJECTED, "independent_audit must stay true"
         )
-    if "auditor" in change and "worker" in change and change["auditor"] == change["worker"]:
+    if "auditor" in change and "worker" in change and change["auditor"] == change["worker"]:  # noqa: E501  # frozen-cite K02
         return _refuse(
             AUDIT_INDEPENDENCE_REJECTED, "auditor must differ from worker"
         )

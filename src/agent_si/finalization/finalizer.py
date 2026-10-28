@@ -66,6 +66,10 @@ def _coerce_task_state(value: Any) -> manifest.TaskState:
 def _coerce_audit_result(value: Any) -> manifest.AuditResult:
     if isinstance(value, manifest.AuditResult):
         return value
+    if isinstance(value, Enum):
+        # Assurance-lane AuditResult enums are str-mixed, so str() reads
+        # 'AuditResult.PASS'; the bound .value coerces to the manifest enum.
+        return manifest.AuditResult(value.value)
     return manifest.AuditResult(str(value))
 
 
@@ -259,6 +263,86 @@ class Finalizer:
             )
 
     @staticmethod
+    def _check_record_binding(
+        *,
+        verification_record: Any,
+        audit_record: Any,
+        project_id: str,
+        task_id: str,
+        run_id: Optional[str],
+        verification_ref: Optional[str],
+        audit_ref: Any,
+    ) -> None:
+        """Require the exact records bound to the finalization inputs.
+
+        No sibling module imports this one, so the record types are
+        imported lazily here to keep finalization import-light. Inputs are
+        only read; nothing is mutated.
+        """
+        from agent_si.assurance.audit_records import (
+            AuditRecord as _AuditRecord,
+        )
+        from agent_si.policies.verification import (
+            VerificationRecord as _VerificationRecord,
+        )
+
+        if verification_record is None:
+            raise FinalizationError(
+                "record-bound finalization needs verification_record"
+            )
+        if audit_record is None:
+            raise FinalizationError(
+                "record-bound finalization needs audit_record"
+            )
+        if not isinstance(verification_record, _VerificationRecord):
+            raise FinalizationError(
+                "verification_record must be a VerificationRecord"
+            )
+        if not isinstance(audit_record, _AuditRecord):
+            raise FinalizationError(
+                "audit_record must be an AuditRecord"
+            )
+        if (
+            verification_ref is None
+            or verification_ref != verification_record.verification_id
+        ):
+            raise FinalizationError(
+                "verification_ref must equal "
+                "verification_record.verification_id exactly"
+            )
+        if audit_ref is None or audit_ref != audit_record:
+            raise FinalizationError(
+                "audit_ref must be the exact AuditRecord"
+            )
+        for label, record in (
+            ("verification_record", verification_record),
+            ("audit_record", audit_record),
+        ):
+            if record.task_id != task_id or record.project_id != project_id:
+                raise FinalizationError(
+                    "%s must bind task_id/project_id exactly" % label
+                )
+            if run_id is None:
+                if str(record.run_id or "").strip():
+                    raise FinalizationError(
+                        "%s must carry a blank run_id for run_id None"
+                        % label
+                    )
+            elif record.run_id != run_id:
+                raise FinalizationError(
+                    "%s must bind run_id exactly" % label
+                )
+        if not str(verification_record.contract_hash or "").strip():
+            raise FinalizationError(
+                "verification_record must commit to a contract_hash"
+            )
+        if verification_record.contract_hash != audit_record.contract_hash:
+            raise FinalizationError(
+                "verification_record and audit_record must commit to "
+                "the same contract_hash"
+            )
+
+    @staticmethod
     def finalize(
         *,
         finalization_id: str = "",
@@ -285,6 +369,10 @@ class Finalizer:
         settled/released budget and resource coverage, and returns a NEW
         immutable FinalizationRecord. History is never rewritten: no input
         is mutated and no run status (notably SUCCEEDED) is fabricated.
+
+        The legacy no-records path behaves exactly as before. Callers that
+        must bind the exact VerificationRecord + AuditRecord use
+        ``finalize_with_records`` instead (strict record-bound path).
         """
         state = _coerce_task_state(task_state)
         if state not in manifest.TASK_TERMINAL:
@@ -362,6 +450,64 @@ class Finalizer:
             metric_refs=tuple(metric_refs or ()),
             completed_at=completed_at,
             limitations=tuple(limitations or ()),
+        )
+
+    @staticmethod
+    def finalize_with_records(
+        *,
+        verification_record: Any = None,
+        audit_record: Any = None,
+        finalization_id: str = "",
+        project_id: str,
+        task_id: str,
+        run_id: Optional[str] = None,
+        task_state: Any,
+        audit_result: Any = None,
+        audit_ref: Any = None,
+        verification_ref: Optional[str] = None,
+        override: Optional[OverrideRecord] = None,
+        output_refs: Tuple[str, ...] = (),
+        metric_refs: Tuple[str, ...] = (),
+        accounting_complete: bool = False,
+        budget_settled: bool = False,
+        resources_released: bool = False,
+        limitations: Tuple[str, ...] = (),
+        completed_at: str = "",
+    ) -> FinalizationRecord:
+        """Strict record-bound finalization (21D, 18B; ARCH-641/642).
+
+        Both exact records are required: refs/hashes must bind to the
+        finalization inputs via ``_check_record_binding``, and any
+        missing/mismatched record refuses with FinalizationError (a
+        missing record refuses with FinalizationError, never TypeError).
+        On success delegates to ``finalize`` without record kwargs.
+        """
+        Finalizer._check_record_binding(
+            verification_record=verification_record,
+            audit_record=audit_record,
+            project_id=project_id,
+            task_id=task_id,
+            run_id=run_id,
+            verification_ref=verification_ref,
+            audit_ref=audit_ref,
+        )
+        return Finalizer.finalize(
+            finalization_id=finalization_id,
+            project_id=project_id,
+            task_id=task_id,
+            run_id=run_id,
+            task_state=task_state,
+            audit_result=audit_result,
+            audit_ref=audit_ref,
+            verification_ref=verification_ref,
+            override=override,
+            output_refs=output_refs,
+            metric_refs=metric_refs,
+            accounting_complete=accounting_complete,
+            budget_settled=budget_settled,
+            resources_released=resources_released,
+            limitations=limitations,
+            completed_at=completed_at,
         )
 
 

@@ -35,9 +35,19 @@ def test_accepted_persists_exactly_one_decision_row():
     log: list = []
     before = copy.deepcopy(config)
     out = dl.apply_config_change(
-        config, log, "manifest", "raise limit", "need capacity", "director", {"cost": 10.0}
+        config,
+        log,
+        "manifest",
+        "raise limit",
+        "need capacity",
+        "director",
+        {"cost": 10.0},
     )
-    assert out == {"applied": True, "reason": "applied", "decision_ref": "manifest-0001"}
+    assert out == {
+        "applied": True,
+        "reason": "applied",
+        "decision_ref": "manifest-0001",
+    }
     assert len(log) == 1
     row = log[0]
     assert row["decision_id"] == "manifest-0001"
@@ -156,7 +166,7 @@ def test_reject_model_pin():
     log: list = []
     before = copy.deepcopy(config)
     patch = {"model": "other-model"}
-    ok, reason = dl.validate_config_change(patch, config)
+    ok, _reason = dl.validate_config_change(patch, config)
     assert ok is False
     out = dl.apply_config_change(
         config, log, "manifest", "s", "r", "director", patch
@@ -169,7 +179,7 @@ def test_invalid_chain_blocked_without_mutation():
     log: list = []
     before = copy.deepcopy(config)
     patch = {"active_chain": "not-a-list"}
-    ok, reason = dl.validate_config_change(patch, config)
+    ok, _reason = dl.validate_config_change(patch, config)
     assert ok is False
     out = dl.apply_config_change(
         config, log, "manifest", "s", "r", "director", patch
@@ -186,8 +196,14 @@ def test_validate_accepted_ok():
 def test_stored_config_accept_persists_exactly_one_row():
     store = dl.HierarchyConfigStore(fresh_config())
     before = store.get_config()
-    out = store.apply("manifest", "raise limit", "need capacity", "director", {"cost": 10.0})
-    assert out == {"applied": True, "reason": "applied", "decision_ref": "manifest-0001"}
+    out = store.apply(
+        "manifest", "raise limit", "need capacity", "director", {"cost": 10.0}
+    )
+    assert out == {
+        "applied": True,
+        "reason": "applied",
+        "decision_ref": "manifest-0001",
+    }
     assert len(store.log) == 1
     row = store.log[0]
     assert set(row.keys()) == {
@@ -219,7 +235,11 @@ def test_stored_config_reject_mutates_nothing():
     store = dl.HierarchyConfigStore(fresh_config())
     before = store.get_config()
     out = store.apply(
-        "manifest", "s", "r", "director", {"auditor": "work-1", "independent_audit": False}
+        "manifest",
+        "s",
+        "r",
+        "director",
+        {"auditor": "work-1", "independent_audit": False},
     )
     assert out["applied"] is False
     assert out["decision_ref"] is None
@@ -233,7 +253,9 @@ def test_stored_config_invalid_chain_blocked_without_mutation():
     before = store.get_config()
     ok, reason = store.validate({"active_chain": ["n1", "ghost"]})
     assert ok is False and "POLICY_CONFLICT" in reason
-    out = store.apply("manifest", "s", "r", "director", {"active_chain": ["n1", "ghost"]})
+    out = store.apply(
+        "manifest", "s", "r", "director", {"active_chain": ["n1", "ghost"]}
+    )
     assert out["applied"] is False
     assert store.get_config() == before
     assert len(store.log) == 0
@@ -286,5 +308,5 @@ def test_surface_rejection_and_hot_write(tmp_path):
     assert dl.hot_write_text(path, "row-1\n") == path
     with open(path, "rb") as handle:
         assert b"\r" not in handle.read()
-    with open(path, "r", encoding="utf-8") as handle:
+    with open(path, encoding="utf-8") as handle:
         assert handle.read() == "row-1\n"

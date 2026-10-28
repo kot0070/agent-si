@@ -75,7 +75,7 @@ class PartRow:
     agent: str
     scope: str
     deliverable: str
-    status: PartStatus = "QUEUED"  # type: ignore[assignment]
+    status: PartStatus = "QUEUED"
 
     def __post_init__(self) -> None:
         if not self.agent.strip():
@@ -134,7 +134,7 @@ class PartRecord:
             value = getattr(self, name)
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"PartRecord.{name} must be a non-blank string")
-        if not isinstance(self.deliverable_ref, str) or not self.deliverable_ref.strip():
+        if not isinstance(d := self.deliverable_ref, str) or not d.strip():
             raise ValueError("PartRecord.deliverable_ref must be non-empty")
         if not (
             self.deliverable_ref.startswith(ARTIFACT_PREFIX)
@@ -210,33 +210,33 @@ class PartStore:
 
 
 __all__ = [
-    "MODEL_ID",
-    "GATE_PASS",
     "AUDIT_PASS",
-    "GATE_VERDICTS",
     "AUDIT_RESULTS",
-    "GateRefused",
-    "TeamCard",
-    "PartStatus",
-    "PartRow",
-    "register_part",
-    "list_parts",
-    "update_status",
-    "PartRecord",
+    "GATE_PASS",
+    "GATE_VERDICTS",
+    "MODEL_ID",
+    "ApplyOutcome",
     "ClosedPartRef",
-    "PartStore",
+    "DecisionLog",
+    "DecisionRow",
+    "GateRefused",
     "LedgerRow",
     "PackageLedger",
+    "PartRecord",
+    "PartRow",
+    "PartStatus",
+    "PartStore",
+    "TeamCard",
+    "build_package_report",
+    "ensure_compact_english",
+    "hot_write_text",
+    "is_compact_english",
+    "list_parts",
+    "load_ledger",
     "package_report",
     "persist_ledger",
-    "load_ledger",
-    "build_package_report",
-    "DecisionRow",
-    "DecisionLog",
-    "ApplyOutcome",
+    "register_part",
     "surface_rejection",
-    "ensure_compact_english",
-    "is_compact_english",
-    "hot_write_text",
+    "update_status",
     "utc_now",
 ]

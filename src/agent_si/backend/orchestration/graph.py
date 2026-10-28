@@ -10,11 +10,11 @@ DecisionLog, DecisionRow, utc_now, ensure_compact_english,
 is_compact_english) lives in common.py and is re-exported here.
 """
 
-from __future__ import annotations
+from __future__ import annotations  # noqa: I001  # frozen-cite K02
 
 from dataclasses import dataclass, field
 from hashlib import sha256
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, Sequence  # noqa: UP035  # frozen-cite K02
 
 from .common import (
     ApplyOutcome,
@@ -226,7 +226,7 @@ class TaskPlanner:
                 goal=str(spec.get("goal", "")),
                 task_class=str(spec.get("task_class", "general")),
                 risk=str(spec.get("risk", "LOW")),
-                required_capabilities=[str(c) for c in spec.get("required_capabilities", ())],
+                required_capabilities=[str(c) for c in spec.get("required_capabilities", ())],  # noqa: E501  # frozen-cite K02
                 knowledge_needs=[str(c) for c in spec.get("knowledge_needs", ())],
                 tool_needs=[str(c) for c in spec.get("tool_needs", ())],
                 acceptance_criteria_refs=[
@@ -336,7 +336,7 @@ def build_graph(
         if part not in graph or dependency not in graph:
             raise DependencyError(
                 "unknown dep nodes: "
-                f"{sorted({n for n in (part, dependency)} - set(graph))}"
+                f"{sorted({part, dependency} - set(graph))}"
             )
         if dependency not in graph[part]:
             graph[part].append(dependency)
@@ -469,7 +469,7 @@ class HierarchyConfigStore:
         corrections.append(entry)
         self.config["user_corrections"] = corrections
         statement = ensure_compact_english("record user correction")
-        row = self.log.append("user-correction", statement, text.strip(), actor, utc_now())
+        row = self.log.append("user-correction", statement, text.strip(), actor, utc_now())  # noqa: E501  # frozen-cite K02
         return ApplyOutcome(
             accepted=True, reason="correction recorded", row=row,
             surfaced="change applied",
@@ -482,7 +482,7 @@ class HierarchyConfigStore:
         if role not in role_models:
             raise HierarchyRefused(f"unconfigured role: no authority for {role}")
         candidate = dict(binding)
-        if candidate.get("model") == MODEL_ID and candidate.get("purpose") == "production":
+        if candidate.get("model") == MODEL_ID and candidate.get("purpose") == "production":  # noqa: E501  # frozen-cite K02
             raise HierarchyRefused(
                 "contributor binding is development-only: production refused"
             )
@@ -513,7 +513,7 @@ class HierarchyConfigStore:
             part_id for part_id, verdict in part_results.items() if verdict != "PASS"
         )
         if failing:
-            raise ParentClosureBlocked(f"parent closure blocked: parts not PASS: {failing}")
+            raise ParentClosureBlocked(f"parent closure blocked: parts not PASS: {failing}")  # noqa: E501  # frozen-cite K02
         return {
             "parent": "closed",
             "parts": ",".join(sorted(part_results)),
@@ -562,3 +562,16 @@ class HierarchyConfigStore:
         return apply_config_change(
             self.config, self.log.rows, scope, statement, reason, authority, patch
         )
+
+
+# V2 ONE-HOME: the shared kernel names below are re-exported here (the frozen
+# contract test asserts graph.DecisionRow/graph.is_compact_english identity
+# with common), so they are listed explicitly to mark the re-export.
+__all__ = [
+    "ApplyOutcome",
+    "DecisionLog",
+    "DecisionRow",
+    "ensure_compact_english",
+    "is_compact_english",
+    "utc_now",
+]

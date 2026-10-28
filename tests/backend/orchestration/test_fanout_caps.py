@@ -1,7 +1,16 @@
-import os, sys; sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__),"..","..","..","src")))
-"""ROW32/M-P1-10/B0B-ARCH-755/762: fanout bounded by caps, excess queued never dropped."""
+"""ROW32/M-P1-10/B0B-ARCH-755/762: fanout bounded by caps, excess queued
+never dropped."""
+import os
+import sys
 
 import pytest
+
+sys.path.insert(
+    0,
+    os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "..", "src")
+    ),
+)
 
 from agent_si.backend.orchestration.split import (
     MultiManagerSettings,
@@ -22,7 +31,10 @@ def make_settings(mode=True, cap=2, overlap=False):
 
 def make_parts(tag, total, max_parts):
     return split_package(
-        tag, f"{tag} goal", [f"artifact://{tag}/ctx-{i:03d}" for i in range(total)], max_parts
+        tag,
+        f"{tag} goal",
+        [f"artifact://{tag}/ctx-{i:03d}" for i in range(total)],
+        max_parts,
     )
 
 
