@@ -26,6 +26,9 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Any, Callable, Dict, Tuple
 
+# Wiring-only import: the attempt loop lives in runner.py; the public surface below stays unchanged (0C_ARCHITECTURE.md:139).
+from agent_si.sdk_adapter.runner import run_sdk_turn
+
 try:
     from iface.frozen_manifest import manifest
 except ImportError:  # alternate layout: the iface/ directory itself on sys.path
@@ -289,37 +292,33 @@ class OpenAIAgentsSDKAdapter:
 # END K13R1 (M-ECHO)
         transport = transport_for_provider(run_config.selected_provider)
         secret_ids = tuple(ref.secret_id for ref in (secret_refs or ()))
-        attempts = 0
-        while True:
-            attempts += 1
-            self._calls_made += 1
-            outcome = self._runner(
-                {
-                    "transport": transport,
-                    "provider": run_config.selected_provider,
-                    "model": run_config.selected_model,
-                    "input_ref": input_ref,
-                    "secret_ids": secret_ids,
-                    "attempt": attempts,
-                }
+        # The attempt loop lives in runner.py; K02 reaches this entry only
+        # through the single-entry facade (orchestration_interface.py:72).
+        outcome = run_sdk_turn(
+            run_config=run_config,
+            input_ref=input_ref,
+            secret_ids=secret_ids,
+            transport=transport,
+            turn_budget=run_config.max_runner_retries,
+            sdk_call=self._runner,
+        )
+        self._calls_made += outcome.attempts_made
+        if outcome.ok:
+            return SdkRunResult(
+                run_id=run_config.run_id,
+                output_ref="artifact:run/%s/output" % run_config.run_id,
+                provider=run_config.selected_provider,
+                model=run_config.selected_model,
+                status=manifest.ExecutionAttemptStatus.SUCCEEDED,
             )
-            if outcome.get("ok"):
-                return SdkRunResult(
-                    run_id=run_config.run_id,
-                    output_ref="artifact:run/%s/output" % run_config.run_id,
-                    provider=run_config.selected_provider,
-                    model=run_config.selected_model,
-                    status=manifest.ExecutionAttemptStatus.SUCCEEDED,
-                )
-            if attempts > run_config.max_runner_retries:
-                return SdkRunResult(
-                    run_id=run_config.run_id,
-                    output_ref="artifact:run/%s/output" % run_config.run_id,
-                    provider=run_config.selected_provider,
-                    model=run_config.selected_model,
-                    status=manifest.ExecutionAttemptStatus.FAILED,
-                    error_ref=str(outcome.get("error", "sdk_run_failed")),
-                )
+        return SdkRunResult(
+            run_id=run_config.run_id,
+            output_ref="artifact:run/%s/output" % run_config.run_id,
+            provider=run_config.selected_provider,
+            model=run_config.selected_model,
+            status=manifest.ExecutionAttemptStatus.FAILED,
+            error_ref=outcome.error,
+        )
 
     def execute_builder_workflow(
         self,
