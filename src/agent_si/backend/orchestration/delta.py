@@ -109,10 +109,10 @@ def close_with_linkcheck(delta: dict, verdict: dict) -> dict:
         base_refs = [r for r in refs if isinstance(r, str)] if isinstance(refs, list) else []  # noqa: E501  # frozen-cite K02
         return {
             "package_id": package_id,
-            "gate": "BLOCKED",
-            "audit": "BLOCKED",
+            "gate": ("FAIL" if gate == "FAIL" and audit == "FAIL" and link_ok else "BLOCKED"),
+            "audit": ("FAIL" if gate == "FAIL" and audit == "FAIL" and link_ok else "BLOCKED"),
             "decided_at": _utc_now(),
-            "evidence_refs": [*base_refs, reason_ref],
+            "evidence_refs": ([*base_refs, "linkcheck:failed:joint"] if gate == "FAIL" and audit == "FAIL" and link_ok else [*base_refs, reason_ref]),
         }
     except Exception:
         return {
