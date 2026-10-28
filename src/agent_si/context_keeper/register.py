@@ -14,6 +14,9 @@ only.
 from __future__ import annotations
 
 import dataclasses
+import importlib
+import json
+import os
 import sys
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
@@ -88,6 +91,69 @@ def _blocking_severities():
     return (severe.HIGH, severe.CRITICAL)
 
 
+#: Register rows file name inside a file-backed store dir.
+_REGISTER_ROWS_FILE = "register_rows.json"
+
+
+def _contract():
+    """Return the frozen contract module, importing it late when needed."""
+    try:
+        return sys.modules[_CK_MODULE]
+    except KeyError:
+        return importlib.import_module(_CK_MODULE)
+
+
+def _record_to_dict(record) -> dict:
+    """Serialize a frozen integrity row to JSON-safe primitives."""
+    return {
+        "context_event_id": record.context_event_id,
+        "incident_ref": record.incident_ref,
+        "project_id": record.project_id,
+        "task_id": record.task_id,
+        "run_id": record.run_id,
+        "actor": record.actor,
+        "detected_by": record.detected_by,
+        "type": record.type,
+        "severity": getattr(record.severity, "value", record.severity),
+        "expected_context_refs": list(record.expected_context_refs),
+        "actual_context_refs": list(record.actual_context_refs),
+        "missing_refs": list(record.missing_refs),
+        "conflicting_refs": list(record.conflicting_refs),
+        "contract_hash": record.contract_hash,
+        "detected_at": record.detected_at,
+        "impact": record.impact,
+        "resolution": record.resolution,
+        "resolved_at": record.resolved_at,
+        "evidence_refs": list(record.evidence_refs),
+    }
+
+
+def _record_from_dict(payload):
+    """Rebuild the frozen integrity row (same class object, never a copy)."""
+    contract = _contract()
+    return contract.ContextIntegrityRecord(
+        context_event_id=payload["context_event_id"],
+        incident_ref=payload["incident_ref"],
+        project_id=payload["project_id"],
+        task_id=payload["task_id"],
+        run_id=payload["run_id"],
+        actor=payload["actor"],
+        detected_by=payload["detected_by"],
+        type=payload["type"],
+        severity=contract.IncidentSeverity(payload["severity"]),
+        expected_context_refs=tuple(payload["expected_context_refs"]),
+        actual_context_refs=tuple(payload["actual_context_refs"]),
+        missing_refs=tuple(payload["missing_refs"]),
+        conflicting_refs=tuple(payload["conflicting_refs"]),
+        contract_hash=payload["contract_hash"],
+        detected_at=payload["detected_at"],
+        impact=payload["impact"],
+        resolution=payload["resolution"],
+        resolved_at=payload["resolved_at"],
+        evidence_refs=tuple(payload["evidence_refs"]),
+    )
+
+
 @dataclass(frozen=True)
 class LevelStartBundle:
     """Refs re-injected when a level starts (violations authoritative)."""
@@ -130,9 +196,53 @@ def compare_refs(
 class Register:
     """Verbatim append-only context register (K13 section 45A)."""
 
-    def __init__(self) -> None:
+    def __init__(self, store_dir=None) -> None:
         self._by_id: Dict[str, ck.ContextIntegrityRecord] = {}
         self._order: List[str] = []
+        self._store_dir = store_dir
+        if store_dir is not None:
+            os.makedirs(store_dir, exist_ok=True)
+            self._load()
+
+    def _path(self, name):
+        return os.path.join(str(self._store_dir), name)
+
+    def _write_json(self, name, payload):
+        if self._store_dir is None:
+            return
+        tmp = self._path(name + ".tmp")
+        with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
+            json.dump(payload, fh, indent=2)
+            fh.write("\n")
+        os.replace(tmp, self._path(name))
+
+    def _load(self):
+        try:
+            with open(
+                self._path(_REGISTER_ROWS_FILE), encoding="utf-8"
+            ) as fh:
+                rows = json.load(fh)
+        except FileNotFoundError:
+            return
+        for payload in rows:
+            record = _record_from_dict(payload)
+            event_id = record.context_event_id
+            if event_id not in self._by_id:
+                self._by_id[event_id] = record
+                self._order.append(event_id)
+
+    def _sync(self):
+        if self._store_dir is not None:
+            self._load()
+
+    def _persist(self):
+        self._write_json(
+            _REGISTER_ROWS_FILE,
+            [
+                _record_to_dict(self._by_id[event_id])
+                for event_id in self._order
+            ],
+        )
 
     def append(
         self, record: ck.ContextIntegrityRecord
@@ -147,14 +257,20 @@ class Register:
             return stored
         self._by_id[record.context_event_id] = record
         self._order.append(record.context_event_id)
+        self._persist()
         return record
 
     def read(self, context_event_id: str) -> Optional[ck.ContextIntegrityRecord]:
         """Return the stored row for context_event_id, else None."""
-        return self._by_id.get(context_event_id)
+        row = self._by_id.get(context_event_id)
+        if row is None and self._store_dir is not None:
+            self._sync()
+            row = self._by_id.get(context_event_id)
+        return row
 
     def list_unresolved(self, project_id: str) -> List[ck.ContextIntegrityRecord]:
         """Return rows of project_id whose resolved_at is None."""
+        self._sync()
         return [
             self._by_id[event_id]
             for event_id in self._order
@@ -164,6 +280,7 @@ class Register:
 
     def list_all(self, project_id: str) -> List[ck.ContextIntegrityRecord]:
         """Return every row of project_id (resolved rows stay in history)."""
+        self._sync()
         return [
             self._by_id[event_id]
             for event_id in self._order
@@ -230,6 +347,7 @@ class Register:
             stored, resolution=resolution, resolved_at=resolved_at
         )
         self._by_id[context_event_id] = updated
+        self._persist()
         return updated
 
     def provenance(self, project_id: str, ref: str) -> str:

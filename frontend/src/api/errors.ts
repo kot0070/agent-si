@@ -68,6 +68,12 @@ export function parseErrorBody(data: unknown, status: number): ApiError {
   if (checked.success && isErrorCode(checked.data.code)) {
     return errorFromStatus(checked.data.code, status);
   }
+  if (status === 404) {
+    return errorFromStatus("CONTEXT_MISSING", status);
+  }
+  if (status === 0) {
+    return errorFromStatus("CONTEXT_MISSING", status);
+  }
   return errorFromStatus("CONTEXT_WRONG_CONTRACT_VERSION", status);
 }
 
@@ -85,7 +91,25 @@ export function parseOrThrow<T>(
 
 const UI_TOKEN_STORAGE_KEY = "agent-si.ui-token";
 
+const WINDOW_TOKEN_KEY = "__AGENT_SI_UI_TOKEN";
+
 let memoryToken: string | null = null;
+
+function readWindowToken(): string | null {
+  try {
+    if (typeof window !== "undefined") {
+      const value = (window as unknown as Record<string, unknown>)[
+        WINDOW_TOKEN_KEY
+      ];
+      if (typeof value === "string" && value.length > 0) {
+        return value;
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
 
 function readStoredToken(): string | null {
   try {
@@ -99,6 +123,10 @@ function readStoredToken(): string | null {
 }
 
 export function getUiToken(): string | null {
+  const fromWindow = readWindowToken();
+  if (fromWindow !== null) {
+    return fromWindow;
+  }
   if (memoryToken !== null) {
     return memoryToken;
   }
@@ -136,8 +164,8 @@ export interface RequestOptions {
   actor?: string;
 }
 
-const UI_TOKEN_HEADER = "Authorization";
-const ACTOR_HEADER = "x-agent-si-actor";
+const UI_TOKEN_HEADER = "x-ui-session-token";
+const ACTOR_HEADER = "x-actor";
 const DEFAULT_ACTOR = "ui";
 
 export async function requestResponse(
@@ -152,10 +180,8 @@ export async function requestResponse(
   if (kind === "write" || kind === "chat") {
     const token = getUiToken();
     if (token !== null) {
-      headers[UI_TOKEN_HEADER] = `Bearer ${token}`;
+      headers[UI_TOKEN_HEADER] = token;
     }
-  }
-  if (kind === "chat") {
     headers[ACTOR_HEADER] = options.actor ?? DEFAULT_ACTOR;
   }
   let response: Response;
