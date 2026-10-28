@@ -177,6 +177,8 @@ def _k04_payload(method, template, write_headers):
         return None, None, 200
     if key == ("post", "/api/v1/kb/proposals/apply"):
         return {}, write_headers, 400
+    if key == ("put", "/api/v1/roles/chat-model"):
+        return {}, write_headers, 400
     raise AssertionError("no safe payload for %s %s" % (method, template))
 
 

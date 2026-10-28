@@ -473,6 +473,21 @@ def build_telemetry_event(event_id, project_id, timestamp, event_type,
     }
 
 
+def build_incident_event(outage_id, project_id, timestamp, task_id=None,
+                         run_id=None, provider=None, model=None,
+                         detail=None):
+    """incident_recorded envelope for one outage linkage.
+
+    The event shares the outage id (event_id == outage_id); the matching
+    budget incident row carries the same id.
+    """
+    return build_telemetry_event(
+        event_id=outage_id, project_id=project_id, timestamp=timestamp,
+        task_id=task_id, run_id=run_id, provider=provider, model=model,
+        event_type="incident_recorded", error_ref=detail,
+    )
+
+
 class TelemetryEventLog:
     """Append-only envelope store; duplicate event_id returns the stored row."""
 

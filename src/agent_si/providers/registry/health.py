@@ -18,6 +18,9 @@ MODEL_STATUSES = ("READY", "LOADING", "DEGRADED", "ERROR", "OFFLINE", "UNKNOWN")
 MEASURED = "MEASURED"
 NOT_MEASURED = "UNAVAILABLE"
 
+#: Check-type value marking a provider check that observed an outage.
+OUTAGE_CHECK_TYPE = "outage"
+
 
 def _now() -> float:
     return time.time()
@@ -32,6 +35,7 @@ class ProviderHealth:
     latency_ms: float | None = None
     error: str | None = None
     capacity_state: str | None = None
+    check_type: str | None = None
 
     def view(self) -> dict:
         return {
@@ -42,6 +46,7 @@ class ProviderHealth:
             "latency_ms": self.latency_ms,
             "error": self.error,
             "capacity_state": self.capacity_state,
+            "check_type": self.check_type,
         }
 
 
@@ -78,6 +83,7 @@ class ProviderHealthLog:
         latency_ms: float | None = None,
         error: str | None = None,
         capacity_state: str | None = None,
+        check_type: str | None = None,
         checked_at: float | None = None,
     ) -> ProviderHealth:
         if status not in PROVIDER_STATUSES:
@@ -90,9 +96,24 @@ class ProviderHealthLog:
             latency_ms=latency_ms,
             error=error,
             capacity_state=capacity_state,
+            check_type=check_type,
         )
         self._entries[(provider_id, instance_id)] = entry
         return entry
+
+    def record_outage(
+        self,
+        provider_id: str,
+        instance_id: str,
+        *,
+        error: str | None = None,
+        checked_at: float | None = None,
+    ) -> ProviderHealth:
+        """Record one outage check: OFFLINE with the outage check type."""
+        return self.record(
+            provider_id, instance_id, "OFFLINE", error=error,
+            check_type=OUTAGE_CHECK_TYPE, checked_at=checked_at,
+        )
 
     def latest(self, provider_id: str, instance_id: str) -> ProviderHealth | None:
         return self._entries.get((provider_id, instance_id))
