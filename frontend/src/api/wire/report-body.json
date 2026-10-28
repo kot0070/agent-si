@@ -1,0 +1,11 @@
+{
+  "auto_push": false,
+  "load": {
+    "agents": 2,
+    "package_id": "wire-pkg-a",
+    "peak_concurrency": 2,
+    "wall_time_s": 5.0
+  },
+  "nudge": "review package wire-pkg-a load (agents 2, peak 2, wall 5.0s) before starting package wire-pkg-b",
+  "package_id": "wire-pkg-a"
+}

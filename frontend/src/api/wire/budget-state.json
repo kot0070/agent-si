@@ -1,0 +1,15 @@
+{
+  "budget": {
+    "budget_limit": "5.00",
+    "currency": "USD",
+    "hard_limit": "5.00",
+    "project_id": "wire-project-001",
+    "provider_spend_caps": {},
+    "remaining_derived": "5.00",
+    "reserved": "0",
+    "soft_limit": "4.00",
+    "spent": "0",
+    "updated_at": ""
+  },
+  "project_id": "wire-project-001"
+}

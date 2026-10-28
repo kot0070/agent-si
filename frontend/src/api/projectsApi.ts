@@ -90,11 +90,26 @@ export const PackageLedgerRowSchema: z.ZodType<PackageLedgerRow> =
     wall_time_s: z.number().min(0),
   });
 
-export const PackageReportSchema: z.ZodType<PackageReport> = z.object({
+const ServedPackageReportSchema = z.object({
+  package_id: z.string().min(1),
+  load: PackageLedgerRowSchema,
+  nudge: z.string().min(1),
+  auto_push: z.literal(false),
+});
+
+const LegacyPackageReportSchema = z.object({
   row: PackageLedgerRowSchema,
   nudge: z.string().min(1),
   auto_push: z.literal(false),
 });
+
+export const PackageReportSchema: z.ZodType<PackageReport> = z
+  .union([ServedPackageReportSchema, LegacyPackageReportSchema])
+  .transform((body) =>
+    "load" in body
+      ? { row: body.load, nudge: body.nudge, auto_push: false as const }
+      : body,
+  );
 
 const RoutingDecisionSchema: z.ZodType<RoutingDecision> = z.object({
   decision_id: z.string().min(1),
@@ -130,11 +145,15 @@ export const RoutingWhySchema: z.ZodType<RoutingWhy> = z.object({
   reason: ReasonTextSchema,
 });
 
+const BudgetAmountSchema = z
+  .union([z.number().min(0), z.string().regex(/^\d+(\.\d+)?$/)])
+  .transform((value) => (typeof value === "string" ? Number(value) : value));
+
 export const BudgetStateSchema: z.ZodType<BudgetState> = z.object({
   project_id: z.string().min(1),
-  hard_limit: z.number().min(0),
-  spent: z.number().min(0),
-  reserved: z.number().min(0),
+  hard_limit: BudgetAmountSchema,
+  spent: BudgetAmountSchema,
+  reserved: BudgetAmountSchema,
   currency: z.string().min(1),
 });
 
@@ -149,6 +168,18 @@ export const ChatChunkSchema: z.ZodType<ChatChunk> = z.object({
   delta: z.string(),
   done: z.boolean(),
 });
+
+export const ChatStreamEventSchema = z.object({
+  type: z.string().min(1),
+  stream_id: z.string().optional(),
+  run_id: z.string().optional(),
+  text: z.string().optional(),
+  code: z.string().optional(),
+  message: z.string().optional(),
+  reason: z.string().optional(),
+});
+
+export type ChatStreamEvent = z.infer<typeof ChatStreamEventSchema>;
 
 export const ChatCancelSchema = z.object({
   stream_id: z.string().min(1),
@@ -174,8 +205,9 @@ const LedgerResponseSchema = z.object({
   rows: z.array(LedgerRowSchema),
 });
 
-const BudgetResponseSchema = z.object({
-  state: BudgetStateSchema,
+export const BudgetResponseSchema = z.object({
+  project_id: z.string().min(1),
+  budget: BudgetStateSchema,
 });
 
 const OkResponseSchema = z.object({
@@ -336,7 +368,7 @@ export async function readBudgetState(
     withProject(ENDPOINTS.budget, projectId),
     { method: "GET", kind: "read" },
     BudgetResponseSchema,
-  ).then((body) => body.state);
+  ).then((body) => body.budget);
 }
 
 export async function cancelChatStreamRequest(

@@ -174,7 +174,9 @@ export type ApiErrorCode =
   | "KB_VALIDATION_FAILED"
   | "KB_PROPOSAL_NOT_APPROVED"
   | "KEY_SAVE_TIMEOUT"
-  | "CREDENTIAL_ENTRY_MISSING";
+  | "CREDENTIAL_ENTRY_MISSING"
+  | "NO_PROVIDER_BOUND"
+  | "APPROVAL_REQUIRED";
 
 export interface ApiErrorBody {
   code: ApiErrorCode;
