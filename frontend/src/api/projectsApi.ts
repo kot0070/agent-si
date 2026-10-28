@@ -26,7 +26,12 @@ import type {
   TaskRecord,
 } from "./iface";
 import { ENDPOINTS, expandEndpoint, withPackage, withProject } from "./endpoints";
-import { parseOrThrow, requestJson, requestVoid } from "./errors";
+import {
+  ApiError,
+  parseOrThrow,
+  requestJson,
+  requestVoid,
+} from "./errors";
 
 export type {
   BudgetState,
@@ -177,12 +182,55 @@ const OkResponseSchema = z.object({
   ok: z.literal(true),
 });
 
-export async function listProjectRecords(): Promise<ProjectRecord[]> {
+function fetchProjectRecordsOnce(): Promise<ProjectRecord[]> {
   return requestJson(
     ENDPOINTS.projects,
     { method: "GET", kind: "read" },
     ProjectsResponseSchema,
   ).then((body) => body.projects);
+}
+
+function retryDelayMs(attempt: number): Promise<void> {
+  const waitMs = 10 * 2 ** (attempt - 1);
+  return new Promise((resolve) => {
+    setTimeout(resolve, waitMs);
+  });
+}
+
+let inflightProjectRecords: Promise<ProjectRecord[]> | null = null;
+
+export async function listProjectRecords(): Promise<ProjectRecord[]> {
+  const shared = inflightProjectRecords;
+  if (shared !== null) {
+    return shared;
+  }
+  const task = (async (): Promise<ProjectRecord[]> => {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await fetchProjectRecordsOnce();
+      } catch (error) {
+        if (
+          error instanceof ApiError &&
+          error.status >= 400 &&
+          error.status < 500
+        ) {
+          throw error;
+        }
+        if (attempt >= 3) {
+          throw error;
+        }
+        await retryDelayMs(attempt);
+      }
+    }
+  })();
+  inflightProjectRecords = task;
+  try {
+    return await task;
+  } finally {
+    if (inflightProjectRecords === task) {
+      inflightProjectRecords = null;
+    }
+  }
 }
 
 export async function readProjectRecord(
