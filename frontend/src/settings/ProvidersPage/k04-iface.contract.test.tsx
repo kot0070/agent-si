@@ -215,3 +215,27 @@ describe("k04-iface LeftoverKeyFinder contract", () => {
     expect(store.audit().map((record) => record.entryName)).toContain("agent_si/provider/old");
   });
 });
+
+import type {
+  ChatModelSaveRequest,
+  ChatModelSaveResult,
+} from "./k04-iface";
+
+describe("k04-iface chat-model save shapes", () => {
+  it("request/response types mirror the PUT route JSON body and 200 payload", () => {
+    const body: ChatModelSaveRequest = {
+      project_id: "local",
+      model_id: "openai/model-1",
+    };
+    const result: ChatModelSaveResult = {
+      ok: true,
+      project_id: body.project_id,
+      model_id: body.model_id,
+    };
+    expect(JSON.stringify(body)).toBe(
+      '{"project_id":"local","model_id":"openai/model-1"}',
+    );
+    expect(JSON.stringify(body)).not.toContain("session_token");
+    expect(result.ok).toBe(true);
+  });
+});

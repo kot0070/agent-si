@@ -403,6 +403,41 @@ class BudgetGate:
         self._persist_incident(incident)
         return incident
 
+    def record_provider_incident(self, project_id, task_id, run_id,
+                                 timestamp, description,
+                                 incident_id=None,
+                                 root_cause="helper-provider outage"):
+        """Append + persist one provider-outage incident row (public path).
+
+        Outage linkage (M-P2-68/R-366): incident_id carries the shared
+        outage id when given, else the next inc-<project>-<n> identity.
+        """
+        with self._lock:
+            state = self._states[project_id]
+            if incident_id is None:
+                incident_id = "inc-%s-%d" % (project_id,
+                                             len(self._incidents) + 1)
+            incident = IncidentRecord(
+                incident_id=incident_id,
+                project_id=project_id, timestamp=timestamp,
+                task_id=task_id, run_id=run_id,
+                actor="budget_observe", detected_by="budget_observe",
+                severity="HIGH", type="provider_outage",
+                description=description,
+                root_cause=root_cause,
+                impact="helper-provider service DOWN; "
+                       "billable work refused fail-closed",
+                action="LINKED",
+                regression_test=(
+                    "tests/test_outage_r366_m268.py::"
+                    "test_outage_round_trip_links_telemetry_and_budget"
+                ),
+                status="OPEN",
+            )
+            self._incidents.append(incident)
+            self._persist_incident(incident)
+            return incident
+
     # -- admission --------------------------------------------------------
     def compare_and_reserve(self, request: ReservationRequest) -> BudgetReservation:
         """Frozen facade: ReservationRequest (Mapping/None tolerated positionally).

@@ -31,7 +31,7 @@ def _served_pairs():
 def test_a1con_served_routes_are_exactly_frozen():
     frozen = {(str(m).lower(), str(p)) for m, p in IF.HTTP_ROUTES}
     assert set(_served_pairs()) == frozen
-    assert len(_served_pairs()) == len(set(_served_pairs())) == 11
+    assert len(_served_pairs()) == len(set(_served_pairs())) == 12
 
 
 def test_a1con_leftover_served_via_dispatch():

@@ -490,6 +490,29 @@ def create_app(settings: Any = None,
     from agent_si.backend import console_projects_write as _k02r3_write
     from agent_si.backend import read_routes as _k02r3_read
 
+    def _k02r3_store_dir(_settings: Any) -> str | None:
+        # Same settings keys as the K04 lookup below (read-only
+        # reference): when configured, project/task rows persist to
+        # JSONL under this dir and hydrate on first bind; with no key
+        # the ports stay purely in-memory.
+        for _key in ("store_dir", "data_dir", "data_directory"):
+            if isinstance(_settings, Mapping):
+                if _key in _settings:
+                    if not _settings[_key]:
+                        raise ValueError(
+                            f"K02R3 store setting {_key!r} is empty: pass "
+                            "a real dir, never a silent tmp fallback")
+                    return str(_settings[_key])
+            elif _settings is not None and hasattr(_settings, _key):
+                _val = getattr(_settings, _key)
+                if not _val:
+                    raise ValueError(
+                        f"K02R3 store setting {_key!r} is empty: pass a "
+                        "real dir, never a silent tmp fallback")
+                return str(_val)
+        return None
+
+    app.state.k02r3_store_dir = _k02r3_store_dir(settings)
     _k02r3_read.register_read_routes(app)
     _k02r3_write.register_console_projects_write_routes(app)
 
@@ -512,8 +535,11 @@ def create_app(settings: Any = None,
     from agent_si.budget.gate import BudgetGate as _K04BudgetGate
     from agent_si.model_kb import kb_reader as _k04_kb_reader
     from agent_si.providers.registry import facades as _k04_facades
+    import copy as _k04_copy
     from agent_si.routing.roles import RoleTable as _K04RoleTable
     from agent_si.routing.store import RoutingStore as _K04RoutingStore
+    from agent_si.routing.telemetry_port import (
+        TelemetryEmitter as _K04TelemetryEmitter)
 
     def _k04_store_dir(_settings: Any) -> Optional[str]:
         for _key in ("store_dir", "data_dir", "data_directory"):
@@ -559,7 +585,23 @@ def create_app(settings: Any = None,
     app.state.k04_ctx = _k04_ctx
     app.state.k04_config_error = _k04_config_error
 
-    def _k04_make_endpoint(_fn: Callable, _is_write: bool) -> Callable:
+    # BEDEF1 ensure-at-start: projects loaded from the store that have no
+    # budget state or step limits get the product starting values
+    # (idempotent; an existing state is never overwritten).
+    try:
+        from agent_si.backend import project_defaults as _bedef1_defaults
+        from agent_si.backend import read_routes as _bedef1_read
+
+        _bedef1_projects, _bedef1_tasks = _bedef1_read.repos_for(app)
+        for _bedef1_row in _bedef1_projects.list_by({}):
+            _bedef1_pid = _bedef1_row.get("project_id")
+            if _bedef1_pid and not _bedef1_row.get("archived"):
+                _bedef1_defaults.ensure_project_defaults(app, _bedef1_pid)
+    except Exception:
+        pass
+
+    def _k04_make_endpoint(_fn: Callable, _is_write: bool,
+                           _name: str = "") -> Callable:
         async def _k04_endpoint(request: Request) -> _K04JSONResponse:
             if _k04_config_error is not None:
                 return _K04JSONResponse(
@@ -577,7 +619,32 @@ def create_app(settings: Any = None,
                     _body = {}
                 if _body is None:
                     _body = {}
-            if _is_write:
+            # HD ADDENDUM (K04P2-CHATSAVE): the chat-model save takes its
+            # token ONLY from the x-ui-session-token header through the
+            # K02 binding (a per-request ctx.session_token). The URL query
+            # and the JSON body are never token channels here, so a
+            # query-only token is refused with 401. Old routes keep the
+            # shared write path below unchanged.
+            _call_ctx: Any = _k04_ctx
+            if _name == "put_chat_model":
+                _header_token = request.headers.get("x-ui-session-token")
+                if not (isinstance(_header_token, str)
+                        and _header_token.strip()) \
+                        or _header_token != app.state.ui_session_token:
+                    return _K04JSONResponse(
+                        status_code=401,
+                        content={
+                            "error": "chat save refused: a valid "
+                                     "x-ui-session-token header is required "
+                                     "(never in the URL query or the JSON "
+                                     "body)",
+                            "code": _k04_pr._USER_WRITE_DENIED_CODE,
+                        })
+                _call_ctx = _k04_copy.copy(_k04_ctx)
+                _call_ctx.session_token = _header_token
+                if getattr(_call_ctx, "emitter", None) is None:
+                    _call_ctx.emitter = _K04TelemetryEmitter()
+            elif _is_write:
                 _actor = (request.headers.get("x-actor") or "").strip()
                 if not _actor:
                     return _K04JSONResponse(
@@ -594,9 +661,10 @@ def create_app(settings: Any = None,
                                    and _token == _actor):
                     return _K04JSONResponse(status_code=403,
                                             content={"error": "forbidden"})
-                _query["session_token"] = _token
+                _call_ctx = _k04_copy.copy(_k04_ctx)
+                _call_ctx.session_token = _token
             try:
-                _status, _payload = _fn(_k04_ctx, _query, _body)
+                _status, _payload = _fn(_call_ctx, _query, _body)
             except Exception as _exc:
                 return _K04JSONResponse(
                     status_code=500,
@@ -610,7 +678,7 @@ def create_app(settings: Any = None,
         app.add_api_route(
             _path,
             _k04_make_endpoint(
-                _fn, _method.lower() in _k04_pr._USER_WRITE_METHODS),
+                _fn, _method.lower() in _k04_pr._USER_WRITE_METHODS, _name),
             methods=[_method.upper()],
             name="k04_" + _name)
 

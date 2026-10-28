@@ -64,8 +64,10 @@ def test_list_projects_empty_without_token(client):
 
 def test_project_lifecycle_shapes(client):
     created = _create_project(client)
-    assert set(created) == {"project_id", "name", "created_at"}
+    assert set(created) == {
+        "project_id", "name", "folder_ref", "created_at"}
     assert created["name"] == "harbor"
+    assert created["folder_ref"] == "folder"
     pid = created["project_id"]
 
     resp = client.get("/api/v1/projects")

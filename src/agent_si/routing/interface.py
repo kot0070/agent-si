@@ -632,6 +632,11 @@ def apply_proposal(proposal_id: str,
     ...
 
 
+def put_chat_model(ctx: RoutingCtx, query, body) -> Tuple[int, Dict]:
+    """Frozen 3.6: persists one project's chat model pick."""
+    ...
+
+
 class ProvidersPageProps(TypedDict):
     project_id: str
 
@@ -670,6 +675,7 @@ HTTP_ROUTES = (
     ("GET", "/api/v1/budget"),
     ("GET", "/api/v1/kb/status"),
     ("POST", "/api/v1/kb/proposals/apply"),
+    ("PUT", "/api/v1/roles/chat-model"),
 )
 
 #: Frozen function name to owning lane implementation (dotted path).
@@ -706,4 +712,5 @@ REALIZATION_MAP = {
     "get_kb_status": "agent_si.backend.modelkb.get_kb_status",
     "get_models": "agent_si.backend.modelkb.get_models",
     "apply_proposal": "agent_si.backend.modelkb.apply_proposal",
+    "put_chat_model": "agent_si.backend.pools_routes.put_chat_model",
 }
