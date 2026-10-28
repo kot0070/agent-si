@@ -451,7 +451,7 @@ describe("ProvidersPage role pools wiring (page-level)", () => {
     expect(text).not.toContain("pool-opt-1");
   });
 
-  it("pinning a role PUTs project/role/mode/provider/model with the token in query", async () => {
+  it("pinning a role PUTs project/role/mode/provider/model header-only, never in the URL", async () => {
     const fetchMock = await connectOpenaiAndEnableStandard();
     const worker = roleCard("worker");
     fireEvent.click(within(worker).getByLabelText("Pinned model"));
@@ -465,8 +465,9 @@ describe("ProvidersPage role pools wiring (page-level)", () => {
     expect(fetchMock).toHaveBeenCalled();
     const { url, init } = lastFetchCall(fetchMock);
     expect(init.method).toBe("PUT");
-    expect(url).toContain("/api/v1/roles/pools");
-    expect(url).toContain("session_token=local-session");
+    expect(url).toBe("/api/v1/roles/pools");
+    expect(url).not.toContain("session_token");
+    expect(url).not.toContain("local-session");
     const body = JSON.parse(init.body as string) as Record<string, unknown>;
     expect(body).toMatchObject({
       project_id: "local",
@@ -477,7 +478,7 @@ describe("ProvidersPage role pools wiring (page-level)", () => {
     });
     expect(body["pool"]).toEqual([]);
     expect(JSON.stringify(body)).not.toContain("session_token");
-    expect(init.headers).toMatchObject({ "Content-Type": "application/json" });
+    expect(init.headers).toMatchObject({ "content-type": "application/json" });
     fetchMock.mockClear();
     fireEvent.click(within(worker).getByLabelText("Automatic"));
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());

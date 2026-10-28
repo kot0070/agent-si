@@ -70,7 +70,9 @@ def test_write_guard_put_role_pools(tmp_path):
     body = {"project_id": "p1", "role": "worker", "mode": "AUTO",
             "provider": None, "model": None, "pool": [], "strategy": "AUTO"}
     refused(*fn(ctx, {}, body))
-    status, payload = fn(ctx, TOKEN, body)
+    refused(*fn(ctx, TOKEN, body))
+    ctx.session_token = "ui-sess-1"
+    status, payload = fn(ctx, {}, body)
     assert status == 200, payload
     assert payload["profile"]["mode"] == "AUTO"
 
@@ -81,7 +83,9 @@ def test_write_guard_set_role(tmp_path):
     body = {"project_id": "p1", "role": "worker", "mode": "PINNED",
             "provider": "pa", "model": "pa/a-1"}
     refused(*fn(ctx, {}, body))
-    status, payload = fn(ctx, TOKEN, body)
+    refused(*fn(ctx, TOKEN, body))
+    ctx.session_token = "ui-sess-1"
+    status, payload = fn(ctx, {}, body)
     assert status == 200, payload
     assert ctx.role_table.get_profile("p1", "worker").model == "pa/a-1"
 
@@ -92,7 +96,9 @@ def test_write_guard_post_pick(tmp_path):
     fn = served_legacy("post", "/api/v1/routing/pick")
     body = {"project_id": "p1", "role": "worker", "key": "k1"}
     refused(*fn(ctx, {}, body))
-    status, payload = fn(ctx, TOKEN, body)
+    refused(*fn(ctx, TOKEN, body))
+    ctx.session_token = "ui-sess-1"
+    status, payload = fn(ctx, {}, body)
     assert status == 200, payload
     assert payload["profile"]["mode"] == "PINNED"
 
@@ -111,7 +117,9 @@ def test_write_guard_post_decide(tmp_path):
             "role": "worker", "mode": "PINNED",
             "candidates": [{"provider": "pa", "model": "pa/a-1"}]}
     refused(*fn(ctx, {}, body))
-    status, payload = fn(ctx, TOKEN, body)
+    refused(*fn(ctx, TOKEN, body))
+    ctx.session_token = "ui-sess-1"
+    status, payload = fn(ctx, {}, body)
     assert status == 200, payload
     assert payload["decision_id"], payload
     assert payload["status"] == "BLOCKED", payload
@@ -121,7 +129,9 @@ def test_write_guard_connect(tmp_path):
     ctx = make_ctx(tmp_path)
     fn = served_frozen("POST", "/api/v1/providers/connect")
     refused(*fn(ctx, {}, {}))
-    status, payload = fn(ctx, TOKEN, {})
+    refused(*fn(ctx, TOKEN, {}))
+    ctx.session_token = "ui-sess-1"
+    status, payload = fn(ctx, {}, {})
     assert status == 400, payload
     assert "preset_id" in payload["error"], payload
 
@@ -130,7 +140,9 @@ def test_write_guard_disconnect(tmp_path):
     ctx = make_ctx(tmp_path)
     fn = served_frozen("POST", "/api/v1/providers/{id}/disconnect")
     refused(*fn(ctx, {"id": "nope"}, {}))
-    status, payload = fn(ctx, dict(TOKEN, id="nope"), {})
+    refused(*fn(ctx, dict(TOKEN, id="nope"), {}))
+    ctx.session_token = "ui-sess-1"
+    status, payload = fn(ctx, {"id": "nope"}, {})
     assert status == 404, payload
 
 
@@ -139,7 +151,9 @@ def test_write_guard_kb_apply(tmp_path):
     fn = served_frozen("POST", "/api/v1/kb/proposals/apply")
     body = {"proposal_id": "kb-prop-404", "approved_by_user": True}
     refused(*fn(ctx, {}, body))
-    status, payload = fn(ctx, TOKEN, body)
+    refused(*fn(ctx, TOKEN, body))
+    ctx.session_token = "ui-sess-1"
+    status, payload = fn(ctx, {}, body)
     assert status == 404, payload
 
 

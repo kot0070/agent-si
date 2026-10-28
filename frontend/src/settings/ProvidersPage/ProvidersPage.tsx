@@ -86,7 +86,7 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
 
   async function handleRolePoolChange(role: string, value: RolePoolValue): Promise<void> {
     try {
-      await saveRolePool(project, role, value, poolOptions, sessionToken);
+      await saveRolePool(project, role, value, poolOptions);
       setPoolSaveMessage(`Saved ${role}.`);
     } catch {
       setPoolSaveMessage(`Save failed for ${role}.`);

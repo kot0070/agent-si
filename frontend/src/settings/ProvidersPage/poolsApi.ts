@@ -1,8 +1,10 @@
 // Save helper for per-role pool bindings.
-// PUTs the page's live RolePoolValue to /api/v1/roles/pools with the session
-// token as a query param (never in the JSON body: the backend raw-secret
-// guard refuses secret-looking body fields).
+// PUTs the page's live RolePoolValue to /api/v1/roles/pools with the UI
+// session token in the x-ui-session-token header via the shared client
+// (never in the URL query or the JSON body: the backend never accepts a
+// query token and refuses secret-looking body fields).
 
+import { requestVoid } from "../../api/errors";
 import { defaultPoolResolver } from "./RolePoolPicker";
 import type { PoolOption, RolePoolValue } from "./RolePoolPicker";
 
@@ -57,15 +59,10 @@ export async function saveRolePool(
   role: string,
   value: RolePoolValue,
   options: PoolOption[],
-  sessionToken: string,
 ): Promise<void> {
-  const url = `/api/v1/roles/pools?session_token=${encodeURIComponent(sessionToken)}`;
-  const response = await fetch(url, {
+  await requestVoid("/api/v1/roles/pools", {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(buildRolePoolBody(project_id, role, value, options)),
+    kind: "write",
+    body: buildRolePoolBody(project_id, role, value, options),
   });
-  if (!response.ok) {
-    throw new Error(`save role pool failed: ${response.status}`);
-  }
 }

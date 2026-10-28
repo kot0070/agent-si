@@ -577,7 +577,8 @@ def create_app(settings: Any = None,
                                    and _token == _actor):
                     return _K04JSONResponse(status_code=403,
                                             content={"error": "forbidden"})
-                _query["session_token"] = _token
+                _call_ctx = _k04_copy.copy(_k04_ctx)
+                _call_ctx.session_token = _token
             try:
                 _status, _payload = _fn(_call_ctx, _query, _body)
             except Exception as _exc:

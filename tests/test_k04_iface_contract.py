@@ -780,6 +780,10 @@ def test_c03_disconnect_entry(tmp_path):
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"removed": True,
                            "provider_id": "openai"}, resp.text
+    qry = client.post("/api/v1/providers/openai/disconnect"
+                      "?session_token=ui-test-c03", json={})
+    assert qry.status_code == 401, qry.text
+    assert "ui-test-c03" not in qry.text
 
 
 def test_c04_models_entry(tmp_path):
@@ -797,6 +801,13 @@ def test_c04_models_entry(tmp_path):
         "key_ref": {"secret_id": "s-c04", "provider_id": "openai"}},
         headers=headers)
     assert setup.status_code == 200, setup.text
+    qry = client.post("/api/v1/providers/connect"
+                      "?session_token=ui-test-c04",
+                      json={"preset_id": "openai", "model": "m-c04",
+                            "key_ref": {"secret_id": "s-c04",
+                                        "provider_id": "openai"}})
+    assert qry.status_code == 401, qry.text
+    assert "ui-test-c04" not in qry.text
     resp = client.get("/api/v1/providers/openai/models")
     assert resp.status_code == 200, resp.text
     payload = resp.json()
@@ -837,6 +848,10 @@ def test_c07_roles_pools_put_entry(tmp_path):
                       headers={"x-actor": "ui-test-c07",
                                "x-ui-session-token": "ui-test-c07"})
     assert resp.status_code == 200, resp.text
+    qry = client.put("/api/v1/roles/pools?session_token=ui-test-c07",
+                     json=body)
+    assert qry.status_code == 401, qry.text
+    assert "ui-test-c07" not in qry.text
     payload = resp.json()
     assert payload["profile"]["role"] == "worker", payload
     assert payload["profile"]["mode"] == "AUTO", payload
@@ -970,7 +985,13 @@ def test_w02_pools_handler_reads_role_table_and_store(tmp_path):
     body = {"project_id": "p1", "role": "worker", "mode": "pool",
             "pool": [{"provider": "pa", "model": "m1"}],
             "strategy": "FALLBACK_ORDER"}
-    status, payload = fn(ctx, {"session_token": "ui-test-w02"}, body)
+    refused_status, refused_payload = fn(
+        ctx, {"session_token": "ui-test-w02"}, body)
+    assert refused_status == 401, refused_payload
+    assert refused_payload.get("code") == "CONTEXT_MISSING", \
+        refused_payload
+    ctx.session_token = "ui-test-w02"
+    status, payload = fn(ctx, {}, body)
     assert status == 200, payload
     assert table.get_profile("p1", "worker").mode == "pool"
     binding = store.get_pool("p1", "worker")
@@ -1048,8 +1069,14 @@ def test_w05_served_decide_calls_frozen_select(tmp_path):
             "role": "worker", "task_class": "coding",
             "candidates": [{"provider": "pa", "model": "m1"}]}
     with _mock.patch.object(_RTR, "select", _spy):
-        status, payload = decide(ctx, {"session_token": "ui-test-w05"},
-                                 body)
+        refused_status, refused_payload = decide(
+            ctx, {"session_token": "ui-test-w05"}, body)
+    assert refused_status == 401, refused_payload
+    assert refused_payload.get("code") == "CONTEXT_MISSING", \
+        refused_payload
+    ctx.session_token = "ui-test-w05"
+    with _mock.patch.object(_RTR, "select", _spy):
+        status, payload = decide(ctx, {}, body)
     assert status == 200, payload
     assert calls, (
         "sec7 call-surface: served POST /api/v1/routing/decide did not "

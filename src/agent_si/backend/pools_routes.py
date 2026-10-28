@@ -29,8 +29,8 @@ class RoutingCtx:
     """Server-side context: store, profiles, KB port, health views, emitter.
 
     session_token carries the K06 UI session handle when the host binds
-    it server-side (reads ignore it); query-carried tokens take the
-    same guard path (see _served_token). The token never travels in
+    it server-side (reads ignore it); the URL query is never a token
+    channel (see _served_token). The token never travels in
     the JSON body: secret-looking body fields stay refused by the
     raw-secret guards.
     """
@@ -1208,20 +1208,17 @@ _D9_MERGED = False
 def _served_token(ctx, query, body):
     """Return the request's UI session token, or None when absent.
 
-    The K06 UI session handle travels with the request (query
-    ``session_token``) or rides the server-side ctx binding
+    The K06 UI session handle travels ONLY in the x-ui-session-token
+    header through the server-side ctx binding
     (``session_token``/``ui_session_token``); reads ignore it. The
-    JSON body is deliberately not a token channel: ``session_token``
-    is a secret-looking field and stays refused there by the
-    raw-secret guards (pass it as ``?session_token=...`` instead).
+    URL query is never a token channel: a ``?session_token=...``
+    value is refused (it is not read here, never used, never logged).
+    The JSON body is deliberately not a token channel either:
+    ``session_token`` is a secret-looking field and stays refused by
+    the raw-secret guards.
     """
+    _ = query
     _ = body
-    if isinstance(query, Mapping):
-        token = query.get("session_token")
-        if isinstance(token, list):
-            token = token[0] if token else None
-        if isinstance(token, str) and token.strip():
-            return token
     for attr in ("session_token", "ui_session_token"):
         token = getattr(ctx, attr, None)
         if isinstance(token, str) and token.strip():
