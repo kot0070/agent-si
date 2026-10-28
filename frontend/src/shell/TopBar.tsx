@@ -6,6 +6,7 @@
 import { useEffect, useState } from "react";
 import type { ReactElement } from "react";
 import type { ProjectRecord } from "../api/iface";
+import { ApiError, requestResponse } from "../api/errors";
 import type { TopBarProps } from "../app/iface";
 import { useApiClient, useCurrentProject } from "../app/ApiClientProvider";
 import {
@@ -37,6 +38,8 @@ export function TopBar(props: TopBarProps): ReactElement {
   const current = useCurrentProject();
   const [locale, setLocaleUi] = useState<SupportedLocale>(readStoredLocale);
   const [projects, setProjects] = useState<ProjectRecord[] | null>(null);
+  const [stopArmed, setStopArmed] = useState(false);
+  const [stopStatus, setStopStatus] = useState<number | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -71,8 +74,26 @@ export function TopBar(props: TopBarProps): ReactElement {
     );
   }
 
-  function stopAll(): void {
+  async function stopAll(): Promise<void> {
     window.dispatchEvent(new Event(TOPBAR_STOP_EVENT));
+    if (!stopArmed) {
+      setStopArmed(true);
+      return;
+    }
+    setStopArmed(false);
+    try {
+      const response = await requestResponse("/api/v1/stop-all", {
+        method: "POST",
+        kind: "write",
+      });
+      setStopStatus(response.status);
+    } catch (error) {
+      if (error instanceof ApiError) {
+        setStopStatus(error.status);
+      } else {
+        setStopStatus(0);
+      }
+    }
   }
 
   return (
@@ -106,9 +127,18 @@ export function TopBar(props: TopBarProps): ReactElement {
         </select>
       </label>
       <span data-testid="topbar-watcher">{t("shell.topbar.watcher")}</span>
-      <button type="button" data-testid="topbar-stop-all" onClick={stopAll}>
-        {t("shell.topbar.stop_all")}
+      <button
+        type="button"
+        data-testid="topbar-stop-all"
+        onClick={() => {
+          void stopAll();
+        }}
+      >
+        {stopArmed ? t("shell.closing.confirm") : t("shell.topbar.stop_all")}
       </button>
+      {stopStatus === null ? null : (
+        <span data-testid="stop-all-result">{stopStatus}</span>
+      )}
       <label>
         {t("shell.topbar.language")}
         <select
