@@ -19,8 +19,8 @@ from __future__ import annotations
 from typing import Any
 
 __all__ = [
-    "may_start_early",
     "early_start_allowed",
+    "may_start_early",
     "validate_multi_manager_settings",
 ]
 
@@ -97,7 +97,7 @@ def validate_multi_manager_settings(settings: Any) -> tuple[bool, str]:
             return (False, "POLICY_CONFLICT: model_pool_per_manager must be a dict")
         return (True, "ok")
     except Exception as exc:
-        return (False, "POLICY_CONFLICT: settings validation error %s" % type(exc).__name__)
+        return False, f"POLICY_CONFLICT: settings validation error {type(exc).__name__}"
 
 
 def early_start_allowed(ref: dict, overlap: Any = True, settings: Any = None) -> bool:
@@ -109,7 +109,7 @@ def early_start_allowed(ref: dict, overlap: Any = True, settings: Any = None) ->
     Never raises.
     """
     try:
-        source: Any = settings if settings is not None else (overlap if isinstance(overlap, dict) else None)
+        source: Any = settings if settings is not None else (overlap if isinstance(overlap, dict) else None)  # noqa: E501  # frozen-cite K02
         flag: Any = _setting(source, "overlap", True) if source is not None else overlap
         if flag is False:
             return False

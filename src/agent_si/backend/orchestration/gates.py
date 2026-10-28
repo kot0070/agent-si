@@ -9,12 +9,12 @@ close_part in this module).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from hashlib import sha256
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 GATE_VERDICTS = frozenset({"PASS", "FAIL", "BLOCKED"})
 AUDIT_RESULTS = frozenset({"PASS", "REWORK", "BLOCKED", "ESCALATE", "FAIL"})
@@ -175,7 +175,7 @@ class GateAuditLog:
 
 def _ref_field(ref: object, name: str) -> str | None:
     try:
-        if isinstance(ref, dict):
+        if isinstance(ref, dict):  # noqa: SIM108  # frozen-cite K02
             value = ref.get(name)
         else:
             value = getattr(ref, name)
@@ -334,4 +334,4 @@ def check_hierarchy_activation(chain: list[str]) -> None:
             "INVALID_HIERARCHY_CHAIN: chain must be a list of >=3 non-blank "
             "unique ids (director + manager + tool)"
         )
-    return None
+    return

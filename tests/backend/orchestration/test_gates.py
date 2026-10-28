@@ -1,14 +1,22 @@
-import os, sys; sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__),"..","..","..","src")))
 """ROW87/94: gate plus fresh audit per part; no close without PASS."""
+import os
+import sys
 
 import pytest
 
+sys.path.insert(
+    0,
+    os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "..", "src")
+    ),
+)
+
 from agent_si.backend.orchestration.gates import (
     AUDIT_RESULTS,
-    AuditRefused,
     GATE_NOT_PASSED,
     INVALID_HIERARCHY_CHAIN,
     MISSING_INTEGRATION_TASK,
+    AuditRefused,
     GateAuditLog,
     GateRefused,
     audit_scope_id_of,
@@ -19,7 +27,9 @@ from agent_si.backend.orchestration.gates import (
 )
 
 
-def close_via_log(log, package_id, contract_hash, part_id, gate_v="PASS", audit_v="PASS"):
+def close_via_log(
+    log, package_id, contract_hash, part_id, gate_v="PASS", audit_v="PASS"
+):
     # ROW94 pattern: serve the pair via GateAuditLog, build the frozen
     # PartRef dict, close via gates.close_part.
     gate = log.serve_gate(part_id, gate_v)

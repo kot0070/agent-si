@@ -1,15 +1,22 @@
-import os, sys; sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__),"..","..","..","src")))
 """ROW93/ROW100 frozen sect. 3: split N disjoint parts, bounded per-part context."""
-
+import os
+import sys
 from hashlib import sha256
 from math import ceil
 
 import pytest
 
+sys.path.insert(
+    0,
+    os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "..", "src")
+    ),
+)
+
 from agent_si.backend.orchestration import split as split_mod
 from agent_si.backend.orchestration.split import (
-    PartRef,
     SCOPE_OVERLAP,
+    PartRef,
     split_package,
     validate_disjoint,
 )

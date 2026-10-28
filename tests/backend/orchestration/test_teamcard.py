@@ -189,7 +189,8 @@ def test_register_verbatim_statuses():
     assert tc.register_verbatim("e1", "alpha", baseline)["status"] == "PRESERVED"
     assert tc.register_verbatim("e1", "beta", baseline)["status"] == "CHANGED"
     assert tc.register_verbatim("e9", "alpha", baseline)["status"] == "MISSING"
-    assert tc.register_verbatim("e1", "NOT alpha", baseline, negations)["status"] == "CONTRADICTED"
+    out = tc.register_verbatim("e1", "NOT alpha", baseline, negations)
+    assert out["status"] == "CONTRADICTED"
 
 
 def test_records_use_compact_english():
@@ -203,6 +204,8 @@ def test_records_use_compact_english():
 
 
 def test_secret_ref_never_stores_raw_secret():
-    card = tc.build_team_card("acme", {}, {"units": 5}, {}, budget_secret="RAW-SECRET-XYZ")
+    card = tc.build_team_card(
+        "acme", {}, {"units": 5}, {}, budget_secret="RAW-SECRET-XYZ"
+    )
     assert "RAW-SECRET-XYZ" not in repr(card.budget_left)
     assert card.budget_left["secret_ref"]["secret_ref"] == "budget-store"

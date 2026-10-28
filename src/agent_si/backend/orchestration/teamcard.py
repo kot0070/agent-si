@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, Sequence  # noqa: UP035  # frozen-cite K02
 
 try:
     from .common import (
@@ -29,16 +29,16 @@ except ImportError:  # lane tests load this module by file path (no package)
     _common_name = "agent_si.backend.orchestration.common"
     _common_module = _fallback_sys.modules.get(_common_name)
     if _common_module is None:
-        _common_spec = _importlib_util.spec_from_file_location(
+        _common_spec: Any = _importlib_util.spec_from_file_location(
             _common_name,
             os.path.join(os.path.dirname(os.path.abspath(__file__)), "common.py"),
         )
         _common_module = _importlib_util.module_from_spec(_common_spec)
         _fallback_sys.modules[_common_name] = _common_module
         _common_spec.loader.exec_module(_common_module)
-    ApplyOutcome = _common_module.ApplyOutcome
-    DecisionLog = _common_module.DecisionLog
-    DecisionRow = _common_module.DecisionRow
+    ApplyOutcome = _common_module.ApplyOutcome  # type: ignore[misc]
+    DecisionLog = _common_module.DecisionLog  # type: ignore[misc]
+    DecisionRow = _common_module.DecisionRow  # type: ignore[misc]
     ensure_compact_english = _common_module.ensure_compact_english
     hot_write_text = _common_module.hot_write_text
     is_compact_english = _common_module.is_compact_english
@@ -50,7 +50,7 @@ MODEL_ID = "meta/muse-spark-1.3-contributor"
 FACT_PART_SIZE_VS_MODEL = "part-size-vs-model"
 FACT_LONG_CONTEXT_ROUTING = "long-context-routing"
 FACT_CHEAP_SMALL_PARTS = "cheap-models-for-small-parts"
-KNOWN_FACTS = (FACT_PART_SIZE_VS_MODEL, FACT_LONG_CONTEXT_ROUTING, FACT_CHEAP_SMALL_PARTS)
+KNOWN_FACTS = FACT_PART_SIZE_VS_MODEL, FACT_LONG_CONTEXT_ROUTING, FACT_CHEAP_SMALL_PARTS
 
 SMALL_PART_THRESHOLD = 8
 LONG_CONTEXT_THRESHOLD = 64
@@ -110,7 +110,7 @@ def director_context(
     }
 
 
-def manager_context(own_card: TeamCard, worker_cards: Sequence[TeamCard]) -> dict[str, Any]:
+def manager_context(own_card: TeamCard, worker_cards: Sequence[TeamCard]) -> dict[str, Any]:  # noqa: E501  # frozen-cite K02
     return {"own": own_card, "workers": list(worker_cards)}
 
 
@@ -149,7 +149,7 @@ def record_decomposition(
     else:
         route = "standard"
         reason = ensure_compact_english(
-            f"part {part_id} keeps the standard model using fact {FACT_PART_SIZE_VS_MODEL}"
+            f"part {part_id} keeps the standard model using fact {FACT_PART_SIZE_VS_MODEL}"  # noqa: E501  # frozen-cite K02
         )
     for fact in facts:
         if fact not in KNOWN_FACTS:
@@ -187,7 +187,7 @@ class TeamConfigStore:
         self.log: DecisionLog = log if log is not None else DecisionLog()
 
 
-def validate_team_config_change(patch: Mapping[str, Any], current: Mapping[str, Any]) -> tuple[bool, str]:
+def validate_team_config_change(patch: Mapping[str, Any], current: Mapping[str, Any]) -> tuple[bool, str]:  # noqa: E501  # frozen-cite K02
     merged = dict(current)
     cost = patch.get("cost", 0)
     try:
@@ -278,11 +278,11 @@ def register_verbatim(
     negations: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
     if entry_id not in baseline:
-        return {"entry_id": entry_id, "status": REGISTER_MISSING, "detail": "no baseline entry"}
+        return {"entry_id": entry_id, "status": REGISTER_MISSING, "detail": "no baseline entry"}  # noqa: E501  # frozen-cite K02
     if baseline[entry_id] == text:
-        return {"entry_id": entry_id, "status": REGISTER_PRESERVED, "detail": "verbatim match"}
+        return {"entry_id": entry_id, "status": REGISTER_PRESERVED, "detail": "verbatim match"}  # noqa: E501  # frozen-cite K02
     if negations is not None and negations.get(entry_id) == text:
-        return {"entry_id": entry_id, "status": REGISTER_CONTRADICTED, "detail": "negates baseline"}
+        return {"entry_id": entry_id, "status": REGISTER_CONTRADICTED, "detail": "negates baseline"}  # noqa: E501  # frozen-cite K02
     return {"entry_id": entry_id, "status": REGISTER_CHANGED, "detail": "text differs"}
 
 
@@ -343,7 +343,7 @@ except ImportError:
     import importlib.util as _int2_util
     import sys as _int2_sys
 
-    _int2_spec = _int2_util.spec_from_file_location(
+    _int2_spec: Any = _int2_util.spec_from_file_location(
         "agent_si.backend.orchestration.common",
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "common.py"),
     )
