@@ -243,6 +243,18 @@ def create_app(settings: Any = None,
         )
     app.include_router(_k08_automation_routes.router)
 
+    # K08R7 entry lane (row R-323 plus Q3; lane m_entry; author Sable):
+    # sibling-router mount only; no other line in this file changes.
+    import agent_si.backend.watcher_routes as _k08_watcher_routes
+
+    if _k08_auth is not None:
+        _k08_watcher_routes.configure(_k08_auth, _k08_rate, _k08_factory)
+    else:
+        _k08_watcher_routes.configure(
+            lambda token: token == app_token, _k08_rate, _k08_factory
+        )
+    app.include_router(_k08_watcher_routes.router)
+
     _K08_WATCHER_STATUS_BY_CODE = {
         "SESSION_TOKEN_MISSING": 401,
         "SESSION_TOKEN_INVALID": 403,

@@ -10,6 +10,9 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+import importlib
+import json
+import os
 import sys
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
@@ -59,6 +62,46 @@ CHECKPOINT_SOURCE = "agent_si.context_keeper.checkpoints"
 
 #: Guard identity used for workspace writes.
 GUARD_AGENT_ID = "context-keeper"
+
+#: Checkpoint rows file name inside a file-backed store dir.
+_CHECKPOINTS_FILE = "checkpoints.json"
+
+
+def _contract():
+    """Return the frozen contract module, importing it late when needed."""
+    try:
+        return sys.modules[_CK_MODULE]
+    except KeyError:
+        return importlib.import_module(_CK_MODULE)
+
+
+def _checkpoint_to_dict(record) -> dict:
+    """Serialize a frozen checkpoint row to JSON-safe primitives."""
+    return {
+        "checkpoint_id": record.checkpoint_id,
+        "project_id": record.project_id,
+        "task_id": record.task_id,
+        "run_id": record.run_id,
+        "contract_hash": record.contract_hash,
+        "context_refs": list(record.context_refs),
+        "created_at": record.created_at,
+        "hash": record.hash,
+    }
+
+
+def _checkpoint_from_dict(payload):
+    """Rebuild the frozen checkpoint row (same class object, never a copy)."""
+    contract = _contract()
+    return contract.CheckpointRecord(
+        checkpoint_id=payload["checkpoint_id"],
+        project_id=payload["project_id"],
+        task_id=payload["task_id"],
+        run_id=payload["run_id"],
+        contract_hash=payload["contract_hash"],
+        context_refs=tuple(payload["context_refs"]),
+        created_at=payload["created_at"],
+        hash=payload["hash"],
+    )
 
 
 def _utc_now_iso() -> str:
@@ -117,12 +160,57 @@ class Checkpoints:
         journal_append: Optional[Callable[..., object]] = None,
         guard_check: Optional[Callable[..., object]] = None,
         workspace_root: Optional[str] = None,
+        store_dir=None,
     ) -> None:
         self._journal_append = journal_append
         self._guard_check = guard_check
         self._workspace_root = workspace_root
         self._by_id: Dict[str, ck.CheckpointRecord] = {}
         self._order: List[str] = []
+        self._store_dir = store_dir
+        if store_dir is not None:
+            os.makedirs(store_dir, exist_ok=True)
+            self._load()
+
+    def _path(self, name):
+        return os.path.join(str(self._store_dir), name)
+
+    def _write_json(self, name, payload):
+        if self._store_dir is None:
+            return
+        tmp = self._path(name + ".tmp")
+        with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
+            json.dump(payload, fh, indent=2)
+            fh.write("\n")
+        os.replace(tmp, self._path(name))
+
+    def _load(self):
+        try:
+            with open(
+                self._path(_CHECKPOINTS_FILE), encoding="utf-8"
+            ) as fh:
+                rows = json.load(fh)
+        except FileNotFoundError:
+            return
+        for payload in rows:
+            record = _checkpoint_from_dict(payload)
+            checkpoint_id = record.checkpoint_id
+            if checkpoint_id not in self._by_id:
+                self._by_id[checkpoint_id] = record
+                self._order.append(checkpoint_id)
+
+    def _sync(self):
+        if self._store_dir is not None:
+            self._load()
+
+    def _persist(self):
+        self._write_json(
+            _CHECKPOINTS_FILE,
+            [
+                _checkpoint_to_dict(self._by_id[checkpoint_id])
+                for checkpoint_id in self._order
+            ],
+        )
 
     def write_checkpoint(
         self,
@@ -165,6 +253,7 @@ class Checkpoints:
         )
         self._by_id[checkpoint_id] = record
         self._order.append(checkpoint_id)
+        self._persist()
         if self._journal_append is not None:
             self._journal_append(
                 project_id,
@@ -179,12 +268,17 @@ class Checkpoints:
         self, checkpoint_id: str
     ) -> Optional[ck.CheckpointRecord]:
         """Return the stored checkpoint row for checkpoint_id, else None."""
-        return self._by_id.get(checkpoint_id)
+        row = self._by_id.get(checkpoint_id)
+        if row is None and self._store_dir is not None:
+            self._sync()
+            row = self._by_id.get(checkpoint_id)
+        return row
 
     def latest_for_project(
         self, project_id: str
     ) -> Optional[ck.CheckpointRecord]:
         """Return the last checkpoint written for project_id, else None."""
+        self._sync()
         for checkpoint_id in reversed(self._order):
             record = self._by_id[checkpoint_id]
             if record.project_id == project_id:

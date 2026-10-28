@@ -10,11 +10,13 @@ CRITICAL incident stays unresolved after recovery. Standard library only.
 from __future__ import annotations
 
 import datetime
+import os
 import sys
 from typing import Callable, Optional, TYPE_CHECKING
 
 from agent_si.context_keeper import checkpoints as keeper_checkpoints
 from agent_si.context_keeper import project_state as keeper_project_state
+from agent_si.context_keeper import register as keeper_register
 
 if TYPE_CHECKING:
     from agent_si.context_keeper import interface as ck
@@ -72,11 +74,26 @@ class Recovery:
 
     def __init__(
         self,
-        register,
+        register=None,
         checkpoints=None,
         journal_append: Optional[Callable[..., object]] = None,
         request_stop: Optional[Callable[..., object]] = None,
+        store_dir=None,
     ) -> None:
+        if isinstance(checkpoints, (str, os.PathLike)):
+            if store_dir is None:
+                store_dir = checkpoints
+            checkpoints = None
+        if isinstance(register, (str, os.PathLike)):
+            if store_dir is None:
+                store_dir = register
+            register = None
+        if store_dir is None and checkpoints is not None:
+            store_dir = getattr(checkpoints, "_store_dir", None)
+        if register is None:
+            register = keeper_register.Register(store_dir=store_dir)
+        if checkpoints is None and store_dir is not None:
+            checkpoints = keeper_checkpoints.Checkpoints(store_dir=store_dir)
         self._register = register
         self._checkpoints = checkpoints
         self._journal_append = journal_append
