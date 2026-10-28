@@ -109,6 +109,22 @@ def sse_bytes(payload: Mapping[str, Any]) -> bytes:
     ).encode("utf-8")
 
 
+def _chat_error_event(stream_id: str, err: Exception) -> dict[str, Any]:
+    """Render one terminal error SSE payload for a mid-stream failure."""
+    code = getattr(err, "code", None) or type(err).__name__
+    if isinstance(err, KeyError) and err.args \
+            and isinstance(err.args[0], str):
+        message = err.args[0]
+    else:
+        message = str(err) or type(err).__name__
+    return {
+        "type": "error",
+        "stream_id": stream_id,
+        "code": str(code),
+        "message": str(message),
+    }
+
+
 def _load_manager_run_task_streamed() -> Any | None:
     """Lazy M-MANAGER entry; None when the manager module is absent."""
     try:
@@ -280,17 +296,10 @@ class ManagerSdkBridge:
             run_kwargs = {}
         try:
             run_events = run_task_streamed(request, **run_kwargs)
-        except KeyError as err:
-            self._finish(stream_id)
-            raise ChatStreamAbsent(
-                f"no live chat engine: {err}") from err
         except Exception as err:
             self._finish(stream_id)
-            if getattr(err, "code", "") == "MANAGER_PROVIDER_UNBOUND":
-                raise ChatStreamAbsent(
-                    f"no live chat engine: {err}") from err
-            raise ChatStreamFailed(
-                f"manager run failed: {err}") from err
+            yield sse_bytes(_chat_error_event(stream_id, err))
+            return
         try:
             for event in run_events:
                 if state["cancelled"]:
@@ -299,16 +308,10 @@ class ManagerSdkBridge:
                     return
                 yield sse_bytes(_manager_event_payload(
                     stream_id, run_id, event))
-        except (ChatStreamAbsent, ChatStreamFailed):
-            raise
-        except KeyError as err:
-            raise ChatStreamAbsent(
-                f"no live chat engine: {err}") from err
         except Exception as err:
-            if getattr(err, "code", "") == "MANAGER_PROVIDER_UNBOUND":
-                raise ChatStreamAbsent(
-                    f"no live chat engine: {err}") from err
-            raise
+            self._finish(stream_id)
+            yield sse_bytes(_chat_error_event(stream_id, err))
+            return
         finally:
             self._finish(stream_id)
         yield sse_bytes({**_manager_event_payload(stream_id, run_id, event),
@@ -377,8 +380,8 @@ class ManagerSdkBridge:
             result = interface.run_turn(turn)
         except Exception as err:
             self._finish(stream_id)
-            raise ChatStreamFailed(
-                f"manager run failed: {err}") from err
+            yield sse_bytes(_chat_error_event(stream_id, err))
+            return
         if state["cancelled"]:
             self._finish(stream_id)
             yield sse_bytes({"type": "cancelled", "stream_id": stream_id})
