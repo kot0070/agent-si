@@ -547,10 +547,20 @@ def test_mock_usage_probe_transport():
 # Adapters import with stdlib only: no third-party SDK import required.
 
 def test_no_third_party_sdk_imported():
-    for name in ("litellm", "openai", "anthropic", "google", "mistralai",
-                 "groq", "httpx", "requests", "aiohttp"):
-        assert name not in sys.modules, name
-    assert LiteLLMBackedAdapter.openai_compat is False
+    import subprocess
+
+    child = (
+        "import sys\n"
+        "sys.path.insert(0, %r)\n"
+        "for name in (\"litellm\", \"openai\", \"anthropic\", \"google\", \"mistralai\",\n"
+        "             \"groq\", \"httpx\", \"requests\", \"aiohttp\"):\n"
+        "    assert name not in sys.modules, name\n"
+        "from agent_si.providers.adapters.litellm_backed import LiteLLMBackedAdapter\n"
+        "assert LiteLLMBackedAdapter.openai_compat is False\n"
+    ) % (_SRC,)
+    proc = subprocess.run([sys.executable, "-c", child],
+                          capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
 
 
 # K04 W04 A1W04-pins (additive only): default usage-probe port configured

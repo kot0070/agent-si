@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, Sequence  # noqa: UP035  # frozen-cite K02
 
 try:
     from .common import (
@@ -30,16 +30,16 @@ except ImportError:  # lane tests load this module by file path (no package)
     _common_name = "agent_si.backend.orchestration.common"
     _common_module = _fallback_sys.modules.get(_common_name)
     if _common_module is None:
-        _common_spec = _importlib_util.spec_from_file_location(
+        _common_spec: Any = _importlib_util.spec_from_file_location(
             _common_name,
             os.path.join(os.path.dirname(os.path.abspath(__file__)), "common.py"),
         )
         _common_module = _importlib_util.module_from_spec(_common_spec)
         _fallback_sys.modules[_common_name] = _common_module
         _common_spec.loader.exec_module(_common_module)
-    ApplyOutcome = _common_module.ApplyOutcome
-    DecisionLog = _common_module.DecisionLog
-    DecisionRow = _common_module.DecisionRow
+    ApplyOutcome = _common_module.ApplyOutcome  # type: ignore[misc]
+    DecisionLog = _common_module.DecisionLog  # type: ignore[misc]
+    DecisionRow = _common_module.DecisionRow  # type: ignore[misc]
     hot_write_text = _common_module.hot_write_text
     surface_rejection = _common_module.surface_rejection
     utc_now = _common_module.utc_now
@@ -60,7 +60,7 @@ class LedgerRow:
     def __post_init__(self) -> None:
         if not isinstance(self.agents, int) or isinstance(self.agents, bool):
             raise ValueError("agents must be an int")
-        if not isinstance(self.peak_concurrency, int) or isinstance(self.peak_concurrency, bool):
+        if not isinstance(p := self.peak_concurrency, int) or isinstance(p, bool):
             raise ValueError("peak_concurrency must be an int")
         if not isinstance(self.wall_time_s, (int, float)) or isinstance(
             self.wall_time_s, bool

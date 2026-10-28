@@ -9,7 +9,7 @@ a limit is readable only after an accepted change set it.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from agent_si.backend.orchestration.offload import DecisionRow
@@ -81,7 +81,7 @@ def _reset_state() -> None:
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _is_compact_english(text: object) -> bool:
@@ -141,7 +141,7 @@ def apply_steplimit_config_change(change: dict) -> ApplyOutcome:
         return _refuse(
             AUDIT_INDEPENDENCE_REJECTED, "independent_audit must stay true"
         )
-    if "auditor" in change and "worker" in change and change["auditor"] == change["worker"]:
+    if "auditor" in change and "worker" in change and change["auditor"] == change["worker"]:  # noqa: E501  # frozen-cite K02
         return _refuse(
             AUDIT_INDEPENDENCE_REJECTED, "auditor must differ from worker"
         )

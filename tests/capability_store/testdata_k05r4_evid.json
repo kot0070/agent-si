@@ -1,0 +1,15 @@
+{
+  "_label": "FAKE-OF: K05R4 labelled measurement data - test data only, never production evidence",
+  "model_id": "FAKE-OF: fixture model id",
+  "task_class": "FAKE-OF: fixture task class",
+  "score": 0.72,
+  "score_type": "pass_rate",
+  "sample_count": 40,
+  "confidence": 0.75,
+  "benchmark_version": "FAKE-OF: test-bench-k05r4",
+  "measured_at": "2026-10-27T06:30:00+00:00",
+  "runtime": "FAKE-OF: test runtime k05r4",
+  "source": "FAKE-OF: test source k05r4",
+  "runtime_version": "FAKE-OF: test runtime version k05r4",
+  "environment_fingerprint": "FAKE-OF: test environment k05r4"
+}

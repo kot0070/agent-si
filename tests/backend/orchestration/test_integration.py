@@ -66,7 +66,7 @@ _uid = 0
 def fresh_id(prefix):
     global _uid
     _uid += 1
-    return "%s-%04d" % (prefix, _uid)
+    return f"{prefix}-{_uid:04d}"
 
 
 @pytest.fixture(autouse=True)
@@ -136,13 +136,13 @@ _LANE_BY_NAME = {
 def _joint_cases():
     for module, symbols in V2_EXPORTS.items():
         for symbol in symbols:
-            yield pytest.param(module, symbol, id="%s.%s" % (module, symbol))
+            yield pytest.param(module, symbol, id=f"{module}.{symbol}")
 
 
 @pytest.mark.parametrize("module,symbol", list(_joint_cases()))
 def test_joint_exports_v2_present(module, symbol):
     assert hasattr(_LANE_BY_NAME[module], symbol), (
-        "%s missing v2 symbol: %s" % (module, symbol)
+        f"{module} missing v2 symbol: {symbol}"
     )
 
 
@@ -167,7 +167,7 @@ def test_joint_exports_c19_extras_present():
     assert gates_mod.GateAuditLog is not None
     for name in ("serve_gate", "serve_audit", "has_fresh_audit"):
         assert hasattr(gates_mod.GateAuditLog, name), (
-            "GateAuditLog missing C19 member: %s" % name
+            f"GateAuditLog missing C19 member: {name}"
         )
     for name in (
         "route_task",
@@ -179,7 +179,7 @@ def test_joint_exports_c19_extras_present():
         "CycleError",
         "DependencyError",
     ):
-        assert hasattr(graph_mod, name), "graph missing C19 symbol: %s" % name
+        assert hasattr(graph_mod, name), f"graph missing C19 symbol: {name}"
 
 
 def test_joint_exports_c20_adopted_present():
@@ -224,8 +224,7 @@ def test_joint_exports_c20_adopted_present():
     for module, names in cases.items():
         for name in names:
             assert hasattr(module, name), (
-                "C20 adopted symbol missing: %s.%s"
-                % (module.__name__, name)
+                f"C20 adopted symbol missing: {module.__name__}.{name}"
             )
 
 
@@ -242,7 +241,7 @@ def test_common_kernel_seven_symbols():
         "utc_now",
         "hot_write_text",
     ):
-        assert hasattr(common_mod, name), "common missing: %s" % name
+        assert hasattr(common_mod, name), f"common missing: {name}"
 
 
 def test_common_decision_row_fields_exact():
@@ -390,8 +389,8 @@ def test_v2_no_early_start_without_resolved_pass():
     ref = {
         "package_id": package_id,
         "contract_hash": "ch",
-        "gate_verdict_ref": "gate-%s" % package_id,
-        "audit_verdict_ref": "audit-%s" % package_id,
+        "gate_verdict_ref": f"gate-{package_id}",
+        "audit_verdict_ref": f"audit-{package_id}",
     }
     assert overlap_mod.may_start_early(ref) is False
     overlap_mod._record_gate_verdict(ref["gate_verdict_ref"], "PASS")
@@ -406,7 +405,7 @@ def test_v3_manifest_mismatch_rejects_part():
     # Frozen v2 shape: minimal manifest sealed with frozen_hash
     # (build_manifest serves the extra drift shape, covered in the joint flow).
     base = {
-        "manifest_id": "m-v3-%s" % fresh_id("x"),
+        "manifest_id": f"m-v3-{fresh_id('x')}",
         "version": 1,
         "hash_algorithm": "sha256",
     }
@@ -481,7 +480,7 @@ def test_v5_planner_router_never_name_provider_or_model():
             "goal": "second slice",
             "task_class": "verify",
             "risk": "MEDIUM",
-            "dependency_ids": ["%s:sub-000" % fresh_id("pkg-v5x")],
+            "dependency_ids": [f"{fresh_id('pkg-v5x')}:sub-000"],
         },
     ]
     package_id = fresh_id("pkg-v5")
@@ -528,7 +527,7 @@ def test_v6_anchor_resolves_seven_kernel_symbols():
         common_mod.utc_now,
         common_mod.hot_write_text,
     )
-    assert teamcard_mod._INT2_KERNEL == expected
+    assert expected == teamcard_mod._INT2_KERNEL
 
 
 def test_v7_no_raw_secrets_in_outputs(tmp_path):
@@ -583,7 +582,7 @@ def test_joint_linkcheck_flow_clean_and_conflict():
 
 def test_joint_split_parts_manifest_earlystart_close():
     package_id = fresh_id("pkg-flow")
-    refs = ["artifact://%s/ctx-%d" % (package_id, idx) for idx in range(4)]
+    refs = [f"artifact://{package_id}/ctx-{idx}" for idx in range(4)]
     parts = split_mod.split_package(package_id, "joint flow goal", refs, 2)
     assert len(parts) == 2
     split_mod.validate_disjoint(parts)
@@ -608,7 +607,7 @@ def test_joint_split_parts_manifest_earlystart_close():
         }
         for part in running
     ]
-    manifest = manifest_mod.build_manifest("m-%s" % package_id, 1, draft_refs)
+    manifest = manifest_mod.build_manifest(f"m-{package_id}", 1, draft_refs)
     for ref in manifest["parts"]:
         ref["contract_hash"] = manifest["hash"]
     assert manifest_mod.check_manifest(manifest) is True
@@ -629,8 +628,8 @@ def test_joint_split_parts_manifest_earlystart_close():
             }
         ) is True
     log = gates_mod.GateAuditLog()
-    for index, part in enumerate(running):
-        part_id = "%s:part-%03d" % (package_id, index)
+    for index, _part in enumerate(running):
+        part_id = f"{package_id}:part-{index:03d}"
         gate, audit = _serve_pair(log, part_id)
         verdict = gates_mod.close_part(_gate_refs(gate, audit, package_id))
         assert verdict["gate"] == "PASS" and verdict["audit"] == "PASS"
@@ -823,11 +822,11 @@ def test_c12_persist_load_ledger_roundtrip(tmp_path):
 
 
 def test_c13_both_bounded_delta_intakes():
-    scope = ["s-%02d" % idx for idx in range(16)]
+    scope = [f"s-{idx:02d}" for idx in range(16)]
     pkg = delta_mod.intake_bounded_delta(scope, False)
     assert pkg["scope"] == scope and pkg["keep"] == scope and pkg["patch"] == []
     with pytest.raises(delta_mod.DELTA_OVER_BOUND):
-        delta_mod.intake_bounded_delta(["s-%02d" % idx for idx in range(17)], False)
+        delta_mod.intake_bounded_delta([f"s-{idx:02d}" for idx in range(17)], False)
     taken = []
     accepted = ledger_mod.intake_bounded_delta(
         taken, {"delta_id": "d1", "items": ["a", "b"]}, 3
@@ -882,7 +881,11 @@ def test_c15_delta_apply_config_change_dict_shape():
         config, log, "manifest", "raise limit", "need capacity", "director",
         {"cost": 10.0},
     )
-    assert out == {"applied": True, "reason": "applied", "decision_ref": "manifest-0001"}
+    assert out == {
+        "applied": True,
+        "reason": "applied",
+        "decision_ref": "manifest-0001",
+    }
     assert len(log) == 1
     assert set(log[0].keys()) == {
         "decision_id",
@@ -986,7 +989,7 @@ def test_section4_agents_live_served_from_register():
         parts_mod.PartRow(
             agent="agent-live",
             scope=scope,
-            deliverable="artifact://pkg/%s" % scope,
+            deliverable=f"artifact://pkg/{scope}",
         )
     )
     rows = parts_mod.list_parts(None)
@@ -1067,12 +1070,12 @@ def _int3f_seed_parts(prefix):
         parts_mod.PartRow(
             agent="int3f-agent-1",
             scope=prefix + "-0001",
-            deliverable="artifact://int3f/%s-0001" % prefix,
+            deliverable=f"artifact://int3f/{prefix}-0001",
         ),
         parts_mod.PartRow(
             agent="int3f-agent-2",
             scope=prefix + "-0002",
-            deliverable="artifact://int3f/%s-0002" % prefix,
+            deliverable=f"artifact://int3f/{prefix}-0002",
             status="RUNNING",
         ),
     ]

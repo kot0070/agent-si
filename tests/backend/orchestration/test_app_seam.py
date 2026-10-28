@@ -1,7 +1,15 @@
-import os, sys; sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__),"..","..","..","src")))
 """K02 APP-SEAM: FastAPI routes served from real orchestration state + router guard."""
+import os
+import sys
 
 from fastapi.testclient import TestClient
+
+sys.path.insert(
+    0,
+    os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "..", "src")
+    ),
+)
 
 from agent_si.backend.app import create_app
 from agent_si.backend.orchestration.parts import PartRow, register_part
@@ -19,9 +27,9 @@ def make_client(**kwargs):
 def seed_parts(prefix="seam-live"):
     rows = [
         PartRow(agent="seam-agent-1", scope=prefix + "-0001",
-                deliverable="artifact://seam/%s-0001" % prefix),
+                deliverable=f"artifact://seam/{prefix}-0001"),
         PartRow(agent="seam-agent-2", scope=prefix + "-0002",
-                deliverable="artifact://seam/%s-0002" % prefix,
+                deliverable=f"artifact://seam/{prefix}-0002",
                 status="RUNNING"),
     ]
     for row in rows:
@@ -37,7 +45,7 @@ def seed_ledger(app, project_id="proj-seam"):
 
 
 def test_agents_live_serves_registered_rows():
-    app, client = make_client()
+    _, client = make_client()
     rows = seed_parts()
     resp = client.get("/api/v1/agents/live")
     assert resp.status_code == 200

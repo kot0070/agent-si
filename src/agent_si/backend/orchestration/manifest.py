@@ -17,17 +17,17 @@ import json as _json
 import os as _os
 
 __all__ = [
-    "frozen_hash",
-    "check_part_manifest",
     "ManifestRec",
-    "canonical_manifest_bytes",
-    "manifest_hash",
     "build_manifest",
-    "verify_manifest_hash",
-    "validate_part_ref",
+    "canonical_manifest_bytes",
     "check_manifest",
-    "save_manifest",
+    "check_part_manifest",
+    "frozen_hash",
     "load_manifest",
+    "manifest_hash",
+    "save_manifest",
+    "validate_part_ref",
+    "verify_manifest_hash",
 ]
 
 
@@ -101,7 +101,7 @@ class ManifestRec:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "ManifestRec":
+    def from_dict(cls, data: dict) -> ManifestRec:
         if not isinstance(data, dict):
             raise ValueError("POLICY_CONFLICT: manifest must be a dict")
         return cls(
@@ -206,7 +206,7 @@ def check_manifest(manifest: dict, refs: list | None = None) -> bool:
 
 def _hot_write_text(path: str, text: str) -> None:
     directory = _os.path.dirname(_os.path.abspath(path))
-    tmp_path = _os.path.join(directory, ".tmp-manifest-%d" % _os.getpid())
+    tmp_path = _os.path.join(directory, f".tmp-manifest-{_os.getpid()}")
     with open(tmp_path, "w", encoding="utf-8", newline="\n") as handle:
         handle.write(text)
     _os.replace(tmp_path, path)
@@ -223,13 +223,13 @@ def save_manifest(manifest: dict, path: str) -> str:
 
 
 def load_manifest(path: str) -> dict:
-    with open(str(path), "r", encoding="utf-8", newline=None) as handle:
+    with open(str(path), encoding="utf-8", newline=None) as handle:
         data = _json.load(handle)
     if not isinstance(data, dict):
         raise ValueError("POLICY_CONFLICT: manifest file must hold a dict")
     for key in ("manifest_id", "version", "parts", "hash", "hash_algorithm"):
         if key not in data:
-            raise ValueError("POLICY_CONFLICT: manifest missing key %s" % key)
+            raise ValueError(f"POLICY_CONFLICT: manifest missing key {key}")
     if not verify_manifest_hash(data):
         raise ValueError("POLICY_CONFLICT: manifest hash mismatch, load refused")
     return data

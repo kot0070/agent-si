@@ -1,0 +1,30 @@
+# K02 shared ruff config — owned by M-CONF (coder), read-only for M-FIX.
+# Target matches the project venv Python (observed 3.13.15): py313.
+target-version = "py313"
+line-length = 88
+
+[lint]
+# E/F: baseline hygiene. UP: py313 modernisation. B: likely bugs.
+# I: stable import order. SIM/C4/RET/RUF: mechanical cleanups M-FIX
+# can apply without behaviour change.
+# NOT selected, with reason:
+# - TRY: K02 refusal/error exception types are frozen contracts
+#   (contract tests assert them); TRY004 would demand TypeError swaps.
+# - BLE: lane handlers contractually return error dicts from broad
+#   `except Exception`; narrowing would change behaviour.
+# - PIE/PYI: interface.py carries intentional `...` stub markers
+#   referenced by the frozen contract test.
+# - PLR: structural refactor demands (PLR0911/0912/0913/0917: max
+#   returns/branches/args) that M-FIX cannot satisfy without
+#   behaviour-risky redesign; RET501 already covers useless-return.
+select = ["E", "F", "UP", "B", "I", "SIM", "C4", "RET", "RUF"]
+
+[lint.per-file-ignores]
+# Frozen contract test: untouched by any agent per M-CONF brief.
+# The sys.path bootstrap must stay on line 1 (E401/E402/E702/I001),
+# %-format messages are asserted by content (UP031), overlong frozen
+# lines cannot be reflowed (E501), and the frozen control flow plus
+# loop variables are asserted as-is (SIM102/B007).
+"tests/backend/orchestration/test_interface_contract.py" = ["E401", "E402", "E501", "E702", "I001", "UP031", "SIM102", "B007"]
+# interface.py is a frozen file: per-file waiver covering its 37 findings (UP035 x1 + E501 x36).
+"src/agent_si/backend/orchestration/interface.py" = ["E501", "UP035"]

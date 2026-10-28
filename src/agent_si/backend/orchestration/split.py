@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from hashlib import sha256
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, Sequence  # noqa: UP035  # frozen-cite K02
 
 from .common import ensure_compact_english, hot_write_text, is_compact_english
 from .teamcard import TeamCard
@@ -180,7 +180,7 @@ def validate_disjoint(parts: list[PartRef]) -> None:
                 raise SCOPE_OVERLAP(
                     f"SCOPE_OVERLAP: conflicting scopes {sorted(clash)}"
                 )
-    return None
+    return
 
 
 def fanout(
@@ -255,7 +255,7 @@ def record_decomposition(
     else:
         route = "standard"
         reason = ensure_compact_english(
-            f"part {part_id} keeps the standard model using fact {FACT_PART_SIZE_VS_MODEL}"
+            f"part {part_id} keeps the standard model using fact {FACT_PART_SIZE_VS_MODEL}"  # noqa: E501  # frozen-cite K02
         )
     for fact in facts:
         if fact not in KNOWN_FACTS:
@@ -356,32 +356,32 @@ def load_decompositions(path: str) -> list[DecompositionRecord]:
 
 
 __all__ = [
-    "MODEL_ID",
     "ARTIFACT_PREFIX",
     "ARTIFACT_REF_PREFIX",
-    "SECRET_REF_KEY",
-    "PartRef",
-    "MultiManagerSettings",
+    "FACT_CHEAP_SMALL_PARTS",
+    "FACT_LONG_CONTEXT_ROUTING",
+    "FACT_PART_SIZE_VS_MODEL",
+    "KNOWN_FACTS",
+    "MODEL_ID",
     "SCOPE_OVERLAP",
+    "SECRET_REF_KEY",
+    "DecompositionRecord",
+    "MultiManagerSettings",
+    "PartRef",
+    "QueueSlot",
+    "TeamCard",
+    "capped_queue",
+    "corrections_hash",
+    "ensure_compact_english",
+    "fanout",
+    "hot_write_text",
+    "is_compact_english",
+    "is_shared_ref",
+    "issued_corrections_hash",
+    "load_decompositions",
+    "make_secret_ref",
+    "persist_decompositions",
+    "record_decomposition",
     "split_package",
     "validate_disjoint",
-    "fanout",
-    "TeamCard",
-    "is_compact_english",
-    "ensure_compact_english",
-    "make_secret_ref",
-    "is_shared_ref",
-    "corrections_hash",
-    "issued_corrections_hash",
-    "FACT_PART_SIZE_VS_MODEL",
-    "FACT_LONG_CONTEXT_ROUTING",
-    "FACT_CHEAP_SMALL_PARTS",
-    "KNOWN_FACTS",
-    "DecompositionRecord",
-    "record_decomposition",
-    "QueueSlot",
-    "capped_queue",
-    "hot_write_text",
-    "persist_decompositions",
-    "load_decompositions",
 ]

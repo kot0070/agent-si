@@ -5,12 +5,14 @@ import dataclasses
 import os
 import sys
 
-_ROOT = os.path.dirname(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-)
-sys.path.insert(0, os.path.join(_ROOT, "src"))
-
 import pytest
+
+sys.path.insert(
+    0,
+    os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "..", "src")
+    ),
+)
 
 from agent_si.backend.orchestration import offload as mod
 from agent_si.backend.orchestration.offload import (
@@ -51,14 +53,21 @@ def _change(
     return change
 
 
-def _accept(project: str, role: str, enabled: object = True, **extra: object) -> ApplyOutcome:
+def _accept(
+    project: str, role: str, enabled: object = True, **extra: object
+) -> ApplyOutcome:
     outcome = apply_offload_config_change(_change(project, role, enabled, **extra))
     assert outcome.applied is True
     return outcome
 
 
 def _snapshot() -> tuple:
-    return (dict(mod._SWITCHES), dict(mod._TASK_PROJECT), list(mod._HANDOVERS), list(mod._DECISIONS))
+    return (
+        dict(mod._SWITCHES),
+        dict(mod._TASK_PROJECT),
+        list(mod._HANDOVERS),
+        list(mod._DECISIONS),
+    )
 
 
 def test_frozen_shapes_exact() -> None:
@@ -83,7 +92,17 @@ def test_frozen_shapes_exact() -> None:
         "decision_ref",
     ]
     assert mod.DecisionRow is DecisionRow
-    assert len({AUDIT_INDEPENDENCE_REJECTED, BUDGET_CAPPED, POLICY_CONFLICT, REJECTED_SCOPE_OVERLAP}) == 4
+    assert (
+        len(
+            {
+                AUDIT_INDEPENDENCE_REJECTED,
+                BUDGET_CAPPED,
+                POLICY_CONFLICT,
+                REJECTED_SCOPE_OVERLAP,
+            }
+        )
+        == 4
+    )
 
 
 def test_switch_on_routine_hands_over_with_record() -> None:
@@ -102,7 +121,7 @@ def test_switch_on_routine_hands_over_with_record() -> None:
     assert record.to_role == "cheap-agent"
     assert record.reason == "routine triage runs cheaper"
     assert record.created_at != ""
-    assert mod._HANDOVERS == [record]
+    assert [record] == mod._HANDOVERS
 
 
 def test_switch_off_returns_none_and_records_nothing() -> None:
@@ -146,7 +165,7 @@ def test_unbound_task_uses_role_switch() -> None:
     assert record.from_role == "worker"
     assert record.to_role != ""
     assert record.reason != ""
-    assert mod._HANDOVERS == [record]
+    assert [record] == mod._HANDOVERS
 
 
 def test_accept_persists_one_decision_row() -> None:
