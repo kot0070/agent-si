@@ -14,6 +14,9 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
+# K02R4 openapi-annotation: module scope so FastAPI resolves the
+# K04 endpoint return annotation when it builds the OpenAPI schema.
+from fastapi.responses import JSONResponse as _K04JSONResponse
 
 from agent_si.backend.orchestration import parts as _parts_store
 from agent_si.backend.orchestration.ledger import PackageLedger, package_report
@@ -118,8 +121,9 @@ def create_app(settings: Any = None,
 
     @app.get("/api/v1/agents/live")
     def agents_live() -> dict[str, Any]:
-        rows = list_parts(None)
-        return {"agents": [_row_payload(row) for row in rows]}
+        from agent_si.backend.agents_live import live_rows as _live_rows
+
+        return _live_rows()
 
     @app.get("/api/v1/runs/ledger")
     def runs_ledger(project_id: str) -> dict[str, Any]:
@@ -166,7 +170,10 @@ def create_app(settings: Any = None,
         }
 
     @app.post("/api/v1/chat/stream")
-    def chat_stream(request: Request) -> dict[str, Any]:
+    async def chat_stream(request: Request) -> Any:
+        # K02R4 engine entry: guard shape unchanged (401 missing
+        # x-actor, 403 bad token, 429 rate limited); the accepted+json
+        # placeholder is replaced by SSE streaming of a Manager run.
         actor = (request.headers.get("x-actor") or "").strip()
         if not actor:
             raise HTTPException(status_code=401,
@@ -178,11 +185,51 @@ def create_app(settings: Any = None,
         check_rate: RateHook = app.state.rate_hook
         if not check_rate(actor):
             raise HTTPException(status_code=429, detail="rate limited")
-        return {
-            "status": "accepted",
-            "actor": actor,
-            "live_parts": len(list_parts(None)),
-        }
+        from fastapi.responses import StreamingResponse
+
+        from agent_si.backend import chat_stream as _k02r4_chat
+        from agent_si.backend.orchestration import graph as _k02r4_graph
+
+        try:
+            raw = await request.body()
+        except Exception:
+            raw = b""
+        if not raw:
+            return {
+                "status": "accepted",
+                "actor": actor,
+                "live_parts": len(list_parts(None)),
+            }
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
+        try:
+            chat_request = _k02r4_chat.ChatStreamRequest.from_body(
+                body, actor)
+        except _k02r4_chat.ChatBadRequest as err:
+            raise HTTPException(
+                status_code=400, detail=str(err)) from None
+        bridge = _k02r4_chat.bridge_for_app(app)
+        try:
+            stream_id, events = bridge.run(chat_request)
+        except _k02r4_graph.DispatchRejected as err:
+            raise HTTPException(
+                status_code=400, detail=str(err)) from None
+        except _k02r4_chat.ChatStreamAbsent as err:
+            raise HTTPException(
+                status_code=404, detail=str(err)) from None
+        except _k02r4_chat.ChatStreamFailed as err:
+            raise HTTPException(
+                status_code=500, detail=str(err)) from None
+        return StreamingResponse(
+            events,
+            media_type="text/event-stream",
+            headers={
+                "x-stream-id": stream_id,
+                "Cache-Control": "no-cache",
+            },
+        )
 
     # K08 HTTP surface (additions-only): configure + include the frozen
     # automation router, then register the five declared watcher routes.
@@ -448,7 +495,6 @@ def create_app(settings: Any = None,
     # accepted alongside the app session token via auth_hook.
     import os as _k04_os
     from fastapi.encoders import jsonable_encoder as _k04_jsonable
-    from fastapi.responses import JSONResponse as _K04JSONResponse
 
     from agent_si.backend import pools_routes as _k04_pr
     from agent_si.budget.gate import BudgetGate as _K04BudgetGate
