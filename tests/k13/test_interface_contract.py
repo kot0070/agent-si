@@ -1485,7 +1485,6 @@ def test_behaviour_scheduler_config_has_production_caller():
     assert hits, "no production caller references SchedulerConfig"
 
 
-@pytest.mark.xfail(strict=True, reason="D2: ExecutionRun production caller in other lane")
 def test_behaviour_execution_run_has_production_caller():
     # D2 waiting row: some src module outside the defining module must
     # construct ExecutionRun (a production caller exists).
