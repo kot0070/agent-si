@@ -43,12 +43,46 @@ class ImmutableRecordError(ValueError):
     """Append-only log rewrite attempt with different content."""
 
 
-class IllegalTransitionError(ValueError):
+class CommitGateError(ValueError):
+    """Storage commit-gate refusal (manifest section 42 CAS gate).
+
+    Raised by _extra_check inside compare_and_set; no write lands.
+    """
+
+
+class IllegalTransitionError(CommitGateError):
     """State edge rejected by the frozen manifest transition tables."""
 
 
 class CounterLimitExceededError(ValueError):
     """increment() would pass the configured limit."""
+
+
+# Manifest section 15 ENUM AmendmentStatus.
+_AMENDMENT_STATUSES = frozenset(
+    {"PENDING", "APPLIED", "SUPERSEDED", "REJECTED", "CANCELLED"}
+)
+# Manifest section 38 ENUM ResourceLeaseStatus.
+_LEASE_STATUSES = frozenset(
+    {"CREATED", "ACTIVE", "RELEASED", "EXPIRED", "FAILED", "ORPHANED"}
+)
+# Manifest section 38 terminal leases (Recovery: expired never trusted).
+_LEASE_TERMINAL = frozenset({"RELEASED", "EXPIRED", "FAILED"})
+# Manifest section 38 ENUM ResourceReservationStatus.
+_RESERVATION_STATUSES = frozenset(
+    {"CREATED", "ACTIVE", "FULFILLED", "RELEASED", "EXPIRED", "FAILED",
+     "ORPHANED"}
+)
+# Manifest section 38 terminal reservations.
+_RESERVATION_TERMINAL = frozenset(
+    {"FULFILLED", "RELEASED", "EXPIRED", "FAILED"}
+)
+# Manifest section 27A ENUM BudgetReservationStatus.
+_BUDGET_STATUSES = frozenset(
+    {"CREATED", "ACTIVE", "SETTLED", "RELEASED", "EXPIRED", "FAILED"}
+)
+# Manifest section 27A terminal budget states.
+_BUDGET_TERMINAL = frozenset({"SETTLED", "RELEASED", "EXPIRED", "FAILED"})
 
 
 def _copy(record: Mapping[str, Any]) -> Dict[str, Any]:
@@ -131,7 +165,23 @@ class _MemoryPort(manifest.RepositoryPort):
     def _extra_check(
         self, stored: Dict[str, Any], data: Dict[str, Any]
     ) -> None:
-        """Per-port commit gate run inside compare_and_set."""
+        """Per-port commit gate run inside compare_and_set.
+
+        Manifest section 42 CAS gate + section 8 project binding: a
+        stored row never changes identity under compare_and_set.
+        """
+        if data.get(self.ID_FIELD) != stored.get(self.ID_FIELD):
+            raise CommitGateError(
+                "%s identity %r != stored %r"
+                % (self.DOMAIN, data.get(self.ID_FIELD),
+                   stored.get(self.ID_FIELD))
+            )
+        if data.get("project_id") != stored.get("project_id"):
+            raise CommitGateError(
+                "%s project %r != stored %r"
+                % (self.DOMAIN, data.get("project_id"),
+                   stored.get("project_id"))
+            )
 
     # -- unit-of-work support -------------------------------------------
     def _snapshot(self) -> Any:
@@ -149,6 +199,17 @@ class ProjectRepository(_MemoryPort):
     """Mutable project aggregate (§8 PRODUCT_PROJECT_MODEL)."""
 
     DOMAIN = "projects"
+
+    def _extra_check(
+        self, stored: Dict[str, Any], data: Dict[str, Any]
+    ) -> None:
+        # Manifest section 8 archived flag: archiving is monotonic.
+        super()._extra_check(stored, data)
+        if stored.get("archived") is True and data.get("archived") is False:
+            raise CommitGateError(
+                "projects %s archived rows never un-archive"
+                % stored.get(self.ID_FIELD)
+            )
 
 
 class TaskContractRepository(_MemoryPort):
@@ -205,6 +266,9 @@ class ExecutionRunRepository(_MemoryPort):
     def _extra_check(
         self, stored: Dict[str, Any], data: Dict[str, Any]
     ) -> None:
+        # Manifest section 14A run ALLOWED (logic unchanged): illegal
+        # edges raise the named commit-gate error via inheritance
+        # (IllegalTransitionError is a CommitGateError).
         src = stored.get("status")
         dst = data.get("status")
         if dst is not None and dst != src:
@@ -223,7 +287,9 @@ class ExecutionAttemptLog(_MemoryPort):
     def _extra_check(
         self, stored: Dict[str, Any], data: Dict[str, Any]
     ) -> None:
-        # Identical re-store only; status never mutates on a finished attempt.
+        # Manifest section 14B linear lifecycle (logic unchanged):
+        # identical re-store only; illegal edges raise the named
+        # commit-gate error via inheritance.
         src = stored.get("status")
         dst = data.get("status")
         if dst is not None and dst != src:
@@ -253,6 +319,35 @@ class AmendmentRepository(_MemoryPort):
         missing = [f for f in manifest.AMENDMENT_FIELDS if f not in record]
         if missing:
             raise ValueError("amendment missing fields: %s" % ",".join(missing))
+
+    def _extra_check(
+        self, stored: Dict[str, Any], data: Dict[str, Any]
+    ) -> None:
+        # Manifest section 15 ENUM AmendmentStatus: status moves stay
+        # inside the enum and never return to PENDING once non-PENDING;
+        # creation fields freeze once stored.
+        super()._extra_check(stored, data)
+        src = stored.get("status")
+        dst = data.get("status")
+        if src is not None and dst is not None:
+            if dst not in _AMENDMENT_STATUSES:
+                raise CommitGateError(
+                    "amendment %s status %r not an AmendmentStatus"
+                    % (stored.get(self.ID_FIELD), dst)
+                )
+            if src != "PENDING" and dst == "PENDING":
+                raise CommitGateError(
+                    "amendment %s cannot return to PENDING from %r"
+                    % (stored.get(self.ID_FIELD), src)
+                )
+        for field in ("scope", "effective_from", "target",
+                      "amendment_sequence"):
+            if (field in stored and field in data
+                    and stored[field] != data[field]):
+                raise CommitGateError(
+                    "amendment %s creation field %s is frozen"
+                    % (stored.get(self.ID_FIELD), field)
+                )
 
 
 class PolicyRepository(_MemoryPort):
@@ -368,11 +463,67 @@ class ResourceLeaseRegistry(_MemoryPort):
 
     DOMAIN = "leases"
 
+    def _extra_check(
+        self, stored: Dict[str, Any], data: Dict[str, Any]
+    ) -> None:
+        # Manifest section 38 ENUM ResourceLeaseStatus + Recovery:
+        # expired never trusted; orphans released/expired deterministically.
+        super()._extra_check(stored, data)
+        src = stored.get("status")
+        dst = data.get("status")
+        if dst is None:
+            return
+        if dst not in _LEASE_STATUSES:
+            raise CommitGateError(
+                "lease %s status %r not a ResourceLeaseStatus"
+                % (stored.get(self.ID_FIELD), dst)
+            )
+        if dst == src:
+            return
+        if src in _LEASE_TERMINAL:
+            raise CommitGateError(
+                "lease %s terminal status %r is frozen"
+                % (stored.get(self.ID_FIELD), src)
+            )
+        if src == "ORPHANED" and dst not in ("RELEASED", "EXPIRED"):
+            raise CommitGateError(
+                "lease %s ORPHANED may only move to RELEASED/EXPIRED, not %r"
+                % (stored.get(self.ID_FIELD), dst)
+            )
+
 
 class ResourceReservationRegistry(_MemoryPort):
     """Resource reservations (§38); fulfil/release moves go through CAS."""
 
     DOMAIN = "reservations"
+
+    def _extra_check(
+        self, stored: Dict[str, Any], data: Dict[str, Any]
+    ) -> None:
+        # Manifest section 38 ENUM ResourceReservationStatus: terminal
+        # states never reopen; orphans released/expired deterministically.
+        super()._extra_check(stored, data)
+        src = stored.get("status")
+        dst = data.get("status")
+        if dst is None:
+            return
+        if dst not in _RESERVATION_STATUSES:
+            raise CommitGateError(
+                "reservation %s status %r not a ResourceReservationStatus"
+                % (stored.get(self.ID_FIELD), dst)
+            )
+        if dst == src:
+            return
+        if src in _RESERVATION_TERMINAL:
+            raise CommitGateError(
+                "reservation %s terminal status %r is frozen"
+                % (stored.get(self.ID_FIELD), src)
+            )
+        if src == "ORPHANED" and dst not in ("RELEASED", "EXPIRED"):
+            raise CommitGateError(
+                "reservation %s ORPHANED may only move to RELEASED/EXPIRED,"
+                " not %r" % (stored.get(self.ID_FIELD), dst)
+            )
 
 
 class BudgetLedger(_MemoryPort):
@@ -383,6 +534,35 @@ class BudgetLedger(_MemoryPort):
     """
 
     DOMAIN = "budget"
+
+    def _extra_check(
+        self, stored: Dict[str, Any], data: Dict[str, Any]
+    ) -> None:
+        # Manifest section 27A settlement dedupe identity: reservation_id
+        # plus the evidence ref freeze once stored (settlement_id is NEVER
+        # part of dedupe identity); terminal budget states never reopen.
+        super()._extra_check(stored, data)
+        for field in ("reservation_id", "provider_usage_evidence_ref",
+                      "provider_request_ref"):
+            if (field in stored and field in data
+                    and stored[field] != data[field]):
+                raise CommitGateError(
+                    "budget %s settle field %s is frozen"
+                    % (stored.get(self.ID_FIELD), field)
+                )
+        src = stored.get("status")
+        dst = data.get("status")
+        if src is not None and dst is not None:
+            if dst not in _BUDGET_STATUSES:
+                raise CommitGateError(
+                    "budget %s status %r not a BudgetReservationStatus"
+                    % (stored.get(self.ID_FIELD), dst)
+                )
+            if dst != src and src in _BUDGET_TERMINAL:
+                raise CommitGateError(
+                    "budget %s terminal status %r is frozen"
+                    % (stored.get(self.ID_FIELD), src)
+                )
 
     def settle_key(self, record: Mapping[str, Any]) -> str:
         return "%s\x00%s" % (
