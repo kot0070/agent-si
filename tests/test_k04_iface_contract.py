@@ -1196,3 +1196,57 @@ def test_c19_roles_pools_put_wrong_token_refused(tmp_path):
                        params={"project_id": "p1"}).text
     assert after == before, (
         "refused roles-pools PUT changed served roles state")
+
+
+# ---------------------------------------------------------------------------
+# K04 CLOSE (chat-model save): interface stub additions for
+# PUT /api/v1/roles/chat-model (appended; nothing above modified).
+# ---------------------------------------------------------------------------
+
+def test_chat_model_iface_route_present():
+    # The stub HTTP surface carries the chat-model save row.
+    assert ("PUT", "/api/v1/roles/chat-model") in IF.HTTP_ROUTES
+
+
+def test_chat_model_iface_map_points_at_put_chat_model():
+    # REALIZATION_MAP resolves to the frozen pools_routes handler by
+    # identity (no copy, no wrapper).
+    dotted = IF.REALIZATION_MAP["put_chat_model"]
+    assert dotted == "agent_si.backend.pools_routes.put_chat_model"
+    assert resolve(dotted) is PR.put_chat_model
+
+
+def test_chat_model_iface_sig_matches_put_chat_model():
+    # The stub _sig_full EXACTLY mirrors the real handler (param names,
+    # kinds, defaults, annotations, return).
+    assert _sigs_match(IF.put_chat_model, PR.put_chat_model)
+
+
+def _seal_seed_worker_profile(ctx, project_id="p1"):
+    profile = RT.RoleModelProfile(
+        role="worker", project_id=project_id, mode="AUTO",
+        provider=None, model=None, binding="DEFAULT", version=1,
+        hash="seal")
+    ctx.role_table.set_profile(profile)
+    return profile
+
+
+def test_chat_model_served_put_reaches_put_chat_model(tmp_path):
+    # The served route reaches the frozen handler: seeded worker profile
+    # plus x-ui-session-token header -> 200 {ok, project_id, model_id}.
+    from agent_si.backend.app import create_app
+    import fastapi.testclient
+    token = "seal-chat-model-token"
+    app = create_app({"store_dir": str(tmp_path / "appdata"),
+                      "ui_session_token": token})
+    client = fastapi.testclient.TestClient(app)
+    _seal_seed_worker_profile(app.state.k04_ctx)
+    resp = client.put("/api/v1/roles/chat-model",
+                      json={"project_id": "p1",
+                            "model_id": "openai/model-1"},
+                      headers={"x-ui-session-token": token})
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"ok": True, "project_id": "p1",
+                           "model_id": "openai/model-1"}
+    assert PR.get_chat_record(app.state.k04_ctx, "p1") == {
+        "project_id": "p1", "model_id": "openai/model-1"}

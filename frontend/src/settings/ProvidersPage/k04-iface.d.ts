@@ -33,3 +33,16 @@ export interface LeftoverKeyFinderProps {
   refreshKey?: number;
   loadEntries?: () => Promise<SecretRef[]>;
 }
+
+// K04 CLOSE (chat-model save): JSON body of PUT /api/v1/roles/chat-model
+// (see saveChatModel in ProvidersPage.tsx) plus its 200 payload.
+export interface ChatModelSaveRequest {
+  project_id: string;
+  model_id: string;
+}
+
+export interface ChatModelSaveResult {
+  ok: boolean;
+  project_id: string;
+  model_id: string;
+}

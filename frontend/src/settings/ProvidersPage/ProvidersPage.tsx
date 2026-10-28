@@ -18,6 +18,24 @@ import type { SecretStorePort } from "./secretStore";
 import { ROLE_KEYS } from "./types";
 import type { ProviderPreset, ProviderState } from "./types";
 
+// Save helper for the project chat model.
+// PUTs {project_id, model_id} to /api/v1/roles/chat-model with the session
+// token in the x-ui-session-token header (never in the URL or the JSON body).
+export async function saveChatModel(
+  project_id: string,
+  model_id: string,
+  sessionToken: string,
+): Promise<void> {
+  const response = await fetch("/api/v1/roles/chat-model", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", "x-ui-session-token": sessionToken },
+    body: JSON.stringify({ project_id, model_id }),
+  });
+  if (!response.ok) {
+    throw new Error(`save chat model failed: ${response.status}`);
+  }
+}
+
 type ProvidersPageProps = {
   project_id?: string;
 };
@@ -63,6 +81,7 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
   const choices = useMemo(() => enabledChatChoices(ordered, states), [ordered, states]);
   const poolOptions = useMemo(() => choicesToPoolOptions(choices), [choices]);
   const [poolSaveMessage, setPoolSaveMessage] = useState("");
+  const [chatSaveMessage, setChatSaveMessage] = useState("");
   const needle = query.trim().toLowerCase();
 
   async function handleRolePoolChange(role: string, value: RolePoolValue): Promise<void> {
@@ -71,6 +90,15 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
       setPoolSaveMessage(`Saved ${role}.`);
     } catch {
       setPoolSaveMessage(`Save failed for ${role}.`);
+    }
+  }
+
+  async function handleChatModelChange(modelId: string): Promise<void> {
+    try {
+      await saveChatModel(project, modelId, sessionToken);
+      setChatSaveMessage("Saved chat model.");
+    } catch {
+      setChatSaveMessage("Save failed for chat model.");
     }
   }
 
@@ -236,7 +264,12 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
       </section>
       <section aria-label="Chat">
         <h2>Chat</h2>
-        <ChatModelSelector project_id={project} states={states} />
+        <ChatModelSelector
+          project_id={project}
+          states={states}
+          onChange={(modelId) => void handleChatModelChange(modelId)}
+        />
+        {chatSaveMessage ? <p role="status">{chatSaveMessage}</p> : null}
       </section>
       <section aria-label="Leftover keys">
         <h2>Leftover keys</h2>

@@ -203,8 +203,11 @@ def create_app(settings: Any = None,
     from agent_si.budget.gate import BudgetGate as _K04BudgetGate
     from agent_si.model_kb import kb_reader as _k04_kb_reader
     from agent_si.providers.registry import facades as _k04_facades
+    import copy as _k04_copy
     from agent_si.routing.roles import RoleTable as _K04RoleTable
     from agent_si.routing.store import RoutingStore as _K04RoutingStore
+    from agent_si.routing.telemetry_port import (
+        TelemetryEmitter as _K04TelemetryEmitter)
 
     def _k04_store_dir(_settings: Any) -> Optional[str]:
         for _key in ("store_dir", "data_dir", "data_directory"):
@@ -250,7 +253,8 @@ def create_app(settings: Any = None,
     app.state.k04_ctx = _k04_ctx
     app.state.k04_config_error = _k04_config_error
 
-    def _k04_make_endpoint(_fn: Callable, _is_write: bool) -> Callable:
+    def _k04_make_endpoint(_fn: Callable, _is_write: bool,
+                           _name: str = "") -> Callable:
         async def _k04_endpoint(request: Request) -> _K04JSONResponse:
             if _k04_config_error is not None:
                 return _K04JSONResponse(
@@ -268,7 +272,32 @@ def create_app(settings: Any = None,
                     _body = {}
                 if _body is None:
                     _body = {}
-            if _is_write:
+            # HD ADDENDUM (K04P2-CHATSAVE): the chat-model save takes its
+            # token ONLY from the x-ui-session-token header through the
+            # K02 binding (a per-request ctx.session_token). The URL query
+            # and the JSON body are never token channels here, so a
+            # query-only token is refused with 401. Old routes keep the
+            # shared write path below unchanged.
+            _call_ctx: Any = _k04_ctx
+            if _name == "put_chat_model":
+                _header_token = request.headers.get("x-ui-session-token")
+                if not (isinstance(_header_token, str)
+                        and _header_token.strip()) \
+                        or _header_token != app.state.ui_session_token:
+                    return _K04JSONResponse(
+                        status_code=401,
+                        content={
+                            "error": "chat save refused: a valid "
+                                     "x-ui-session-token header is required "
+                                     "(never in the URL query or the JSON "
+                                     "body)",
+                            "code": _k04_pr._USER_WRITE_DENIED_CODE,
+                        })
+                _call_ctx = _k04_copy.copy(_k04_ctx)
+                _call_ctx.session_token = _header_token
+                if getattr(_call_ctx, "emitter", None) is None:
+                    _call_ctx.emitter = _K04TelemetryEmitter()
+            elif _is_write:
                 _actor = (request.headers.get("x-actor") or "").strip()
                 if not _actor:
                     return _K04JSONResponse(
@@ -287,7 +316,7 @@ def create_app(settings: Any = None,
                                             content={"error": "forbidden"})
                 _query["session_token"] = _token
             try:
-                _status, _payload = _fn(_k04_ctx, _query, _body)
+                _status, _payload = _fn(_call_ctx, _query, _body)
             except Exception as _exc:
                 return _K04JSONResponse(
                     status_code=500,
@@ -301,8 +330,18 @@ def create_app(settings: Any = None,
         app.add_api_route(
             _path,
             _k04_make_endpoint(
-                _fn, _method.lower() in _k04_pr._USER_WRITE_METHODS),
+                _fn, _method.lower() in _k04_pr._USER_WRITE_METHODS, _name),
             methods=[_method.upper()],
             name="k04_" + _name)
+
+    # HD ADDENDUM (K04P2-CHATSAVE): exactly one added registration row
+    # for the chat-model save. The handler lives in pools_routes; the
+    # frozen ROUTES tuple stays 11 rows until the post-PASS HD re-freeze,
+    # so the existing exact-11 merge pin keeps passing unmodified.
+    app.add_api_route(
+        "/api/v1/roles/chat-model",
+        _k04_make_endpoint(_k04_pr.put_chat_model, True, "put_chat_model"),
+        methods=["PUT"],
+        name="k04_put_chat_model")
 
     return app

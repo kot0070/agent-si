@@ -549,6 +549,135 @@ def put_role_pools(ctx: RoutingCtx, query, body) -> Tuple[int, Dict]:
     return 200, payload
 
 
+# --------------------------------------------------------------------------
+# Chat-model save (K04P2-CHATSAVE, HD_VERDICT_PAGE_K04_2 plus ADDENDUM).
+#
+# PUT /api/v1/roles/chat-model persists one project's chat model pick.
+# Token rule (ADDENDUM): the UI session token travels ONLY in the
+# x-ui-session-token header through the K02 binding (ctx.session_token
+# here); the URL query and the JSON body are never token channels, so a
+# query-only token is refused with 401 exactly like a missing one. The
+# old query-token guarded-write wrapper stays untouched on the old
+# routes; this handler carries its own header-only guard instead.
+#
+# Persistence: the chat record lives in the "chat" section of the same
+# profiles registry document the K04 store owns (store.py is frozen, so
+# this lane reads/writes that section through the store's table API and
+# changes no store shape). Registry read path: get_chat_record.
+# K08 seam: journal-append (ctx.audit_sink.append) plus notify
+# (ctx.emitter.emit) only; when either end is missing the save fails
+# closed (500, nothing persisted) and no K08 file changes.
+
+def get_chat_record(ctx: RoutingCtx, project_id: str) -> Optional[Dict[str, Any]]:
+    """Read one project's saved chat model from the K04 registry.
+
+    Returns {"project_id", "model_id"} or None when the registry holds
+    no chat record for the project.
+    """
+    store = getattr(ctx, "store", None)
+    if store is None:
+        return None
+    table = store._load_table("profiles")
+    section = table.get("chat")
+    if not isinstance(section, Mapping):
+        return None
+    row = section.get(project_id)
+    if not isinstance(row, Mapping):
+        return None
+    model_id = row.get("model_id")
+    if not (isinstance(model_id, str) and model_id):
+        return None
+    return {"project_id": project_id, "model_id": model_id}
+
+
+def _save_chat_record(store, project_id: str, model_id: str) -> None:
+    """Persist one project's chat model into the registry chat section."""
+    table = store._load_table("profiles")
+    section = table.get("chat")
+    if not isinstance(section, dict):
+        section = {}
+        table["chat"] = section
+    section[project_id] = {"project_id": project_id, "model_id": model_id}
+    store._save_table("profiles", table)
+
+
+def _chat_project_known(ctx: RoutingCtx, project_id: str) -> bool:
+    """True when the K04 registry knows the project at all.
+
+    Known means at least one frozen-role profile, one pool binding, or
+    one chat record; anything else is an unknown project (404), never a
+    hardcoded id list.
+    """
+    role_table = getattr(ctx, "role_table", None)
+    if role_table is not None:
+        for role in T.ROLES:
+            if role_table.get_profile(project_id, role) is not None:
+                return True
+    store = getattr(ctx, "store", None)
+    if store is not None:
+        for role in T.ROLES:
+            if store.get_pool(project_id, role) is not None:
+                return True
+        if get_chat_record(ctx, project_id) is not None:
+            return True
+    return False
+
+
+def put_chat_model(ctx: RoutingCtx, query, body) -> Tuple[int, Dict]:
+    """Save one project's chat model (PUT /api/v1/roles/chat-model)."""
+    _ = query
+    token = getattr(ctx, "session_token", None)
+    if isinstance(token, list):
+        token = token[0] if token else None
+    if not (isinstance(token, str) and token.strip()):
+        return (401, {
+            "error": "chat save refused: x-ui-session-token header missing "
+                     "(the UI session token travels only in that header, "
+                     "never in the URL query or the JSON body)",
+            "code": _USER_WRITE_DENIED_CODE,
+        })
+    if not isinstance(body, Mapping):
+        return 400, {"error": "chat save needs a JSON object body"}
+    hit = _find_raw_secret(body)
+    if hit:
+        return 400, {"error": "raw secret material refused at %s "
+                              "(pass a SecretRef handle, never raw)" % hit}
+    if set(body.keys()) != {"project_id", "model_id"}:
+        return 400, {"error": "chat save body holds exactly project_id "
+                              "plus model_id"}
+    project_id = body.get("project_id")
+    model_id = body.get("model_id")
+    if not (isinstance(project_id, str) and project_id.strip()) or not (
+            isinstance(model_id, str) and model_id.strip()):
+        return 400, {"error": "chat save needs non-empty project_id plus "
+                              "model_id"}
+    if not _chat_project_known(ctx, project_id):
+        return 404, {"error": "unknown project %r (no role profile, no pool "
+                              "binding, no chat record)" % (project_id,)}
+    store = getattr(ctx, "store", None)
+    if store is None:
+        return 500, {"error": "chat save refused: no K04 registry bound"}
+    sink = getattr(ctx, "audit_sink", None)
+    emitter = getattr(ctx, "emitter", None)
+    if sink is None or not callable(getattr(sink, "append", None)) or \
+            emitter is None or not callable(getattr(emitter, "emit", None)):
+        return (500, {
+            "error": "chat save refused: K08 seam DOWN (journal-append "
+                     "plus notify unavailable; fail-closed, nothing "
+                     "persisted)",
+        })
+    _save_chat_record(store, project_id, model_id)
+    sink.append({"project_id": project_id, "model_id": model_id})
+    emitter.emit(routing_event(
+        project_id=project_id, task_id="-", run_id="-", role="chat",
+        event_type="chat_model_save",
+        reason="chat model for project %r set to %r"
+               % (project_id, model_id),
+        model=model_id))
+    return 200, {"ok": True, "project_id": project_id,
+                 "model_id": model_id}
+
+
 def _plain(value):
     """Convert dataclass records (or nested mixes) to plain JSON data."""
     if _is_dc(value) and not isinstance(value, type):

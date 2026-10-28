@@ -630,3 +630,60 @@ describe("ProvidersPage project setup", () => {
     expect(screen.getAllByTestId("role-pool-picker")[0].getAttribute("data-project-id")).toBe("proj-7");
   });
 });
+
+describe("ProvidersPage chat model save wiring (page-level)", () => {
+  async function connectOpenaiAndEnableStandardForChat() {
+    const fetchMock = vi.fn(
+      async (
+        _url: string,
+        _init: {
+          method?: string;
+          headers?: Record<string, string>;
+          body?: string;
+        },
+      ) => ({ ok: true }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ProvidersPage project_id="local" />);
+    fireEvent.click(screen.getByLabelText("Connect OpenAI"));
+    const connectDialog = screen.getByRole("dialog");
+    fireEvent.change(within(connectDialog).getByLabelText("API key"), { target: { value: "sk-test" } });
+    fireEvent.click(within(connectDialog).getByText("Save"));
+    expect(await within(connectDialog).findByText(/Reference saved/)).toBeTruthy();
+    fireEvent.click(within(connectDialog).getByLabelText("Close"));
+    fireEvent.click(screen.getByLabelText("OpenAI Standard"));
+    expect((screen.getByLabelText("OpenAI Standard") as HTMLInputElement).checked).toBe(true);
+    return fetchMock;
+  }
+
+  it("chat save PUTs project/model with the header token and keeps the new model shown", async () => {
+    const fetchMock = await connectOpenaiAndEnableStandardForChat();
+    fetchMock.mockClear();
+    const chat = screen.getByTestId("chat-model-selector");
+    const select = within(chat).getByLabelText("Chat model") as HTMLSelectElement;
+    const target = Array.from(select.options).find((option) =>
+      (option.textContent ?? "").includes("OpenAI"),
+    );
+    expect(target).toBeTruthy();
+    fireEvent.change(select, { target: { value: (target as HTMLOptionElement).value } });
+    expect(await screen.findByText("Saved chat model.")).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(init.method).toBe("PUT");
+    expect(url).toBe("/api/v1/roles/chat-model");
+    expect(url).not.toContain("session_token");
+    expect(url).not.toContain("?");
+    expect(init.headers).toMatchObject({
+      "Content-Type": "application/json",
+      "x-ui-session-token": "local-session",
+    });
+    const body = JSON.parse(init.body as string) as Record<string, unknown>;
+    expect(body).toEqual({ project_id: "local", model_id: "openai/model-1" });
+    expect(JSON.stringify(body)).not.toContain("session_token");
+    expect(JSON.stringify(body)).not.toContain("local-session");
+    expect(select.value).toBe("openai/model-1");
+    const selectedLabel =
+      Array.from(select.options).find((option) => option.value === select.value)?.textContent ?? "";
+    expect(selectedLabel).toContain("Standard");
+  });
+});
