@@ -8,6 +8,7 @@ import { ApiClientProvider } from "./ApiClientProvider";
 import { HttpApiClient } from "../api/client";
 import { LocaleProvider } from "../locale/index";
 import { App } from "./App";
+import "../ui/tokens.css";
 
 const rootElement = document.getElementById("root");
 if (rootElement === null) {

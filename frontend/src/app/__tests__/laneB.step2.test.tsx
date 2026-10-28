@@ -72,7 +72,12 @@ describe('FirstRunFlow', () => {
     fireEvent.click(skips[0]!);
     expect(screen.getAllByRole('button', { name: en.firstrun.skip }).length).toBe(3);
     expect(done).toBe(false);
+    // kit BUILD_PLAN:868-869: "Guided first run (connect provider, one-click team, project plus folder, first task; local AI, watcher preset, automations, KBs clearly optional and skippable)"
     fireEvent.click(screen.getByRole('button', { name: /next/i }));
+    fireEvent.click(screen.getByRole('button', { name: /next/i }));
+    fireEvent.click(screen.getByRole('button', { name: /next/i }));
+    expect(done).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: en.tasks.creator.create }));
     expect(done).toBe(true);
     expect(container.textContent).toContain(en.firstrun.optionalNote);
   });

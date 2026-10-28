@@ -93,7 +93,12 @@ describe('lane B behaviour contract (STEP1: every behaviour below fails on throw
   it('first run advances through required steps and skips optionals', () => {
     let done = false;
     render(<FirstRunFlow onComplete={() => { done = true; }} />);
+    // kit BUILD_PLAN:868-869: "Guided first run (connect provider, one-click team, project plus folder, first task; local AI, watcher preset, automations, KBs clearly optional and skippable)"
     fireEvent.click(screen.getByRole('button', { name: /next/i }));
+    fireEvent.click(screen.getByRole('button', { name: /next/i }));
+    fireEvent.click(screen.getByRole('button', { name: /next/i }));
+    expect(done).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: en.tasks.creator.create }));
     expect(done).toBe(true);
   });
 

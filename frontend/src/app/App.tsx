@@ -32,10 +32,13 @@ import {
 } from "../locale/index";
 import type { SupportedLocale } from "../locale/index";
 import { SETTINGS_ROUTES, AcceptedRiskSwitch, RoleProfileEditor } from "../settings/index";
+import { ProvidersPage } from "../settings/ProvidersPage";
 import {
   LocalBenchDecisionList,
+  LocalBenchTab,
   readStoredLocalBench,
 } from "../settings/LocalBenchTab";
+import { HttpLocalBenchClient } from "../settings/LocalBenchClient";
 import { EVIDENCE_LOCALE_KEYS } from "../settings/LocalBenchTypes";
 import { SettingsLayout } from "../shell/SettingsLayout";
 import { EmptyState } from "../ui/EmptyState";
@@ -144,6 +147,7 @@ function LocalAiStoredPanel(): ReactElement {
           ))}
         </ul>
       )}
+      <p data-testid="localai-endpoint-label">{t("settings.localAi.title")}</p>
       <p data-testid="localai-endpoint">{ENDPOINTS.agentsLive}</p>
       <LocalBenchDecisionList decisions={stored.decisions} />
     </div>
@@ -387,6 +391,17 @@ function SettingsSectionRoute(): ReactElement {
         </>
       ) : route.path === "localAI" ? (
         <LocalAiStoredPanel />
+      ) : route.path === "localbench" ? (
+        <span data-testid="settings-section-body">
+          <LocalBenchTab client={new HttpLocalBenchClient()} />
+        </span>
+      ) : route.path === "models" ||
+        route.path === "routing" ||
+        route.path === "optimization" ||
+        route.path === "capabilityDB" ? (
+        <span data-testid="settings-section-body">
+          <ProvidersPage project_id={projectId ?? "local"} />
+        </span>
       ) : (
         <span data-testid="settings-section-body" />
       )}
