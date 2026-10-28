@@ -24,6 +24,7 @@ from typing import Any
 from fastapi import HTTPException, Request
 
 from agent_si.backend.read_routes import (
+    persist_k02r3_store,
     project_view,
     repos_for,
     task_view,
@@ -123,6 +124,7 @@ def register_console_projects_write_routes(app: Any) -> Any:
             "archived": False,
         }
         stored = projects.append(record)
+        persist_k02r3_store(request.app)
         return {"project": project_view(stored)}
 
     @app.put("/api/v1/projects/{project_id}")
@@ -153,6 +155,7 @@ def register_console_projects_write_routes(app: Any) -> Any:
             raise HTTPException(
                 status_code=409, detail="project changed; re-read"
             ) from None
+        persist_k02r3_store(request.app)
         return {"project": project_view(saved)}
 
     @app.delete("/api/v1/projects/{project_id}")
@@ -174,6 +177,7 @@ def register_console_projects_write_routes(app: Any) -> Any:
             raise HTTPException(
                 status_code=409, detail="project changed; re-read"
             ) from None
+        persist_k02r3_store(request.app)
         return {"ok": True}
 
     async def _create_task(request: Request, project_id: str) -> dict:
@@ -206,6 +210,7 @@ def register_console_projects_write_routes(app: Any) -> Any:
             "created_at": _utcnow(),
         }
         stored = tasks.append(record)
+        persist_k02r3_store(request.app)
         return {"task": task_view(stored)}
 
     @app.post("/api/v1/projects/{project_id}/tasks")

@@ -490,6 +490,29 @@ def create_app(settings: Any = None,
     from agent_si.backend import console_projects_write as _k02r3_write
     from agent_si.backend import read_routes as _k02r3_read
 
+    def _k02r3_store_dir(_settings: Any) -> str | None:
+        # Same settings keys as the K04 lookup below (read-only
+        # reference): when configured, project/task rows persist to
+        # JSONL under this dir and hydrate on first bind; with no key
+        # the ports stay purely in-memory.
+        for _key in ("store_dir", "data_dir", "data_directory"):
+            if isinstance(_settings, Mapping):
+                if _key in _settings:
+                    if not _settings[_key]:
+                        raise ValueError(
+                            f"K02R3 store setting {_key!r} is empty: pass "
+                            "a real dir, never a silent tmp fallback")
+                    return str(_settings[_key])
+            elif _settings is not None and hasattr(_settings, _key):
+                _val = getattr(_settings, _key)
+                if not _val:
+                    raise ValueError(
+                        f"K02R3 store setting {_key!r} is empty: pass a "
+                        "real dir, never a silent tmp fallback")
+                return str(_val)
+        return None
+
+    app.state.k02r3_store_dir = _k02r3_store_dir(settings)
     _k02r3_read.register_read_routes(app)
     _k02r3_write.register_console_projects_write_routes(app)
 
