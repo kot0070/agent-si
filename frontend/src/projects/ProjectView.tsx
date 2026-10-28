@@ -3,7 +3,9 @@
 // from the stored snapshot), audits, errors and reports. Numbers render only
 // from served records; served token or audit telemetry has no route, so those
 // views stay honestly empty until one lands. The reports export serializes
-// stored telemetry; derived narrative lines carry the DERIVED label and never
+// stored telemetry; the reports view renders readable rows from records and
+// keeps the raw export behind a collapsed details block; derived narrative
+// lines carry the DERIVED label and never
 // override measured rows. Mounted by the App routes
 // /projects/:projectId/* in wave 3.
 
@@ -19,17 +21,14 @@ import type {
 } from "../api/iface";
 import { ApiError, apiErrorLocaleKey } from "../api/errors";
 import { useApiClient } from "../app/ApiClientProvider";
-import { t, useLocale } from "../locale/index";
+import { formatDate, t, useLocale } from "../locale/index";
+import type { SupportedLocale } from "../locale/index";
 import { Card } from "../ui/Card";
 import { EmptyState } from "../ui/EmptyState";
 import { ErrorPanel } from "../ui/ErrorPanel";
 import { LoadingState } from "../ui/LoadingState";
-import {
-  PartStatusSchema,
-  placementKey,
-  resolveStatusHuman,
-  statusHumanKey,
-} from "../agents/agentsApi";
+import { placementKey, resolveStatusHuman } from "../agents/agentsApi";
+import { TASKS_CHANGED_EVENT, taskStatusLabel } from "../tasks/TaskComposer";
 import {
   PROJECT_VIEWS,
   buildReportNarrative,
@@ -82,6 +81,106 @@ function Fact(props: {
     <div data-testid={props.testId}>
       <span>{t(props.labelKey)}</span>
       <span>{props.value}</span>
+    </div>
+  );
+}
+
+export interface ParsedReportExport {
+  format: string;
+  project: ProjectRecord;
+  ledger: LedgerRow[];
+  budget: BudgetState;
+}
+
+export function parseReportExport(
+  text: string | null,
+): ParsedReportExport | null {
+  if (text === null || text === "") {
+    return null;
+  }
+  try {
+    const data: unknown = JSON.parse(text) as unknown;
+    if (typeof data !== "object" || data === null) {
+      return null;
+    }
+    const record = data as Record<string, unknown>;
+    if (typeof record.project !== "object" || record.project === null) {
+      return null;
+    }
+    if (!Array.isArray(record.ledger)) {
+      return null;
+    }
+    if (typeof record.budget !== "object" || record.budget === null) {
+      return null;
+    }
+    return data as ParsedReportExport;
+  } catch {
+    return null;
+  }
+}
+
+function statusCounts(
+  tasks: TaskRecord[],
+): Array<{ status: string; count: number }> {
+  const counts = new Map<string, number>();
+  for (const task of tasks) {
+    counts.set(task.status, (counts.get(task.status) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort(([left], [right]) =>
+      left < right ? -1 : left > right ? 1 : 0,
+    )
+    .map(([status, count]) => ({ status, count }));
+}
+
+function formatTaskDate(createdAt: string, locale: SupportedLocale): string {
+  const parsed = Date.parse(createdAt);
+  if (Number.isNaN(parsed)) {
+    return createdAt;
+  }
+  return formatDate(new Date(parsed), locale);
+}
+
+export function ReportReadable(props: {
+  project: ProjectRecord;
+  tasks: TaskRecord[];
+  budget: BudgetState;
+  report: string | null;
+}): ReactElement {
+  if (parseReportExport(props.report) === null) {
+    return (
+      <div data-testid="project-report-readable">
+        <span>{props.report ?? ""}</span>
+      </div>
+    );
+  }
+  return (
+    <div data-testid="project-report-readable">
+      <div data-testid="report-project-name">
+        <span>{t("shell.topbar.project")}</span>
+        <span>{props.project.name}</span>
+      </div>
+      <div data-testid="report-task-counts">
+        <span>{t("tasks.list.title")}</span>
+        {statusCounts(props.tasks).map(({ status, count }) => (
+          <div key={status} data-testid={`report-task-count-${status}`}>
+            <span>{taskStatusLabel(status)}</span>
+            <span>{count}</span>
+          </div>
+        ))}
+      </div>
+      <div data-testid="report-budget-spent">
+        <span>{t("telemetry.cost")}</span>
+        <span>{`${props.budget.spent} ${props.budget.currency}`}</span>
+      </div>
+      <div data-testid="report-budget-reserved">
+        <span>{t("projects.cost.title")}</span>
+        <span>{`${props.budget.reserved} ${props.budget.currency}`}</span>
+      </div>
+      <div data-testid="report-budget-limit">
+        <span>{t("ui.card.total")}</span>
+        <span>{`${props.budget.hard_limit} ${props.budget.currency}`}</span>
+      </div>
     </div>
   );
 }
@@ -143,6 +242,28 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
       alive = false;
     };
   }, [client, props.projectId, props.view, props.decisionId, nonce]);
+
+  useEffect(() => {
+    if (props.view !== "tasks") {
+      return;
+    }
+    function onTasksChanged(event: Event): void {
+      const detail = (
+        event as CustomEvent<{ projectId?: unknown } | null>
+      ).detail;
+      if (
+        detail !== null &&
+        typeof detail === "object" &&
+        detail.projectId === props.projectId
+      ) {
+        setNonce((value) => value + 1);
+      }
+    }
+    window.addEventListener(TASKS_CHANGED_EVENT, onTasksChanged);
+    return () => {
+      window.removeEventListener(TASKS_CHANGED_EVENT, onTasksChanged);
+    };
+  }, [props.projectId, props.view]);
 
   function renderContent(): ReactElement {
     if (data === null) {
@@ -241,15 +362,8 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
             {data.tasks.map((task) => (
               <div key={task.task_id} data-testid={`task-row-${task.task_id}`}>
                 <span>{task.title}</span>
-                <span>
-                  {(() => {
-                    const checked = PartStatusSchema.safeParse(task.status);
-                    return checked.success
-                      ? t(statusHumanKey(checked.data))
-                      : task.status;
-                  })()}
-                </span>
-                <span>{task.created_at}</span>
+                <span>{taskStatusLabel(task.status)}</span>
+                <span>{formatTaskDate(task.created_at, locale)}</span>
               </div>
             ))}
           </div>
@@ -492,7 +606,16 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
       case "reports": {
         return (
           <div>
-            <pre data-testid="project-report-export">{report ?? ""}</pre>
+            <ReportReadable
+              project={data.project}
+              tasks={data.tasks}
+              budget={data.budget}
+              report={report}
+            />
+            <details data-testid="project-report-raw">
+              <summary>{t("ui.disclosure.more")}</summary>
+              <pre data-testid="project-report-export">{report ?? ""}</pre>
+            </details>
             <div data-testid="project-report-derived">
               <span>{t("projects.derived.label")}</span>
               {buildReportNarrative({
