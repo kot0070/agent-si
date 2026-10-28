@@ -125,6 +125,9 @@ def register_console_projects_write_routes(app: Any) -> Any:
         }
         stored = projects.append(record)
         persist_k02r3_store(request.app)
+        from agent_si.backend import project_defaults as _project_defaults
+
+        _project_defaults.ensure_project_defaults(request.app, project_id)
         return {"project": project_view(stored)}
 
     @app.put("/api/v1/projects/{project_id}")
