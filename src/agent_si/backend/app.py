@@ -318,4 +318,13 @@ def create_app(settings: Any = None,
             methods=[_method.upper()],
             name="k04_" + _name)
 
+    # K13F1 routes: amend / finalize-read / stop over the real K13 entries.
+    # Additions-only block: binds per-app in-memory K13 state on app.state
+    # and registers the /api/v1/k13/ handlers. Writes keep the K02 guard
+    # (401 missing x-actor, 403 bad token via app.state.auth_hook).
+    from agent_si.backend import k13f1_routes as _k13f1_routes
+
+    _k13f1_routes.bind_k13f1_state(app)
+    _k13f1_routes.register_k13f1_routes(app)
+
     return app
