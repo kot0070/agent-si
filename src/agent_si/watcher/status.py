@@ -2,7 +2,7 @@
 
 Owns the REALIZATION_MAP entry ``watcher.status.get`` (:func:`get`).
 The payload replays stored facts: integrity from the stored verify, the
-journal head from the stored rows, plus a fresh generation stamp.
+journal head from the stored rows, plus the stored generation stamp.
 """
 
 from __future__ import annotations
@@ -57,10 +57,18 @@ def get(project_id: str) -> WatcherStatus:
     except WatcherError:
         ok = False
     rows = journal_store.list_events(key)
-    head = rows[-1].entry_id if rows else ""
+    # K08F2: generated_at is the time of the stored facts served (the
+    # stored head stamp; "" when nothing is stored), so two reads with
+    # no state change serve equal payloads.
+    if rows:
+        head = rows[-1].entry_id
+        generated_at = rows[-1].timestamp
+    else:
+        head = ""
+        generated_at = ""
     return WatcherStatus(
         project_id=key,
         integrity_ok=ok,
         journal_head=head,
-        generated_at=_utcnow(),
+        generated_at=generated_at,
     )
