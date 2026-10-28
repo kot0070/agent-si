@@ -577,4 +577,150 @@ def create_app(settings: Any = None,
     _k13f1_routes.bind_k13f1_state(app)
     _k13f1_routes.register_k13f1_routes(app)
 
+    # --- K09-REFRESH stale KB copy refresh (LIVE0-06 additions-only). ---
+    # Per-app recorded versions + changelog over local KB dirs (no
+    # network; the KB dir is never mutated). GET proposal is an open read
+    # that records the on-disk copy on the first call and reports
+    # staleness with a section diff + version bump preview. POST apply
+    # keeps the frozen USER_WRITE guard (401 missing x-actor, 403 bad
+    # token via app.state.auth_hook, fail closed; the session token
+    # travels in the x-ui-session-token header only, never in the URL).
+    import datetime as _k09r_datetime
+    import json as _k09r_json
+    from pathlib import Path as _K09RPath
+
+    from src.agent_si.kb import registry as _k09r_registry
+
+    _K09R_UNKNOWN = "UNKNOWN"
+
+    app.state.kb_refresh_recorded = {}
+    app.state.kb_refresh_changelog = []
+
+    def _k09r_source_version(kb_id: str) -> str:
+        """On-disk manifest "version" string, else UNKNOWN (never guessed)."""
+        try:
+            _manifest = _k09r_json.loads(
+                (_K09RPath(kb_id) / "manifest.json").read_text(
+                    encoding="utf-8"))
+        except (OSError, ValueError):
+            return _K09R_UNKNOWN
+        if not isinstance(_manifest, dict):
+            return _K09R_UNKNOWN
+        _version = _manifest.get("version")
+        if not isinstance(_version, str) or not _version.strip():
+            return _K09R_UNKNOWN
+        return _version
+
+    def _k09r_current_sections(kb_id: str) -> dict[str, Any]:
+        """Current on-disk section texts keyed by section id."""
+        _snapshot: dict[str, Any] = {}
+        for _section_id in _k09r_registry.section_ids(kb_id):
+            try:
+                _snapshot[_section_id] = _k09r_registry.section_text(
+                    kb_id, _section_id)
+            except KeyError:
+                continue
+        return _snapshot
+
+    def _k09r_diff(_recorded_sections: dict[str, Any],
+                   _current_sections: dict[str, Any],
+                   _recorded_version: str,
+                   _source_version: str) -> dict[str, Any]:
+        _current_ids = set(_current_sections)
+        _recorded_ids = set(_recorded_sections)
+        return {
+            "added": sorted(_current_ids - _recorded_ids),
+            "removed": sorted(_recorded_ids - _current_ids),
+            "changed": sorted(
+                _sid for _sid in _current_ids & _recorded_ids
+                if _recorded_sections[_sid] != _current_sections[_sid]),
+            "version_from": _recorded_version,
+            "version_to": _source_version,
+        }
+
+    def _k09r_status(kb_id: str) -> dict[str, Any]:
+        """Proposal payload; the first call records the on-disk copy."""
+        _source_version = _k09r_source_version(kb_id)
+        _current_sections = _k09r_current_sections(kb_id)
+        _recorded = app.state.kb_refresh_recorded.get(kb_id)
+        if _recorded is None:
+            _recorded = {"recorded_version": _source_version,
+                         "sections": _current_sections}
+            app.state.kb_refresh_recorded[kb_id] = _recorded
+        _recorded_version = _recorded["recorded_version"]
+        _diff = _k09r_diff(_recorded["sections"], _current_sections,
+                           _recorded_version, _source_version)
+        _stale = (
+            _source_version == _K09R_UNKNOWN
+            or _recorded_version != _source_version
+            or bool(_diff["added"] or _diff["removed"] or _diff["changed"]))
+        return {"kb_id": kb_id,
+                "stale": _stale,
+                "recorded_version": _recorded_version,
+                "source_version": _source_version,
+                "diff": _diff}
+
+    @app.get("/api/v1/kb/refresh/proposal")
+    def _k09r_get_proposal(kb_id: str) -> dict[str, Any]:
+        if not kb_id or not _K09RPath(kb_id).is_dir():
+            raise HTTPException(status_code=404, detail="unknown kb_id")
+        return _k09r_status(kb_id)
+
+    @app.post("/api/v1/kb/refresh/apply")
+    async def _k09r_post_apply(request: Request) -> dict[str, Any]:
+        _actor = (request.headers.get("x-actor") or "").strip()
+        if not _actor:
+            raise HTTPException(status_code=401,
+                                detail="missing x-actor header")
+        _token = request.headers.get("x-ui-session-token")
+        _check = getattr(app.state, "auth_hook", None)
+        _allowed = False
+        if callable(_check):
+            try:
+                _allowed = bool(_check(_token, _actor, USER_WRITE))
+            except Exception:
+                _allowed = False
+        else:
+            _expected = getattr(app.state, "ui_session_token", None)
+            _allowed = (_expected is not None and _token == _expected)
+        if not _allowed:
+            raise HTTPException(status_code=403, detail="forbidden")
+        try:
+            _body = await request.json()
+        except Exception:
+            _body = None
+        _kb_id = None
+        if isinstance(_body, dict):
+            _kb_id = _body.get("kb_id")
+        if not _kb_id:
+            _kb_id = request.query_params.get("kb_id")
+        if not isinstance(_kb_id, str) or not _kb_id:
+            raise HTTPException(status_code=400, detail="kb_id required")
+        if not _K09RPath(_kb_id).is_dir():
+            raise HTTPException(status_code=404, detail="unknown kb_id")
+        _status = _k09r_status(_kb_id)
+        if _status["source_version"] == _K09R_UNKNOWN:
+            raise HTTPException(
+                status_code=409,
+                detail="unsourced version is never current evidence")
+        if not _status["stale"]:
+            return {"applied": False,
+                    "kb_id": _kb_id,
+                    "recorded_version": _status["recorded_version"],
+                    "source_version": _status["source_version"]}
+        _row = {"kb_id": _kb_id,
+                "from": _status["recorded_version"],
+                "to": _status["source_version"],
+                "at": _k09r_datetime.datetime.now(
+                    _k09r_datetime.timezone.utc).isoformat(),
+                "actor": _actor}
+        app.state.kb_refresh_recorded[_kb_id] = {
+            "recorded_version": _status["source_version"],
+            "sections": _k09r_current_sections(_kb_id)}
+        app.state.kb_refresh_changelog.append(_row)
+        return {"applied": True,
+                "recorded_version": _status["source_version"],
+                "source_version": _status["source_version"],
+                **_row}
+
     return app
