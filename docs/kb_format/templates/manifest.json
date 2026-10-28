@@ -1,0 +1,5 @@
+{
+  "kb_id": "example-kb",
+  "purpose": "One or two sentences saying what this KB is for.",
+  "sections": ["intro", "setup"]
+}
