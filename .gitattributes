@@ -28,3 +28,6 @@
 
 # Frozen K13 manifest: byte-exact (its sha256 is frozen), no line-ending conversion
 iface/frozen_manifest/K13_MANIFEST.md -text
+iface/frozen_k04/K04_INTERFACE_STUB.py -text
+iface/frozen_k04/K04_INTERFACE_STUB_v2_MAP13.py -text
+iface/frozen_k04/K04_INTERFACE_STUB_v3_ADD412.py -text

@@ -427,3 +427,119 @@ ENTRY_POINTS = {
     "gateway_spend_leg": "gateway_spend_leg",
     "settle_spend_leg": "settle_spend_leg",
 }
+
+
+def register_stage_routes(app):
+    """Mount STAGE_ROUTES on a FastAPI app; returns the app.
+
+    Every handler calls exactly its declared REALIZATION_MAP entry: the
+    dotted path is resolved lazily per request (importlib + getattr at
+    request time), so this module never imports sibling lane modules at
+    the top and wraps-spies on the entry observe the call. Parameters come
+    from the query string merged over by the JSON body, matched against the
+    entry signature (missing required parameters are 400); Enum-typed
+    parameters accept their string values and dataclass-typed parameters
+    accept dicts. Entry failures map to 4xx with the message text
+    preserved, unexpected failures to 500.
+    """
+    import importlib
+    import inspect
+    import typing
+    from fastapi import HTTPException, Request
+
+    def _bind(app, http_method, path):
+        """Duck-type binder (same shape as kb_routes._bind)."""
+        binder = None
+        try:
+            binder = app.get if http_method == "GET" else app.post
+        except AttributeError:
+            binder = None
+        if binder is None:
+            return app.route(path, methods=[http_method])
+        return binder(path)
+
+    def _resolve(dotted):
+        module_name, _, attr = dotted.rpartition(".")
+        return getattr(importlib.import_module(module_name), attr)
+
+    def _coerce(annotation, value):
+        if annotation is None:
+            return value
+        if isinstance(annotation, type):
+            import enum as _enum
+
+            if issubclass(annotation, _enum.Enum) and isinstance(value, str):
+                return annotation(value)
+            if hasattr(annotation, "__dataclass_fields__") and isinstance(
+                    value, dict):
+                hints = typing.get_type_hints(annotation)
+                return annotation(**{
+                    key: _coerce(hints.get(key), item)
+                    for key, item in value.items()
+                })
+        return value
+
+    def _status_for(exc):
+        if isinstance(exc, KeyError):
+            return 404
+        if isinstance(exc, (ValueError, TypeError)):
+            return 400
+        if isinstance(exc, StageError):
+            return 400
+        if (type(exc).__module__.startswith("agent_si.test_runners")
+                and getattr(exc, "code", None) is not None):
+            return 400
+        return 500
+
+    def _detail(exc):
+        code = getattr(exc, "code", None)
+        text = str(exc)
+        if code is not None and str(code) not in text:
+            return "%s: %s" % (code, text)
+        return text
+
+    def _make_handler(dotted):
+        # NOTE: `from __future__ import annotations` keeps closure
+        # annotations as strings that FastAPI cannot resolve (it sees
+        # module globals, not these locals); assign the real objects so
+        # `request` injects the Request instead of becoming a query param.
+        async def _serve_stage_route(request):
+            try:
+                body = await request.json()
+            except Exception:
+                body = None
+            merged = dict(request.query_params)
+            if isinstance(body, dict):
+                merged.update(body)
+            try:
+                entry = _resolve(dotted)
+                signature = inspect.signature(entry)
+                kwargs = {}
+                for name, param in signature.parameters.items():
+                    if param.kind in (
+                            inspect.Parameter.VAR_POSITIONAL,
+                            inspect.Parameter.VAR_KEYWORD):
+                        continue
+                    if name in merged:
+                        annotation = (None if param.annotation is
+                                      inspect.Parameter.empty
+                                      else param.annotation)
+                        kwargs[name] = _coerce(annotation, merged[name])
+                    elif param.default is inspect.Parameter.empty:
+                        raise TypeError(
+                            "missing required parameter %r for %s"
+                            % (name, dotted))
+                result = entry(**kwargs)
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=_status_for(exc),
+                    detail=_detail(exc)) from exc
+            return result
+
+        _serve_stage_route.__annotations__ = {"request": Request}
+        return _serve_stage_route
+
+    for _key, _dotted in REALIZATION_MAP.items():
+        _method, _, _path = _key.partition(" ")
+        _bind(app, _method, _path)(_make_handler(_dotted))
+    return app
