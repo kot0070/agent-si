@@ -19,6 +19,7 @@ import {
 import type { RouteTable } from "./iface";
 import type { ApiClient } from "../api/iface";
 import { ENDPOINTS } from "../api/endpoints";
+import { ApiError, apiErrorLocaleKey } from "../api/errors";
 import {
   useApiClient,
   useCurrentProject,
@@ -42,6 +43,7 @@ import { HttpLocalBenchClient } from "../settings/LocalBenchClient";
 import { EVIDENCE_LOCALE_KEYS } from "../settings/LocalBenchTypes";
 import { SettingsLayout } from "../shell/SettingsLayout";
 import { EmptyState } from "../ui/EmptyState";
+import { ErrorPanel } from "../ui/ErrorPanel";
 import { LoadingState } from "../ui/LoadingState";
 import { TopBar, TOPBAR_LOCALE_EVENT } from "../shell/TopBar";
 import { Sidebar } from "../shell/Sidebar";
@@ -208,10 +210,105 @@ function useEnsureProjectSelection(): void {
   }, [client, current]);
 }
 
+// Chat-first start box for the no-project case (kit PRODUCT_SPEC:4154):
+// the / route always mounts a working message box; the first sent message
+// creates the first project and starts a task in it, then selects it so the
+// route continues in the regular chat surface. Reuses the chat composer
+// testids so the route stays chat-first before any project exists.
+function ChatStartBox(): ReactElement {
+  const client = useApiClient();
+  const current = useCurrentProject();
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [blocking, setBlocking] = useState<{
+    errorKey: string;
+    code: string;
+  } | null>(null);
+
+  async function handleSend(): Promise<void> {
+    const message = draft.trim();
+    if (message === "" || busy) {
+      return;
+    }
+    setBusy(true);
+    setBlocking(null);
+    try {
+      const compact = message.replace(/\s+/g, " ").slice(0, 80);
+      const project = await client.createProject({
+        name: compact,
+        folder_ref: compact,
+      });
+      current.select(project.project_id);
+      await client.createTask(project.project_id, {
+        title: message,
+        scope: [],
+      });
+      setDraft("");
+    } catch (error) {
+      if (error instanceof ApiError) {
+        setBlocking({
+          errorKey: apiErrorLocaleKey(error.code),
+          code: error.code,
+        });
+      } else {
+        setBlocking({ errorKey: "errors.generic", code: "CONTEXT_MISSING" });
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section data-testid="chat-area" aria-label={t("shell.sidebar.chat")}>
+      <div data-testid="chat-composer">
+        <input
+          data-testid="chat-prompt"
+          type="text"
+          placeholder={t("chat.composer.prompt")}
+          aria-label={t("chat.composer.prompt")}
+          value={draft}
+          onChange={(event) => {
+            setDraft(event.target.value);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              void handleSend();
+            }
+          }}
+        />
+        <button
+          type="button"
+          data-testid="chat-send"
+          disabled={draft.trim() === "" || busy}
+          onClick={() => {
+            void handleSend();
+          }}
+        >
+          {t("chat.composer.send")}
+        </button>
+        {busy ? (
+          <span data-testid="chat-spinner" role="status">
+            {t("chat.stream.spinner")}
+          </span>
+        ) : null}
+      </div>
+      {blocking !== null ? (
+        <ErrorPanel
+          errorKey={blocking.errorKey}
+          code={blocking.code}
+          onRetry={() => {
+            void handleSend();
+          }}
+        />
+      ) : null}
+    </section>
+  );
+}
+
 function ChatRoute(): ReactElement {
   const current = useCurrentProject();
   if (current.projectId === null) {
-    return <ProjectsPageView />;
+    return <ChatStartBox />;
   }
   return <ChatAreaView projectId={current.projectId} />;
 }

@@ -9,7 +9,7 @@ import type { FormEvent, ReactElement } from "react";
 import type { ProjectRecord } from "../api/iface";
 import { ApiError, apiErrorLocaleKey } from "../api/errors";
 import { useApiClient, useCurrentProject } from "../app/ApiClientProvider";
-import { t } from "../locale/index";
+import { formatDate, t } from "../locale/index";
 import { Card } from "../ui/Card";
 import { EmptyState } from "../ui/EmptyState";
 import { ErrorPanel } from "../ui/ErrorPanel";
@@ -17,6 +17,14 @@ import { LoadingState } from "../ui/LoadingState";
 
 function isPaused(paused: ReadonlySet<string>, id: string): boolean {
   return paused.has(id);
+}
+
+function formatProjectDate(value: string): string {
+  const stamp = new Date(value);
+  if (Number.isNaN(stamp.getTime())) {
+    return value;
+  }
+  return formatDate(stamp);
 }
 
 export function ProjectsPage(): ReactElement {
@@ -176,8 +184,9 @@ export function ProjectsPage(): ReactElement {
                   >
                     {row.name}
                   </button>
-                  <span>{row.project_id}</span>
-                  <span>{row.created_at}</span>
+                  <span data-testid={`project-created-${row.project_id}`}>
+                    {formatProjectDate(row.created_at)}
+                  </span>
                   {isPaused(paused, row.project_id) ? (
                     <button
                       type="button"

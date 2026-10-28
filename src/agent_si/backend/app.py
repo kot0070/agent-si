@@ -585,6 +585,21 @@ def create_app(settings: Any = None,
     app.state.k04_ctx = _k04_ctx
     app.state.k04_config_error = _k04_config_error
 
+    # BEDEF1 ensure-at-start: projects loaded from the store that have no
+    # budget state or step limits get the product starting values
+    # (idempotent; an existing state is never overwritten).
+    try:
+        from agent_si.backend import project_defaults as _bedef1_defaults
+        from agent_si.backend import read_routes as _bedef1_read
+
+        _bedef1_projects, _bedef1_tasks = _bedef1_read.repos_for(app)
+        for _bedef1_row in _bedef1_projects.list_by({}):
+            _bedef1_pid = _bedef1_row.get("project_id")
+            if _bedef1_pid and not _bedef1_row.get("archived"):
+                _bedef1_defaults.ensure_project_defaults(app, _bedef1_pid)
+    except Exception:
+        pass
+
     def _k04_make_endpoint(_fn: Callable, _is_write: bool,
                            _name: str = "") -> Callable:
         async def _k04_endpoint(request: Request) -> _K04JSONResponse:
