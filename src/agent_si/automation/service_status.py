@@ -375,11 +375,25 @@ def observe_budget(service_id: str) -> Optional[object]:
     Returns the gate's state record, or ``None`` while K04 has not landed.
     Never reserves, settles, or otherwise controls budget.
     """
+    # K08INT1B: the K04 gate is keyed by project, never by service:
+    # resolve the owning project of this service row before the frozen
+    # read. When K04 has no state on file for that project, degrade to
+    # None (observe plus notify only: status observation and journal
+    # notification continue). The (KeyError, LookupError) catch mirrors
+    # the K04 HTTP surface contract in src/agent_si/budget/routes.py,
+    # which maps the same signal to an honest 404.
+    row = _SERVICES.get(service_id)
+    if row is None:
+        return None
+    project_id = str(row["project_id"])
     try:
         from agent_si.budget.gate import BudgetGate
     except ImportError:
         return None
-    return BudgetGate().get_state(service_id)
+    try:
+        return BudgetGate().get_state(project_id)
+    except (KeyError, LookupError):
+        return None
 
 
 def _usage(service_id: str) -> Tuple[bool, str, str]:
