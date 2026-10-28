@@ -197,6 +197,15 @@ def create_app(settings: Any = None,
     _localbench_routes.register_localbench_routes(app)
     _stage_runner.register_stage_routes(app)
 
+    # K02R3: project/task read + console write routes (M-ROUTES). Reads
+    # need no token; writes enforce the frozen USER_WRITE guard
+    # themselves. Never touch the K04 block below.
+    from agent_si.backend import console_projects_write as _k02r3_write
+    from agent_si.backend import read_routes as _k02r3_read
+
+    _k02r3_read.register_read_routes(app)
+    _k02r3_write.register_console_projects_write_routes(app)
+
     # --- K04 package routes (HD-authorised additions-only block). ---
     # HD_VERDICT_INT1_K04_ROOT + HD_RULING_K04_TESTS: this block only ADDS
     # routes; no existing K02 line above changes. Real wiring: store dir
