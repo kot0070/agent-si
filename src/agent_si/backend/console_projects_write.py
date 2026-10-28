@@ -11,8 +11,8 @@ storage. Rows live in the K13 repository ports shared with read_routes
 in-route cache. Unknown ids give an honest 404.
 
 Chat cancel (POST /api/v1/chat/cancel) is guarded the same way and
-answers honestly: the seam chat entry keeps no live-stream registry,
-so every stream_id is an honest 404 (see the module note below).
+ends a live stream by stream_id through the shared chat bridge
+(agent_si.backend.chat_stream); unknown ids stay an honest 404.
 """
 
 from __future__ import annotations
@@ -226,12 +226,9 @@ def register_console_projects_write_routes(app: Any) -> Any:
 
     @app.post("/api/v1/chat/cancel")
     async def cancel_chat(request: Request) -> dict:
-        # Guarded as a USER write. The seam chat entry (chat_stream in
-        # backend/app.py) is stateless: it accepts a prompt, returns no
-        # stream ids and keeps no live-stream registry on the app, so no
-        # stream_id can name a live run. Answer an honest 404 rather than
-        # a faked {ok: true} until a real live-run engine entry reachable
-        # from the app exists (NOT-DONE waits-for-HD row).
+        # K02R4 engine entry: guarded as a USER write; ends a live
+        # stream by stream_id through the shared chat bridge. Unknown
+        # ids stay an honest 404, never a faked {ok: true}.
         _enforce_user_write(request)
         body = await _json_body(request)
         stream_id = body.get("stream_id")
@@ -239,9 +236,15 @@ def register_console_projects_write_routes(app: Any) -> Any:
             raise HTTPException(
                 status_code=400,
                 detail="chat cancel needs a non-empty stream_id")
-        raise HTTPException(
-            status_code=404,
-            detail=f"no live chat stream {stream_id.strip()!r}",
-        )
+        from agent_si.backend import chat_stream as _k02r4_chat
+
+        bridge = _k02r4_chat.bridge_for_app(request.app)
+        name = stream_id.strip()
+        if not bridge.cancel(name):
+            raise HTTPException(
+                status_code=404,
+                detail=f"no live chat stream {name!r}",
+            )
+        return {"ok": True, "stream_id": name}
 
     return app
