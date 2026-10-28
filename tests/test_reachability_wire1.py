@@ -28,6 +28,7 @@ if _SRC not in sys.path:
 from agent_si.backend import kb_routes as _kb_mod
 from agent_si.backend import local_connect as _local_mod
 from agent_si.backend import localbench_routes as _bench_mod
+from agent_si.backend import pools_routes as _k04_mod
 from agent_si.backend.app import create_app
 from agent_si.test_runners import stage_runner as _stage_mod
 
@@ -42,6 +43,7 @@ def _wire1_clean():
     """Snapshot module-global lane state; restore it after the test."""
     lc_paired = _local_mod._PAIRED_SESSION_TOKEN
     lc_attached = _local_mod._ATTACHED_RUNTIME
+    k04_default_ctx = _k04_mod._DEFAULT_POOLS_CTX
     runs = dict(_stage_mod._RUNS)
     results = {key: list(val) for key, val in _stage_mod._RESULTS.items()}
     reservations = dict(_stage_mod._RESERVATIONS)
@@ -57,6 +59,7 @@ def _wire1_clean():
     yield
     _local_mod._PAIRED_SESSION_TOKEN = lc_paired
     _local_mod._ATTACHED_RUNTIME = lc_attached
+    _k04_mod._DEFAULT_POOLS_CTX = k04_default_ctx
     _stage_mod._RUNS.clear()
     _stage_mod._RUNS.update(runs)
     _stage_mod._RESULTS.clear()
@@ -126,7 +129,59 @@ def _wrap_kb_handler(handler, calls):
     return _wrapper
 
 
-def test_wire1_routes_reach_declared_entries(_wire1_clean, monkeypatch):
+def _wrap_k04_handler(name, handler, calls):
+    """Call-recorded spy preserving the (ctx, query, body) entry shape."""
+
+    @functools.wraps(handler)
+    def _wrapper(ctx, query, body):
+        calls.append(name)
+        return handler(ctx, query, body)
+
+    return _wrapper
+
+
+def _k04_drive_path(template):
+    """Concrete drive path for a declared template (runtime-read)."""
+    return "/".join(
+        "wire1-nope" if seg.startswith("{") and seg.endswith("}") else seg
+        for seg in template.split("/"))
+
+
+def _k04_payload(method, template, write_headers):
+    """Safe payload + headers + exact expected status per K04 template.
+
+    Mirrors _stage_payload: unknown templates fail loud (never skipped).
+    Payloads fail validation inside the declared entry (never in the app
+    guard), so the spy proves the entry ran.
+    """
+    key = (method.lower(), template)
+    if key == ("get", "/api/v1/providers"):
+        return None, None, 200
+    if key == ("post", "/api/v1/providers/connect"):
+        return {}, write_headers, 400
+    if key == ("post", "/api/v1/providers/{id}/disconnect"):
+        return {}, write_headers, 404
+    if key == ("get", "/api/v1/providers/{id}/models"):
+        return None, None, 404
+    if key == ("get", "/api/v1/chat/models"):
+        return None, None, 200
+    if key == ("get", "/api/v1/roles/pools"):
+        return None, None, 200
+    if key == ("put", "/api/v1/roles/pools"):
+        return {}, write_headers, 400
+    if key == ("get", "/api/v1/routing/decision/{id}/why"):
+        return None, None, 404
+    if key == ("get", "/api/v1/budget"):
+        return None, None, 404
+    if key == ("get", "/api/v1/kb/status"):
+        return None, None, 200
+    if key == ("post", "/api/v1/kb/proposals/apply"):
+        return {}, write_headers, 400
+    raise AssertionError("no safe payload for %s %s" % (method, template))
+
+
+def test_wire1_routes_reach_declared_entries(_wire1_clean, monkeypatch,
+                                             tmp_path):
     """Every declared K03/K09/K05 route is registered and reaches its entry."""
     from fastapi.testclient import TestClient
 
@@ -140,7 +195,21 @@ def test_wire1_routes_reach_declared_entries(_wire1_clean, monkeypatch):
         tuple((m, p, _wrap_kb_handler(h, kb_calls))
               for m, p, h in kb_declaration))
 
-    app = create_app(dict(TEST_SETTINGS))
+    # K04 handlers bind at registration time like the KB ones: wrap the
+    # live ROUTES entries (same functions, call-recorded by route name)
+    # so the app binds the spies. Method+path+name are read from the live
+    # declaration below; K04 is configured with a real dir (tmp_path) so
+    # entries run instead of the unconfigured 500 short-circuit.
+    k04_declaration = _k04_mod.ROUTES
+    k04_calls: list = []
+    monkeypatch.setattr(
+        _k04_mod, "ROUTES",
+        tuple((m, p, n, _wrap_k04_handler(n, f, k04_calls))
+              for m, p, n, f in k04_declaration))
+
+    settings = dict(TEST_SETTINGS)
+    settings["store_dir"] = str(tmp_path)
+    app = create_app(settings)
     token = app.state.ui_session_token
     assert token == TEST_TOKEN
     headers = {"x-actor": "wire1", "x-ui-session-token": token}
@@ -194,6 +263,16 @@ def test_wire1_routes_reach_declared_entries(_wire1_clean, monkeypatch):
         if path == "/api/v1/teststage/runs/counters":
             path = path + "?run_id=wire1-nope"
         cases.append((method, path, payload, None, owner, attr, kind))
+    # K04 cases (runtime-read): method+template+name from the live ROUTES
+    # declaration wrapped above; only the safe payload + exact expected
+    # status are fixed per template (the file's own _stage_payload
+    # pattern). Templates drive concrete paths; registration is asserted
+    # on the template in the K04 loop below.
+    k04_cases = []
+    for method, path, name, _fn in k04_declaration:
+        payload, hdrs, expected = _k04_payload(method, path, headers)
+        k04_cases.append((method.upper(), _k04_drive_path(path), path,
+                          payload, hdrs, name, expected))
 
     with contextlib.ExitStack() as stack:
         spies = {}
@@ -261,6 +340,16 @@ def test_wire1_routes_reach_declared_entries(_wire1_clean, monkeypatch):
                     else:
                         assert status == kind, (
                             "%s %s -> %s: %s" % (method, path, status, text))
+
+    for method, drive, template, payload, hdrs, name, expected in k04_cases:
+        assert (method, template) in registered, (
+            "%s %s is not registered in app.routes" % (method, template))
+        resp = _drive(client, method, drive, payload, hdrs)
+        status, text = resp.status_code, resp.text
+        assert name in k04_calls, (
+            "%s %s did not reach entry %s" % (method, drive, name))
+        assert status == expected, (
+            "%s %s -> %s: %s" % (method, drive, status, text))
 
 
 def test_wire1_unregistered_path_is_404(_wire1_clean):

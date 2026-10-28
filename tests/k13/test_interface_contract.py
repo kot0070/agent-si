@@ -1458,7 +1458,6 @@ def test_behaviour_builder_workflow_not_revalidated_raised():
     assert excinfo.value.code == "BUILDER_WORKFLOW_NOT_REVALIDATED"
 
 
-@pytest.mark.xfail(strict=True, reason="K02: run_turn production caller out of tree")
 def test_behaviour_run_turn_has_production_caller():
     # Every call surface wired: some src module outside the defining
     # module must reference run_turn (a production caller exists).

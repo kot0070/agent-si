@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import http.client
 import importlib.util
 import inspect
@@ -22,9 +23,29 @@ from agent_si.local.adapter import EvidenceTier, LifecycleStage
 
 _WS_ROOT = pathlib.Path(__file__).resolve().parents[2]
 
+# Frozen K04 interface stubs: byte-exact repo copies under iface/frozen_k04/
+# (copies are never edited). sha256 values confirmed against the RECORDS/day1
+# originals; the loader checks each copy before use.
+_K04_SHA256 = "c2ff19b32928d93c30264ac5ad1a98414eab6cc9051af6e0559d6a6af9afaf02"
+_K04_V2_MAP13_SHA256 = (
+    "e6a0d09eda7598d641ffad35998dc4ee50b99243d3b95cc72808aeefc0ab04c3"
+)
+_K04_V3_ADD412_SHA256 = (
+    "20ca34bf342ee78f25128bf297acbd7a90cfb290edb6016a05d9ac021e4dbb99"
+)
+_FROZEN_K04_FILES = (
+    ("K04_INTERFACE_STUB.py", _K04_SHA256),
+    ("K04_INTERFACE_STUB_v2_MAP13.py", _K04_V2_MAP13_SHA256),
+    ("K04_INTERFACE_STUB_v3_ADD412.py", _K04_V3_ADD412_SHA256),
+)
+
 
 def _load_frozen_k04():
-    path = _WS_ROOT / "RECORDS" / "day1" / "K04_INTERFACE_STUB.py"
+    frozen_dir = _WS_ROOT / "iface" / "frozen_k04"
+    for name, expected in _FROZEN_K04_FILES:
+        digest = hashlib.sha256((frozen_dir / name).read_bytes()).hexdigest()
+        assert digest == expected, f"frozen K04 copy changed: {name}"
+    path = frozen_dir / "K04_INTERFACE_STUB.py"
     spec = importlib.util.spec_from_file_location("k04_frozen_iface", path)
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
