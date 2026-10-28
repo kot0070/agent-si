@@ -1338,6 +1338,8 @@ def _d9_merge():
         ("get", "/api/v1/kb/status", "kb_status", _modelkb.kb_status),
         ("post", "/api/v1/kb/proposals/apply", "kb_proposal_apply",
          _guarded_write("kb_proposal_apply", _modelkb.kb_proposal_apply)),
+        ("put", "/api/v1/roles/chat-model", "put_chat_model",
+         _guarded_write("put_chat_model", put_chat_model)),
     )
     frozen_keys = {(method.lower(), path) for method, path, _n, _f in frozen}
     legacy = []

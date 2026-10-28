@@ -334,14 +334,4 @@ def create_app(settings: Any = None,
             methods=[_method.upper()],
             name="k04_" + _name)
 
-    # HD ADDENDUM (K04P2-CHATSAVE): exactly one added registration row
-    # for the chat-model save. The handler lives in pools_routes; the
-    # frozen ROUTES tuple stays 11 rows until the post-PASS HD re-freeze,
-    # so the existing exact-11 merge pin keeps passing unmodified.
-    app.add_api_route(
-        "/api/v1/roles/chat-model",
-        _k04_make_endpoint(_k04_pr.put_chat_model, True, "put_chat_model"),
-        methods=["PUT"],
-        name="k04_put_chat_model")
-
     return app
