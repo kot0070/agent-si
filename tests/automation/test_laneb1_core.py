@@ -37,12 +37,8 @@ from agent_si.automation.interface import (
     AutomationError,
 )
 
-K02_DOC = (
-    Path(__file__).resolve().parents[2]
-    / "RECORDS"
-    / "day1"
-    / "K02_INTERFACE.md"
-)
+# K08F1: K02_DOC (RECORDS read) removed — a clean clone has no RECORDS folder.
+# The model-id check now uses the in-repo frozen source (see below).
 
 
 def _code(excinfo):
@@ -470,12 +466,11 @@ def test_error_codes_cover_runtime_core():
 
 
 def test_model_id_matches_repo_exact():
-    line = next(
-        raw for raw in K02_DOC.read_text(encoding="utf-8").splitlines()
-        if "MODEL_ID" in raw
-    )
-    assert runner.MODEL_ID in line
-    assert runner.MODEL_ID == "meta/muse-spark-1.3-contributor"
+    # K08F1: clean-clone fix — compare runner.MODEL_ID with the K02 model id
+    # from the in-repo frozen source src/agent_si/assurance/assurance_iface.py:19
+    # (K02 sec 2 pin; never a RECORDS read, never a retyped literal).
+    from agent_si.assurance.assurance_iface import MODEL_ID as K02_MODEL_ID
+    assert runner.MODEL_ID == K02_MODEL_ID
 
 
 def test_product_sources_stay_clean():
@@ -488,10 +483,12 @@ def test_product_sources_stay_clean():
 
 
 def test_product_sources_are_crlf():
+    # K08F1: clean-clone fix — .gitattributes:4 (*.py text eol=lf) governs LF
+    # checkouts, so the CRLF-presence demand is dropped; the no-mixed-or-stray-CR
+    # assertion is kept, valid for both LF and CRLF checkouts.
     package = Path(__file__).resolve().parents[2] / "src" / "agent_si" / "automation"
     for name in ("pause.py", "runner.py", "launcher.py", "triggers.py", "scheduler.py"):
         raw = (package / name).read_bytes()
-        assert b"\r\n" in raw, name
         assert raw.replace(b"\r\n", b"\n").find(b"\r") == -1, name
 
 
