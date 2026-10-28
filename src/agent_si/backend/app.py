@@ -577,4 +577,76 @@ def create_app(settings: Any = None,
     _k13f1_routes.bind_k13f1_state(app)
     _k13f1_routes.register_k13f1_routes(app)
 
+    # --- K06 ask-UI routes (HD-authorised additions-only block). ---
+    # HD_VERDICT_K06INT1: GET /sessions and POST /asks serve the K06 ask UI
+    # (agent_si.backend.ui_session, lane A); no K02 brief or route owns them,
+    # so route ownership is K06. This block only ADDS routes; no existing
+    # line above changes. Tokens travel in the x-ui-session-token header
+    # only, never in a URL.
+    from agent_si.backend import ui_session as _k06_ui_session
+
+    def _k06_session_payload(summary: Any) -> dict[str, Any]:
+        return {
+            "session_id": summary.session_id,
+            "title": summary.title,
+        }
+
+    @app.get("/sessions")
+    def k06_list_sessions() -> dict[str, Any]:
+        """GET /sessions -> list_sessions over the real UI session store."""
+        sessions = _k06_ui_session.list_sessions(
+            store_path=_k06_ui_session._default_store_dir())
+        return {"sessions": [_k06_session_payload(s) for s in sessions]}
+
+    @app.post("/asks")
+    async def k06_create_ask(request: Request) -> dict[str, Any]:
+        """POST /asks -> create_ask_card; writes need a live header token."""
+        actor = (request.headers.get("x-actor") or "").strip()
+        if not actor:
+            raise HTTPException(status_code=401,
+                                detail="missing x-actor header")
+        token = request.headers.get("x-ui-session-token")
+        if not token:
+            raise HTTPException(status_code=401,
+                                detail="missing x-ui-session-token header")
+        check_auth: AuthHook = app.state.auth_hook
+        try:
+            ok = bool(check_auth(token, actor, USER_WRITE))
+        except Exception:
+            ok = False
+        if not ok:
+            raise HTTPException(status_code=403, detail="forbidden")
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        raw_options = body.get("options", [])
+        options = []
+        if isinstance(raw_options, list):
+            for raw in raw_options:
+                if (isinstance(raw, dict) and raw.get("option_id")
+                        and raw.get("label")):
+                    options.append(
+                        _k06_ui_session.AskOption(
+                            option_id=str(raw["option_id"]),
+                            label=str(raw["label"])))
+        try:
+            card = _k06_ui_session.create_ask_card(
+                kind=body.get("kind", "approval"),
+                summary=body.get("summary", ""),
+                options=options,
+                secret_ref=body.get("secret_ref"))
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return {
+            "ask_id": card.ask_id,
+            "kind": card.kind,
+            "summary": card.summary,
+            "options": [{"option_id": o.option_id, "label": o.label}
+                        for o in card.options],
+            "resume_token": card.resume_token,
+        }
+
     return app
