@@ -38,6 +38,19 @@ CHAT_BAD_REQUEST = "CHAT_BAD_REQUEST"
 MANAGER_STREAM_ABSENT = "MANAGER_STREAM_ABSENT"
 MANAGER_STREAM_FAILED = "MANAGER_STREAM_FAILED"
 
+#: No routed provider adapter is bound (M-WIRE L0B-12; the terminal
+#: SSE error over HTTP 200, never a 404 stack). A mid-stream manager
+#: ProviderUnboundError maps to this code (see _chat_error_event).
+NO_PROVIDER_BOUND = "NO_PROVIDER_BOUND"
+
+#: An AgentTask crossing the chat boundary was rejected at dispatch.
+CHAT_DISPATCH_REJECTED = "CHAT_DISPATCH_REJECTED"
+
+#: Chat-route guard codes (M-WIRE L0B-11; every error body carries one).
+CHAT_ACTOR_MISSING = "CHAT_ACTOR_MISSING"
+CHAT_FORBIDDEN = "CHAT_FORBIDDEN"
+CHAT_RATE_LIMITED = "CHAT_RATE_LIMITED"
+
 #: M-MANAGER-owned runtime entry (lazy import, never defined here).
 MANAGER_MODULE = "agent_si.backend.runtime_manager"
 MANAGER_FN = "run_task_streamed"
@@ -63,6 +76,15 @@ class ChatStreamFailed(RuntimeError):
     """A bound Manager run failed (HTTP 500)."""
 
     code = MANAGER_STREAM_FAILED
+
+
+def http_error_detail(code: str, message: str) -> dict[str, str]:
+    """Build the {code, message} detail for a chat-route HTTP error.
+
+    Every chat error body carries a stable machine code plus a human
+    message; secret, key and token text never belong in either field.
+    """
+    return {"code": str(code), "message": str(message)}
 
 
 @dataclass(frozen=True)
@@ -112,6 +134,10 @@ def sse_bytes(payload: Mapping[str, Any]) -> bytes:
 def _chat_error_event(stream_id: str, err: Exception) -> dict[str, Any]:
     """Render one terminal error SSE payload for a mid-stream failure."""
     code = getattr(err, "code", None) or type(err).__name__
+    if code == "MANAGER_PROVIDER_UNBOUND":
+        # M-WIRE L0B-12: an unbound provider mid-stream is the same
+        # terminal condition as the no-provider open (never a 404).
+        code = NO_PROVIDER_BOUND
     if isinstance(err, KeyError) and err.args \
             and isinstance(err.args[0], str):
         message = err.args[0]
@@ -242,6 +268,47 @@ class ManagerSdkBridge:
                 stream_id, run_id, request, state)
         return stream_id, iterator
 
+    def no_provider_run(
+        self, request: ChatStreamRequest
+    ) -> tuple[str, Iterator[bytes]]:
+        """Start a stream that ends in NO_PROVIDER_BOUND (M-WIRE L0B-12).
+
+        No provider adapter is bound, so no engine runs: the stream
+        carries exactly one `start` plus one terminal `error` event
+        with code NO_PROVIDER_BOUND. Served over HTTP 200 SSE, never
+        a 404.
+        """
+        stream_id = uuid.uuid4().hex
+        run_id = uuid.uuid4().hex
+        state: dict[str, Any] = {"cancelled": False}
+        self._live[stream_id] = state
+        return stream_id, self._no_provider_events(
+            stream_id, run_id, request, state)
+
+    def _no_provider_events(
+        self,
+        stream_id: str,
+        run_id: str,
+        request: ChatStreamRequest,
+        state: dict[str, Any],
+    ) -> Iterator[bytes]:
+        """Yield start plus the terminal NO_PROVIDER_BOUND error."""
+        yield sse_bytes(self._start_event(stream_id, run_id, request))
+        if state["cancelled"]:
+            self._finish(stream_id)
+            yield sse_bytes(
+                {"type": "cancelled", "stream_id": stream_id})
+            return
+        self._finish(stream_id)
+        yield sse_bytes({
+            "type": "error",
+            "stream_id": stream_id,
+            "run_id": run_id,
+            "code": NO_PROVIDER_BOUND,
+            "message": "no provider is connected; "
+                       "connect a provider to enable chat",
+        })
+
     def cancel(self, stream_id: str) -> bool:
         """End a live stream; False when the id names no live stream."""
         state = self._live.pop(stream_id, None)
@@ -276,6 +343,12 @@ class ManagerSdkBridge:
             "agents": rows,
         }
 
+    #: SSE event types that end a stream; exactly one is emitted last.
+    _TERMINAL_TYPES = frozenset({
+        "done", "dispatch_rejected", "budget_stop",
+        "cancelled", "error", "approval",
+    })
+
     def _manager_events(
         self,
         stream_id: str,
@@ -284,7 +357,14 @@ class ManagerSdkBridge:
         state: dict[str, Any],
         run_task_streamed: Any,
     ) -> Iterator[bytes]:
-        """Stream RunEvents from the owned M-MANAGER entry as SSE."""
+        """Stream RunEvents from the owned M-MANAGER entry as SSE.
+
+        Exactly one `start` opens the stream (the manager run's own
+        start record is consumed, never forwarded) and exactly one
+        terminal event closes it: the manager's terminal event when
+        it emits one, a synthesized `done` only when it emits none,
+        or a single `error` when the run fails first.
+        """
         yield sse_bytes(self._start_event(stream_id, run_id, request))
         if state["cancelled"]:
             yield sse_bytes({"type": "cancelled", "stream_id": stream_id})
@@ -300,22 +380,33 @@ class ManagerSdkBridge:
             self._finish(stream_id)
             yield sse_bytes(_chat_error_event(stream_id, err))
             return
+        terminal_emitted = False
         try:
             for event in run_events:
                 if state["cancelled"]:
                     yield sse_bytes(
                         {"type": "cancelled", "stream_id": stream_id})
                     return
-                yield sse_bytes(_manager_event_payload(
-                    stream_id, run_id, event))
+                payload = _manager_event_payload(
+                    stream_id, run_id, event)
+                if payload.get("type") == "start":
+                    continue
+                yield sse_bytes(payload)
+                if payload.get("type") in self._TERMINAL_TYPES:
+                    terminal_emitted = True
         except Exception as err:
             self._finish(stream_id)
-            yield sse_bytes(_chat_error_event(stream_id, err))
+            if not terminal_emitted:
+                yield sse_bytes(_chat_error_event(stream_id, err))
             return
         finally:
             self._finish(stream_id)
-        yield sse_bytes({**_manager_event_payload(stream_id, run_id, event),
-                         "type": "done", "stream_id": stream_id, "run_id": run_id})
+        if not terminal_emitted:
+            yield sse_bytes({
+                "type": "done",
+                "stream_id": stream_id,
+                "run_id": run_id,
+            })
 
     def _orchestration_events(
         self,
@@ -470,6 +561,8 @@ def bridge_for_app(app: Any) -> ManagerSdkBridge:
     The provider adapter is read from app.state.chat_provider_adapter
     when the bridge is first built (tests inject the K04 mock there);
     a later-bound adapter still attaches while the bridge has none.
+    A provider connected after app start binds on first use via
+    bind_routed_provider_adapter (M-WIRE L0B-12).
     """
     bridge = getattr(app.state, "chat_stream_bridge", None)
     if bridge is None:
@@ -479,15 +572,285 @@ def bridge_for_app(app: Any) -> ManagerSdkBridge:
         app.state.chat_stream_bridge = bridge
     elif getattr(bridge, "_provider_adapter", None) is None:
         provider = getattr(app.state, "chat_provider_adapter", None)
+        if provider is None:
+            provider = bind_routed_provider_adapter(app)
         if provider is not None:
             bridge._provider_adapter = provider
     return bridge
 
 
+def _read_secret_value(credential_store: Any, secret_id: str) -> str:
+    """Resolve one secret value at call time (ids in, value out).
+
+    Duck-typed over the credential-store port; raises AdapterConfigError
+    (never logs, never stores the value) when the store cannot serve
+    it. The value travels only to the provider transport Authorization
+    header, never into a body, log, URL or fixture.
+    """
+    if credential_store is not None and secret_id:
+        for attr in ("get_secret", "get", "retrieve", "read",
+                     "get_secret_value"):
+            loader = getattr(credential_store, attr, None)
+            if not callable(loader):
+                continue
+            try:
+                candidate = loader(secret_id)
+            except Exception:
+                continue
+            value = candidate
+            if isinstance(candidate, Mapping):
+                value = candidate.get("value")
+            if isinstance(value, str) and value:
+                return value
+        try:
+            candidate = credential_store[secret_id]
+        except Exception:
+            candidate = None
+        if isinstance(candidate, Mapping):
+            candidate = candidate.get("value")
+        if isinstance(candidate, str) and candidate:
+            return candidate
+    from agent_si.providers.adapters.base import AdapterConfigError
+
+    raise AdapterConfigError(
+        "secret value unavailable at call time for %r "
+        "(bind the credential store value port)" % (secret_id,),
+        "chat-bind:secret")
+
+
+def _gateway_transport(base_url: str, credential_store: Any,
+                       secret_ref: Mapping[str, Any]):
+    """Build the chat-completions gateway transport (stdlib only).
+
+    The transport performs network I/O only when the bound adapter is
+    invoked, which needs an owner-connected provider; it never fires
+    in tests (no provider is ever connected there). Secret values
+    resolve at call time and travel only in the Authorization header.
+    """
+    from agent_si.providers.adapters.base import TransportHttpError
+    from agent_si.providers.adapters.base import TransportTimeoutError
+
+    secret_id = str((secret_ref or {}).get("secret_id", ""))
+    endpoint = str(base_url or "").rstrip("/")
+
+    def _transport(request: Mapping[str, Any]) -> dict[str, Any]:
+        import json as _json
+        import urllib.error as _urlerror
+        import urllib.request as _urlrequest
+
+        value = _read_secret_value(credential_store, secret_id)
+        chat_path = str(request.get("chat_path") or "/chat/completions")
+        url = endpoint + chat_path
+        payload = _json.dumps({
+            "model": request.get("model", ""),
+            "messages": [dict(item) for item in request.get("messages", [])],
+            "stream": False,
+        }).encode("utf-8")
+        http_request = _urlrequest.Request(
+            url, data=payload,
+            headers={"Content-Type": "application/json",
+                     "Authorization": "Bearer " + value},
+            method="POST",
+        )
+        try:
+            with _urlrequest.urlopen(http_request, timeout=60) as response:
+                raw = response.read().decode("utf-8")
+        except _urlerror.HTTPError as exc:
+            raise TransportHttpError(
+                getattr(exc, "code", 0) or 0, str(exc)) from None
+        except _urlerror.URLError as exc:
+            raise TransportTimeoutError(str(exc)) from None
+        try:
+            body = _json.loads(raw)
+        except ValueError:
+            raise TransportHttpError(502, "gateway answered non-JSON") from None
+        choices = body.get("choices") if isinstance(body, dict) else None
+        first = choices[0] if isinstance(choices, list) and choices else {}
+        content = ""
+        finish = "stop"
+        if isinstance(first, Mapping):
+            message = first.get("message", {})
+            if isinstance(message, Mapping):
+                content = str(message.get("content", "") or "")
+            finish = str(first.get("finish_reason", "") or "stop")
+        usage = body.get("usage", {}) if isinstance(body, dict) else {}
+        return {
+            "output_text": content,
+            "finish": finish,
+            "usage": dict(usage) if isinstance(usage, Mapping) else {},
+        }
+
+    return _transport
+
+
+def _chat_models_for(ctx: Any, provider_id: str) -> list:
+    """Provider-id -> model-id rows from the served ctx KB port."""
+    kb = getattr(ctx, "kb", None)
+    if kb is None:
+        return []
+    try:
+        facts = kb.models()
+    except Exception:
+        return []
+    models = []
+    for fact in facts or []:
+        if isinstance(fact, Mapping):
+            provider = fact.get("provider")
+            model = fact.get("model")
+        else:
+            provider = getattr(fact, "provider", None)
+            model = getattr(fact, "model", None)
+        if provider == provider_id and model:
+            models.append(str(model))
+    return models
+
+
+def _chat_record_model(ctx: Any, project_id: str) -> str | None:
+    """Saved chat model_id for one project, or None (public K04 read)."""
+    if not project_id:
+        return None
+    try:
+        from agent_si.backend import pools_routes as _pools
+    except ImportError:
+        return None
+    try:
+        record = _pools.get_chat_record(ctx, project_id)
+    except Exception:
+        return None
+    if not isinstance(record, Mapping):
+        return None
+    model_id = record.get("model_id")
+    return str(model_id) if model_id else None
+
+
+def bind_routed_provider_adapter(app: Any,
+                                 project_id: str | None = None) -> Any | None:
+    """Bind the routed provider adapter at app start (M-WIRE L0B-12).
+
+    Resolves the owner-connected provider through the K04 public API
+    (the app's bound provider facade, the registry facade and the
+    routing interface), picks the routed evidenced provider, and builds
+    the real gateway adapter (refs only, no key material, no network).
+    Sets app.state.chat_provider_adapter and returns the adapter; None
+    when nothing routable is connected (the chat route then answers the
+    terminal NO_PROVIDER_BOUND event). Never raises: every failure mode
+    below returns None so app start and chat open stay total. An already
+    bound adapter (e.g. the test seam) is never replaced.
+    """
+    state = getattr(app, "state", None)
+    if state is None:
+        return None
+    current = getattr(state, "chat_provider_adapter", None)
+    if current is not None:
+        return current
+    ctx = getattr(state, "k04_ctx", None)
+    if ctx is None:
+        return None
+    facade = getattr(ctx, "provider_facade", None)
+    if facade is None:
+        return None
+    try:
+        views = facade.list_providers(True)
+    except Exception:
+        return None
+    evidenced = [view for view in (views or [])
+                 if getattr(view, "evidenced", False)]
+    if not evidenced:
+        return None
+    routed_ids: set = set()
+    for source in ("agent_si.routing.interface",
+                   "agent_si.providers.registry.facades"):
+        try:
+            module = importlib.import_module(source)
+        except ImportError:
+            continue
+        getter = getattr(module, "get_provider", None)
+        if not callable(getter):
+            continue
+        for view in evidenced:
+            provider_id = getattr(view, "provider_id", "")
+            try:
+                candidate = getter(provider_id)
+            except Exception:
+                continue
+            if candidate is not None and getattr(
+                    candidate, "evidenced", False):
+                routed_ids.add(provider_id)
+    wanted_model = _chat_record_model(
+        ctx, project_id) if project_id else None
+    chosen = None
+    chosen_model = None
+    if wanted_model:
+        provider_part, _, model_part = wanted_model.partition("/")
+        for view in evidenced:
+            if model_part and getattr(view, "provider_id", "") == provider_part:
+                chosen, chosen_model = view, model_part
+                break
+        if chosen is None and len(evidenced) == 1:
+            chosen, chosen_model = evidenced[0], wanted_model
+    if chosen is None:
+        if len(evidenced) == 1:
+            chosen = evidenced[0]
+        else:
+            ordered = sorted(
+                evidenced, key=lambda v: getattr(v, "provider_id", ""))
+            for view in ordered:
+                if getattr(view, "provider_id", "") in routed_ids:
+                    chosen = view
+                    break
+            if chosen is None:
+                chosen = ordered[0]
+    provider_id = getattr(chosen, "provider_id", "")
+    instance_id = getattr(chosen, "instance_id", "") or "default"
+    model = chosen_model
+    if not model:
+        kb_models = _chat_models_for(ctx, provider_id)
+        model = kb_models[0] if kb_models else ""
+    if not model or not provider_id:
+        return None
+    secret_ref = getattr(chosen, "secret_ref", None)
+    secret_mapping: dict[str, Any] = {}
+    if secret_ref is not None:
+        describe = getattr(secret_ref, "describe", None)
+        described = None
+        if callable(describe):
+            try:
+                described = describe()
+            except Exception:
+                described = None
+        elif isinstance(secret_ref, Mapping):
+            described = secret_ref
+        if isinstance(described, Mapping):
+            secret_mapping = {key: value for key, value in described.items()
+                            if key != "value"}
+    base_url = getattr(chosen, "base_url", "") or ""
+    credential_store = getattr(ctx, "credential_store", None)
+    try:
+        from agent_si.providers.adapters.legs import build_leg
+    except ImportError:
+        return None
+    try:
+        adapter = build_leg(
+            provider_id, model, secret_mapping,
+            transport=_gateway_transport(
+                base_url, credential_store, secret_mapping),
+            instance_id=instance_id,
+            base_url=base_url or None,
+        )
+    except Exception:
+        return None
+    state.chat_provider_adapter = adapter
+    return adapter
+
+
 __all__ = [
     "AGENTS_LIVE_FN",
     "AGENTS_LIVE_MODULE",
+    "CHAT_ACTOR_MISSING",
     "CHAT_BAD_REQUEST",
+    "CHAT_DISPATCH_REJECTED",
+    "CHAT_FORBIDDEN",
+    "CHAT_RATE_LIMITED",
     "MANAGER_FN",
     "MANAGER_MODULE",
     "MANAGER_STREAM_ABSENT",
@@ -497,8 +860,11 @@ __all__ = [
     "ChatStreamFailed",
     "ChatStreamRequest",
     "ManagerSdkBridge",
+    "NO_PROVIDER_BOUND",
+    "bind_routed_provider_adapter",
     "bridge_for_app",
     "build_bridge",
     "guard_agent_task",
+    "http_error_detail",
     "sse_bytes",
 ]

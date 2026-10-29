@@ -62,6 +62,26 @@ def ensure_project_defaults(app: Any, project_id: str) -> None:
         return
     except (KeyError, LookupError):
         pass
+    # R349A: restore SAVED values first (lazy import: steplimit_routes
+    # owns steplimits.json and must stay import-cycle free).
+    from agent_si.backend import steplimit_routes as _step_routes
+
+    _saved_store = getattr(getattr(app, "state", None),
+                           "k02r3_store_dir", None)
+    _saved = _step_routes.saved_limits_for(_saved_store, project_id)
+    if _saved is not None:
+        _saved_outcome = _steplimits.apply_steplimit_config_change(
+            {
+                "project_id": project_id,
+                "task_max_steps": _saved[0],
+                "chat_max_steps": _saved[1],
+                "authority": _DEFAULT_AUTHORITY,
+                "reason": _DEFAULT_REASON,
+                "statement": "step limits for project %s" % (project_id,),
+            }
+        )
+        if _saved_outcome.applied:
+            return
     outcome = _steplimits.apply_steplimit_config_change(
         {
             "project_id": project_id,

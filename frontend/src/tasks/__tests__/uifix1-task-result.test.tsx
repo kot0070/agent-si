@@ -77,7 +77,8 @@ function stubTaskBoundary(store: TaskStore): void {
       }
       if (path === "/api/v1/budget?project_id=p-1" && method === "GET") {
         return jsonBody({
-          state: {
+          project_id: "p-1",
+          budget: {
             project_id: "p-1",
             hard_limit: 100,
             spent: 10,

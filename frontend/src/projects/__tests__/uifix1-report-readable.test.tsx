@@ -85,7 +85,7 @@ function stubBoundary(): void {
         return jsonBody({ rows: LEDGER });
       }
       if (path === "/api/v1/budget?project_id=p-9" && method === "GET") {
-        return jsonBody({ state: BUDGET });
+        return jsonBody({ project_id: "p-9", budget: BUDGET });
       }
       if (path === "/api/v1/agents/live" && method === "GET") {
         return jsonBody({ agents: [] });
