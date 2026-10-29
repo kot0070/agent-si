@@ -8,6 +8,8 @@
 // lines carry the DERIVED label and never
 // override measured rows. Mounted by the App routes
 // /projects/:projectId/* in wave 3.
+// L0C-01: every panel loads and fails independently, so one failing read
+// never hides the sibling panels.
 
 import { Component, useEffect, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
@@ -60,13 +62,16 @@ export interface ProjectViewProps {
   onSelect?: (view: ProjectViewName) => void;
 }
 
-interface ViewData {
-  project: ProjectRecord;
-  tasks: TaskRecord[];
-  ledger: LedgerRow[];
-  budget: BudgetState;
-  live: PartRow[];
-  why: RoutingWhy | null;
+interface PanelError {
+  errorKey: string;
+  code: string;
+}
+
+function toPanelError(error: unknown): PanelError {
+  if (error instanceof ApiError) {
+    return { errorKey: apiErrorLocaleKey(error.code), code: error.code };
+  }
+  return { errorKey: "errors.generic", code: "CONTEXT_MISSING" };
 }
 
 function readStatusHuman(row: PartRow): unknown {
@@ -212,60 +217,208 @@ class LimitsSectionBoundary extends Component<
 export function ProjectView(props: ProjectViewProps): ReactElement {
   const client = useApiClient();
   const { locale } = useLocale();
-  const [data, setData] = useState<ViewData | null>(null);
+  // L0C-01: one state per served read. No shared Promise.all and no shared
+  // failure flag: each panel below renders from its own state and shows its
+  // own ErrorPanel, so a single failing read never unmounts the others.
+  const [project, setProject] = useState<ProjectRecord | null>(null);
+  const [projectError, setProjectError] = useState<PanelError | null>(null);
+  const [tasks, setTasks] = useState<TaskRecord[] | null>(null);
+  const [tasksError, setTasksError] = useState<PanelError | null>(null);
+  const [ledger, setLedger] = useState<LedgerRow[] | null>(null);
+  const [ledgerError, setLedgerError] = useState<PanelError | null>(null);
+  const [budget, setBudget] = useState<BudgetState | null>(null);
+  const [budgetError, setBudgetError] = useState<PanelError | null>(null);
+  const [live, setLive] = useState<PartRow[] | null>(null);
+  const [liveError, setLiveError] = useState<PanelError | null>(null);
+  const [why, setWhy] = useState<RoutingWhy | null>(null);
+  const [whyError, setWhyError] = useState<PanelError | null>(null);
+  const [whyLoading, setWhyLoading] = useState(false);
   const [report, setReport] = useState<string | null>(null);
-  const [failure, setFailure] = useState<{
-    errorKey: string;
-    code: string;
-  } | null>(null);
+  const [reportError, setReportError] = useState<PanelError | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
   const [nonce, setNonce] = useState(0);
   const [collapsed, setCollapsed] = useState(false);
 
+  function retry(): void {
+    setNonce((value) => value + 1);
+  }
+
+  function panelError(error: PanelError): ReactElement {
+    return (
+      <ErrorPanel
+        errorKey={error.errorKey}
+        code={error.code}
+        onRetry={retry}
+      />
+    );
+  }
+
   useEffect(() => {
     let alive = true;
-    async function load(): Promise<void> {
-      try {
-        const [project, tasks, ledger, budget, live] = await Promise.all([
-          client.readProject(props.projectId),
-          client.listTasks(props.projectId),
-          client.readLedger(props.projectId),
-          client.readBudget(props.projectId),
-          client.listAgentsLive(),
-        ]);
-        let why: RoutingWhy | null = null;
-        if (
-          (props.view === "routing-decisions" || props.view === "models") &&
-          props.decisionId !== undefined
-        ) {
-          why = await client.readRoutingWhy(props.decisionId);
-        }
-        let exported: string | null = null;
-        if (props.view === "reports") {
-          exported = await exportProjectReport(client, props.projectId);
-        }
+    void client
+      .readProject(props.projectId)
+      .then((row) => {
         if (alive) {
-          setData({ project, tasks, ledger, budget, live, why });
-          setReport(exported);
-          setFailure(null);
+          setProject(row);
+          setProjectError(null);
         }
-      } catch (error) {
+      })
+      .catch((error: unknown) => {
         if (alive) {
-          if (error instanceof ApiError) {
-            setFailure({
-              errorKey: apiErrorLocaleKey(error.code),
-              code: error.code,
-            });
-          } else {
-            setFailure({ errorKey: "errors.generic", code: "CONTEXT_MISSING" });
-          }
+          setProject(null);
+          setProjectError(toPanelError(error));
         }
-      }
-    }
-    void load();
+      });
     return () => {
       alive = false;
     };
-  }, [client, props.projectId, props.view, props.decisionId, nonce]);
+  }, [client, props.projectId, nonce]);
+
+  useEffect(() => {
+    let alive = true;
+    void client
+      .listTasks(props.projectId)
+      .then((rows) => {
+        if (alive) {
+          setTasks(rows);
+          setTasksError(null);
+        }
+      })
+      .catch((error: unknown) => {
+        if (alive) {
+          setTasks(null);
+          setTasksError(toPanelError(error));
+        }
+      });
+    return () => {
+      alive = false;
+    };
+  }, [client, props.projectId, nonce]);
+
+  useEffect(() => {
+    let alive = true;
+    void client
+      .readLedger(props.projectId)
+      .then((rows) => {
+        if (alive) {
+          setLedger(rows);
+          setLedgerError(null);
+        }
+      })
+      .catch((error: unknown) => {
+        if (alive) {
+          setLedger(null);
+          setLedgerError(toPanelError(error));
+        }
+      });
+    return () => {
+      alive = false;
+    };
+  }, [client, props.projectId, nonce]);
+
+  useEffect(() => {
+    let alive = true;
+    void client
+      .readBudget(props.projectId)
+      .then((row) => {
+        if (alive) {
+          setBudget(row);
+          setBudgetError(null);
+        }
+      })
+      .catch((error: unknown) => {
+        if (alive) {
+          setBudget(null);
+          setBudgetError(toPanelError(error));
+        }
+      });
+    return () => {
+      alive = false;
+    };
+  }, [client, props.projectId, nonce]);
+
+  useEffect(() => {
+    let alive = true;
+    void client
+      .listAgentsLive()
+      .then((rows) => {
+        if (alive) {
+          setLive(rows);
+          setLiveError(null);
+        }
+      })
+      .catch((error: unknown) => {
+        if (alive) {
+          setLive(null);
+          setLiveError(toPanelError(error));
+        }
+      });
+    return () => {
+      alive = false;
+    };
+  }, [client, nonce]);
+
+  useEffect(() => {
+    if (
+      (props.view !== "routing-decisions" && props.view !== "models") ||
+      props.decisionId === undefined
+    ) {
+      setWhy(null);
+      setWhyError(null);
+      setWhyLoading(false);
+      return;
+    }
+    let alive = true;
+    setWhyLoading(true);
+    void client
+      .readRoutingWhy(props.decisionId)
+      .then((row) => {
+        if (alive) {
+          setWhy(row);
+          setWhyError(null);
+          setWhyLoading(false);
+        }
+      })
+      .catch((error: unknown) => {
+        if (alive) {
+          setWhy(null);
+          setWhyError(toPanelError(error));
+          setWhyLoading(false);
+        }
+      });
+    return () => {
+      alive = false;
+    };
+  }, [client, props.view, props.decisionId, nonce]);
+
+  useEffect(() => {
+    if (props.view !== "reports") {
+      setReport(null);
+      setReportError(null);
+      setReportLoading(false);
+      return;
+    }
+    let alive = true;
+    setReportLoading(true);
+    void exportProjectReport(client, props.projectId)
+      .then((exported) => {
+        if (alive) {
+          setReport(exported);
+          setReportError(null);
+          setReportLoading(false);
+        }
+      })
+      .catch((error: unknown) => {
+        if (alive) {
+          setReport(null);
+          setReportError(toPanelError(error));
+          setReportLoading(false);
+        }
+      });
+    return () => {
+      alive = false;
+    };
+  }, [client, props.projectId, props.view, nonce]);
 
   useEffect(() => {
     if (props.view !== "tasks") {
@@ -290,92 +443,115 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
   }, [props.projectId, props.view]);
 
   function renderContent(): ReactElement {
-    if (data === null) {
-      if (failure !== null) {
-        return (
-          <ErrorPanel
-            errorKey={failure.errorKey}
-            code={failure.code}
-            onRetry={() => {
-              setNonce((value) => value + 1);
-            }}
-          />
-        );
-      }
-      return <LoadingState loadingKey="ui.loading.more" />;
-    }
-    const sums = sumLedger(data.ledger);
     switch (props.view) {
       case "overview": {
-        const age = computeAgeDays(data.project.created_at, Date.now());
+        const age =
+          project === null ? null : computeAgeDays(project.created_at, Date.now());
+        const sums = ledger === null ? null : sumLedger(ledger);
         return (
           <div>
-            <Fact
-              testId="overview-name"
-              labelKey="shell.topbar.project"
-              value={data.project.name}
-            />
-            <Fact
-              testId="overview-created"
-              labelKey="chat.stream.timestamp"
-              value={data.project.created_at}
-            />
-            {age === null ? (
-              <EmptyState
-                stateKey="ui.table.empty"
-                actionKey={null}
-                onAction={null}
-              />
+            {projectError !== null ? (
+              panelError(projectError)
+            ) : project === null ? (
+              <LoadingState loadingKey="ui.loading.more" />
+            ) : (
+              <>
+                <Fact
+                  testId="overview-name"
+                  labelKey="shell.topbar.project"
+                  value={project.name}
+                />
+                <Fact
+                  testId="overview-created"
+                  labelKey="chat.stream.timestamp"
+                  value={project.created_at}
+                />
+                {age === null ? (
+                  <EmptyState
+                    stateKey="ui.table.empty"
+                    actionKey={null}
+                    onAction={null}
+                  />
+                ) : (
+                  <Fact
+                    testId="overview-age-days"
+                    labelKey="projects.time.title"
+                    value={age}
+                  />
+                )}
+              </>
+            )}
+            {tasksError !== null ? (
+              panelError(tasksError)
+            ) : tasks === null ? (
+              <LoadingState loadingKey="ui.loading.more" />
             ) : (
               <Fact
-                testId="overview-age-days"
-                labelKey="projects.time.title"
-                value={age}
+                testId="overview-task-count"
+                labelKey="tasks.list.title"
+                value={tasks.length}
               />
             )}
-            <Fact
-              testId="overview-task-count"
-              labelKey="tasks.list.title"
-              value={data.tasks.length}
-            />
-            <Fact
-              testId="overview-package-count"
-              labelKey="projects.runs.title"
-              value={sums.packages}
-            />
-            <Fact
-              testId="overview-agents-total"
-              labelKey="agents.live.title"
-              value={sums.agents}
-            />
-            <Fact
-              testId="overview-peak-max"
-              labelKey="ui.card.total"
-              value={sums.peak}
-            />
-            <Fact
-              testId="overview-wall-total"
-              labelKey="projects.time.title"
-              value={sums.wall}
-            />
-            <Fact
-              testId="overview-budget-spent"
-              labelKey="telemetry.cost"
-              value={data.budget.spent}
-            />
-            <Fact
-              testId="overview-budget-remaining"
-              labelKey="projects.derived.label"
-              value={remainingBudget(data.budget)}
-            />
+            {ledgerError !== null ? (
+              panelError(ledgerError)
+            ) : ledger === null || sums === null ? (
+              <LoadingState loadingKey="ui.loading.more" />
+            ) : (
+              <>
+                <Fact
+                  testId="overview-package-count"
+                  labelKey="projects.runs.title"
+                  value={sums.packages}
+                />
+                <Fact
+                  testId="overview-agents-total"
+                  labelKey="agents.live.title"
+                  value={sums.agents}
+                />
+                <Fact
+                  testId="overview-peak-max"
+                  labelKey="ui.card.total"
+                  value={sums.peak}
+                />
+                <Fact
+                  testId="overview-wall-total"
+                  labelKey="projects.time.title"
+                  value={sums.wall}
+                />
+              </>
+            )}
+            {budgetError !== null ? (
+              panelError(budgetError)
+            ) : budget === null ? (
+              <LoadingState loadingKey="ui.loading.more" />
+            ) : (
+              <>
+                <Fact
+                  testId="overview-budget-spent"
+                  labelKey="telemetry.cost"
+                  value={budget.spent}
+                />
+                <Fact
+                  testId="overview-budget-remaining"
+                  labelKey="projects.derived.label"
+                  value={remainingBudget(budget)}
+                />
+              </>
+            )}
             <LimitsSectionBoundary>
-              <ProjectLimitsSection projectId={data.project.project_id} />
+              <ProjectLimitsSection projectId={props.projectId} />
             </LimitsSectionBoundary>
           </div>
         );
       }
       case "tasks": {
-        if (data.tasks.length === 0) {
+        if (tasksError !== null) {
+          return panelError(tasksError);
+        }
+        if (tasks === null) {
+          return <LoadingState loadingKey="ui.loading.more" />;
+        }
+        if (tasks.length === 0) {
           return (
             <EmptyState
               stateKey="tasks.list.empty"
@@ -386,7 +562,7 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
         }
         return (
           <div>
-            {data.tasks.map((task) => (
+            {tasks.map((task) => (
               <div key={task.task_id} data-testid={`task-row-${task.task_id}`}>
                 <span>{task.title}</span>
                 <span>{taskStatusLabel(task.status)}</span>
@@ -400,12 +576,18 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
         return (
           <RunHistory
             projectId={props.projectId}
-            packageId={data.ledger[0]?.package_id}
+            packageId={ledger?.[0]?.package_id}
           />
         );
       }
       case "time": {
-        if (data.ledger.length === 0) {
+        if (ledgerError !== null) {
+          return panelError(ledgerError);
+        }
+        if (ledger === null) {
+          return <LoadingState loadingKey="ui.loading.more" />;
+        }
+        if (ledger.length === 0) {
           return (
             <EmptyState
               stateKey="ui.table.empty"
@@ -416,7 +598,7 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
         }
         return (
           <div>
-            {data.ledger.map((row) => (
+            {ledger.map((row) => (
               <div key={row.package_id} data-testid={`time-row-${row.package_id}`}>
                 <span>{row.package_id}</span>
                 <span>{row.wall_time_s}</span>
@@ -425,30 +607,45 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
             <Fact
               testId="time-wall-total"
               labelKey="projects.time.title"
-              value={sums.wall}
+              value={sumLedger(ledger).wall}
             />
           </div>
         );
       }
       case "ai-usage": {
+        const sums = ledger === null ? null : sumLedger(ledger);
         return (
           <div>
-            <Fact
-              testId="usage-agents-total"
-              labelKey="agents.live.title"
-              value={sums.agents}
-            />
-            <Fact
-              testId="usage-peak-max"
-              labelKey="ui.card.total"
-              value={sums.peak}
-            />
-            <Fact
-              testId="usage-wall-total"
-              labelKey="projects.time.title"
-              value={sums.wall}
-            />
-            <MatrixView rows={data.live} />
+            {ledgerError !== null ? (
+              panelError(ledgerError)
+            ) : sums === null ? (
+              <LoadingState loadingKey="ui.loading.more" />
+            ) : (
+              <>
+                <Fact
+                  testId="usage-agents-total"
+                  labelKey="agents.live.title"
+                  value={sums.agents}
+                />
+                <Fact
+                  testId="usage-peak-max"
+                  labelKey="ui.card.total"
+                  value={sums.peak}
+                />
+                <Fact
+                  testId="usage-wall-total"
+                  labelKey="projects.time.title"
+                  value={sums.wall}
+                />
+              </>
+            )}
+            {liveError !== null ? (
+              panelError(liveError)
+            ) : live === null ? (
+              <LoadingState loadingKey="ui.loading.more" />
+            ) : (
+              <MatrixView rows={live} />
+            )}
           </div>
         );
       }
@@ -462,43 +659,65 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
         );
       }
       case "cost": {
-        const usage = contextUsage(data.budget);
+        const usage = budget === null ? null : contextUsage(budget);
         return (
           <div>
-            <div data-testid="context-card">
-              <span>{t("projects.tokens.title")}</span>
-              <span data-testid="context-remaining">{usage.remaining}</span>
-              <span data-testid="context-total">{usage.total}</span>
-              <span data-testid="context-source">{CONTEXT_SOURCE}</span>
-            </div>
-            <Fact
-              testId="cost-spent"
-              labelKey="telemetry.cost"
-              value={data.budget.spent}
-            />
-            <Fact
-              testId="cost-reserved"
-              labelKey="projects.cost.title"
-              value={data.budget.reserved}
-            />
-            <Fact
-              testId="cost-limit"
-              labelKey="ui.card.total"
-              value={data.budget.hard_limit}
-            />
-            <Fact
-              testId="cost-remaining"
-              labelKey="projects.derived.label"
-              value={remainingBudget(data.budget)}
-            />
-            <HealthView ledger={data.ledger} budget={data.budget} />
+            {budgetError !== null ? (
+              panelError(budgetError)
+            ) : budget === null || usage === null ? (
+              <LoadingState loadingKey="ui.loading.more" />
+            ) : (
+              <>
+                <div data-testid="context-card">
+                  <span>{t("projects.tokens.title")}</span>
+                  <span data-testid="context-remaining">{usage.remaining}</span>
+                  <span data-testid="context-total">{usage.total}</span>
+                  <span data-testid="context-source">{CONTEXT_SOURCE}</span>
+                </div>
+                <Fact
+                  testId="cost-spent"
+                  labelKey="telemetry.cost"
+                  value={budget.spent}
+                />
+                <Fact
+                  testId="cost-reserved"
+                  labelKey="projects.cost.title"
+                  value={budget.reserved}
+                />
+                <Fact
+                  testId="cost-limit"
+                  labelKey="ui.card.total"
+                  value={budget.hard_limit}
+                />
+                <Fact
+                  testId="cost-remaining"
+                  labelKey="projects.derived.label"
+                  value={remainingBudget(budget)}
+                />
+              </>
+            )}
+            {budgetError !== null ? (
+              panelError(budgetError)
+            ) : ledgerError !== null ? (
+              panelError(ledgerError)
+            ) : budget === null || ledger === null ? (
+              <LoadingState loadingKey="ui.loading.more" />
+            ) : (
+              <HealthView ledger={ledger} budget={budget} />
+            )}
           </div>
         );
       }
       case "local-ai":
       case "cloud-ai": {
+        if (liveError !== null) {
+          return panelError(liveError);
+        }
+        if (live === null) {
+          return <LoadingState loadingKey="ui.loading.more" />;
+        }
         const wanted = props.view === "local-ai" ? "LOCAL" : "CLOUD";
-        const rows = splitRowsByPlacement(data.live)[wanted];
+        const rows = splitRowsByPlacement(live)[wanted];
         if (rows.length === 0) {
           return (
             <EmptyState
@@ -531,7 +750,13 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
         );
       }
       case "models": {
-        if (data.why === null) {
+        if (whyError !== null) {
+          return panelError(whyError);
+        }
+        if (whyLoading) {
+          return <LoadingState loadingKey="ui.loading.more" />;
+        }
+        if (why === null) {
           return (
             <EmptyState
               stateKey="ui.table.empty"
@@ -542,7 +767,7 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
         }
         return (
           <div>
-            {data.why.assignments.map((assignment, index) => (
+            {why.assignments.map((assignment, index) => (
               <div key={index} data-testid={`model-row-${index}`}>
                 <span>
                   {assignment.provider_id}/{assignment.model} {assignment.role}
@@ -553,7 +778,13 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
         );
       }
       case "routing-decisions": {
-        if (data.why === null) {
+        if (whyError !== null) {
+          return panelError(whyError);
+        }
+        if (whyLoading) {
+          return <LoadingState loadingKey="ui.loading.more" />;
+        }
+        if (why === null) {
           return (
             <EmptyState
               stateKey="ui.table.empty"
@@ -567,29 +798,29 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
             <div data-testid="why-this-model">
               <span>{t("projects.why_this_model.title")}</span>
               <span data-testid="why-this-model-reason">
-                {data.why.reason.fit_basis}
+                {why.reason.fit_basis}
               </span>
-              <span>{data.why.reason.task_class}</span>
-              <span>{data.why.reason.price_basis}</span>
-              <span>{data.why.reason.quality_basis}</span>
-              {data.why.reason.rejected.map((name) => (
+              <span>{why.reason.task_class}</span>
+              <span>{why.reason.price_basis}</span>
+              <span>{why.reason.quality_basis}</span>
+              {why.reason.rejected.map((name) => (
                 <span key={name}>{name}</span>
               ))}
             </div>
             <div data-testid="why-version">
               <span>{t("projects.routing.title")}</span>
-              <span>{data.why.decision.policy_ref}</span>
+              <span>{why.decision.policy_ref}</span>
             </div>
             <div data-testid="why-candidates">
               <span>{t("projects.models.title")}</span>
-              {data.why.assignments.length === 0 ? (
+              {why.assignments.length === 0 ? (
                 <EmptyState
                   stateKey="ui.table.empty"
                   actionKey={null}
                   onAction={null}
                 />
               ) : (
-                data.why.assignments.map((assignment, index) => (
+                why.assignments.map((assignment, index) => (
                   <div key={index} data-testid={`why-candidate-${index}`}>
                     <span>
                       {assignment.provider_id}/{assignment.model}{" "}
@@ -600,15 +831,15 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
               )}
             </div>
             <div data-testid="why-provenance">
-              <span>{data.why.snapshot.snapshot_ref}</span>
-              <span>{data.why.snapshot.captured_at}</span>
+              <span>{why.snapshot.snapshot_ref}</span>
+              <span>{why.snapshot.captured_at}</span>
             </div>
             <div data-testid="why-this-model-decision">
-              <span>{data.why.decision.decision_id}</span>
-              <span>{data.why.decision.policy_ref}</span>
-              <span>{data.why.snapshot.snapshot_ref}</span>
+              <span>{why.decision.decision_id}</span>
+              <span>{why.decision.policy_ref}</span>
+              <span>{why.snapshot.snapshot_ref}</span>
             </div>
-            <VerifierView why={data.why} />
+            <VerifierView why={why} />
           </div>
         );
       }
@@ -622,6 +853,9 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
         );
       }
       case "errors": {
+        if (projectError !== null) {
+          return panelError(projectError);
+        }
         return (
           <EmptyState
             stateKey="ui.table.empty"
@@ -633,25 +867,80 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
       case "reports": {
         return (
           <div>
-            <ReportReadable
-              project={data.project}
-              tasks={data.tasks}
-              budget={data.budget}
-              report={report}
-            />
-            <details data-testid="project-report-raw">
-              <summary>{t("ui.disclosure.more")}</summary>
-              <pre data-testid="project-report-export">{report ?? ""}</pre>
-            </details>
+            <div data-testid="project-report-readable">
+              {projectError !== null ? (
+                panelError(projectError)
+              ) : project === null ? (
+                <LoadingState loadingKey="ui.loading.more" />
+              ) : (
+                <div data-testid="report-project-name">
+                  <span>{t("shell.topbar.project")}</span>
+                  <span>{project.name}</span>
+                </div>
+              )}
+              {tasksError !== null ? (
+                panelError(tasksError)
+              ) : tasks === null ? (
+                <LoadingState loadingKey="ui.loading.more" />
+              ) : (
+                <div data-testid="report-task-counts">
+                  <span>{t("tasks.list.title")}</span>
+                  {statusCounts(tasks).map(({ status, count }) => (
+                    <div key={status} data-testid={`report-task-count-${status}`}>
+                      <span>{taskStatusLabel(status)}</span>
+                      <span>{count}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {budgetError !== null ? (
+                panelError(budgetError)
+              ) : budget === null ? (
+                <LoadingState loadingKey="ui.loading.more" />
+              ) : (
+                <>
+                  <div data-testid="report-budget-spent">
+                    <span>{t("telemetry.cost")}</span>
+                    <span>{`${budget.spent} ${budget.currency}`}</span>
+                  </div>
+                  <div data-testid="report-budget-reserved">
+                    <span>{t("projects.cost.title")}</span>
+                    <span>{`${budget.reserved} ${budget.currency}`}</span>
+                  </div>
+                  <div data-testid="report-budget-limit">
+                    <span>{t("ui.card.total")}</span>
+                    <span>{`${budget.hard_limit} ${budget.currency}`}</span>
+                  </div>
+                </>
+              )}
+            </div>
+            {reportError !== null ? (
+              panelError(reportError)
+            ) : reportLoading || report === null ? (
+              <LoadingState loadingKey="ui.loading.more" />
+            ) : (
+              <details data-testid="project-report-raw">
+                <summary>{t("ui.disclosure.more")}</summary>
+                <pre data-testid="project-report-export">{report ?? ""}</pre>
+              </details>
+            )}
             <div data-testid="project-report-derived">
               <span>{t("projects.derived.label")}</span>
-              {buildReportNarrative({
-                tasks: data.tasks,
-                ledger: data.ledger,
-                budget: data.budget,
-              }).map((line) => (
-                <span key={line}>{line}</span>
-              ))}
+              {tasksError !== null ? (
+                panelError(tasksError)
+              ) : ledgerError !== null ? (
+                panelError(ledgerError)
+              ) : budgetError !== null ? (
+                panelError(budgetError)
+              ) : tasks === null || ledger === null || budget === null ? (
+                <LoadingState loadingKey="ui.loading.more" />
+              ) : (
+                buildReportNarrative({
+                  tasks,
+                  ledger,
+                  budget,
+                }).map((line) => <span key={line}>{line}</span>)
+              )}
             </div>
           </div>
         );
@@ -683,17 +972,7 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
           setCollapsed(!expanded);
         }}
       >
-        {failure !== null && props.view !== "errors" ? (
-          <ErrorPanel
-            errorKey={failure.errorKey}
-            code={failure.code}
-            onRetry={() => {
-              setNonce((value) => value + 1);
-            }}
-          />
-        ) : (
-          renderContent()
-        )}
+        {renderContent()}
       </Card>
     </div>
   );
