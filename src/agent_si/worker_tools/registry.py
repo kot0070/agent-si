@@ -46,6 +46,75 @@ def _checked_argv(argv: Argv) -> list[str]:
     return items
 
 
+_SECRET_KEY_HINTS: tuple[str, ...] = (
+    "secret",
+    "token",
+    "password",
+    "passwd",
+    "api_key",
+    "apikey",
+    "api-key",
+    "credential",
+    "private_key",
+    "privatekey",
+    "private-key",
+)
+
+_SECRET_REF_PREFIX = "secretref:"
+
+
+def _holds_nested_raw(value: object) -> bool:
+    """True when a container hides a raw string that is no opaque handle."""
+    if isinstance(value, dict) and set(value.keys()) == {"secretRef"} and isinstance(
+        value.get("secretRef"), str
+    ):
+        return False
+    if isinstance(value, str):
+        return bool(value) and not value.startswith(_SECRET_REF_PREFIX)
+    if isinstance(value, dict):
+        return any(_holds_nested_raw(item) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_holds_nested_raw(item) for item in value)
+    return False
+
+
+def _carries_raw_secret(value: object) -> bool:
+    """True when a secret-typed slot holds raw material, not a handle.
+
+    The raw string may sit directly under the secret-typed key or be
+    smuggled inside a container under that key; both refuse.
+    """
+    if isinstance(value, dict):
+        if set(value.keys()) == {"secretRef"} and isinstance(
+            value.get("secretRef"), str
+        ):
+            return False
+        for key, item in value.items():
+            if (
+                isinstance(key, str)
+                and any(hint in key.lower() for hint in _SECRET_KEY_HINTS)
+                and isinstance(item, str)
+                and item
+                and not item.startswith(_SECRET_REF_PREFIX)
+            ):
+                return True
+            if (
+                isinstance(key, str)
+                and any(hint in key.lower() for hint in _SECRET_KEY_HINTS)
+                and isinstance(item, (dict, list, tuple))
+                and _holds_nested_raw(item)
+            ):
+                return True
+            if isinstance(item, (dict, list, tuple)) and _carries_raw_secret(
+                item
+            ):
+                return True
+        return False
+    if isinstance(value, (list, tuple)):
+        return any(_carries_raw_secret(item) for item in value)
+    return False
+
+
 def _checked_auth(auth: AuthMapping) -> None:
     """Enforce the belt auth rule; refuse closed on any mismatch."""
     if not isinstance(auth, collections.abc.Mapping):
@@ -54,6 +123,11 @@ def _checked_auth(auth: AuthMapping) -> None:
         raise PermissionError("auth must carry a truthy subject")
     if "token" in auth:
         raise PermissionError("this lane mints no bearer tokens")
+    if _carries_raw_secret(dict(auth)):
+        raise PermissionError(
+            "auth must not carry raw secret material "
+            "(pass a SecretRef handle, never raw)"
+        )
     if "scopes" in auth:
         scopes = auth.get("scopes")
         try:

@@ -1,8 +1,10 @@
 """STEP 2 entry: schema plus static validation of facts (G6, SPEC 20/20A).
 
 Untrusted data stays data: override phrasing is refused. Secret material
-is refused unless it arrives as an opaque SecretRef pointer. Error results
-never echo input payloads back.
+is refused unless it arrives as an opaque SecretRef pointer; a raw
+string under a secret-typed field is refused even without a marker,
+including raw smuggled inside a container under that field.
+Error results never echo input payloads back.
 """
 
 from __future__ import annotations
@@ -21,16 +23,70 @@ def _is_secret_pointer(value: Any) -> bool:
     )
 
 
+_SECRET_KEY_HINTS: tuple[str, ...] = (
+    "secret",
+    "token",
+    "password",
+    "passwd",
+    "api_key",
+    "apikey",
+    "api-key",
+    "credential",
+    "private_key",
+    "privatekey",
+    "private-key",
+)
+
+_SECRET_REF_PREFIX = "secretref:"
+
+
+def _is_opaque_handle(value: Any) -> bool:
+    """True for SecretRef-scheme strings (G5 opaque handles)."""
+    return (
+        isinstance(value, str)
+        and value.startswith(_SECRET_REF_PREFIX)
+        and len(value) > len(_SECRET_REF_PREFIX)
+    )
+
+
+def _holds_nested_raw(value: Any) -> bool:
+    """True when a container hides a raw string that is no opaque handle."""
+    if _is_secret_pointer(value):
+        return False
+    if isinstance(value, str):
+        return bool(value) and not _is_opaque_handle(value)
+    if isinstance(value, dict):
+        return any(_holds_nested_raw(item) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_holds_nested_raw(item) for item in value)
+    return False
+
+
 def _holds_bare_secret(value: Any) -> bool:
     if isinstance(value, str):
         return "secret:" in value
     if isinstance(value, dict):
         if _is_secret_pointer(value):
             return False
-        return any(
-            _holds_bare_secret(key) or _holds_bare_secret(item)
-            for key, item in value.items()
-        )
+        for key, item in value.items():
+            if (
+                isinstance(key, str)
+                and any(hint in key.lower() for hint in _SECRET_KEY_HINTS)
+                and isinstance(item, str)
+                and item
+                and not _is_opaque_handle(item)
+            ):
+                return True
+            if (
+                isinstance(key, str)
+                and any(hint in key.lower() for hint in _SECRET_KEY_HINTS)
+                and isinstance(item, (dict, list, tuple))
+                and _holds_nested_raw(item)
+            ):
+                return True
+            if _holds_bare_secret(key) or _holds_bare_secret(item):
+                return True
+        return False
     if isinstance(value, (list, tuple)):
         return any(_holds_bare_secret(item) for item in value)
     return False
