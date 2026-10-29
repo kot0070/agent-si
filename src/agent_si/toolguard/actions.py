@@ -2,10 +2,10 @@
 
 Records carry action_id, idempotency_key, authorization_ref,
 attempt and status. Execution needs the provider key, otherwise
-prior-state verification; with neither, a present token stays
-untrusted and is refused. Recording an attempt never retries on
-its own: each call applies one explicit status transition and
-returns a new record, leaving the input untouched.
+prior-state verification; a forged or placeholder token stays
+untrusted and is refused under either path. Recording an attempt
+never retries on its own: each call applies one explicit status
+transition and returns a new record, leaving the input untouched.
 """
 
 from __future__ import annotations
@@ -81,14 +81,18 @@ def verify_provider_or_prior_state(
     """Verify a record through the provider key or prior state.
 
     A missing or empty authorization reference is the no-token
-    case; a present token with no provider key and no matching
-    prior state is the wrong-token case. Both refuse with
-    PermissionError. Exactly one verification is performed: there
-    is no silent retry path.
+    case; a reference advertising forgery or placeholder status
+    is the wrong-token case even when a provider key is present.
+    A present token with no provider key and no matching prior
+    state is likewise refused. All refusals raise PermissionError.
+    Exactly one verification is performed: there is no silent
+    retry path.
     """
     token = record.get("authorization_ref") if isinstance(record, dict) else None
     if not isinstance(token, str) or not token:
         raise PermissionError("cannot verify: record carries no authorization token")
+    if _untrusted_token(token):
+        raise PermissionError("cannot verify: untrusted authorization token")
     if isinstance(provider_key, str) and provider_key:
         return {"ok": True}
     if isinstance(prior_state, dict) and prior_state.get(token):

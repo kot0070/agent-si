@@ -30,6 +30,7 @@ from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from agent_si.backend import task_turns as _task_turns
 from agent_si.backend.agents_live import record_live_row
 from agent_si.backend.orchestration import graph as _graph
 from agent_si.backend.orchestration import steplimits as _steplimits
@@ -136,11 +137,13 @@ def _resolve_run_shape(request: Any, explicit: dict[str, Any]) -> dict:
     return shape
 
 
-def _planned_run_task(shape: dict[str, Any]) -> tuple[Any, _graph.SubtaskGraph]:
+def _planned_run_task(
+    shape: dict[str, Any],
+) -> tuple[Any, _graph.SubtaskGraph, str]:
     planner = _graph.TaskPlanner()
     task_id = str(shape["task_id"] or "task")
     subtask_id = f"{task_id}:sub-001"
-    _plan_ref, graph = planner.plan(
+    plan_ref, graph = planner.plan(
         f"pkg-{shape['project_id'] or 'run'}",
         f"manager run for {task_id}",
         [{"subtask_id": subtask_id, "goal": shape["message"] or task_id,
@@ -152,7 +155,7 @@ def _planned_run_task(shape: dict[str, Any]) -> tuple[Any, _graph.SubtaskGraph]:
         "agent_id": str(shape["actor"] or "manager"),
         "contract_hash": str(shape["profile"] or ""),
     }
-    return agent_task, graph
+    return agent_task, graph, plan_ref
 
 
 def _secret_refs_only(refs: Any) -> tuple:
@@ -193,8 +196,9 @@ def run_task_streamed(
         "message": message,
         "secret_refs": secret_refs,
     })
+    plan_ref: str | None = None
     if agent_task is None and graph is None:
-        agent_task, graph = _planned_run_task(shape)
+        agent_task, graph, plan_ref = _planned_run_task(shape)
     if graph is None:
         graph = _graph.SubtaskGraph()
     try:
@@ -211,6 +215,8 @@ def run_task_streamed(
         yield rejected
         return
     planned = graph.nodes[validated.subtask_id]
+    if plan_ref is None:
+        plan_ref = planned.plan_ref
     budget = (max_agent_steps if max_agent_steps is not None
               else _steplimits.limits_for("task", shape["project_id"] or None))
     provider = (provider_adapter if provider_adapter is not None
@@ -333,6 +339,16 @@ def run_task_streamed(
                       "assurance_calls": assurance_calls},
             ))
             return
+        _task_turns.record_turn(
+            str(shape["task_id"] or validated.subtask_id),
+            plan=str(plan_ref),
+            action="tool-call %s %s" % (
+                decision.decision_id, call["tool"]),
+            observation="result %s %s %s" % (
+                result.output_ref,
+                captured.get("finish_reason", ""),
+                captured.get("text", "")),
+        )
         yield _emit(RunEvent(
             event="turn", turn=turn,
             subtask_id=validated.subtask_id,
