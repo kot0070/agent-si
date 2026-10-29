@@ -27,6 +27,9 @@ from typing import Any
 
 from fastapi import HTTPException, Request
 
+from agent_si.backend import task_turns as _task_turns
+from agent_si.backend.orchestration import steplimits as _steplimits
+from agent_si.backend.project_defaults import TASK_MAX_STEPS
 from agent_si.storage.repositories import ProjectRepository
 
 #: JSONL snapshot names under the bound store dir (file names only;
@@ -213,5 +216,39 @@ def register_read_routes(app: Any) -> Any:
                 detail=f"unknown task {task_id!r}",
             )
         return {"task": task_view(stored)}
+
+    @app.get("/api/v1/tasks/{task_id}/turns")
+    def read_task_turns(task_id: str) -> dict:
+        _projects, tasks = repos_for(app)
+        stored = tasks.load(task_id)
+        if stored is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"unknown task {task_id!r}",
+            )
+        try:
+            limit = _steplimits.limits_for(
+                "task", stored.get("project_id"))
+        except KeyError:
+            limit = TASK_MAX_STEPS
+        turns = _task_turns.list_turns(task_id)
+        return {"turns": turns, "used": len(turns), "limit": limit}
+
+    @app.get("/api/v1/analytics/telemetry")
+    def read_telemetry_analytics() -> dict:
+        """Telemetry aggregates FROM the authoritative store file only.
+
+        kit row MVP_ACCEPT-161: analytics values read only from authoritative
+        TelemetryEvent and MetricRecord stores, never from chat text or live
+        rows; this route reads <store_dir>/telemetry_store.json and sums
+        metric values by name deterministically, with no invented numbers.
+        """
+        from agent_si.telemetry import run_store as _telemetry_run_store
+
+        directory = getattr(getattr(app, "state", None),
+                            "telemetry_store_dir", None)
+        if directory is None:
+            directory = _store_dir(app)
+        return _telemetry_run_store.aggregates(store_dir=directory)
 
     return app

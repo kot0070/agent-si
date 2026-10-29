@@ -30,6 +30,7 @@ from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from agent_si.backend import task_turns as _task_turns
 from agent_si.backend.agents_live import record_live_row
 from agent_si.backend.orchestration import graph as _graph
 from agent_si.backend.orchestration import steplimits as _steplimits
@@ -44,6 +45,7 @@ from agent_si.sdk_adapter.sdk_adapter import (
     SdkClientConfig,
     SecretRef,
 )
+from agent_si.telemetry import run_store as _telemetry_store
 
 TERMINAL_EVENTS = frozenset(
     {"done", "dispatch_rejected", "budget_stop"})
@@ -102,6 +104,134 @@ def bound_provider_adapter() -> Any | None:
     return _BOUND_PROVIDER
 
 
+_BUDGET_GATE: Any = None
+
+
+def set_budget_gate(gate: Any) -> Any:
+    """Bind the live BudgetGate for post-call charging (test seam safe)."""
+    global _BUDGET_GATE
+    _BUDGET_GATE = gate
+    return gate
+
+
+def _usage_tokens(usage: Any) -> tuple:
+    """Extract input plus output token counts; Nones when not evidenced."""
+    if not isinstance(usage, Mapping):
+        return (None, None)
+
+    def _as_int(value: Any) -> int | None:
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+        return None
+
+    inp = _as_int(usage.get("input_tokens"))
+    if inp is None:
+        inp = _as_int(usage.get("prompt_tokens"))
+    outp = _as_int(usage.get("output_tokens"))
+    if outp is None:
+        outp = _as_int(usage.get("completion_tokens"))
+    return (inp, outp)
+
+
+def _kb_price_for_manager(provider_id: str, model: str) -> tuple:
+    """KB input plus output price for one pair; Nones when unknown."""
+    bare = str(model or "")
+    if "/" in bare:
+        head, _, tail = bare.partition("/")
+        if head == str(provider_id or "") and tail:
+            bare = tail
+    try:
+        from agent_si.model_kb import kb_reader as _kbr
+        reader = _kbr.CatalogKbReader()
+        rows = reader.models(str(provider_id or ""))
+    except Exception:
+        return (None, None)
+    for fact in rows or []:
+        try:
+            fmodel = str(getattr(fact, "model", "") or "")
+        except Exception:
+            continue
+        if "/" in fmodel:
+            fmodel = fmodel.split("/")[-1]
+        if fmodel != bare:
+            continue
+        try:
+            inp = getattr(fact, "input_price", None)
+            outp = getattr(fact, "output_price", None)
+        except Exception:
+            return (None, None)
+        ok_in = isinstance(inp, (int, float)) and not isinstance(inp, bool)
+        ok_out = isinstance(outp, (int, float)) and not isinstance(outp, bool)
+        return (float(inp) if ok_in else None,
+                float(outp) if ok_out else None)
+    return (None, None)
+
+
+def _charge_budget_gate(project_id: str, provider_id: str, model: str,
+                        usage: Any, run_id: str) -> str | None:
+    """Charge the bound BudgetGate from usage times KB price (never raises).
+
+    Kit BUILD_PLAN 657-658: Cost stays UNAVAILABLE without a price snapshot
+    (never zero, never estimated); the price snapshot is authoritative and
+    every calculated cost references it. Known price: reserve plus settle
+    so spent grows by the real cost. Unknown price: leave spent alone and
+    let telemetry keep cost UNAVAILABLE (never 0 as if free, never invented).
+    """
+    try:
+        gate = _BUDGET_GATE
+        if gate is None:
+            return None
+        pid = str(project_id or "run")
+        prov = str(provider_id or "")
+        mod = str(model or "")
+        if not prov:
+            return None
+        inp_tok, out_tok = _usage_tokens(
+            usage if isinstance(usage, Mapping) else {})
+        if inp_tok is None and out_tok is None:
+            return "UNAVAILABLE"
+        inp_price, out_price = _kb_price_for_manager(prov, mod)
+        if inp_tok is not None and inp_price is None:
+            return "UNAVAILABLE"
+        if out_tok is not None and out_price is None:
+            return "UNAVAILABLE"
+        from decimal import Decimal as _Dec
+        cost = (_Dec(str(inp_price or "0")) * _Dec(int(inp_tok or 0))
+                + _Dec(str(out_price or "0")) * _Dec(int(out_tok or 0)))
+        cost_str = str(cost.quantize(_Dec("0.000001")))
+        try:
+            gate.get_state(pid)
+        except Exception:
+            return "UNAVAILABLE"
+        rid = "chat-%s-%s" % (str(run_id or "run"), prov)
+        try:
+            gate.compare_and_reserve({
+                "project_id": pid, "task_id": "chat",
+                "run_id": str(run_id or ""),
+                "reservation_id": rid,
+                "estimated_amount": cost_str,
+                "reserved_at": "2026-10-26T00:00:00Z",
+                "expires_at": "2026-10-27T00:00:00Z",
+                "provider_id": prov,
+            })
+        except Exception:
+            pass
+        try:
+            gate.settle({
+                "reservation_id": rid,
+                "actual_amount": cost_str,
+                "provider_usage_evidence_ref": "usage-%s" % (str(run_id or ""),),
+                "provider_request_ref": "req-%s" % (str(run_id or ""),),
+                "source": "provider_usage_api",
+                "settled_at": "2026-10-26T01:00:00Z",
+            })
+        except Exception:
+            return None
+        return cost_str
+    except Exception:
+        return None
+
+
 class _RecordingAssuranceHook:
     """Default hook: records each call and notes it, never auto-PASSes."""
 
@@ -136,11 +266,13 @@ def _resolve_run_shape(request: Any, explicit: dict[str, Any]) -> dict:
     return shape
 
 
-def _planned_run_task(shape: dict[str, Any]) -> tuple[Any, _graph.SubtaskGraph]:
+def _planned_run_task(
+    shape: dict[str, Any],
+) -> tuple[Any, _graph.SubtaskGraph, str]:
     planner = _graph.TaskPlanner()
     task_id = str(shape["task_id"] or "task")
     subtask_id = f"{task_id}:sub-001"
-    _plan_ref, graph = planner.plan(
+    plan_ref, graph = planner.plan(
         f"pkg-{shape['project_id'] or 'run'}",
         f"manager run for {task_id}",
         [{"subtask_id": subtask_id, "goal": shape["message"] or task_id,
@@ -152,7 +284,7 @@ def _planned_run_task(shape: dict[str, Any]) -> tuple[Any, _graph.SubtaskGraph]:
         "agent_id": str(shape["actor"] or "manager"),
         "contract_hash": str(shape["profile"] or ""),
     }
-    return agent_task, graph
+    return agent_task, graph, plan_ref
 
 
 def _secret_refs_only(refs: Any) -> tuple:
@@ -160,6 +292,57 @@ def _secret_refs_only(refs: Any) -> tuple:
     if all(isinstance(item, SecretRef) for item in items):
         return items
     return ()
+
+
+def _telemetry_report_usage(
+    provider: Any,
+    shape: dict[str, Any],
+    run_id: str,
+    response: Any,
+) -> None:
+    """Append cloud_calls + usage + PROVIDER_USAGE_REPORTED (never raises)."""
+    try:
+        config = getattr(provider, "config", None)
+        raw_pid = getattr(config, "provider_id", "") if config else ""
+        provider_id = str(raw_pid or "")
+        raw_model = getattr(config, "model", "") if config else ""
+        model = str(raw_model or "")
+        usage = getattr(response, "usage", None)
+        if usage is None and isinstance(response, Mapping):
+            usage = response.get("usage")
+        _telemetry_store.record_provider_usage(
+            project_id=str(shape.get("project_id") or "run"),
+            task_id=str(shape.get("task_id") or ""),
+            run_id=str(run_id or ""),
+            provider=provider_id,
+            model=model,
+            usage=usage,
+        )
+        try:
+            _charge_budget_gate(
+                str(shape.get("project_id") or "run"),
+                provider_id, model, usage, str(run_id or ""))
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
+def _telemetry_report_terminated(
+    shape: dict[str, Any],
+    run_id: str,
+    reason: str,
+) -> None:
+    """Append one RUN_TERMINATED event (never raises, never stores secrets)."""
+    try:
+        _telemetry_store.record_run_terminated(
+            project_id=str(shape.get("project_id") or "run"),
+            task_id=str(shape.get("task_id") or ""),
+            run_id=str(run_id or ""),
+            reason=str(reason or ""),
+        )
+    except Exception:
+        pass
 
 
 def run_task_streamed(
@@ -193,8 +376,9 @@ def run_task_streamed(
         "message": message,
         "secret_refs": secret_refs,
     })
+    plan_ref: str | None = None
     if agent_task is None and graph is None:
-        agent_task, graph = _planned_run_task(shape)
+        agent_task, graph, plan_ref = _planned_run_task(shape)
     if graph is None:
         graph = _graph.SubtaskGraph()
     try:
@@ -208,9 +392,13 @@ def run_task_streamed(
         )
         _record(shape, run_id or "run-refused", rejected,
                 str(shape["task_id"] or ""), str(manager_id))
+        _telemetry_report_terminated(
+            shape, run_id or "run-refused", "dispatch_rejected")
         yield rejected
         return
     planned = graph.nodes[validated.subtask_id]
+    if plan_ref is None:
+        plan_ref = planned.plan_ref
     budget = (max_agent_steps if max_agent_steps is not None
               else _steplimits.limits_for("task", shape["project_id"] or None))
     provider = (provider_adapter if provider_adapter is not None
@@ -222,25 +410,36 @@ def run_task_streamed(
     hook = assurance_hook if assurance_hook is not None \
         else _RecordingAssuranceHook()
     assurance_calls = 0
+    _term_state = {"done": False}
+
+    def _finish(reason: str) -> None:
+        if _term_state["done"]:
+            return
+        _term_state["done"] = True
+        _telemetry_report_terminated(shape, active_run_id, reason)
 
     def _emit(event: RunEvent) -> RunEvent:
         _record(shape, active_run_id, event, validated.subtask_id,
                 validated.agent_id or str(manager_id))
         return event
 
-    yield _emit(RunEvent(
-        event="start", turn=0, subtask_id=validated.subtask_id,
-        detail=f"manager run started for {validated.subtask_id}",
-        data={"run_id": active_run_id,
-              "project_id": shape["project_id"],
-              "task_id": shape["task_id"],
-              "manager_id": str(manager_id),
-              "budget": budget,
-              "provider": str(
-                  getattr(getattr(provider, "config", None),
-                          "provider_id", "")),
-              },
-    ))
+    try:
+        yield _emit(RunEvent(
+            event="start", turn=0, subtask_id=validated.subtask_id,
+            detail=f"manager run started for {validated.subtask_id}",
+            data={"run_id": active_run_id,
+                  "project_id": shape["project_id"],
+                  "task_id": shape["task_id"],
+                  "manager_id": str(manager_id),
+                  "budget": budget,
+                  "provider": str(
+                      getattr(getattr(provider, "config", None),
+                              "provider_id", "")),
+                  },
+        ))
+    except GeneratorExit:
+        _finish("cancelled")
+        raise
     client_config = SdkClientConfig(max_retries=0)
     captured: dict[str, Any] = {}
 
@@ -251,6 +450,8 @@ def run_task_streamed(
         captured["mock"] = bool(getattr(response, "mock", False))
         captured["finish_reason"] = str(
             getattr(response, "finish_reason", "") or "")
+        captured["usage"] = getattr(response, "usage", None)
+        _telemetry_report_usage(provider, shape, active_run_id, response)
         return {"ok": True}
 
     sdk = OpenAIAgentsSDKAdapter(client_config=client_config, runner=_runner)
@@ -258,6 +459,7 @@ def run_task_streamed(
     turn = 0
     while True:
         if turn + 1 > budget:
+            _finish("budget_stop")
             yield _emit(RunEvent(
                 event="budget_stop", turn=turn,
                 subtask_id=validated.subtask_id,
@@ -287,14 +489,19 @@ def run_task_streamed(
         else:
             assurance_calls += 1 if allowed else 0
         if not allowed:
+            _finish("error")
             raise AssuranceRefusedError(
                 f"assurance hook refused turn {turn} of run {active_run_id}")
-        yield _emit(RunEvent(
-            event="tool_call", turn=turn,
-            subtask_id=validated.subtask_id,
-            detail=f"guarded tool call for turn {turn}",
-            data=dict(call),
-        ))
+        try:
+            yield _emit(RunEvent(
+                event="tool_call", turn=turn,
+                subtask_id=validated.subtask_id,
+                detail=f"guarded tool call for turn {turn}",
+                data=dict(call),
+            ))
+        except GeneratorExit:
+            _finish("cancelled")
+            raise
         binding = RoutingDecisionBinding(
             decision_id=decision.decision_id,
             project_id=str(shape["project_id"] or "run"),
@@ -320,8 +527,13 @@ def run_task_streamed(
             secret_refs=_secret_refs_only(shape["secret_refs"]),
             run_config=sdk_run_config,
         )
-        result = interface.run_turn(turn_request)
+        try:
+            result = interface.run_turn(turn_request)
+        except Exception:
+            _finish("error")
+            raise
         if not result.executed:
+            _finish("done")
             yield _emit(RunEvent(
                 event="done", turn=turn,
                 subtask_id=validated.subtask_id,
@@ -333,22 +545,37 @@ def run_task_streamed(
                       "assurance_calls": assurance_calls},
             ))
             return
-        yield _emit(RunEvent(
-            event="turn", turn=turn,
-            subtask_id=validated.subtask_id,
-            detail=f"turn {turn} executed",
-            data={"turn": turn, "run_id": active_run_id,
-                  "output_ref": result.output_ref,
-                  "text": captured.get("text", ""),
-                  "mock": bool(captured.get("mock", False)),
-                  "finish_reason": str(
-                      captured.get("finish_reason", "")),
-                  "client_max_retries": sdk.client_config.max_retries,
-                  "max_runner_retries":
-                      sdk_run_config.max_runner_retries,
-                  "decision_id": decision.decision_id},
-        ))
+        _task_turns.record_turn(
+            str(shape["task_id"] or validated.subtask_id),
+            plan=str(plan_ref),
+            action="tool-call %s %s" % (
+                decision.decision_id, call["tool"]),
+            observation="result %s %s %s" % (
+                result.output_ref,
+                captured.get("finish_reason", ""),
+                captured.get("text", "")),
+        )
+        try:
+            yield _emit(RunEvent(
+                event="turn", turn=turn,
+                subtask_id=validated.subtask_id,
+                detail=f"turn {turn} executed",
+                data={"turn": turn, "run_id": active_run_id,
+                      "output_ref": result.output_ref,
+                      "text": captured.get("text", ""),
+                      "mock": bool(captured.get("mock", False)),
+                      "finish_reason": str(
+                          captured.get("finish_reason", "")),
+                      "client_max_retries": sdk.client_config.max_retries,
+                      "max_runner_retries":
+                          sdk_run_config.max_runner_retries,
+                      "decision_id": decision.decision_id},
+            ))
+        except GeneratorExit:
+            _finish("cancelled")
+            raise
         if str(captured.get("finish_reason", "")) == "stop":
+            _finish("done")
             yield _emit(RunEvent(
                 event="done", turn=turn,
                 subtask_id=validated.subtask_id,
