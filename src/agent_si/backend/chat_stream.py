@@ -649,8 +649,19 @@ def _gateway_transport(base_url: str, credential_store: Any,
         value = _read_secret_value(credential_store, secret_id)
         chat_path = str(request.get("chat_path") or "/chat/completions")
         url = endpoint + chat_path
+        raw_model = str(request.get("model", "") or "")
+        provider_prefix = ""
+        try:
+            provider_prefix = str((secret_ref or {}).get("provider_id") or "")
+        except Exception:
+            provider_prefix = ""
+        wire_model = raw_model
+        if provider_prefix and wire_model.startswith(provider_prefix + "/"):
+            wire_model = wire_model[len(provider_prefix) + 1:]
+        elif wire_model.startswith("meta/"):
+            wire_model = wire_model[len("meta/"):]
         payload = _json.dumps({
-            "model": request.get("model", ""),
+            "model": wire_model,
             "messages": [dict(item) for item in request.get("messages", [])],
             "stream": False,
         }).encode("utf-8")
