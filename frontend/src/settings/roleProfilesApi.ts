@@ -1,5 +1,5 @@
 // K07HTTP1 role-profile server path: GET plus PUT over the role route
-// through the REAL HttpApiClient fetch boundary (no FakeApiClient, no
+// through the REAL HttpApiClient fetch boundary (no test double, no
 // localStorage here). Reads use kind "read" (no token headers); the PUT
 // uses kind "write" (header-only token plus actor, never a URL token).
 // Backend shapes mirror src/agent_si/backend/pools_routes.py:96

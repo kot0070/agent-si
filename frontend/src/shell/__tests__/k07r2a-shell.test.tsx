@@ -15,7 +15,7 @@ import {
 } from 'react-router-dom';
 import type { ReactElement } from 'react';
 import { ApiClientProvider } from '../../app/ApiClientProvider';
-import { FakeApiClient } from '../../api/client';
+import { FakeApiClient } from '../../api/__tests__/fakeApiClient';
 import { resetLocaleForTests, setLocale, t } from '../../locale/index';
 import { App } from '../../app/App';
 import { ClosingGuard } from '../ClosingGuard';
