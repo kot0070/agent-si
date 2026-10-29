@@ -22,9 +22,11 @@ def merge_project_environment(
         "passwd",
         "api_key",
         "apikey",
+        "api-key",
         "credential",
         "private_key",
         "privatekey",
+        "private-key",
     )
 
     def redact(key: str, value: Any) -> Any:
