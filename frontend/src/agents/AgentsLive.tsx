@@ -40,6 +40,7 @@ export function AgentsLive(props: AgentsLiveProps): ReactElement {
   const client = useApiClient();
   const { locale } = useLocale();
   const [rows, setRows] = useState<PartRow[] | null>(null);
+  const [projectName, setProjectName] = useState<string | null>(null);
   const [failure, setFailure] = useState<{
     errorKey: string;
     code: string;
@@ -95,6 +96,25 @@ export function AgentsLive(props: AgentsLiveProps): ReactElement {
     };
   }, [client, nonce]);
 
+  useEffect(() => {
+    let alive = true;
+    client.readProject(props.projectId).then(
+      (project) => {
+        if (alive) {
+          setProjectName(project.name);
+        }
+      },
+      () => {
+        if (alive) {
+          setProjectName(null);
+        }
+      },
+    );
+    return () => {
+      alive = false;
+    };
+  }, [client, props.projectId]);
+
   const counts = countPlacements(rows ?? []);
 
   return (
@@ -108,7 +128,7 @@ export function AgentsLive(props: AgentsLiveProps): ReactElement {
     >
       <div>
         <span>{t("shell.topbar.project")}</span>
-        <span data-testid="agents-live-project">{props.projectId}</span>
+        <span data-testid="agents-live-project">{projectName ?? t("shell.topbar.project")}</span>
       </div>
       <div>
         {PLACEMENTS.map((placement) => (

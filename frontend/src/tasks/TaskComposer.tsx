@@ -16,7 +16,6 @@ import type { TaskRecord } from "../api/iface";
 import { useApiClient } from "../app/ApiClientProvider";
 import { ApiError, apiErrorLocaleKey } from "../api/errors";
 import { t } from "../locale/index";
-import { EmptyState } from "../ui/EmptyState";
 import { ErrorPanel } from "../ui/ErrorPanel";
 import { LoadingState } from "../ui/LoadingState";
 
@@ -243,13 +242,7 @@ export function TaskComposer(props: TaskComposerProps): ReactElement {
             {taskStatusLabel(created.status)}
           </span>
         </div>
-      ) : (
-        <EmptyState
-          stateKey="tasks.list.empty"
-          actionKey={null}
-          onAction={null}
-        />
-      )}
+      ) : null}
       {blocking !== null ? (
         <ErrorPanel
           errorKey={blocking.errorKey}
