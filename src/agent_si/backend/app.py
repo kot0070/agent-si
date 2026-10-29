@@ -677,24 +677,29 @@ def create_app(settings: Any = None,
         else:
             try:
                 _k04_api, _k04_credstore, _k04_auditsink = \
-                    _k04_facades.os_stack(label_suffix=_k04_suffix)
+                    _k04_facades.os_stack(
+                        label_suffix=_k04_suffix,
+                        audit_path=_k04_os.path.join(
+                            _k04_dir, "provider_audit.jsonl"))
+            except Exception as _k04_os_exc:
+                _k04_config_error = (
+                    "K04 OS credential store unavailable: %s: %s"
+                    % (type(_k04_os_exc).__name__, _k04_os_exc))
+        if _k04_config_error is None:
+            _k04_ctx = _k04_pr.RoutingCtx(
+                store=_k04_store,
+                role_table=_K04RoleTable(_k04_store),
+                kb=_k04_kb_reader.CatalogKbReader(),
+                budget_state=_K04BudgetGate(
+                    _k04_os.path.join(_k04_dir, "budget")),
+            )
+            _k04_ctx.provider_facade = _k04_api
+            _k04_ctx.credential_store = _k04_credstore
+            _k04_ctx.audit_sink = _k04_auditsink
+            try:
+                _k04_ctx.key_save_timeout_s = _k04_save_timeout(settings)
             except Exception:
-                _k04_api, _k04_credstore, _k04_auditsink = \
-                    _k04_facades.memory_stack()
-        _k04_ctx = _k04_pr.RoutingCtx(
-            store=_k04_store,
-            role_table=_K04RoleTable(_k04_store),
-            kb=_k04_kb_reader.CatalogKbReader(),
-            budget_state=_K04BudgetGate(
-                _k04_os.path.join(_k04_dir, "budget")),
-        )
-        _k04_ctx.provider_facade = _k04_api
-        _k04_ctx.credential_store = _k04_credstore
-        _k04_ctx.audit_sink = _k04_auditsink
-        try:
-            _k04_ctx.key_save_timeout_s = _k04_save_timeout(settings)
-        except Exception:
-            pass
+                pass
     app.state.k04_ctx = _k04_ctx
     app.state.k04_config_error = _k04_config_error
     # M-WIRE L0B-12: bind the routed provider adapter at app start via
@@ -732,7 +737,7 @@ def create_app(settings: Any = None,
         async def _k04_endpoint(request: Request) -> _K04JSONResponse:
             if _k04_config_error is not None:
                 return _K04JSONResponse(
-                    status_code=500,
+                    status_code=503,
                     content={"error": _k04_config_error})
             _query: dict = dict(request.query_params)
             for _k, _v in request.path_params.items():

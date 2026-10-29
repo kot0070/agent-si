@@ -31,6 +31,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, List, Optional
 
+import json as _json
+import os as _os
+
 from .provider_api import ProviderAPI, ProviderContracts
 from .registry import ProviderRegistry
 
@@ -140,6 +143,68 @@ class _MemoryAuditSink:
         self.records.append(dict(record))
 
 
+class _FileAuditSink:
+    """Persistent append-only JSON-lines audit sink for the served OS stack.
+
+    One record per append to ``path`` (never the secret value); readable
+    back after restart via :attr:`records`. Only entry names travel here.
+    """
+
+    _SECRET_KEYS = frozenset({
+        "key_value", "value", "secret", "secret_value", "key",
+        "api_key", "apikey", "token", "password", "blob",
+    })
+
+    def __init__(self, path: str) -> None:
+        if not isinstance(path, str) or not path.strip():
+            raise ValueError("audit path is required")
+        self._path = str(path)
+        parent = _os.path.dirname(_os.path.abspath(self._path))
+        if parent:
+            _os.makedirs(parent, exist_ok=True)
+        with open(self._path, "a", encoding="utf-8"):
+            pass
+
+    @property
+    def path(self) -> str:
+        return self._path
+
+    def append(self, record: Any) -> None:
+        try:
+            if isinstance(record, dict):
+                cleaned = dict(record)
+            else:
+                cleaned = {"entry": str(record)}
+        except Exception:
+            cleaned = {"entry": "unrepresentable"}
+        for _k in list(cleaned.keys()):
+            if str(_k).lower() in self._SECRET_KEYS:
+                cleaned.pop(_k, None)
+        line = _json.dumps(cleaned, ensure_ascii=False, sort_keys=True)
+        with open(self._path, "a", encoding="utf-8") as _fh:
+            _fh.write(line + "\n")
+
+    @property
+    def records(self) -> list:
+        out: list = []
+        try:
+            with open(self._path, "r", encoding="utf-8") as _fh:
+                for _line in _fh:
+                    _line = _line.strip()
+                    if not _line:
+                        continue
+                    try:
+                        out.append(_json.loads(_line))
+                    except Exception:
+                        continue
+        except FileNotFoundError:
+            return []
+        return out
+
+    def __repr__(self) -> str:
+        return "FileAuditSink(path=%r)" % (self._path,)
+
+
 _configured_api: ProviderAPI | None = None
 
 
@@ -204,13 +269,18 @@ def memory_stack() -> tuple:
 
 def os_stack(*, label_suffix: str = "",
              namespace: str | None = None,
-             timeout_s: float = 5.0) -> tuple:
+             timeout_s: float = 5.0,
+             audit_path: str | None = None) -> tuple:
     """Provision one OS-backed stack (Windows Credential Manager).
 
     Entries live under the product namespace (leftover-keys ``"app:"``)
     with the optional label suffix (HD live run uses ``"TEST"``).
-    Raises OSError off Windows so callers fall back to memory.
+    The audit sink is the persistent append-only JSON-lines file at
+    ``audit_path`` (never the secret value). Raises OSError off Windows;
+    callers surface it, never a silent memory fallback.
     """
+    if _os.name != "nt":
+        raise OSError("OS credential store needs Windows")
     from .os_credential_store import APP_NAMESPACE, OSCredentialStore
 
     store = OSCredentialStore(
@@ -218,7 +288,9 @@ def os_stack(*, label_suffix: str = "",
         namespace=str(namespace or APP_NAMESPACE),
         timeout_s=float(timeout_s or 5.0),
     )
-    sink = _MemoryAuditSink()
+    if audit_path is None:
+        audit_path = _os.path.join(_os.getcwd(), "provider_audit.jsonl")
+    sink = _FileAuditSink(str(audit_path))
     return ProviderAPI(ProviderRegistry(), store, sink), store, sink
 
 
