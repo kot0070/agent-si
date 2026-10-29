@@ -164,6 +164,8 @@ class ProviderAPI:
         self._audit = audit_sink
         self._usage_probe = usage_probe
         self._providers: dict = {}
+        # K04BIND1: per-instance last evidence-failure reason (never secret).
+        self._errors: dict = {}
 
     def register_provider(self, descriptor: Any, secret_ref: Any = None,
                           *, model: str | None = None,
@@ -255,10 +257,16 @@ class ProviderAPI:
             bool(self._registry.credential_evidenced(provider_id, inst))
             for inst in record["models"]
         )
-        try:
-            health = self._registry.provider_status(provider_id, instance_id)
-        except ValueError:
-            health = "UNKNOWN"
+        # K04BIND1: evidence-failure overrides the view health to ERROR.
+        err = self._errors.get((provider_id, instance_id))
+        if err is not None:
+            health = "ERROR"
+        else:
+            try:
+                health = self._registry.provider_status(
+                    provider_id, instance_id)
+            except ValueError:
+                health = "UNKNOWN"
         return ProviderContracts(
             provider_id=provider_id,
             type=record["type"],
@@ -269,6 +277,60 @@ class ProviderAPI:
             health=health,
             mock=record["mock"],
         )
+
+    # K04BIND1: evidence-failure reason port (never secret material).
+    def set_provider_error(self, provider_id: str,
+                           instance_id: str | None,
+                           reason: str) -> ProviderContracts:
+        inst = instance_id or "default"
+        text = str(reason or "provider check failed")
+        self._errors[(provider_id, inst)] = text
+        try:
+            self._registry.record_health(provider_id, inst, "OFFLINE",
+                                         error=text)
+        except Exception:
+            pass
+        return self._view(provider_id, inst)
+
+    def clear_provider_error(self, provider_id: str,
+                             instance_id: str | None) -> None:
+        inst = instance_id or "default"
+        self._errors.pop((provider_id, inst), None)
+
+    def get_provider_error(self, provider_id: str,
+                           instance_id: str | None = None) -> str | None:
+        inst = instance_id or "default"
+        hit = self._errors.get((provider_id, inst))
+        if hit is not None:
+            return hit
+        for (pid, _inst), text in self._errors.items():
+            if pid == provider_id:
+                return text
+        return None
+
+    def get_evidence_ref(self, provider_id: str,
+                         instance_id: str | None = None) -> str | None:
+        inst = instance_id or "default"
+        try:
+            ref_map = getattr(self._registry, "_ref_evidence", None)
+            if isinstance(ref_map, dict):
+                value = ref_map.get((provider_id, inst))
+                return str(value) if value else None
+        except Exception:
+            pass
+        return None
+
+    def last_provider_error(self) -> str | None:
+        # K04BIND1: newest verbatim failure reason for the chat NO_PROVIDER
+        # message (never secret; callers never log the key).
+        if not self._errors:
+            return None
+        try:
+            return next(reversed(list(self._errors.values())))
+        except Exception:
+            for text in self._errors.values():
+                return text
+        return None
 
     def get_provider(self, provider_id: str) -> ProviderContracts | None:
         record = self._providers.get(provider_id)
@@ -334,6 +396,9 @@ class ProviderAPI:
                       if key[0] == provider_id]:
             del by_identity[ident]
         del self._providers[provider_id]
+        # K04BIND1: drop any recorded failure reason with the provider.
+        for key in [key for key in self._errors if key[0] == provider_id]:
+            del self._errors[key]
         self._store.delete(secret_id)
         return None
 
