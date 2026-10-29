@@ -250,7 +250,18 @@ def create_app(settings: Any = None,
             if getattr(app.state, "k04_ctx", None) is not None:
                 # Configured app with nothing bound: the terminal
                 # NO_PROVIDER_BOUND error over HTTP 200 SSE, never a 404.
-                stream_id, events = bridge.no_provider_run(chat_request)
+                # K04BIND1: surface the verbatim last failure reason.
+                _reason: Any = None
+                try:
+                    _fac = getattr(getattr(app.state, "k04_ctx", None),
+                                   "provider_facade", None)
+                    _getter = getattr(_fac, "last_provider_error", None)
+                    if callable(_getter):
+                        _reason = _getter()
+                except Exception:
+                    _reason = None
+                stream_id, events = bridge.no_provider_run(
+                    chat_request, _reason)
             else:
                 raise HTTPException(
                     status_code=404,
@@ -704,6 +715,56 @@ def create_app(settings: Any = None,
                 _k04_ctx.key_save_timeout_s = _k04_save_timeout(settings)
             except Exception:
                 pass
+            # K04BIND1: re-bind persisted providers before the start bind.
+            try:
+                from agent_si.providers.registry import (
+                    provider_store as _k04bind_store)
+                for _rec in _k04bind_store.load_connections(_k04_dir):
+                    try:
+                        _pid = str((_rec or {}).get("provider_id") or "")
+                        _model = str((_rec or {}).get("model") or "")
+                        _kr = (_rec or {}).get("key_ref") or {}
+                        _eref = (_rec or {}).get("evidence_ref")
+                        _type = str((_rec or {}).get("type") or _pid)
+                        _burl = str((_rec or {}).get("base_url") or "")
+                        _inst = str((_rec or {}).get("instance_id")
+                                    or "default")
+                        if not _pid or not _model or not _burl:
+                            continue
+                        if not isinstance(_kr, dict) or not _kr.get(
+                                "secret_id"):
+                            continue
+                        try:
+                            _k04_api.register_provider(
+                                {"provider_id": _pid, "type": _type,
+                                 "base_url": _burl, "model": _model,
+                                 "instance_id": _inst},
+                                _kr,
+                                instance_id=_inst,
+                                evidence_ref=(str(_eref) if _eref else None),
+                                mock=bool((_rec or {}).get("mock", False)))
+                        except ValueError:
+                            pass
+                        _err = (_rec or {}).get("error")
+                        if isinstance(_err, str) and _err:
+                            try:
+                                _k04_api.set_provider_error(
+                                    _pid, _inst, _err)
+                            except Exception:
+                                pass
+                        elif _eref:
+                            try:
+                                _k04_api.clear_provider_error(_pid, _inst)
+                            except Exception:
+                                pass
+                            try:
+                                _k04_api.record_health(_pid, _inst, "ONLINE")
+                            except Exception:
+                                pass
+                    except Exception:
+                        continue
+            except Exception:
+                pass
     app.state.k04_ctx = _k04_ctx
     app.state.k04_config_error = _k04_config_error
     # M-WIRE L0B-12: bind the routed provider adapter at app start via
@@ -735,6 +796,203 @@ def create_app(settings: Any = None,
                 _bedef1_defaults.ensure_project_defaults(app, _bedef1_pid)
     except Exception:
         pass
+
+    # K04BIND1: evidence + persistence + rebind helpers (additions-only).
+    def _k04bind_scrub(text: str) -> str:
+        try:
+            out = str(text or "")
+        except Exception:
+            return "provider check failed"
+        try:
+            store = getattr(_k04_ctx, "credential_store", None)
+            if store is not None:
+                for attr in ("get_secret", "get", "retrieve", "read",
+                             "get_secret_value"):
+                    fn = getattr(store, attr, None)
+                    if not callable(fn):
+                        continue
+                    try:
+                        for sid in ("openai", "meta", "anthropic"):
+                            try:
+                                val = fn(sid)
+                            except Exception:
+                                continue
+                            if isinstance(val, dict):
+                                val = val.get("value", "")
+                            if isinstance(val, str) and val and val in out:
+                                out = out.replace(val, "[redacted]")
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        return out
+
+    def _k04bind_snapshot() -> list:
+        try:
+            api = getattr(_k04_ctx, "provider_facade", None)
+            if api is None:
+                return []
+            rows = []
+            providers = getattr(api, "_providers", {}) or {}
+            for pid in sorted(providers):
+                try:
+                    view = api.get_provider(pid)
+                    if view is None:
+                        continue
+                    try:
+                        secret_desc = view.secret_ref.describe()
+                    except Exception:
+                        secret_desc = {"secret_id": "",
+                                       "provider_id": pid}
+                    try:
+                        eref = api.get_evidence_ref(
+                            pid, getattr(view, "instance_id", "default"))
+                    except Exception:
+                        eref = None
+                    try:
+                        err = api.get_provider_error(pid)
+                    except Exception:
+                        err = None
+                    rows.append({
+                        "provider_id": pid,
+                        "model": str(
+                            (providers[pid].get("models", {}) or {}).get(
+                                getattr(view, "instance_id", "default"),
+                                "") or ""),
+                        "instance_id": str(getattr(
+                            view, "instance_id", "default") or "default"),
+                        "type": str(getattr(view, "type", "") or ""),
+                        "base_url": str(getattr(view, "base_url", "") or ""),
+                        "key_ref": dict(secret_desc) if isinstance(
+                            secret_desc, dict) else {},
+                        "evidence_ref": eref,
+                        "health": str(getattr(view, "health", "") or ""),
+                        "error": err,
+                        "mock": bool(getattr(view, "mock", False)),
+                    })
+                except Exception:
+                    continue
+            return rows
+        except Exception:
+            return []
+
+    def _k04bind_save() -> None:
+        try:
+            if _k04_dir is None:
+                return
+            from agent_si.providers.registry import (
+                provider_store as _k04bind_pstore)
+            _k04bind_pstore.save_connections(_k04_dir, _k04bind_snapshot())
+        except Exception:
+            pass
+
+    def _k04bind_evidence(pid: str, inst: str, model: str,
+                          base_url: str, secret_map: dict) -> tuple:
+        # K04BIND1: real check via the EXISTING usage_probe over the real
+        # gateway transport (key from the store by ref, never echoed).
+        try:
+            from agent_si.backend import chat_stream as _cs
+            from agent_si.providers.adapters import legs as _legs
+            from agent_si.providers.adapters import (
+                usage_probe as _uprobe)
+            try:
+                _chat_path = _legs.leg_descriptor(pid)["chat_path"]
+            except Exception:
+                _chat_path = "/chat/completions"
+            _store = getattr(_k04_ctx, "credential_store", None)
+            _real = _cs._gateway_transport(base_url, _store, secret_map)
+            _seen: dict = {}
+
+            def _usage_trans(req: dict) -> dict:
+                try:
+                    reply = _real({
+                        "model": model,
+                        "messages": [{"role": "user",
+                                      "content": "hi"}],
+                        "stream": False,
+                        "chat_path": _chat_path,
+                    })
+                except Exception as _exc:
+                    _seen["exc"] = _exc
+                    raise
+                usage = {}
+                if isinstance(reply, dict):
+                    usage = reply.get("usage", {})
+                    if not isinstance(usage, dict):
+                        usage = {}
+                return {"usage": dict(usage)}
+
+            def _run() -> dict:
+                return _uprobe.probe_usage(pid, inst or "default",
+                                            _usage_trans)
+            import concurrent.futures as _fut
+            with _fut.ThreadPoolExecutor(max_workers=1) as _pool:
+                _future = _pool.submit(_run)
+                try:
+                    _cap = _future.result(timeout=10.0)
+                except _fut.TimeoutError:
+                    return (False, "evidence probe timed out after 10s")
+            _state = ""
+            try:
+                _state = str((_cap or {}).get("state", "") or "")
+            except Exception:
+                _state = ""
+            if _state in ("VERIFIED", "PARTIAL"):
+                return (True, "")
+            _exc = _seen.get("exc")
+            if _exc is not None:
+                _reason = str(_exc) or type(_exc).__name__
+            else:
+                _reason = "usage probe returned %s" % (_state or "UNKNOWN")
+            return (False, _k04bind_scrub(_reason))
+        except Exception as _exc:
+            try:
+                return (False, _k04bind_scrub(str(_exc)))
+            except Exception:
+                return (False, "provider check failed")
+
+    def _k04bind_rebind(force_clear: bool = False,
+                        only_provider: str | None = None) -> None:
+        try:
+            from agent_si.backend import chat_stream as _cs2
+            if force_clear:
+                try:
+                    cur = getattr(app.state, "chat_provider_adapter", None)
+                    cur_pid = getattr(
+                        getattr(cur, "config", None), "provider_id", "")
+                    if only_provider is None or cur_pid == only_provider:
+                        app.state.chat_provider_adapter = None
+                        try:
+                            _bridge = getattr(
+                                app.state, "chat_stream_bridge", None)
+                            if _bridge is not None:
+                                _bridge._provider_adapter = None
+                        except Exception:
+                            pass
+                    elif only_provider is not None:
+                        return
+                except Exception:
+                    pass
+            else:
+                try:
+                    app.state.chat_provider_adapter = None
+                except Exception:
+                    pass
+            try:
+                _new = _cs2.bind_routed_provider_adapter(app)
+            except Exception:
+                _new = None
+            try:
+                _bridge2 = getattr(app.state, "chat_stream_bridge", None)
+                if _bridge2 is not None and _new is not None:
+                    if getattr(_bridge2, "_provider_adapter", None) is None:
+                        _bridge2._provider_adapter = _new
+                    else:
+                        _bridge2._provider_adapter = _new
+            except Exception:
+                pass
+        except Exception:
+            pass
 
     def _k04_make_endpoint(_fn: Callable, _is_write: bool,
                            _name: str = "") -> Callable:
@@ -806,6 +1064,124 @@ def create_app(settings: Any = None,
                     status_code=500,
                     content={"error": "%s: %s" % (type(_exc).__name__,
                                                  _exc)})
+            # K04BIND1: connect runs the real evidence check, persists and
+            # re-binds; disconnect clears the bound adapter and persists.
+            try:
+                if _name == "connect_provider" and _status == 200:
+                    _api = getattr(_k04_ctx, "provider_facade", None)
+                    _prov = {}
+                    try:
+                        _prov = (_payload or {}).get("provider", {}) or {}
+                    except Exception:
+                        _prov = {}
+                    _pid = str(_prov.get("provider_id", "") or "")
+                    _inst = str(_prov.get("instance_id", "") or "default")
+                    _model = ""
+                    try:
+                        _body_m = (_body or {}).get("model", "")
+                        if isinstance(_body_m, str) and _body_m:
+                            _model = _body_m
+                    except Exception:
+                        pass
+                    if _api is not None and _pid and _model:
+                        try:
+                            _view0 = _api.get_provider(_pid)
+                        except Exception:
+                            _view0 = None
+                        _burl = ""
+                        _smap: dict = {}
+                        try:
+                            _burl = str(getattr(_view0, "base_url", "") or "")
+                            _sref = getattr(_view0, "secret_ref", None)
+                            _desc = _sref.describe() if hasattr(
+                                _sref, "describe") else {}
+                            if isinstance(_desc, dict):
+                                _smap = {k: v for k, v in _desc.items()
+                                         if k != "value"}
+                        except Exception:
+                            pass
+                        if _burl and _smap:
+                            _ok, _reason = _k04bind_evidence(
+                                _pid, _inst, _model, _burl, _smap)
+                            try:
+                                if _ok:
+                                    import datetime as _dt
+                                    _eref = "connect-probe:%s/%s:%s" % (
+                                        _pid, _inst,
+                                        _dt.datetime.now(
+                                            _dt.timezone.utc).isoformat())
+                                    try:
+                                        _api._registry.record_credential_evidence(
+                                            _pid, _inst, _eref)
+                                    except Exception:
+                                        pass
+                                    try:
+                                        _api.clear_provider_error(_pid, _inst)
+                                    except Exception:
+                                        pass
+                                    try:
+                                        _api.record_health(_pid, _inst,
+                                                           "ONLINE")
+                                    except Exception:
+                                        pass
+                                else:
+                                    try:
+                                        _api.set_provider_error(
+                                            _pid, _inst, _reason)
+                                    except Exception:
+                                        pass
+                            except Exception:
+                                pass
+                            try:
+                                _fresh = _api.get_provider(_pid)
+                                if _fresh is not None:
+                                    _payload = {"provider": _fresh.describe()}
+                                    try:
+                                        _err2 = _api.get_provider_error(_pid)
+                                        if _err2:
+                                            _payload["error"] = _err2
+                                    except Exception:
+                                        pass
+                            except Exception:
+                                pass
+                            try:
+                                _k04bind_save()
+                            except Exception:
+                                pass
+                            try:
+                                if _fresh is not None and getattr(
+                                        _fresh, "evidenced", False):
+                                    _k04bind_rebind()
+                            except Exception:
+                                pass
+                        else:
+                            try:
+                                _k04bind_save()
+                            except Exception:
+                                pass
+                elif _name == "disconnect_provider" and _status == 200:
+                    try:
+                        _dpid = ""
+                        try:
+                            _dpid = str((_payload or {}).get(
+                                "provider_id", "") or "")
+                        except Exception:
+                            pass
+                        if not _dpid:
+                            try:
+                                _dpid = str((_query or {}).get("id", "") or "")
+                            except Exception:
+                                pass
+                        _k04bind_save()
+                    except Exception:
+                        pass
+                    try:
+                        _k04bind_rebind(force_clear=True,
+                                        only_provider=_dpid or None)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             return _K04JSONResponse(status_code=_status,
                                     content=_k04_jsonable(_payload))
         return _k04_endpoint

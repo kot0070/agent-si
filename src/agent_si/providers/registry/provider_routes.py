@@ -111,14 +111,30 @@ def _as_bool(value: Any) -> bool:
     return bool(value)
 
 
-def _view_payload(view: Any) -> Dict[str, Any]:
-    return {
+def _view_payload(view: Any, error: Any = None) -> Dict[str, Any]:
+    # K04BIND1: error only when a verbatim failure reason exists (keeps
+    # the D9 exact-set shape for the healthy path).
+    payload = {
         "provider_id": view.provider_id,
         "type": view.type,
         "base_url": view.base_url,
         "health": view.health,
         "evidenced": bool(view.evidenced),
     }
+    if error is not None and isinstance(error, str) and error:
+        payload["error"] = error
+    return payload
+
+
+def _facade_error(facade: Any, provider_id: str) -> Any:
+    # K04BIND1: read the verbatim failure reason without touching secrets.
+    try:
+        getter = getattr(facade, "get_provider_error", None)
+        if callable(getter):
+            return getter(provider_id)
+    except Exception:
+        pass
+    return None
 
 
 def _model_entries(raw: Any) -> List[Tuple[str, Any]]:
@@ -141,7 +157,12 @@ def list_providers(ctx: ProviderCtx, query, body) -> Tuple[int, Dict]:
         views = ctx.facade.list_providers(only)
     except ValueError as exc:
         return 400, {"error": str(exc)}
-    return 200, {"providers": [_view_payload(view) for view in views]}
+    # K04BIND1: surface the verbatim evidence-failure reason (no secret).
+    rows = []
+    for view in views:
+        rows.append(_view_payload(
+            view, _facade_error(ctx.facade, view.provider_id)))
+    return 200, {"providers": rows}
 
 
 def connect_provider(ctx: ProviderCtx, query, body) -> Tuple[int, Dict]:

@@ -269,7 +269,7 @@ class ManagerSdkBridge:
         return stream_id, iterator
 
     def no_provider_run(
-        self, request: ChatStreamRequest
+        self, request: ChatStreamRequest, reason: Any | None = None
     ) -> tuple[str, Iterator[bytes]]:
         """Start a stream that ends in NO_PROVIDER_BOUND (M-WIRE L0B-12).
 
@@ -277,11 +277,14 @@ class ManagerSdkBridge:
         carries exactly one `start` plus one terminal `error` event
         with code NO_PROVIDER_BOUND. Served over HTTP 200 SSE, never
         a 404.
+        # K04BIND1: optional verbatim failure reason (never secret).
         """
         stream_id = uuid.uuid4().hex
         run_id = uuid.uuid4().hex
         state: dict[str, Any] = {"cancelled": False}
         self._live[stream_id] = state
+        if isinstance(reason, str) and reason.strip():
+            state["no_provider_reason"] = reason.strip()
         return stream_id, self._no_provider_events(
             stream_id, run_id, request, state)
 
@@ -300,13 +303,18 @@ class ManagerSdkBridge:
                 {"type": "cancelled", "stream_id": stream_id})
             return
         self._finish(stream_id)
+        # K04BIND1: append the verbatim last failure reason (never secret).
+        base = ("no provider is connected; "
+                "connect a provider to enable chat")
+        reason = state.get("no_provider_reason")
+        if isinstance(reason, str) and reason.strip():
+            base = base + " (last error: " + reason.strip() + ")"
         yield sse_bytes({
             "type": "error",
             "stream_id": stream_id,
             "run_id": run_id,
             "code": NO_PROVIDER_BOUND,
-            "message": "no provider is connected; "
-                       "connect a provider to enable chat",
+            "message": base,
         })
 
     def cancel(self, stream_id: str) -> bool:
