@@ -878,6 +878,31 @@ def create_app(settings: Any = None,
             except Exception:
                 pass
             # K04BIND1: re-bind persisted providers before the start bind.
+            # KEYECHO1: provider failure reasons are codes/refs only, zero
+            # credential bytes. Exception text must never be interpolated:
+            # the gateway transport formats key bytes into it (urllib
+            # "Invalid header value" carries the rejected header value).
+            _K04BIND_REASON_TIMEOUT = "evidence probe timed out after 10s"
+            _K04BIND_REASON_FAILED = "provider check failed"
+            _K04BIND_PROBE_STATES = ("VERIFIED", "PARTIAL", "UNSUPPORTED",
+                                     "UNKNOWN")
+
+            def _k04bind_reason_ok(text: Any) -> bool:
+                try:
+                    value = str(text or "")
+                except Exception:
+                    return False
+                if value in (_K04BIND_REASON_TIMEOUT,
+                             _K04BIND_REASON_FAILED):
+                    return True
+                if value.startswith("provider answered HTTP "):
+                    tail = value[len("provider answered HTTP "):]
+                    return tail.isdigit() and 100 <= int(tail) <= 599
+                if value.startswith("usage probe returned "):
+                    return value[len("usage probe returned "):] in (
+                        _K04BIND_PROBE_STATES)
+                return False
+
             try:
                 from agent_si.providers.registry import (
                     provider_store as _k04bind_store)
@@ -908,7 +933,11 @@ def create_app(settings: Any = None,
                         except ValueError:
                             pass
                         _err = (_rec or {}).get("error")
-                        if isinstance(_err, str) and _err:
+                        # KEYECHO1: only codes/refs are restored; a stale
+                        # free-text reason (possibly pre-fix leak bytes)
+                        # is dropped, never re-surfaced.
+                        if isinstance(_err, str) and _err \
+                                and _k04bind_reason_ok(_err):
                             try:
                                 _k04_api.set_provider_error(
                                     _pid, _inst, _err)
@@ -960,6 +989,7 @@ def create_app(settings: Any = None,
         pass
 
     # K04BIND1: evidence + persistence + rebind helpers (additions-only).
+    # (KEYECHO1 reason codes/allowlist live above with the restore gate.)
     def _k04bind_scrub(text: str) -> str:
         try:
             out = str(text or "")
@@ -1094,7 +1124,7 @@ def create_app(settings: Any = None,
                 try:
                     _cap = _future.result(timeout=10.0)
                 except _fut.TimeoutError:
-                    return (False, "evidence probe timed out after 10s")
+                    return (False, _K04BIND_REASON_TIMEOUT)
             _state = ""
             try:
                 _state = str((_cap or {}).get("state", "") or "")
@@ -1108,25 +1138,21 @@ def create_app(settings: Any = None,
                     _status = getattr(_exc, "status", None)
                 except Exception:
                     _status = None
-                try:
-                    _msg = getattr(_exc, "message", "") or str(_exc)
-                except Exception:
-                    _msg = ""
-                if not _msg:
-                    _msg = type(_exc).__name__
-                if isinstance(_status, int) and _status:
-                    _reason = "provider answered HTTP %s: %s" % (
-                        _status, _msg)
+                # KEYECHO1: status code only; never the exception text
+                # (it may carry key bytes, e.g. "Invalid header value").
+                if (isinstance(_status, int)
+                        and not isinstance(_status, bool) and _status):
+                    _reason = "provider answered HTTP %d" % (_status,)
                 else:
-                    _reason = str(_msg) or type(_exc).__name__
-            else:
+                    _reason = _K04BIND_REASON_FAILED
+            elif _state in _K04BIND_PROBE_STATES and _state not in (
+                    "VERIFIED", "PARTIAL"):
                 _reason = "usage probe returned %s" % (_state or "UNKNOWN")
+            else:
+                _reason = _K04BIND_REASON_FAILED
             return (False, _k04bind_scrub(_reason))
-        except Exception as _exc:
-            try:
-                return (False, _k04bind_scrub(str(_exc)))
-            except Exception:
-                return (False, "provider check failed")
+        except Exception:
+            return (False, _K04BIND_REASON_FAILED)
 
     def _k04bind_rebind(force_clear: bool = False,
                         only_provider: str | None = None) -> None:

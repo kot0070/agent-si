@@ -162,14 +162,19 @@ def test_transport_failure_error_and_no_provider(tmp_path, monkeypatch):
     assert "openai" in rows, rows
     assert rows["openai"]["evidenced"] is False, rows
     assert rows["openai"]["health"] == "ERROR", rows
-    assert "simulated failure K04BIND1" in str(rows["openai"].get("error", "")), rows
+    # KEYECHO1: failure reasons are codes/refs only, never the transport
+    # exception text (it may carry key bytes): the simulated message
+    # must not surface anywhere.
+    assert rows["openai"].get("error") == "provider check failed", rows
+    assert "simulated failure K04BIND1" not in listed.text
     assert BAIT2 not in listed.text
     chat = client.post("/api/v1/chat/stream",
                        json={"project": pid, "message": "hi fail"},
                        headers=HEADERS)
     assert chat.status_code == 200, chat.text
     assert "NO_PROVIDER_BOUND" in chat.text, chat.text
-    assert "simulated failure K04BIND1" in chat.text, chat.text
+    assert "provider check failed" in chat.text, chat.text
+    assert "simulated failure K04BIND1" not in chat.text
     assert BAIT2 not in chat.text
 
 
