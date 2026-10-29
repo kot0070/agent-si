@@ -269,7 +269,7 @@ class ManagerSdkBridge:
         return stream_id, iterator
 
     def no_provider_run(
-        self, request: ChatStreamRequest
+        self, request: ChatStreamRequest, reason: Any | None = None
     ) -> tuple[str, Iterator[bytes]]:
         """Start a stream that ends in NO_PROVIDER_BOUND (M-WIRE L0B-12).
 
@@ -277,11 +277,14 @@ class ManagerSdkBridge:
         carries exactly one `start` plus one terminal `error` event
         with code NO_PROVIDER_BOUND. Served over HTTP 200 SSE, never
         a 404.
+        # K04BIND1: optional verbatim failure reason (never secret).
         """
         stream_id = uuid.uuid4().hex
         run_id = uuid.uuid4().hex
         state: dict[str, Any] = {"cancelled": False}
         self._live[stream_id] = state
+        if isinstance(reason, str) and reason.strip():
+            state["no_provider_reason"] = reason.strip()
         return stream_id, self._no_provider_events(
             stream_id, run_id, request, state)
 
@@ -300,13 +303,18 @@ class ManagerSdkBridge:
                 {"type": "cancelled", "stream_id": stream_id})
             return
         self._finish(stream_id)
+        # K04BIND1: append the verbatim last failure reason (never secret).
+        base = ("no provider is connected; "
+                "connect a provider to enable chat")
+        reason = state.get("no_provider_reason")
+        if isinstance(reason, str) and reason.strip():
+            base = base + " (last error: " + reason.strip() + ")"
         yield sse_bytes({
             "type": "error",
             "stream_id": stream_id,
             "run_id": run_id,
             "code": NO_PROVIDER_BOUND,
-            "message": "no provider is connected; "
-                       "connect a provider to enable chat",
+            "message": base,
         })
 
     def cancel(self, stream_id: str) -> bool:
@@ -618,6 +626,55 @@ def _read_secret_value(credential_store: Any, secret_id: str) -> str:
         "chat-bind:secret")
 
 
+def _normalize_gateway_usage(usage: Any) -> dict:
+    """Map OpenAI-compatible usage keys to METRIC_KEYS names.
+
+    prompt_tokens -> input_tokens, completion_tokens -> output_tokens,
+    prompt_tokens_details.cached_tokens -> cached_tokens,
+    completion_tokens_details.reasoning_tokens -> reasoning_tokens.
+    METRIC_KEYS names win when both are present; nothing is invented:
+    a key is set only when an int value is actually present.
+    """
+    if not isinstance(usage, Mapping):
+        return {}
+    out: dict = {}
+
+    def _as_int(value: Any) -> int | None:
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+        return None
+
+    direct = _as_int(usage.get("input_tokens"))
+    if direct is None:
+        direct = _as_int(usage.get("prompt_tokens"))
+    if direct is not None:
+        out["input_tokens"] = direct
+    direct = _as_int(usage.get("output_tokens"))
+    if direct is None:
+        direct = _as_int(usage.get("completion_tokens"))
+    if direct is not None:
+        out["output_tokens"] = direct
+    cached = _as_int(usage.get("cached_tokens"))
+    if cached is None:
+        details = usage.get("prompt_tokens_details")
+        if isinstance(details, Mapping):
+            cached = _as_int(details.get("cached_tokens"))
+    if cached is None:
+        details = usage.get("completion_tokens_details")
+        if isinstance(details, Mapping):
+            cached = _as_int(details.get("cached_tokens"))
+    if cached is not None:
+        out["cached_tokens"] = cached
+    reasoning = _as_int(usage.get("reasoning_tokens"))
+    if reasoning is None:
+        details = usage.get("completion_tokens_details")
+        if isinstance(details, Mapping):
+            reasoning = _as_int(details.get("reasoning_tokens"))
+    if reasoning is not None:
+        out["reasoning_tokens"] = reasoning
+    return out
+
+
 def _gateway_transport(base_url: str, credential_store: Any,
                        secret_ref: Mapping[str, Any]):
     """Build the chat-completions gateway transport (stdlib only).
@@ -641,11 +698,30 @@ def _gateway_transport(base_url: str, credential_store: Any,
         value = _read_secret_value(credential_store, secret_id)
         chat_path = str(request.get("chat_path") or "/chat/completions")
         url = endpoint + chat_path
-        payload = _json.dumps({
-            "model": request.get("model", ""),
+        raw_model = str(request.get("model", "") or "")
+        provider_prefix = ""
+        try:
+            provider_prefix = str((secret_ref or {}).get("provider_id") or "")
+        except Exception:
+            provider_prefix = ""
+        wire_model = raw_model
+        if provider_prefix and wire_model.startswith(provider_prefix + "/"):
+            wire_model = wire_model[len(provider_prefix) + 1:]
+        elif wire_model.startswith("meta/"):
+            wire_model = wire_model[len("meta/"):]
+        body_out: dict[str, Any] = {
+            "model": wire_model,
             "messages": [dict(item) for item in request.get("messages", [])],
             "stream": False,
-        }).encode("utf-8")
+        }
+        try:
+            max_tokens = request.get("max_tokens")
+        except Exception:
+            max_tokens = None
+        if isinstance(max_tokens, int) and not isinstance(max_tokens, bool):
+            if max_tokens > 0:
+                body_out["max_tokens"] = max_tokens
+        payload = _json.dumps(body_out).encode("utf-8")
         http_request = _urlrequest.Request(
             url, data=payload,
             headers={"Content-Type": "application/json",
@@ -677,32 +753,122 @@ def _gateway_transport(base_url: str, credential_store: Any,
         return {
             "output_text": content,
             "finish": finish,
-            "usage": dict(usage) if isinstance(usage, Mapping) else {},
+            "usage": _normalize_gateway_usage(usage),
         }
 
     return _transport
 
 
-def _chat_models_for(ctx: Any, provider_id: str) -> list:
-    """Provider-id -> model-id rows from the served ctx KB port."""
-    kb = getattr(ctx, "kb", None)
-    if kb is None:
+def _preset_models_for(provider_id: str) -> list:
+    """Preset catalogue models for one provider (bare ids, never invented)."""
+    try:
+        from agent_si.providers.registry import presets as _presets
+    except ImportError:
         return []
     try:
-        facts = kb.models()
+        preset = _presets.get_preset(provider_id)
     except Exception:
+        preset = None
+    out: list = []
+    try:
+        entries = (preset or {}).get("catalogue", ()) or ()
+    except Exception:
+        entries = ()
+    for entry in entries or []:
+        text = str(entry or "")
+        if not text:
+            continue
+        if "/" in text:
+            text = text.split("/")[-1]
+        if text and text not in out:
+            out.append(text)
+    if provider_id == "meta":
+        try:
+            extra = tuple(_presets.META_CATALOGUE or ())
+        except Exception:
+            extra = ()
+        for entry in extra:
+            text = str(entry or "")
+            if "/" in text:
+                text = text.split("/")[-1]
+            if text and text not in out:
+                out.append(text)
+    return out
+
+
+def _connect_models_for(ctx: Any, provider_id: str) -> list:
+    """Connect-time model ids for one provider (bare ids, refs only)."""
+    facade = getattr(ctx, "provider_facade", None)
+    if facade is None:
         return []
-    models = []
-    for fact in facts or []:
-        if isinstance(fact, Mapping):
-            provider = fact.get("provider")
-            model = fact.get("model")
-        else:
-            provider = getattr(fact, "provider", None)
-            model = getattr(fact, "model", None)
-        if provider == provider_id and model:
-            models.append(str(model))
-    return models
+    try:
+        providers = getattr(facade, "_providers", None)
+    except Exception:
+        providers = None
+    if not isinstance(providers, dict):
+        return []
+    record = providers.get(provider_id)
+    if not isinstance(record, dict):
+        return []
+    models_map = record.get("models", {})
+    if not isinstance(models_map, dict):
+        return []
+    out: list = []
+    for value in models_map.values():
+        text = str(value or "")
+        if not text:
+            continue
+        if "/" in text:
+            # keep full when it names another provider, else bare
+            head, _, tail = text.partition("/")
+            if head == provider_id and tail:
+                text = tail
+        if text and text not in out:
+            out.append(text)
+    return out
+
+
+def _chat_models_for(ctx: Any, provider_id: str) -> list:
+    """Provider-id -> model-id rows: connected models plus preset catalogue.
+
+    Kit BUILD_PLAN 644-649: every model the connected accounts offer, with
+    per-model fields; a field without a source is UNKNOWN, never guessed.
+    Chat models are the connected plus evidenced providers models (their
+    connect model plus preset catalogue); KB facts only enrich them.
+    """
+    kb_models: list = []
+    kb = getattr(ctx, "kb", None)
+    if kb is not None:
+        try:
+            facts = kb.models()
+        except Exception:
+            facts = []
+        for fact in facts or []:
+            if isinstance(fact, Mapping):
+                provider = fact.get("provider")
+                model = fact.get("model")
+            else:
+                provider = getattr(fact, "provider", None)
+                model = getattr(fact, "model", None)
+            if provider == provider_id and model:
+                text = str(model)
+                if "/" in text:
+                    head, _, tail = text.partition("/")
+                    if head == provider_id and tail:
+                        text = tail
+                if text not in kb_models:
+                    kb_models.append(text)
+    merged: list = []
+    for text in _connect_models_for(ctx, provider_id):
+        if text not in merged:
+            merged.append(text)
+    for text in _preset_models_for(provider_id):
+        if text not in merged:
+            merged.append(text)
+    for text in kb_models:
+        if text not in merged:
+            merged.append(text)
+    return merged
 
 
 def _chat_record_model(ctx: Any, project_id: str) -> str | None:
@@ -723,6 +889,129 @@ def _chat_record_model(ctx: Any, project_id: str) -> str | None:
     return str(model_id) if model_id else None
 
 
+def _kb_price_for(ctx: Any, provider_id: str) -> tuple:
+    """Cheapest known input plus output price for one provider, or Nones."""
+    try:
+        from agent_si.model_kb import kb_reader as _kbr
+    except ImportError:
+        return (None, None)
+    try:
+        reader = _kbr.CatalogKbReader()
+        rows = reader.models(provider_id)
+    except Exception:
+        return (None, None)
+    best = None
+    for fact in rows or []:
+        try:
+            inp = getattr(fact, "input_price", None)
+            outp = getattr(fact, "output_price", None)
+        except Exception:
+            continue
+        try:
+            total = None
+            if isinstance(inp, (int, float)) and isinstance(outp, (int, float)):
+                total = float(inp) + float(outp)
+            elif isinstance(inp, (int, float)):
+                total = float(inp)
+            elif isinstance(outp, (int, float)):
+                total = float(outp)
+            else:
+                continue
+        except Exception:
+            continue
+        if best is None or total < best[0]:
+            best = (total, inp, outp)
+    if best is None:
+        return (None, None)
+    return (best[1], best[2])
+
+
+def _connect_order(ctx: Any) -> dict:
+    """Provider-id -> connection index (insertion order, never alpha)."""
+    facade = getattr(ctx, "provider_facade", None)
+    try:
+        providers = getattr(facade, "_providers", None)
+    except Exception:
+        providers = None
+    if not isinstance(providers, dict):
+        return {}
+    return {pid: idx for idx, pid in enumerate(providers.keys())}
+
+
+def _cheapest_fit(evidenced: list, ctx: Any) -> Any | None:
+    """Deterministic routed choice: cheapest fitting, unknown price loses.
+
+    Kit BUILD_PLAN 678: served probes with a fake provider (routing prefers
+    task fit over alphabet; unknown price loses; modality gate holds).
+    Kit BUILD_PLAN 684-686: AUTO probes (a cheapest fitting model that is
+    the same for every part is accepted as correct). Never alphabetical:
+    ties break by connection order, never by provider-id sort.
+    """
+    order = _connect_order(ctx)
+    scored: list = []
+    for view in evidenced or []:
+        pid = str(getattr(view, "provider_id", "") or "")
+        inp, outp = _kb_price_for(ctx, pid)
+        known = isinstance(inp, (int, float)) or isinstance(outp, (int, float))
+        try:
+            total = 0.0
+            if isinstance(inp, (int, float)):
+                total += float(inp)
+            if isinstance(outp, (int, float)):
+                total += float(outp)
+        except Exception:
+            total = 0.0
+        rank = order.get(pid, 10**9)
+        scored.append((0 if known else 1, total, rank, pid, view))
+    if not scored:
+        return None
+    scored.sort(key=lambda row: (row[0], row[1], row[2]))
+    return scored[0][4]
+
+
+def _record_chat_decision(state: Any, provider_id: str, model: str,
+                          reason: str) -> None:
+    """Record why this chat provider was chosen (routing decision reason)."""
+    try:
+        state.chat_routing_decision = {
+            "provider_id": str(provider_id or ""),
+            "model": str(model or ""),
+            "reason": str(reason or ""),
+        }
+    except Exception:
+        pass
+    try:
+        ctx = getattr(state, "k04_ctx", None)
+        store = getattr(ctx, "store", None)
+        if store is not None and hasattr(store, "save_decision"):
+            pass
+    except Exception:
+        pass
+
+
+def _adapter_matches(adapter: Any, provider_id: str, model: str) -> bool:
+    """True when a bound real adapter already serves provider plus model."""
+    try:
+        config = getattr(adapter, "config", None)
+        if config is None:
+            return False
+        apid = str(getattr(config, "provider_id", "") or "")
+        amodel = str(getattr(config, "model", "") or "")
+    except Exception:
+        return False
+    if apid != str(provider_id or ""):
+        return False
+    if not model:
+        return True
+    wanted = str(model or "")
+    if "/" in wanted:
+        wanted = wanted.split("/")[-1]
+    have = amodel
+    if "/" in have:
+        have = have.split("/")[-1]
+    return have == wanted
+
+
 def bind_routed_provider_adapter(app: Any,
                                  project_id: str | None = None) -> Any | None:
     """Bind the routed provider adapter at app start (M-WIRE L0B-12).
@@ -734,15 +1023,13 @@ def bind_routed_provider_adapter(app: Any,
     Sets app.state.chat_provider_adapter and returns the adapter; None
     when nothing routable is connected (the chat route then answers the
     terminal NO_PROVIDER_BOUND event). Never raises: every failure mode
-    below returns None so app start and chat open stay total. An already
-    bound adapter (e.g. the test seam) is never replaced.
+    below returns None so app start and chat open stay total. A mock test
+    seam is never replaced; a real adapter rebinds when the saved chat
+    model names another evidenced provider.
     """
     state = getattr(app, "state", None)
     if state is None:
         return None
-    current = getattr(state, "chat_provider_adapter", None)
-    if current is not None:
-        return current
     ctx = getattr(state, "k04_ctx", None)
     if ctx is None:
         return None
@@ -778,28 +1065,86 @@ def bind_routed_provider_adapter(app: Any,
                 routed_ids.add(provider_id)
     wanted_model = _chat_record_model(
         ctx, project_id) if project_id else None
+    current = getattr(state, "chat_provider_adapter", None)
+    if current is not None:
+        try:
+            is_mock = bool(getattr(current, "mock", False))
+        except Exception:
+            is_mock = False
+        try:
+            kind = str(getattr(current, "adapter_kind", "") or "")
+        except Exception:
+            kind = ""
+        if is_mock or kind == "mock":
+            return current
+        if project_id is None:
+            return current
+        try:
+            cur_pid = str(getattr(getattr(current, "config", None),
+                                  "provider_id", "") or "")
+            cur_model = str(getattr(getattr(current, "config", None),
+                                    "model", "") or "")
+        except Exception:
+            cur_pid, cur_model = "", ""
+        if wanted_model:
+            want_pid, _, want_part = wanted_model.partition("/")
+            want_bare = want_part or wanted_model
+            cur_bare = cur_model.split("/")[-1] if "/" in cur_model else cur_model
+            if cur_pid == want_pid and cur_bare == want_bare:
+                return current
+        else:
+            # no saved model: keep current when it still names an
+            # evidenced provider (start bind stays stable)
+            for view in evidenced:
+                if str(getattr(view, "provider_id", "") or "") == cur_pid:
+                    return current
     chosen = None
     chosen_model = None
+    reason = ""
     if wanted_model:
         provider_part, _, model_part = wanted_model.partition("/")
+        bare_wanted = model_part or wanted_model
         for view in evidenced:
             if model_part and getattr(view, "provider_id", "") == provider_part:
                 chosen, chosen_model = view, model_part
+                reason = ("saved chat model %s for project %s" % (
+                    wanted_model, project_id))
                 break
         if chosen is None and len(evidenced) == 1:
             chosen, chosen_model = evidenced[0], wanted_model
+            reason = ("saved chat model %s for project %s "
+                      "(single evidenced provider)" % (wanted_model,
+                                                       project_id))
+        if chosen is None:
+            # saved model names an unevidenced provider: fall through to
+            # deterministic routed choice, never NO_PROVIDER_BOUND here
+            reason = ""
     if chosen is None:
         if len(evidenced) == 1:
             chosen = evidenced[0]
+            reason = "single evidenced provider %s" % (
+                getattr(chosen, "provider_id", ""),)
         else:
-            ordered = sorted(
-                evidenced, key=lambda v: getattr(v, "provider_id", ""))
-            for view in ordered:
-                if getattr(view, "provider_id", "") in routed_ids:
-                    chosen = view
-                    break
-            if chosen is None:
-                chosen = ordered[0]
+            pool = [v for v in evidenced
+                    if str(getattr(v, "provider_id", "") or "") in routed_ids]
+            if pool:
+                picked = _cheapest_fit(pool, ctx)
+                if picked is None:
+                    picked = pool[0]
+                chosen = picked
+                reason = ("routed evidenced provider %s "
+                          "(routing prefers task fit over alphabet; "
+                          "unknown price loses)" % (
+                              getattr(chosen, "provider_id", ""),))
+            else:
+                chosen = _cheapest_fit(evidenced, ctx)
+                if chosen is None:
+                    return None
+                reason = ("cheapest fitting evidenced provider %s "
+                          "(routing prefers task fit over alphabet; "
+                          "unknown price loses; saved chat model %s)" % (
+                              getattr(chosen, "provider_id", ""),
+                              wanted_model or "unset"))
     provider_id = getattr(chosen, "provider_id", "")
     instance_id = getattr(chosen, "instance_id", "") or "default"
     model = chosen_model
@@ -840,6 +1185,10 @@ def bind_routed_provider_adapter(app: Any,
     except Exception:
         return None
     state.chat_provider_adapter = adapter
+    try:
+        _record_chat_decision(state, provider_id, model, reason)
+    except Exception:
+        pass
     return adapter
 
 

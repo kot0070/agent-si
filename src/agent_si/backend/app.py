@@ -250,7 +250,18 @@ def create_app(settings: Any = None,
             if getattr(app.state, "k04_ctx", None) is not None:
                 # Configured app with nothing bound: the terminal
                 # NO_PROVIDER_BOUND error over HTTP 200 SSE, never a 404.
-                stream_id, events = bridge.no_provider_run(chat_request)
+                # K04BIND1: surface the verbatim last failure reason.
+                _reason: Any = None
+                try:
+                    _fac = getattr(getattr(app.state, "k04_ctx", None),
+                                   "provider_facade", None)
+                    _getter = getattr(_fac, "last_provider_error", None)
+                    if callable(_getter):
+                        _reason = _getter()
+                except Exception:
+                    _reason = None
+                stream_id, events = bridge.no_provider_run(
+                    chat_request, _reason)
             else:
                 raise HTTPException(
                     status_code=404,
@@ -560,6 +571,10 @@ def create_app(settings: Any = None,
         return None
 
     app.state.k02r3_store_dir = _k02r3_store_dir(settings)
+    from agent_si.telemetry import run_store as _l0c06_telemetry_store
+
+    app.state.telemetry_store_dir = app.state.k02r3_store_dir
+    _l0c06_telemetry_store.bind_store_dir(app.state.k02r3_store_dir)
     _k02r3_read.register_read_routes(app)
     _k02r3_write.register_console_projects_write_routes(app)
 
@@ -613,6 +628,55 @@ def create_app(settings: Any = None,
                 return str(_val)
         return None  # No store key: K04 unconfigured; K04 routes fail loud.
 
+    def _k04_secret_kind(_settings: Any) -> str:
+        _raw: Any = None
+        if isinstance(_settings, Mapping):
+            if "secret_store" in _settings:
+                _raw = _settings["secret_store"]
+        elif _settings is not None and hasattr(_settings, "secret_store"):
+            _raw = getattr(_settings, "secret_store")
+        if isinstance(_raw, str) and _raw.strip():
+            _low = _raw.strip().lower()
+            if _low == "memory":
+                return "memory"
+            if _low == "os":
+                return "os"
+        if isinstance(_settings, Mapping):
+            if _settings.get("testing") is True:
+                return "memory"
+        elif _settings is not None and getattr(
+                _settings, "testing", None) is True:
+            return "memory"
+        return "os"
+
+    def _k04_label_suffix(_settings: Any) -> str:
+        _raw2: Any = None
+        if isinstance(_settings, Mapping):
+            if "secret_label_suffix" in _settings:
+                _raw2 = _settings["secret_label_suffix"]
+        elif _settings is not None and hasattr(
+                _settings, "secret_label_suffix"):
+            _raw2 = getattr(_settings, "secret_label_suffix")
+        if isinstance(_raw2, str) and _raw2.strip():
+            return _raw2.strip()
+        return ""
+
+    def _k04_save_timeout(_settings: Any) -> float:
+        _raw3: Any = None
+        if isinstance(_settings, Mapping):
+            if "key_save_timeout_s" in _settings:
+                _raw3 = _settings["key_save_timeout_s"]
+        elif _settings is not None and hasattr(
+                _settings, "key_save_timeout_s"):
+            _raw3 = getattr(_settings, "key_save_timeout_s")
+        try:
+            _val = float(_raw3)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return 5.0
+        if _val > 0:
+            return _val
+        return 5.0
+
     _k04_dir = _k04_store_dir(settings)
     _k04_config_error: Optional[str] = None
     if _k04_dir is None:
@@ -624,18 +688,220 @@ def create_app(settings: Any = None,
     if _k04_config_error is None:
         assert _k04_dir is not None
         _k04_store = _K04RoutingStore(_k04_dir)
-        _k04_api, _k04_credstore, _k04_auditsink = \
-            _k04_facades.ephemeral_stack()
-        _k04_ctx = _k04_pr.RoutingCtx(
-            store=_k04_store,
-            role_table=_K04RoleTable(_k04_store),
-            kb=_k04_kb_reader.CatalogKbReader(),
-            budget_state=_K04BudgetGate(
-                _k04_os.path.join(_k04_dir, "budget")),
-        )
-        _k04_ctx.provider_facade = _k04_api
-        _k04_ctx.credential_store = _k04_credstore
-        _k04_ctx.audit_sink = _k04_auditsink
+        _k04_kind = _k04_secret_kind(settings)
+        _k04_suffix = _k04_label_suffix(settings)
+        if _k04_kind == "memory":
+            _k04_api, _k04_credstore, _k04_auditsink = \
+                _k04_facades.memory_stack()
+        else:
+            try:
+                _k04_api, _k04_credstore, _k04_auditsink = \
+                    _k04_facades.os_stack(
+                        label_suffix=_k04_suffix,
+                        audit_path=_k04_os.path.join(
+                            _k04_dir, "provider_audit.jsonl"))
+            except Exception as _k04_os_exc:
+                _k04_config_error = (
+                    "K04 OS credential store unavailable: %s: %s"
+                    % (type(_k04_os_exc).__name__, _k04_os_exc))
+        if _k04_config_error is None:
+            _k04_ctx = _k04_pr.RoutingCtx(
+                store=_k04_store,
+                role_table=_K04RoleTable(_k04_store),
+                kb=_k04_kb_reader.CatalogKbReader(),
+                budget_state=_K04BudgetGate(
+                    _k04_os.path.join(_k04_dir, "budget")),
+            )
+            _k04_ctx.provider_facade = _k04_api
+            _k04_ctx.credential_store = _k04_credstore
+            _k04_ctx.audit_sink = _k04_auditsink
+            try:
+                from agent_si.runtime import manager as _k04_mgr
+                if hasattr(_k04_mgr, "set_budget_gate"):
+                    _k04_mgr.set_budget_gate(_k04_ctx.budget_state)
+            except Exception:
+                pass
+            try:
+
+                class _ChatKbEnriched:
+                    """KB reader plus connected models and preset catalogue.
+
+                    Kit BUILD_PLAN 644-649: every model the connected
+                    accounts offer; a field without a source is UNKNOWN.
+                    Chat models are the connected plus evidenced providers
+                    models (their connect model plus preset catalogue);
+                    KB facts only enrich them.
+                    """
+
+                    def __init__(self, base: Any, facade: Any) -> None:
+                        self._base = base
+                        self._facade = facade
+
+                    def facts(self, provider: str, model: str) -> Any:
+                        try:
+                            return self._base.facts(provider, model)
+                        except Exception:
+                            return None
+
+                    def models(self, provider: Any = None) -> list:
+                        try:
+                            base_rows = list(self._base.models(provider) or [])
+                        except Exception:
+                            base_rows = []
+                        try:
+                            seen = set()
+                            for row in base_rows:
+                                try:
+                                    p = str(getattr(row, "provider", "") or "")
+                                    m = str(getattr(row, "model", "") or "")
+                                except Exception:
+                                    continue
+                                if "/" in m:
+                                    m = m.split("/")[-1]
+                                seen.add((p, m))
+                        except Exception:
+                            seen = set()
+                        extra: list = []
+                        try:
+                            from agent_si.model_kb import kb as _kbmod
+                            from agent_si.model_kb import kb_reader as _kbr
+                            from agent_si.providers.registry import (
+                                presets as _presets)
+                        except Exception:
+                            return base_rows
+                        try:
+                            views = self._facade.list_providers(True)
+                        except Exception:
+                            views = []
+                        wanted: list = []
+                        for view in views or []:
+                            try:
+                                pid = str(getattr(view, "evidenced", False)
+                                          and getattr(view, "provider_id", "")
+                                          or "")
+                            except Exception:
+                                continue
+                            if not pid:
+                                continue
+                            if provider is not None and pid != str(provider):
+                                continue
+                            wanted.append(pid)
+                        if provider is not None and str(provider) not in wanted:
+                            # listing for one provider still offers its
+                            # catalogue even before evidence
+                            wanted.append(str(provider))
+                        for pid in wanted:
+                            bare_models: list = []
+                            try:
+                                provs = getattr(self._facade, "_providers", {})
+                                rec = provs.get(pid, {}) if isinstance(
+                                    provs, dict) else {}
+                                mmap = rec.get("models", {}) if isinstance(
+                                    rec, dict) else {}
+                                for val in (mmap.values() if isinstance(
+                                        mmap, dict) else []):
+                                    text = str(val or "")
+                                    if "/" in text:
+                                        head, _, tail = text.partition("/")
+                                        if head == pid and tail:
+                                            text = tail
+                                    if text and text not in bare_models:
+                                        bare_models.append(text)
+                            except Exception:
+                                pass
+                            try:
+                                preset = _presets.get_preset(pid)
+                                cat = (preset or {}).get("catalogue", ()) or ()
+                            except Exception:
+                                cat = ()
+                            for entry in cat or []:
+                                text = str(entry or "")
+                                if "/" in text:
+                                    text = text.split("/")[-1]
+                                if text and text not in bare_models:
+                                    bare_models.append(text)
+                            if pid == "meta":
+                                try:
+                                    mcat = tuple(
+                                        _presets.META_CATALOGUE or ())
+                                except Exception:
+                                    mcat = ()
+                                for entry in mcat:
+                                    text = str(entry or "")
+                                    if "/" in text:
+                                        text = text.split("/")[-1]
+                                    if text and text not in bare_models:
+                                        bare_models.append(text)
+                            for bare in bare_models:
+                                if (pid, bare) in seen:
+                                    continue
+                                try:
+                                    row = _kbmod.make_model_row(pid, bare)
+                                    fact = _kbr.row_to_facts(row)
+                                except Exception:
+                                    continue
+                                seen.add((pid, bare))
+                                extra.append(fact)
+                        return base_rows + extra
+
+                _k04_ctx.kb = _ChatKbEnriched(
+                    _k04_ctx.kb, _k04_ctx.provider_facade)
+            except Exception:
+                pass
+            try:
+                _k04_ctx.key_save_timeout_s = _k04_save_timeout(settings)
+            except Exception:
+                pass
+            # K04BIND1: re-bind persisted providers before the start bind.
+            try:
+                from agent_si.providers.registry import (
+                    provider_store as _k04bind_store)
+                for _rec in _k04bind_store.load_connections(_k04_dir):
+                    try:
+                        _pid = str((_rec or {}).get("provider_id") or "")
+                        _model = str((_rec or {}).get("model") or "")
+                        _kr = (_rec or {}).get("key_ref") or {}
+                        _eref = (_rec or {}).get("evidence_ref")
+                        _type = str((_rec or {}).get("type") or _pid)
+                        _burl = str((_rec or {}).get("base_url") or "")
+                        _inst = str((_rec or {}).get("instance_id")
+                                    or "default")
+                        if not _pid or not _model or not _burl:
+                            continue
+                        if not isinstance(_kr, dict) or not _kr.get(
+                                "secret_id"):
+                            continue
+                        try:
+                            _k04_api.register_provider(
+                                {"provider_id": _pid, "type": _type,
+                                 "base_url": _burl, "model": _model,
+                                 "instance_id": _inst},
+                                _kr,
+                                instance_id=_inst,
+                                evidence_ref=(str(_eref) if _eref else None),
+                                mock=bool((_rec or {}).get("mock", False)))
+                        except ValueError:
+                            pass
+                        _err = (_rec or {}).get("error")
+                        if isinstance(_err, str) and _err:
+                            try:
+                                _k04_api.set_provider_error(
+                                    _pid, _inst, _err)
+                            except Exception:
+                                pass
+                        elif _eref:
+                            try:
+                                _k04_api.clear_provider_error(_pid, _inst)
+                            except Exception:
+                                pass
+                            try:
+                                _k04_api.record_health(_pid, _inst, "ONLINE")
+                            except Exception:
+                                pass
+                    except Exception:
+                        continue
+            except Exception:
+                pass
     app.state.k04_ctx = _k04_ctx
     app.state.k04_config_error = _k04_config_error
     # M-WIRE L0B-12: bind the routed provider adapter at app start via
@@ -668,12 +934,224 @@ def create_app(settings: Any = None,
     except Exception:
         pass
 
+    # K04BIND1: evidence + persistence + rebind helpers (additions-only).
+    def _k04bind_scrub(text: str) -> str:
+        try:
+            out = str(text or "")
+        except Exception:
+            return "provider check failed"
+        try:
+            store = getattr(_k04_ctx, "credential_store", None)
+            if store is not None:
+                for attr in ("get_secret", "get", "retrieve", "read",
+                             "get_secret_value"):
+                    fn = getattr(store, attr, None)
+                    if not callable(fn):
+                        continue
+                    try:
+                        for sid in ("openai", "meta", "anthropic"):
+                            try:
+                                val = fn(sid)
+                            except Exception:
+                                continue
+                            if isinstance(val, dict):
+                                val = val.get("value", "")
+                            if isinstance(val, str) and val and val in out:
+                                out = out.replace(val, "[redacted]")
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        return out
+
+    def _k04bind_snapshot() -> list:
+        try:
+            api = getattr(_k04_ctx, "provider_facade", None)
+            if api is None:
+                return []
+            rows = []
+            providers = getattr(api, "_providers", {}) or {}
+            for pid in sorted(providers):
+                try:
+                    view = api.get_provider(pid)
+                    if view is None:
+                        continue
+                    try:
+                        secret_desc = view.secret_ref.describe()
+                    except Exception:
+                        secret_desc = {"secret_id": "",
+                                       "provider_id": pid}
+                    try:
+                        eref = api.get_evidence_ref(
+                            pid, getattr(view, "instance_id", "default"))
+                    except Exception:
+                        eref = None
+                    try:
+                        err = api.get_provider_error(pid)
+                    except Exception:
+                        err = None
+                    rows.append({
+                        "provider_id": pid,
+                        "model": str(
+                            (providers[pid].get("models", {}) or {}).get(
+                                getattr(view, "instance_id", "default"),
+                                "") or ""),
+                        "instance_id": str(getattr(
+                            view, "instance_id", "default") or "default"),
+                        "type": str(getattr(view, "type", "") or ""),
+                        "base_url": str(getattr(view, "base_url", "") or ""),
+                        "key_ref": dict(secret_desc) if isinstance(
+                            secret_desc, dict) else {},
+                        "evidence_ref": eref,
+                        "health": str(getattr(view, "health", "") or ""),
+                        "error": err,
+                        "mock": bool(getattr(view, "mock", False)),
+                    })
+                except Exception:
+                    continue
+            return rows
+        except Exception:
+            return []
+
+    def _k04bind_save() -> None:
+        try:
+            if _k04_dir is None:
+                return
+            from agent_si.providers.registry import (
+                provider_store as _k04bind_pstore)
+            _k04bind_pstore.save_connections(_k04_dir, _k04bind_snapshot())
+        except Exception:
+            pass
+
+    def _k04bind_evidence(pid: str, inst: str, model: str,
+                          base_url: str, secret_map: dict) -> tuple:
+        # K04BIND1: real check via the EXISTING usage_probe over the real
+        # gateway transport (key from the store by ref, never echoed).
+        try:
+            from agent_si.backend import chat_stream as _cs
+            from agent_si.providers.adapters import legs as _legs
+            from agent_si.providers.adapters import (
+                usage_probe as _uprobe)
+            try:
+                _chat_path = _legs.leg_descriptor(pid)["chat_path"]
+            except Exception:
+                _chat_path = "/chat/completions"
+            _store = getattr(_k04_ctx, "credential_store", None)
+            _real = _cs._gateway_transport(base_url, _store, secret_map)
+            _seen: dict = {}
+
+            def _usage_trans(req: dict) -> dict:
+                try:
+                    reply = _real({
+                        "model": model,
+                        "messages": [{"role": "user",
+                                      "content": "ping"}],
+                        "max_tokens": 1,
+                        "stream": False,
+                        "chat_path": _chat_path,
+                    })
+                except Exception as _exc:
+                    _seen["exc"] = _exc
+                    raise
+                usage = {}
+                if isinstance(reply, dict):
+                    usage = reply.get("usage", {})
+                    if not isinstance(usage, dict):
+                        usage = {}
+                return {"usage": dict(usage)}
+
+            def _run() -> dict:
+                return _uprobe.probe_usage(pid, inst or "default",
+                                            _usage_trans)
+            import concurrent.futures as _fut
+            with _fut.ThreadPoolExecutor(max_workers=1) as _pool:
+                _future = _pool.submit(_run)
+                try:
+                    _cap = _future.result(timeout=10.0)
+                except _fut.TimeoutError:
+                    return (False, "evidence probe timed out after 10s")
+            _state = ""
+            try:
+                _state = str((_cap or {}).get("state", "") or "")
+            except Exception:
+                _state = ""
+            if _state in ("VERIFIED", "PARTIAL"):
+                return (True, "")
+            _exc = _seen.get("exc")
+            if _exc is not None:
+                try:
+                    _status = getattr(_exc, "status", None)
+                except Exception:
+                    _status = None
+                try:
+                    _msg = getattr(_exc, "message", "") or str(_exc)
+                except Exception:
+                    _msg = ""
+                if not _msg:
+                    _msg = type(_exc).__name__
+                if isinstance(_status, int) and _status:
+                    _reason = "provider answered HTTP %s: %s" % (
+                        _status, _msg)
+                else:
+                    _reason = str(_msg) or type(_exc).__name__
+            else:
+                _reason = "usage probe returned %s" % (_state or "UNKNOWN")
+            return (False, _k04bind_scrub(_reason))
+        except Exception as _exc:
+            try:
+                return (False, _k04bind_scrub(str(_exc)))
+            except Exception:
+                return (False, "provider check failed")
+
+    def _k04bind_rebind(force_clear: bool = False,
+                        only_provider: str | None = None) -> None:
+        try:
+            from agent_si.backend import chat_stream as _cs2
+            if force_clear:
+                try:
+                    cur = getattr(app.state, "chat_provider_adapter", None)
+                    cur_pid = getattr(
+                        getattr(cur, "config", None), "provider_id", "")
+                    if only_provider is None or cur_pid == only_provider:
+                        app.state.chat_provider_adapter = None
+                        try:
+                            _bridge = getattr(
+                                app.state, "chat_stream_bridge", None)
+                            if _bridge is not None:
+                                _bridge._provider_adapter = None
+                        except Exception:
+                            pass
+                    elif only_provider is not None:
+                        return
+                except Exception:
+                    pass
+            else:
+                try:
+                    app.state.chat_provider_adapter = None
+                except Exception:
+                    pass
+            try:
+                _new = _cs2.bind_routed_provider_adapter(app)
+            except Exception:
+                _new = None
+            try:
+                _bridge2 = getattr(app.state, "chat_stream_bridge", None)
+                if _bridge2 is not None and _new is not None:
+                    if getattr(_bridge2, "_provider_adapter", None) is None:
+                        _bridge2._provider_adapter = _new
+                    else:
+                        _bridge2._provider_adapter = _new
+            except Exception:
+                pass
+        except Exception:
+            pass
+
     def _k04_make_endpoint(_fn: Callable, _is_write: bool,
                            _name: str = "") -> Callable:
         async def _k04_endpoint(request: Request) -> _K04JSONResponse:
             if _k04_config_error is not None:
                 return _K04JSONResponse(
-                    status_code=500,
+                    status_code=503,
                     content={"error": _k04_config_error})
             _query: dict = dict(request.query_params)
             for _k, _v in request.path_params.items():
@@ -738,6 +1216,129 @@ def create_app(settings: Any = None,
                     status_code=500,
                     content={"error": "%s: %s" % (type(_exc).__name__,
                                                  _exc)})
+            # K04BIND1: connect runs the real evidence check, persists and
+            # re-binds; disconnect clears the bound adapter and persists.
+            try:
+                if _name == "connect_provider" and _status == 200:
+                    _api = getattr(_k04_ctx, "provider_facade", None)
+                    _prov = {}
+                    try:
+                        _prov = (_payload or {}).get("provider", {}) or {}
+                    except Exception:
+                        _prov = {}
+                    _pid = str(_prov.get("provider_id", "") or "")
+                    _inst = str(_prov.get("instance_id", "") or "default")
+                    _model = ""
+                    try:
+                        _body_m = (_body or {}).get("model", "")
+                        if isinstance(_body_m, str) and _body_m:
+                            _model = _body_m
+                    except Exception:
+                        pass
+                    if _api is not None and _pid and _model:
+                        try:
+                            _view0 = _api.get_provider(_pid)
+                        except Exception:
+                            _view0 = None
+                        _burl = ""
+                        _smap: dict = {}
+                        try:
+                            _burl = str(getattr(_view0, "base_url", "") or "")
+                            _sref = getattr(_view0, "secret_ref", None)
+                            _desc = _sref.describe() if hasattr(
+                                _sref, "describe") else {}
+                            if isinstance(_desc, dict):
+                                _smap = {k: v for k, v in _desc.items()
+                                         if k != "value"}
+                        except Exception:
+                            pass
+                        if _burl and _smap:
+                            _ok, _reason = _k04bind_evidence(
+                                _pid, _inst, _model, _burl, _smap)
+                            try:
+                                if _ok:
+                                    import datetime as _dt
+                                    _eref = "connect-probe:%s/%s:%s" % (
+                                        _pid, _inst,
+                                        _dt.datetime.now(
+                                            _dt.timezone.utc).isoformat())
+                                    try:
+                                        _api._registry.record_credential_evidence(
+                                            _pid, _inst, _eref)
+                                    except Exception:
+                                        pass
+                                    try:
+                                        _api.clear_provider_error(_pid, _inst)
+                                    except Exception:
+                                        pass
+                                    try:
+                                        _api.record_health(_pid, _inst,
+                                                           "ONLINE")
+                                    except Exception:
+                                        pass
+                                else:
+                                    try:
+                                        _api.set_provider_error(
+                                            _pid, _inst, _reason)
+                                    except Exception:
+                                        pass
+                            except Exception:
+                                pass
+                            try:
+                                _fresh = _api.get_provider(_pid)
+                                if _fresh is not None:
+                                    _payload = {"provider": _fresh.describe()}
+                                    try:
+                                        _err2 = _api.get_provider_error(_pid)
+                                        if _err2:
+                                            _payload["error"] = _err2
+                                    except Exception:
+                                        pass
+                            except Exception:
+                                pass
+                            try:
+                                _k04bind_save()
+                            except Exception:
+                                pass
+                            try:
+                                if _fresh is not None and getattr(
+                                        _fresh, "evidenced", False):
+                                    _k04bind_rebind()
+                            except Exception:
+                                pass
+                        else:
+                            try:
+                                _k04bind_save()
+                            except Exception:
+                                pass
+                elif _name == "disconnect_provider" and _status == 200:
+                    try:
+                        _dpid = ""
+                        try:
+                            _dpid = str((_payload or {}).get(
+                                "provider_id", "") or "")
+                        except Exception:
+                            pass
+                        if not _dpid:
+                            try:
+                                _dpid = str((_query or {}).get("id", "") or "")
+                            except Exception:
+                                pass
+                        _k04bind_save()
+                    except Exception:
+                        pass
+                    try:
+                        _k04bind_rebind(force_clear=True,
+                                        only_provider=_dpid or None)
+                    except Exception:
+                        pass
+                elif _name == "put_chat_model" and _status == 200:
+                    try:
+                        _k04bind_rebind(force_clear=True)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             return _K04JSONResponse(status_code=_status,
                                     content=_k04_jsonable(_payload))
         return _k04_endpoint
@@ -749,6 +1350,17 @@ def create_app(settings: Any = None,
                 _fn, _method.lower() in _k04_pr._USER_WRITE_METHODS, _name),
             methods=[_method.upper()],
             name="k04_" + _name)
+
+    try:
+        from agent_si.providers.registry import key_routes as _k04_keys
+
+        app.add_api_route(
+            "/api/v1/providers/keys",
+            _k04_make_endpoint(_k04_keys.save_key, True, "save_key"),
+            methods=["POST"],
+            name="k04_save_key")
+    except Exception:
+        pass
 
     # K13F1 routes: amend / finalize-read / stop over the real K13 entries.
     # Additions-only block: binds per-app in-memory K13 state on app.state

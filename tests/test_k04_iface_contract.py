@@ -732,7 +732,7 @@ def _served_entry(method, path, tmp_path=None):
         pytest.fail("create_app missing")
     import fastapi.testclient
     store_dir = str(tmp_path) if tmp_path is not None else "tmp/test-seam"
-    app = create_app({"store_dir": store_dir},
+    app = create_app({"store_dir": store_dir, "secret_store": "memory"},
                      auth_hook=None, rate_hook=None, model_factory=None)
     client = fastapi.testclient.TestClient(app)
     return client
