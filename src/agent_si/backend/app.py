@@ -712,6 +712,139 @@ def create_app(settings: Any = None,
             _k04_ctx.credential_store = _k04_credstore
             _k04_ctx.audit_sink = _k04_auditsink
             try:
+                from agent_si.runtime import manager as _k04_mgr
+                if hasattr(_k04_mgr, "set_budget_gate"):
+                    _k04_mgr.set_budget_gate(_k04_ctx.budget_state)
+            except Exception:
+                pass
+            try:
+
+                class _ChatKbEnriched:
+                    """KB reader plus connected models and preset catalogue.
+
+                    Kit BUILD_PLAN 644-649: every model the connected
+                    accounts offer; a field without a source is UNKNOWN.
+                    Chat models are the connected plus evidenced providers
+                    models (their connect model plus preset catalogue);
+                    KB facts only enrich them.
+                    """
+
+                    def __init__(self, base: Any, facade: Any) -> None:
+                        self._base = base
+                        self._facade = facade
+
+                    def facts(self, provider: str, model: str) -> Any:
+                        try:
+                            return self._base.facts(provider, model)
+                        except Exception:
+                            return None
+
+                    def models(self, provider: Any = None) -> list:
+                        try:
+                            base_rows = list(self._base.models(provider) or [])
+                        except Exception:
+                            base_rows = []
+                        try:
+                            seen = set()
+                            for row in base_rows:
+                                try:
+                                    p = str(getattr(row, "provider", "") or "")
+                                    m = str(getattr(row, "model", "") or "")
+                                except Exception:
+                                    continue
+                                if "/" in m:
+                                    m = m.split("/")[-1]
+                                seen.add((p, m))
+                        except Exception:
+                            seen = set()
+                        extra: list = []
+                        try:
+                            from agent_si.model_kb import kb as _kbmod
+                            from agent_si.model_kb import kb_reader as _kbr
+                            from agent_si.providers.registry import (
+                                presets as _presets)
+                        except Exception:
+                            return base_rows
+                        try:
+                            views = self._facade.list_providers(True)
+                        except Exception:
+                            views = []
+                        wanted: list = []
+                        for view in views or []:
+                            try:
+                                pid = str(getattr(view, "evidenced", False)
+                                          and getattr(view, "provider_id", "")
+                                          or "")
+                            except Exception:
+                                continue
+                            if not pid:
+                                continue
+                            if provider is not None and pid != str(provider):
+                                continue
+                            wanted.append(pid)
+                        if provider is not None and str(provider) not in wanted:
+                            # listing for one provider still offers its
+                            # catalogue even before evidence
+                            wanted.append(str(provider))
+                        for pid in wanted:
+                            bare_models: list = []
+                            try:
+                                provs = getattr(self._facade, "_providers", {})
+                                rec = provs.get(pid, {}) if isinstance(
+                                    provs, dict) else {}
+                                mmap = rec.get("models", {}) if isinstance(
+                                    rec, dict) else {}
+                                for val in (mmap.values() if isinstance(
+                                        mmap, dict) else []):
+                                    text = str(val or "")
+                                    if "/" in text:
+                                        head, _, tail = text.partition("/")
+                                        if head == pid and tail:
+                                            text = tail
+                                    if text and text not in bare_models:
+                                        bare_models.append(text)
+                            except Exception:
+                                pass
+                            try:
+                                preset = _presets.get_preset(pid)
+                                cat = (preset or {}).get("catalogue", ()) or ()
+                            except Exception:
+                                cat = ()
+                            for entry in cat or []:
+                                text = str(entry or "")
+                                if "/" in text:
+                                    text = text.split("/")[-1]
+                                if text and text not in bare_models:
+                                    bare_models.append(text)
+                            if pid == "meta":
+                                try:
+                                    mcat = tuple(
+                                        _presets.META_CATALOGUE or ())
+                                except Exception:
+                                    mcat = ()
+                                for entry in mcat:
+                                    text = str(entry or "")
+                                    if "/" in text:
+                                        text = text.split("/")[-1]
+                                    if text and text not in bare_models:
+                                        bare_models.append(text)
+                            for bare in bare_models:
+                                if (pid, bare) in seen:
+                                    continue
+                                try:
+                                    row = _kbmod.make_model_row(pid, bare)
+                                    fact = _kbr.row_to_facts(row)
+                                except Exception:
+                                    continue
+                                seen.add((pid, bare))
+                                extra.append(fact)
+                        return base_rows + extra
+
+                _k04_ctx.kb = _ChatKbEnriched(
+                    _k04_ctx.kb, _k04_ctx.provider_facade)
+            except Exception:
+                pass
+            try:
                 _k04_ctx.key_save_timeout_s = _k04_save_timeout(settings)
             except Exception:
                 pass
@@ -1193,6 +1326,11 @@ def create_app(settings: Any = None,
                     try:
                         _k04bind_rebind(force_clear=True,
                                         only_provider=_dpid or None)
+                    except Exception:
+                        pass
+                elif _name == "put_chat_model" and _status == 200:
+                    try:
+                        _k04bind_rebind(force_clear=True)
                     except Exception:
                         pass
             except Exception:
