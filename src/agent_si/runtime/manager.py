@@ -160,10 +160,19 @@ def _kb_price_for_manager(provider_id: str, model: str) -> tuple:
             outp = getattr(fact, "output_price", None)
         except Exception:
             return (None, None)
-        ok_in = isinstance(inp, (int, float)) and not isinstance(inp, bool)
-        ok_out = isinstance(outp, (int, float)) and not isinstance(outp, bool)
-        return (float(inp) if ok_in else None,
-                float(outp) if ok_out else None)
+
+        def _num(value: Any) -> float | None:
+            if isinstance(value, bool):
+                return None
+            if isinstance(value, (int, float)):
+                return float(value)
+            if isinstance(value, str):
+                try:
+                    return float(value.strip())
+                except (TypeError, ValueError):
+                    return None
+            return None
+        return (_num(inp), _num(outp))
     return (None, None)
 
 

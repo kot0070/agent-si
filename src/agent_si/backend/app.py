@@ -238,6 +238,31 @@ def create_app(settings: Any = None,
             app, project_id=chat_request.project or None)
         bridge = _k02r4_chat.bridge_for_app(app)
         try:
+            from agent_si.runtime import manager as _k04bud1_mgr
+            from agent_si.backend import project_defaults as _k04bud1_defs
+
+            _k04bud1_ctx = getattr(app.state, "k04_ctx", None)
+            _k04bud1_gate = (getattr(_k04bud1_ctx, "budget_state", None)
+                             if _k04bud1_ctx is not None else None)
+            if _k04bud1_gate is not None and hasattr(
+                    _k04bud1_mgr, "set_budget_gate"):
+                _k04bud1_mgr.set_budget_gate(_k04bud1_gate)
+            try:
+                if chat_request.project and _k04bud1_gate is not None:
+                    _k04bud1_pid = str(chat_request.project)
+                    try:
+                        _k04bud1_gate.get_state(_k04bud1_pid)
+                    except (KeyError, LookupError):
+                        _k04bud1_gate.configure_project(
+                            _k04bud1_pid, _k04bud1_defs.CURRENCY,
+                            _k04bud1_defs.BUDGET_LIMIT,
+                            _k04bud1_defs.SOFT_LIMIT,
+                            _k04bud1_defs.HARD_LIMIT)
+            except Exception:
+                pass
+        except Exception:
+            pass
+        try:
             stream_id, events = bridge.run(chat_request)
         except _k02r4_graph.DispatchRejected as err:
             raise HTTPException(
