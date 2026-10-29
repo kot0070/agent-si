@@ -122,6 +122,13 @@ class StageRun:
     project_id: str
     plan_id: str
     state: StageState
+    verification_id: Optional[str] = None
+    verification_result: Optional[str] = None
+    audit_id: Optional[str] = None
+    verdict: Optional[str] = None
+    close_row_id: Optional[str] = None
+    phase: Optional[str] = None
+    code: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -138,6 +145,13 @@ class StageCounters:
     active: int
     passed: int
     remaining: int
+    verification_id: Optional[str] = None
+    verification_result: Optional[str] = None
+    audit_id: Optional[str] = None
+    verdict: Optional[str] = None
+    close_row_id: Optional[str] = None
+    phase: Optional[str] = None
+    code: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -187,6 +201,22 @@ _SETTLED_DEDUPE_KEYS: set = set()
 #: Reservation sequence for unique reservation ids.
 _RESERVATION_SEQ = [0]
 
+#: Assurance outcome per stage run id; the stage read merges it.
+_ASSURANCE_STATUS: Dict[str, Dict[str, Optional[str]]] = {}
+
+
+def stage_assurance_status(run_id: str) -> Dict[str, Optional[str]]:
+    """Return the stored assurance outcome for one stage run."""
+    stored = _ASSURANCE_STATUS.get(run_id)
+    if stored is None:
+        return {}
+    return dict(stored)
+
+
+def _store_assurance_status(run_id: str, status: Dict[str, Optional[str]]) -> None:
+    """Remember one assurance outcome for the stage read."""
+    _ASSURANCE_STATUS[run_id] = dict(status)
+
 
 def start_stage(project_id: str, plan_id: str, run_id: str) -> StageRun:
     """Open a stage run in PLAN state for an existing plan."""
@@ -196,6 +226,7 @@ def start_stage(project_id: str, plan_id: str, run_id: str) -> StageRun:
     )
     _RUNS[run_id] = run
     _RESULTS[run_id] = []
+    _ASSURANCE_STATUS.pop(run_id, None)
     return run
 
 
@@ -260,10 +291,40 @@ def stage_counters(run_id: str) -> StageCounters:
     passed = sum(1 for row in rows if row.status == "PASS")
     remaining = sum(1 for row in rows if row.status != "PASS")
     active = sum(1 for row in rows if row.status not in TEST_STATUSES)
-    return StageCounters(active=active, passed=passed, remaining=remaining)
+    stored = _ASSURANCE_STATUS.get(run_id, {})
+    return StageCounters(
+        active=active,
+        passed=passed,
+        remaining=remaining,
+        verification_id=stored.get("verification_id"),
+        verification_result=stored.get("verification_result"),
+        audit_id=stored.get("audit_id"),
+        verdict=stored.get("verdict"),
+        close_row_id=stored.get("close_row_id"),
+        phase=stored.get("phase"),
+        code=stored.get("code"),
+    )
 
 
-def finish_stage(run_id: str) -> StageRun:
+def finish_stage(
+    run_id: str,
+    project_id: Optional[str] = None,
+    task_id: Optional[str] = None,
+    contract_hash: Optional[str] = None,
+    project_dir: Optional[str] = None,
+    work_refs: Optional[List[str]] = None,
+    artifact_refs: Optional[List[str]] = None,
+    evidence_refs: Optional[List[str]] = None,
+    producer_session_refs: Optional[List[str]] = None,
+    tool_rows: Optional[List[Dict[str, object]]] = None,
+    criteria: Optional[List[Dict[str, object]]] = None,
+    implementer_model_ids: Optional[List[str]] = None,
+    auditor_candidates: Optional[List[Dict[str, object]]] = None,
+    task_class: Optional[str] = None,
+    minimum_level: Optional[str] = None,
+    scope_id: Optional[str] = None,
+    pair_reuse: Optional[Dict[str, object]] = None,
+) -> StageRun:
     """Close a run into RESULTS; runs without recorded results fail."""
     rows = _RESULTS.get(run_id, [])
     if not rows:
@@ -277,15 +338,355 @@ def finish_stage(run_id: str) -> StageRun:
             "STAGE_BAD_TRANSITION",
             "run %r is already closed in RESULTS" % run_id,
         )
-    project_id = current.project_id if current is not None else None
+    assurance_requested = (
+        task_id is not None
+        or contract_hash is not None
+        or project_dir is not None
+        or work_refs is not None
+        or artifact_refs is not None
+        or evidence_refs is not None
+        or producer_session_refs is not None
+        or tool_rows is not None
+        or criteria is not None
+        or implementer_model_ids is not None
+        or auditor_candidates is not None
+        or scope_id is not None
+        or pair_reuse is not None
+    )
+    if not assurance_requested:
+        project_id_legacy = current.project_id if current is not None else None
+        finished = StageRun(
+            run_id=run_id,
+            project_id=project_id_legacy if project_id_legacy is not None else "",
+            plan_id=current.plan_id if current is not None else "",
+            state=StageState.RESULTS,
+        )
+        _RUNS[run_id] = finished
+        _conclude_episode(project_id_legacy)
+        return finished
+    from agent_si.backend import assurance_mount as _assurance_mount
+
+    effective_project = (
+        project_id if project_id is not None
+        else (current.project_id if current is not None else "")
+    )
+    effective_task = task_id if task_id is not None else ""
+    effective_contract = contract_hash if contract_hash is not None else ""
+    effective_dir = project_dir if project_dir is not None else ""
+    if not effective_task.strip() or not effective_contract.strip():
+        raise StageError(
+            "STAGE_BAD_TRANSITION",
+            "finish needs task_id and contract_hash for assurance",
+        )
+    if not effective_dir.strip():
+        raise StageError(
+            "STAGE_BAD_TRANSITION",
+            "finish needs project_dir for assurance",
+        )
+    effective_project = str(effective_project)
+    effective_task = str(effective_task).strip()
+    effective_contract = str(effective_contract).strip()
+    effective_dir = str(effective_dir).strip()
+    work = [str(item) for item in (work_refs or [])]
+    artifacts = [str(item) for item in (artifact_refs or [])]
+    evidence = [str(item) for item in (evidence_refs or [])]
+    producers = [str(item) for item in (producer_session_refs or [])]
+    tools = list(tool_rows or [])
+    crits = list(criteria or [])
+    implementers = [str(item) for item in (implementer_model_ids or [])]
+    candidates_raw = list(auditor_candidates or [])
+    effective_class = (
+        task_class.strip() if isinstance(task_class, str) and task_class.strip()
+        else "served-turn"
+    )
+    effective_level = (
+        minimum_level.strip()
+        if isinstance(minimum_level, str) and minimum_level.strip()
+        else "L2"
+    )
+    if not work and not artifacts:
+        raise StageError(
+            _assurance_mount._chain_coordinator.EmptyWorkError.code,
+            "served finish carries no work; empty work fails",
+        )
+    registry = _assurance_mount._Registry()
+    coordinator = _assurance_mount._Coordinator()
+    pair_decision_id: Optional[str] = None
+    if pair_reuse is not None:
+        if not isinstance(pair_reuse, dict):
+            raise StageError(
+                "STAGE_BAD_TRANSITION",
+                "finish needs pair_reuse as a JSON object",
+            )
+        raw_decision = pair_reuse.get("decision_id")
+        if not isinstance(raw_decision, str) or not raw_decision.strip():
+            raise StageError(
+                "STAGE_BAD_TRANSITION",
+                "finish needs a non-empty pair_reuse decision_id",
+            )
+        pair_decision_id = raw_decision.strip()
+        registry.record_pair_reuse(
+            _assurance_mount._chain_registry.SourcingDecision(
+                decision_id=pair_decision_id,
+                project_id=effective_project,
+                scope=str(pair_reuse.get("scope") or ""),
+                statement=str(pair_reuse.get("statement") or ""),
+                reason=str(pair_reuse.get("reason") or ""),
+                authority=str(pair_reuse.get("authority") or "USER"),
+                decided_by=str(
+                    pair_reuse.get("decided_by") or "stage-finish"),
+                visible_to_user=bool(
+                    pair_reuse.get("visible_to_user", True)),
+                user_resolution_ref=pair_reuse.get("user_resolution_ref"),
+                created_at=_assurance_mount._utcnow(),
+            )
+        )
+    try:
+        verification = _assurance_mount._chain_checker.verify_run(
+            project_dir=effective_dir,
+            tool_rows=list(tools),
+            criteria=list(crits),
+            project_id=effective_project,
+            task_id=effective_task,
+            run_id=run_id,
+            contract_hash=effective_contract,
+        )
+    except Exception as exc:
+        _assurance_mount._turns.record_turn(
+            effective_task,
+            _assurance_mount._TURN_PLAN,
+            _assurance_mount._NO_AUDIT_ACTION,
+            "phase=VERIFY_REFUSED verification=none result=ERROR "
+            "note=%s: %s" % (type(exc).__name__, exc),
+        )
+        status = {
+            "verification_id": None,
+            "verification_result": "ERROR",
+            "audit_id": None,
+            "verdict": None,
+            "close_row_id": None,
+            "phase": "VERIFY_REFUSED",
+            "code": "VERIFY_REFUSED",
+        }
+        _store_assurance_status(run_id, status)
+        state = current.state if current is not None else StageState.RUNNING
+        return StageRun(
+            run_id=run_id,
+            project_id=effective_project,
+            plan_id=current.plan_id if current is not None else "",
+            state=state,
+            verification_id=None,
+            verification_result="ERROR",
+            audit_id=None,
+            verdict=None,
+            close_row_id=None,
+            phase="VERIFY_REFUSED",
+            code="VERIFY_REFUSED",
+        )
+    verification_id = verification.verification_id
+    verification_result = getattr(
+        verification.result, "value", str(verification.result))
+    if verification_result != "PASS":
+        _assurance_mount._turns.record_turn(
+            effective_task,
+            _assurance_mount._TURN_PLAN,
+            _assurance_mount._NO_AUDIT_ACTION,
+            "phase=VERIFY_REFUSED verification=%s result=%s"
+            % (verification_id, verification_result),
+        )
+        status = {
+            "verification_id": verification_id,
+            "verification_result": verification_result,
+            "audit_id": None,
+            "verdict": None,
+            "close_row_id": None,
+            "phase": "VERIFY_REFUSED",
+            "code": "VERIFY_REFUSED",
+        }
+        _store_assurance_status(run_id, status)
+        state = current.state if current is not None else StageState.RUNNING
+        return StageRun(
+            run_id=run_id,
+            project_id=effective_project,
+            plan_id=current.plan_id if current is not None else "",
+            state=state,
+            verification_id=verification_id,
+            verification_result=verification_result,
+            audit_id=None,
+            verdict=None,
+            close_row_id=None,
+            phase="VERIFY_REFUSED",
+            code="VERIFY_REFUSED",
+        )
+    for position, raw in enumerate(candidates_raw):
+        if not isinstance(raw, dict):
+            raise StageError(
+                "STAGE_BAD_TRANSITION",
+                "auditor candidate %d must be a JSON object" % position,
+            )
+        provider_id = raw.get("provider_id")
+        model = raw.get("model")
+        if not isinstance(provider_id, str) or not provider_id.strip():
+            raise StageError(
+                "STAGE_BAD_TRANSITION",
+                "finish needs a non-empty auditor candidate provider_id",
+            )
+        if not isinstance(model, str) or not model.strip():
+            raise StageError(
+                "STAGE_BAD_TRANSITION",
+                "finish needs a non-empty auditor candidate model",
+            )
+        cap_refs = raw.get("capability_evidence_refs")
+        cap_list = list(cap_refs) if isinstance(cap_refs, list) else []
+        registry.register_candidate(
+            _assurance_mount._chain_registry.AuditorCandidate(
+                provider_id=provider_id.strip(),
+                provider_instance=(
+                    raw.get("provider_instance")
+                    if isinstance(raw.get("provider_instance"), str)
+                    else None
+                ),
+                model=model.strip(),
+                capability_evidence_refs=tuple(
+                    str(item) for item in cap_list),
+                registered_at="",
+            )
+        )
+    auditor_models = {
+        str(raw.get("model", "")).strip()
+        for raw in candidates_raw
+        if isinstance(raw, dict)
+    }
+
+    def _refuse(refs: Tuple[str, ...]) -> None:
+        try:
+            coordinator.refuse_contributor("", tuple(refs))
+        except (
+            _assurance_mount._chain_coordinator.ContributorInAuditorSetError
+        ) as exc:
+            _assurance_mount._turns.record_turn(
+                effective_task,
+                _assurance_mount._TURN_PLAN,
+                _assurance_mount._NO_AUDIT_ACTION,
+                "phase=REFUSED code=%s contributors=%s"
+                % (exc.code, ",".join(tuple(refs))),
+            )
+            _store_assurance_status(run_id, {
+                "verification_id": verification_id,
+                "verification_result": verification_result,
+                "audit_id": None,
+                "verdict": None,
+                "close_row_id": None,
+                "phase": "REFUSED",
+                "code": exc.code,
+            })
+            raise StageError(exc.code, str(exc)) from None
+
+    overlap = sorted(
+        {name for name in implementers if name and name in auditor_models}
+    )
+    if overlap:
+        _refuse(tuple(overlap))
+    try:
+        selection = registry.select_auditor(
+            effective_class,
+            tuple(implementers),
+            effective_level,
+        )
+    except _assurance_mount._chain_registry.NoEligibleAuditorError as exc:
+        _assurance_mount._turns.record_turn(
+            effective_task,
+            _assurance_mount._TURN_PLAN,
+            _assurance_mount._NO_AUDIT_ACTION,
+            "phase=BLOCKED code=%s verification=%s"
+            % (exc.code, verification_id),
+        )
+        status = {
+            "verification_id": verification_id,
+            "verification_result": verification_result,
+            "audit_id": None,
+            "verdict": None,
+            "close_row_id": None,
+            "phase": "BLOCKED",
+            "code": exc.code,
+        }
+        _store_assurance_status(run_id, status)
+        state = current.state if current is not None else StageState.RUNNING
+        return StageRun(
+            run_id=run_id,
+            project_id=effective_project,
+            plan_id=current.plan_id if current is not None else "",
+            state=state,
+            verification_id=verification_id,
+            verification_result=verification_result,
+            audit_id=None,
+            verdict=None,
+            close_row_id=None,
+            phase="BLOCKED",
+            code=exc.code,
+        )
+    if not registry.check_separate_model(
+        selection.auditor.model, tuple(implementers)
+    ):
+        _refuse((selection.auditor.model,))
+    turn = _assurance_mount._chain_coordinator.ServedTurn(
+        turn_ref=run_id,
+        project_id=effective_project,
+        task_id=effective_task,
+        run_id=run_id,
+        work_refs=tuple(work),
+        artifact_refs=tuple(artifacts),
+        evidence_refs=tuple(evidence),
+        producer_session_refs=tuple(producers),
+        contract_hash=effective_contract,
+    )
+    audit_id = coordinator.audit_with_fresh_auditor(turn)
+    scope = scope_id.strip() if isinstance(
+        scope_id, str) and scope_id.strip() else "%s/%s/%s" % (
+        effective_project, effective_task, effective_contract)
+    row_id = coordinator.close_stage(effective_task, scope, audit_id)
+    stored = _assurance_mount._chain_records._fetch_record(audit_id)
+    verdict = getattr(
+        getattr(stored, "result", None), "value", None) or "UNKNOWN"
+    audit_session = getattr(stored, "context_session_ref", "") or ""
+    _assurance_mount._turns.record_turn(
+        effective_task,
+        _assurance_mount._TURN_PLAN,
+        audit_id,
+        "phase=CLOSED verification=%s verdict=%s close=%s "
+        "auditor=%s session=%s"
+        % (
+            verification_id,
+            verdict,
+            row_id,
+            selection.auditor.model,
+            audit_session,
+        ),
+    )
+    _store_assurance_status(run_id, {
+        "verification_id": verification_id,
+        "verification_result": verification_result,
+        "audit_id": audit_id,
+        "verdict": verdict,
+        "close_row_id": row_id,
+        "phase": "CLOSED",
+        "code": None,
+    })
     finished = StageRun(
         run_id=run_id,
-        project_id=project_id if project_id is not None else "",
+        project_id=effective_project,
         plan_id=current.plan_id if current is not None else "",
         state=StageState.RESULTS,
+        verification_id=verification_id,
+        verification_result=verification_result,
+        audit_id=audit_id,
+        verdict=verdict,
+        close_row_id=row_id,
+        phase="CLOSED",
+        code=None,
     )
     _RUNS[run_id] = finished
-    _conclude_episode(project_id)
+    _conclude_episode(current.project_id if current is not None else None)
     return finished
 
 

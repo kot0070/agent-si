@@ -234,4 +234,84 @@ def register_read_routes(app: Any) -> Any:
         turns = _task_turns.list_turns(task_id)
         return {"turns": turns, "used": len(turns), "limit": limit}
 
+    # K03VER2 (rows 200, 201, M-P3-120, M-P4-154; additions-only): mount the
+    # catalog-version, runner-contract and test-base surfaces plus the
+    # local-tests switch and TESTS view over the real lane modules. No
+    # doubles, no copies: every handler calls its owning entry directly.
+    from agent_si.test_runners import catalog_versions as _k03ver2_versions
+    from agent_si.test_runners import runner_contract as _k03ver2_contract
+    from agent_si.test_runners import test_bases as _k03ver2_bases
+
+    _k03ver2_versions.register_catalog_version_routes(app)
+    _k03ver2_contract.register_runner_contract_routes(app)
+    _k03ver2_bases.register_test_base_routes(app)
+
+    from agent_si.qa_catalog import qa_catalog as _k03ver2_catalog
+
+    @app.get("/api/v1/teststage/local-tests")
+    def k03ver2_local_tests(project_id: str) -> dict:
+        return {
+            "project_id": project_id,
+            "enabled": bool(_k03ver2_catalog.local_tests_enabled(project_id)),
+        }
+
+    @app.post("/api/v1/teststage/local-tests")
+    async def k03ver2_set_local_tests(request: Request) -> dict:
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
+        merged = dict(request.query_params)
+        if isinstance(body, dict):
+            merged.update(body)
+        project_id = str(merged.get("project_id", ""))
+        if not project_id:
+            raise HTTPException(status_code=400, detail="project_id required")
+        raw = merged.get("enabled", True)
+        if isinstance(raw, str):
+            enabled = raw.strip().lower() in ("1", "true", "yes", "on")
+        else:
+            enabled = bool(raw)
+        row = _k03ver2_catalog.set_local_tests_enabled(
+            project_id, enabled, str(merged.get("updated_at", "")))
+        return {
+            "project_id": row.project_id,
+            "enabled": bool(row.enabled),
+            "updated_at": row.updated_at,
+        }
+
+    @app.get("/api/v1/teststage/tests-view")
+    def k03ver2_tests_view(plan_id: str, run_id: str) -> dict:
+        view = _k03ver2_catalog.build_tests_view(plan_id, run_id)
+        return {
+            "plan_id": view.plan_id,
+            "run_id": view.run_id,
+            "active": view.active,
+            "passed": view.passed,
+            "remaining": view.remaining,
+            "rows": [
+                {"test_id": row.test_id, "status": row.status,
+                 "output_ref": row.output_ref}
+                for row in view.rows
+            ],
+            "settings_controls": list(view.settings_controls),
+        }
+
+    @app.get("/api/v1/analytics/telemetry")
+    def read_telemetry_analytics() -> dict:
+        """Telemetry aggregates FROM the authoritative store file only.
+
+        kit row MVP_ACCEPT-161: analytics values read only from authoritative
+        TelemetryEvent and MetricRecord stores, never from chat text or live
+        rows; this route reads <store_dir>/telemetry_store.json and sums
+        metric values by name deterministically, with no invented numbers.
+        """
+        from agent_si.telemetry import run_store as _telemetry_run_store
+
+        directory = getattr(getattr(app, "state", None),
+                            "telemetry_store_dir", None)
+        if directory is None:
+            directory = _store_dir(app)
+        return _telemetry_run_store.aggregates(store_dir=directory)
+
     return app

@@ -24,7 +24,7 @@ PRESETS: dict[str, dict[str, Any]] = {
         "provider_id": "meta",
         "provider_type": "meta",
         "transport": TRANSPORT_OPENAI_COMPATIBLE,
-        "base_url": "https://api.llama.com/v1",
+        "base_url": "https://api.meta.ai/v1",
         "adapter": None,
         "catalogue": META_CATALOGUE,
     },
