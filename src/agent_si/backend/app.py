@@ -908,7 +908,8 @@ def create_app(settings: Any = None,
                     reply = _real({
                         "model": model,
                         "messages": [{"role": "user",
-                                      "content": "hi"}],
+                                      "content": "ping"}],
+                        "max_tokens": 1,
                         "stream": False,
                         "chat_path": _chat_path,
                     })
@@ -941,7 +942,21 @@ def create_app(settings: Any = None,
                 return (True, "")
             _exc = _seen.get("exc")
             if _exc is not None:
-                _reason = str(_exc) or type(_exc).__name__
+                try:
+                    _status = getattr(_exc, "status", None)
+                except Exception:
+                    _status = None
+                try:
+                    _msg = getattr(_exc, "message", "") or str(_exc)
+                except Exception:
+                    _msg = ""
+                if not _msg:
+                    _msg = type(_exc).__name__
+                if isinstance(_status, int) and _status:
+                    _reason = "provider answered HTTP %s: %s" % (
+                        _status, _msg)
+                else:
+                    _reason = str(_msg) or type(_exc).__name__
             else:
                 _reason = "usage probe returned %s" % (_state or "UNKNOWN")
             return (False, _k04bind_scrub(_reason))
