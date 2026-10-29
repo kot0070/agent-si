@@ -42,7 +42,11 @@ class _MemoryCredentialStore:
     """Ephemeral credential-store stand-in for the lazy default backing.
 
     Entries are seeded explicitly after provisioning; ``has``/``delete``
-    mirror the store port :class:`ProviderAPI` removes through.
+    mirror the store port :class:`ProviderAPI` removes through. The save
+    route writes through ``set_secret`` (plus ``store``/``put``/``set``
+    aliases); call-time readers use ``get_secret`` (plus ``get``/
+    ``retrieve``/``read`` aliases and mapping read). Values never appear
+    in repr or errors.
     """
 
     def __init__(self) -> None:
@@ -51,6 +55,66 @@ class _MemoryCredentialStore:
     def seed(self, secret_id: str, payload: Any = "ephemeral-entry") -> None:
         self._entries[secret_id] = payload
 
+    def set_secret(self, secret_id: str, value: Any) -> None:
+        if not isinstance(secret_id, str) or not secret_id:
+            raise ValueError("secret_id is required")
+        if not isinstance(value, str) or not value:
+            raise ValueError("key value is required")
+        self._entries[secret_id] = value
+
+    def store(self, secret_id: str, value: Any) -> None:
+        self.set_secret(secret_id, value)
+
+    def put(self, secret_id: str, value: Any) -> None:
+        self.set_secret(secret_id, value)
+
+    def set(self, secret_id: str, value: Any) -> None:
+        self.set_secret(secret_id, value)
+
+    def store_secret(self, secret_id: str, value: Any) -> None:
+        self.set_secret(secret_id, value)
+
+    def get_secret(self, secret_id: str) -> str:
+        try:
+            value = self._entries[secret_id]
+        except KeyError:
+            raise KeyError(secret_id) from None
+        if isinstance(value, dict):
+            inner = value.get("value", "")
+            if isinstance(inner, str) and inner:
+                return inner
+            raise KeyError(secret_id)
+        if isinstance(value, str) and value:
+            return value
+        return str(value)
+
+    def get(self, secret_id: str, default: Any = None) -> Any:
+        try:
+            return self.get_secret(secret_id)
+        except (KeyError, ValueError):
+            return default
+
+    def retrieve(self, secret_id: str) -> str:
+        return self.get_secret(secret_id)
+
+    def read(self, secret_id: str) -> str:
+        return self.get_secret(secret_id)
+
+    def get_secret_value(self, secret_id: str) -> str:
+        return self.get_secret(secret_id)
+
+    def __getitem__(self, secret_id: str) -> dict:
+        return {"value": self.get_secret(secret_id)}
+
+    def __contains__(self, secret_id: object) -> bool:
+        return isinstance(secret_id, str) and secret_id in self._entries
+
+    def __iter__(self):  # type: ignore[no-untyped-def]
+        return iter(list(self._entries))
+
+    def __len__(self) -> int:
+        return len(self._entries)
+
     def has(self, secret_id: str) -> bool:
         return secret_id in self._entries
 
@@ -58,6 +122,12 @@ class _MemoryCredentialStore:
         if secret_id not in self._entries:
             raise KeyError(secret_id)
         del self._entries[secret_id]
+
+    def __delitem__(self, secret_id: str) -> None:
+        self.delete(secret_id)
+
+    def __repr__(self) -> str:
+        return "MemoryCredentialStore(entries=%d)" % len(self._entries)
 
 
 class _MemoryAuditSink:
@@ -122,6 +192,36 @@ def ephemeral_stack() -> tuple:
     return ProviderAPI(ProviderRegistry(), store, sink), store, sink
 
 
+def memory_stack() -> tuple:
+    """Provision one memory-backed stack (tests and isolation probes).
+
+    Same shape as :func:`ephemeral_stack` with the full value port
+    (``set_secret``/``get_secret`` plus ``has``/``delete``); the save
+    route writes through it and the disconnect path removes through it.
+    """
+    return ephemeral_stack()
+
+
+def os_stack(*, label_suffix: str = "",
+             namespace: str | None = None,
+             timeout_s: float = 5.0) -> tuple:
+    """Provision one OS-backed stack (Windows Credential Manager).
+
+    Entries live under the product namespace (leftover-keys ``"app:"``)
+    with the optional label suffix (HD live run uses ``"TEST"``).
+    Raises OSError off Windows so callers fall back to memory.
+    """
+    from .os_credential_store import APP_NAMESPACE, OSCredentialStore
+
+    store = OSCredentialStore(
+        label_suffix=str(label_suffix or ""),
+        namespace=str(namespace or APP_NAMESPACE),
+        timeout_s=float(timeout_s or 5.0),
+    )
+    sink = _MemoryAuditSink()
+    return ProviderAPI(ProviderRegistry(), store, sink), store, sink
+
+
 def register_provider(descriptor: ProviderContracts,
                       secret_ref: SecretRef) -> ProviderContracts:
     """Key-only connect; the model travels inside the descriptor mapping."""
@@ -152,6 +252,9 @@ def remove_provider(provider_id: str) -> None:
 __all__ = [
     "ProviderContracts",
     "configure",
+    "ephemeral_stack",
+    "memory_stack",
+    "os_stack",
     "register_provider",
     "get_provider",
     "list_providers",

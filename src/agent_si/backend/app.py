@@ -609,6 +609,55 @@ def create_app(settings: Any = None,
                 return str(_val)
         return None  # No store key: K04 unconfigured; K04 routes fail loud.
 
+    def _k04_secret_kind(_settings: Any) -> str:
+        _raw: Any = None
+        if isinstance(_settings, Mapping):
+            if "secret_store" in _settings:
+                _raw = _settings["secret_store"]
+        elif _settings is not None and hasattr(_settings, "secret_store"):
+            _raw = getattr(_settings, "secret_store")
+        if isinstance(_raw, str) and _raw.strip():
+            _low = _raw.strip().lower()
+            if _low == "memory":
+                return "memory"
+            if _low == "os":
+                return "os"
+        if isinstance(_settings, Mapping):
+            if _settings.get("testing") is True:
+                return "memory"
+        elif _settings is not None and getattr(
+                _settings, "testing", None) is True:
+            return "memory"
+        return "os"
+
+    def _k04_label_suffix(_settings: Any) -> str:
+        _raw2: Any = None
+        if isinstance(_settings, Mapping):
+            if "secret_label_suffix" in _settings:
+                _raw2 = _settings["secret_label_suffix"]
+        elif _settings is not None and hasattr(
+                _settings, "secret_label_suffix"):
+            _raw2 = getattr(_settings, "secret_label_suffix")
+        if isinstance(_raw2, str) and _raw2.strip():
+            return _raw2.strip()
+        return ""
+
+    def _k04_save_timeout(_settings: Any) -> float:
+        _raw3: Any = None
+        if isinstance(_settings, Mapping):
+            if "key_save_timeout_s" in _settings:
+                _raw3 = _settings["key_save_timeout_s"]
+        elif _settings is not None and hasattr(
+                _settings, "key_save_timeout_s"):
+            _raw3 = getattr(_settings, "key_save_timeout_s")
+        try:
+            _val = float(_raw3)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return 5.0
+        if _val > 0:
+            return _val
+        return 5.0
+
     _k04_dir = _k04_store_dir(settings)
     _k04_config_error: Optional[str] = None
     if _k04_dir is None:
@@ -620,8 +669,18 @@ def create_app(settings: Any = None,
     if _k04_config_error is None:
         assert _k04_dir is not None
         _k04_store = _K04RoutingStore(_k04_dir)
-        _k04_api, _k04_credstore, _k04_auditsink = \
-            _k04_facades.ephemeral_stack()
+        _k04_kind = _k04_secret_kind(settings)
+        _k04_suffix = _k04_label_suffix(settings)
+        if _k04_kind == "memory":
+            _k04_api, _k04_credstore, _k04_auditsink = \
+                _k04_facades.memory_stack()
+        else:
+            try:
+                _k04_api, _k04_credstore, _k04_auditsink = \
+                    _k04_facades.os_stack(label_suffix=_k04_suffix)
+            except Exception:
+                _k04_api, _k04_credstore, _k04_auditsink = \
+                    _k04_facades.memory_stack()
         _k04_ctx = _k04_pr.RoutingCtx(
             store=_k04_store,
             role_table=_K04RoleTable(_k04_store),
@@ -632,6 +691,10 @@ def create_app(settings: Any = None,
         _k04_ctx.provider_facade = _k04_api
         _k04_ctx.credential_store = _k04_credstore
         _k04_ctx.audit_sink = _k04_auditsink
+        try:
+            _k04_ctx.key_save_timeout_s = _k04_save_timeout(settings)
+        except Exception:
+            pass
     app.state.k04_ctx = _k04_ctx
     app.state.k04_config_error = _k04_config_error
     # M-WIRE L0B-12: bind the routed provider adapter at app start via
@@ -745,6 +808,17 @@ def create_app(settings: Any = None,
                 _fn, _method.lower() in _k04_pr._USER_WRITE_METHODS, _name),
             methods=[_method.upper()],
             name="k04_" + _name)
+
+    try:
+        from agent_si.providers.registry import key_routes as _k04_keys
+
+        app.add_api_route(
+            "/api/v1/providers/keys",
+            _k04_make_endpoint(_k04_keys.save_key, True, "save_key"),
+            methods=["POST"],
+            name="k04_save_key")
+    except Exception:
+        pass
 
     # K13F1 routes: amend / finalize-read / stop over the real K13 entries.
     # Additions-only block: binds per-app in-memory K13 state on app.state
