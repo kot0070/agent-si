@@ -9,8 +9,8 @@
 // override measured rows. Mounted by the App routes
 // /projects/:projectId/* in wave 3.
 
-import { useEffect, useState } from "react";
-import type { ReactElement } from "react";
+import { Component, useEffect, useState } from "react";
+import type { ReactElement, ReactNode } from "react";
 import type {
   BudgetState,
   LedgerRow,
@@ -186,6 +186,29 @@ export function ReportReadable(props: {
   );
 }
 
+// R349B: a render throw inside the limits section (missing locale key,
+// unexpected row shape) must never unmount the sibling project content, so
+// the section always renders behind this boundary. Fetch failures are
+// already owned by the section itself (its own loading and error states).
+class LimitsSectionBoundary extends Component<
+  { children: ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+  static getDerivedStateFromError(): { failed: boolean } {
+    return { failed: true };
+  }
+  componentDidCatch(): void {
+    return undefined;
+  }
+  render(): ReactNode {
+    if (this.state.failed) {
+      return null;
+    }
+    return <>{this.props.children}</>;
+  }
+}
+
 export function ProjectView(props: ProjectViewProps): ReactElement {
   const client = useApiClient();
   const { locale } = useLocale();
@@ -345,7 +368,9 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
               labelKey="projects.derived.label"
               value={remainingBudget(data.budget)}
             />
-            <ProjectLimitsSection projectId={data.project.project_id} />
+            <LimitsSectionBoundary>
+              <ProjectLimitsSection projectId={data.project.project_id} />
+            </LimitsSectionBoundary>
           </div>
         );
       }
