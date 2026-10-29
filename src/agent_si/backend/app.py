@@ -567,6 +567,10 @@ def create_app(settings: Any = None,
         return None
 
     app.state.k02r3_store_dir = _k02r3_store_dir(settings)
+    from agent_si.telemetry import run_store as _l0c06_telemetry_store
+
+    app.state.telemetry_store_dir = app.state.k02r3_store_dir
+    _l0c06_telemetry_store.bind_store_dir(app.state.k02r3_store_dir)
     _k02r3_read.register_read_routes(app)
     _k02r3_write.register_console_projects_write_routes(app)
 

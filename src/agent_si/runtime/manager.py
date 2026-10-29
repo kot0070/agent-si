@@ -45,6 +45,7 @@ from agent_si.sdk_adapter.sdk_adapter import (
     SdkClientConfig,
     SecretRef,
 )
+from agent_si.telemetry import run_store as _telemetry_store
 
 TERMINAL_EVENTS = frozenset(
     {"done", "dispatch_rejected", "budget_stop"})
@@ -165,6 +166,49 @@ def _secret_refs_only(refs: Any) -> tuple:
     return ()
 
 
+def _telemetry_report_usage(
+    provider: Any,
+    shape: dict[str, Any],
+    run_id: str,
+    response: Any,
+) -> None:
+    """Append cloud_calls + usage + PROVIDER_USAGE_REPORTED (never raises)."""
+    try:
+        config = getattr(provider, "config", None)
+        provider_id = str(getattr(config, "provider_id", "") or "")
+        model = str(getattr(config, "model", "") or "")
+        usage = getattr(response, "usage", None)
+        if usage is None and isinstance(response, Mapping):
+            usage = response.get("usage")
+        _telemetry_store.record_provider_usage(
+            project_id=str(shape.get("project_id") or "run"),
+            task_id=str(shape.get("task_id") or ""),
+            run_id=str(run_id or ""),
+            provider=provider_id,
+            model=model,
+            usage=usage,
+        )
+    except Exception:
+        pass
+
+
+def _telemetry_report_terminated(
+    shape: dict[str, Any],
+    run_id: str,
+    reason: str,
+) -> None:
+    """Append one RUN_TERMINATED event (never raises, never stores secrets)."""
+    try:
+        _telemetry_store.record_run_terminated(
+            project_id=str(shape.get("project_id") or "run"),
+            task_id=str(shape.get("task_id") or ""),
+            run_id=str(run_id or ""),
+            reason=str(reason or ""),
+        )
+    except Exception:
+        pass
+
+
 def run_task_streamed(
     request: Any = None,
     *,
@@ -212,6 +256,8 @@ def run_task_streamed(
         )
         _record(shape, run_id or "run-refused", rejected,
                 str(shape["task_id"] or ""), str(manager_id))
+        _telemetry_report_terminated(
+            shape, run_id or "run-refused", "dispatch_rejected")
         yield rejected
         return
     planned = graph.nodes[validated.subtask_id]
@@ -228,25 +274,36 @@ def run_task_streamed(
     hook = assurance_hook if assurance_hook is not None \
         else _RecordingAssuranceHook()
     assurance_calls = 0
+    _term_state = {"done": False}
+
+    def _finish(reason: str) -> None:
+        if _term_state["done"]:
+            return
+        _term_state["done"] = True
+        _telemetry_report_terminated(shape, active_run_id, reason)
 
     def _emit(event: RunEvent) -> RunEvent:
         _record(shape, active_run_id, event, validated.subtask_id,
                 validated.agent_id or str(manager_id))
         return event
 
-    yield _emit(RunEvent(
-        event="start", turn=0, subtask_id=validated.subtask_id,
-        detail=f"manager run started for {validated.subtask_id}",
-        data={"run_id": active_run_id,
-              "project_id": shape["project_id"],
-              "task_id": shape["task_id"],
-              "manager_id": str(manager_id),
-              "budget": budget,
-              "provider": str(
-                  getattr(getattr(provider, "config", None),
-                          "provider_id", "")),
-              },
-    ))
+    try:
+        yield _emit(RunEvent(
+            event="start", turn=0, subtask_id=validated.subtask_id,
+            detail=f"manager run started for {validated.subtask_id}",
+            data={"run_id": active_run_id,
+                  "project_id": shape["project_id"],
+                  "task_id": shape["task_id"],
+                  "manager_id": str(manager_id),
+                  "budget": budget,
+                  "provider": str(
+                      getattr(getattr(provider, "config", None),
+                              "provider_id", "")),
+                  },
+        ))
+    except GeneratorExit:
+        _finish("cancelled")
+        raise
     client_config = SdkClientConfig(max_retries=0)
     captured: dict[str, Any] = {}
 
@@ -257,6 +314,8 @@ def run_task_streamed(
         captured["mock"] = bool(getattr(response, "mock", False))
         captured["finish_reason"] = str(
             getattr(response, "finish_reason", "") or "")
+        captured["usage"] = getattr(response, "usage", None)
+        _telemetry_report_usage(provider, shape, active_run_id, response)
         return {"ok": True}
 
     sdk = OpenAIAgentsSDKAdapter(client_config=client_config, runner=_runner)
@@ -264,6 +323,7 @@ def run_task_streamed(
     turn = 0
     while True:
         if turn + 1 > budget:
+            _finish("budget_stop")
             yield _emit(RunEvent(
                 event="budget_stop", turn=turn,
                 subtask_id=validated.subtask_id,
@@ -293,14 +353,19 @@ def run_task_streamed(
         else:
             assurance_calls += 1 if allowed else 0
         if not allowed:
+            _finish("error")
             raise AssuranceRefusedError(
                 f"assurance hook refused turn {turn} of run {active_run_id}")
-        yield _emit(RunEvent(
-            event="tool_call", turn=turn,
-            subtask_id=validated.subtask_id,
-            detail=f"guarded tool call for turn {turn}",
-            data=dict(call),
-        ))
+        try:
+            yield _emit(RunEvent(
+                event="tool_call", turn=turn,
+                subtask_id=validated.subtask_id,
+                detail=f"guarded tool call for turn {turn}",
+                data=dict(call),
+            ))
+        except GeneratorExit:
+            _finish("cancelled")
+            raise
         binding = RoutingDecisionBinding(
             decision_id=decision.decision_id,
             project_id=str(shape["project_id"] or "run"),
@@ -326,8 +391,13 @@ def run_task_streamed(
             secret_refs=_secret_refs_only(shape["secret_refs"]),
             run_config=sdk_run_config,
         )
-        result = interface.run_turn(turn_request)
+        try:
+            result = interface.run_turn(turn_request)
+        except Exception:
+            _finish("error")
+            raise
         if not result.executed:
+            _finish("done")
             yield _emit(RunEvent(
                 event="done", turn=turn,
                 subtask_id=validated.subtask_id,
@@ -349,22 +419,27 @@ def run_task_streamed(
                 captured.get("finish_reason", ""),
                 captured.get("text", "")),
         )
-        yield _emit(RunEvent(
-            event="turn", turn=turn,
-            subtask_id=validated.subtask_id,
-            detail=f"turn {turn} executed",
-            data={"turn": turn, "run_id": active_run_id,
-                  "output_ref": result.output_ref,
-                  "text": captured.get("text", ""),
-                  "mock": bool(captured.get("mock", False)),
-                  "finish_reason": str(
-                      captured.get("finish_reason", "")),
-                  "client_max_retries": sdk.client_config.max_retries,
-                  "max_runner_retries":
-                      sdk_run_config.max_runner_retries,
-                  "decision_id": decision.decision_id},
-        ))
+        try:
+            yield _emit(RunEvent(
+                event="turn", turn=turn,
+                subtask_id=validated.subtask_id,
+                detail=f"turn {turn} executed",
+                data={"turn": turn, "run_id": active_run_id,
+                      "output_ref": result.output_ref,
+                      "text": captured.get("text", ""),
+                      "mock": bool(captured.get("mock", False)),
+                      "finish_reason": str(
+                          captured.get("finish_reason", "")),
+                      "client_max_retries": sdk.client_config.max_retries,
+                      "max_runner_retries":
+                          sdk_run_config.max_runner_retries,
+                      "decision_id": decision.decision_id},
+            ))
+        except GeneratorExit:
+            _finish("cancelled")
+            raise
         if str(captured.get("finish_reason", "")) == "stop":
+            _finish("done")
             yield _emit(RunEvent(
                 event="done", turn=turn,
                 subtask_id=validated.subtask_id,

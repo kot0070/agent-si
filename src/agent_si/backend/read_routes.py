@@ -234,4 +234,21 @@ def register_read_routes(app: Any) -> Any:
         turns = _task_turns.list_turns(task_id)
         return {"turns": turns, "used": len(turns), "limit": limit}
 
+    @app.get("/api/v1/analytics/telemetry")
+    def read_telemetry_analytics() -> dict:
+        """Telemetry aggregates FROM the authoritative store file only.
+
+        kit row MVP_ACCEPT-161: analytics values read only from authoritative
+        TelemetryEvent and MetricRecord stores, never from chat text or live
+        rows; this route reads <store_dir>/telemetry_store.json and sums
+        metric values by name deterministically, with no invented numbers.
+        """
+        from agent_si.telemetry import run_store as _telemetry_run_store
+
+        directory = getattr(getattr(app, "state", None),
+                            "telemetry_store_dir", None)
+        if directory is None:
+            directory = _store_dir(app)
+        return _telemetry_run_store.aggregates(store_dir=directory)
+
     return app
