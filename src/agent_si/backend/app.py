@@ -24,6 +24,9 @@ from agent_si.backend.orchestration.parts import PartRow, list_parts
 
 USER_WRITE = "USER_WRITE"
 
+#: Stable machine code for a missing report row (M-WIRE L0B-11).
+REPORT_ROW_NOT_FOUND = "REPORT_ROW_NOT_FOUND"
+
 AuthHook = Callable[[str | None, str, str], bool]
 RateHook = Callable[[str], bool]
 
@@ -156,8 +159,13 @@ def create_app(settings: Any = None,
                            project_id: str | None = None) -> dict[str, Any]:
         ledger = _find_ledger_with(package_id, project_id)
         if ledger is None:
-            raise HTTPException(status_code=404,
-                                detail=f"no ledger row for package {package_id}")
+            from agent_si.backend import chat_stream as _wire_chat
+
+            raise HTTPException(
+                status_code=404,
+                detail=_wire_chat.http_error_detail(
+                    REPORT_ROW_NOT_FOUND,
+                    f"no ledger row for package {package_id}"))
         ids = ledger.package_ids()
         position = ids.index(package_id)
         next_id = ids[position + 1] if position + 1 < len(ids) else None
@@ -174,21 +182,32 @@ def create_app(settings: Any = None,
         # K02R4 engine entry: guard shape unchanged (401 missing
         # x-actor, 403 bad token, 429 rate limited); the accepted+json
         # placeholder is replaced by SSE streaming of a Manager run.
-        actor = (request.headers.get("x-actor") or "").strip()
-        if not actor:
-            raise HTTPException(status_code=401,
-                                detail="missing x-actor header")
-        token = request.headers.get("x-ui-session-token")
-        check_auth: AuthHook = app.state.auth_hook
-        if not check_auth(token, actor, USER_WRITE):
-            raise HTTPException(status_code=403, detail="forbidden")
-        check_rate: RateHook = app.state.rate_hook
-        if not check_rate(actor):
-            raise HTTPException(status_code=429, detail="rate limited")
+        # Every error body carries {code, message} (M-WIRE L0B-11).
         from fastapi.responses import StreamingResponse
 
         from agent_si.backend import chat_stream as _k02r4_chat
         from agent_si.backend.orchestration import graph as _k02r4_graph
+
+        actor = (request.headers.get("x-actor") or "").strip()
+        if not actor:
+            raise HTTPException(
+                status_code=401,
+                detail=_k02r4_chat.http_error_detail(
+                    _k02r4_chat.CHAT_ACTOR_MISSING,
+                    "missing x-actor header"))
+        token = request.headers.get("x-ui-session-token")
+        check_auth: AuthHook = app.state.auth_hook
+        if not check_auth(token, actor, USER_WRITE):
+            raise HTTPException(
+                status_code=403,
+                detail=_k02r4_chat.http_error_detail(
+                    _k02r4_chat.CHAT_FORBIDDEN, "forbidden"))
+        check_rate: RateHook = app.state.rate_hook
+        if not check_rate(actor):
+            raise HTTPException(
+                status_code=429,
+                detail=_k02r4_chat.http_error_detail(
+                    _k02r4_chat.CHAT_RATE_LIMITED, "rate limited"))
 
         try:
             raw = await request.body()
@@ -209,19 +228,43 @@ def create_app(settings: Any = None,
                 body, actor)
         except _k02r4_chat.ChatBadRequest as err:
             raise HTTPException(
-                status_code=400, detail=str(err)) from None
+                status_code=400,
+                detail=_k02r4_chat.http_error_detail(
+                    _k02r4_chat.CHAT_BAD_REQUEST, str(err))) from None
+        # M-WIRE L0B-12: resolve the routed provider adapter at open
+        # (start bind, then the per-project chat record) so the bridge
+        # sees a connected provider with no test help.
+        _k02r4_chat.bind_routed_provider_adapter(
+            app, project_id=chat_request.project or None)
         bridge = _k02r4_chat.bridge_for_app(app)
         try:
             stream_id, events = bridge.run(chat_request)
         except _k02r4_graph.DispatchRejected as err:
             raise HTTPException(
-                status_code=400, detail=str(err)) from None
+                status_code=400,
+                detail=_k02r4_chat.http_error_detail(
+                    getattr(err, "code", None)
+                    or _k02r4_chat.CHAT_DISPATCH_REJECTED,
+                    str(err))) from None
         except _k02r4_chat.ChatStreamAbsent as err:
-            raise HTTPException(
-                status_code=404, detail=str(err)) from None
+            if getattr(app.state, "k04_ctx", None) is not None:
+                # Configured app with nothing bound: the terminal
+                # NO_PROVIDER_BOUND error over HTTP 200 SSE, never a 404.
+                stream_id, events = bridge.no_provider_run(chat_request)
+            else:
+                raise HTTPException(
+                    status_code=404,
+                    detail=_k02r4_chat.http_error_detail(
+                        getattr(err, "code", None)
+                        or _k02r4_chat.MANAGER_STREAM_ABSENT,
+                        str(err))) from None
         except _k02r4_chat.ChatStreamFailed as err:
             raise HTTPException(
-                status_code=500, detail=str(err)) from None
+                status_code=500,
+                detail=_k02r4_chat.http_error_detail(
+                    getattr(err, "code", None)
+                    or _k02r4_chat.MANAGER_STREAM_FAILED,
+                    str(err))) from None
         return StreamingResponse(
             events,
             media_type="text/event-stream",
@@ -490,8 +533,38 @@ def create_app(settings: Any = None,
     from agent_si.backend import console_projects_write as _k02r3_write
     from agent_si.backend import read_routes as _k02r3_read
 
+    def _k02r3_store_dir(_settings: Any) -> str | None:
+        # Same settings keys as the K04 lookup below (read-only
+        # reference): when configured, project/task rows persist to
+        # JSONL under this dir and hydrate on first bind; with no key
+        # the ports stay purely in-memory.
+        for _key in ("store_dir", "data_dir", "data_directory"):
+            if isinstance(_settings, Mapping):
+                if _key in _settings:
+                    if not _settings[_key]:
+                        raise ValueError(
+                            f"K02R3 store setting {_key!r} is empty: pass "
+                            "a real dir, never a silent tmp fallback")
+                    return str(_settings[_key])
+            elif _settings is not None and hasattr(_settings, _key):
+                _val = getattr(_settings, _key)
+                if not _val:
+                    raise ValueError(
+                        f"K02R3 store setting {_key!r} is empty: pass a "
+                        "real dir, never a silent tmp fallback")
+                return str(_val)
+        return None
+
+    app.state.k02r3_store_dir = _k02r3_store_dir(settings)
     _k02r3_read.register_read_routes(app)
     _k02r3_write.register_console_projects_write_routes(app)
+
+    # R349A project step limits (additions-only): GET+PUT surface plus
+    # steplimits.json persistence owned by steplimit_routes; the K02 seam
+    # above and the K04 block below are unchanged.
+    from agent_si.backend import steplimit_routes as _r349_steplimits
+
+    _r349_steplimits.register_steplimit_routes(app)
 
     # --- K04 package routes (HD-authorised additions-only block). ---
     # HD_VERDICT_INT1_K04_ROOT + HD_RULING_K04_TESTS: this block only ADDS
@@ -561,6 +634,35 @@ def create_app(settings: Any = None,
         _k04_ctx.audit_sink = _k04_auditsink
     app.state.k04_ctx = _k04_ctx
     app.state.k04_config_error = _k04_config_error
+    # M-WIRE L0B-12: bind the routed provider adapter at app start via
+    # the K04 public API, so bridge_for_app sees
+    # app.state.chat_provider_adapter with no test help. No connected
+    # provider (or no K04) leaves it unset: the chat route then answers
+    # the terminal NO_PROVIDER_BOUND event over HTTP 200 SSE. Never
+    # raises: start stays total even when binding cannot complete.
+    app.state.chat_provider_adapter = None
+    if _k04_ctx is not None:
+        try:
+            from agent_si.backend import chat_stream as _wire_chat_bind
+
+            _wire_chat_bind.bind_routed_provider_adapter(app)
+        except Exception:
+            pass
+
+    # BEDEF1 ensure-at-start: projects loaded from the store that have no
+    # budget state or step limits get the product starting values
+    # (idempotent; an existing state is never overwritten).
+    try:
+        from agent_si.backend import project_defaults as _bedef1_defaults
+        from agent_si.backend import read_routes as _bedef1_read
+
+        _bedef1_projects, _bedef1_tasks = _bedef1_read.repos_for(app)
+        for _bedef1_row in _bedef1_projects.list_by({}):
+            _bedef1_pid = _bedef1_row.get("project_id")
+            if _bedef1_pid and not _bedef1_row.get("archived"):
+                _bedef1_defaults.ensure_project_defaults(app, _bedef1_pid)
+    except Exception:
+        pass
 
     def _k04_make_endpoint(_fn: Callable, _is_write: bool,
                            _name: str = "") -> Callable:

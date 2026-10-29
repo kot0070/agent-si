@@ -20,13 +20,18 @@ import type {
   TaskRecord,
 } from "./iface";
 import { ENDPOINTS } from "./endpoints";
-import { ApiError, parseOrThrow, requestResponse } from "./errors";
+import {
+  ApiError,
+  apiErrorFromCode,
+  parseOrThrow,
+  requestResponse,
+} from "./errors";
 import { listAgentsLiveRows, parseAgentsLive } from "./agentsApi";
 import { PartRowSchema } from "./agentsApi";
 import {
   ChatCancelSchema,
-  ChatChunkSchema,
   ChatOpenSchema,
+  ChatStreamEventSchema,
   ProjectCreateSchema,
   ProjectPatchSchema,
   TaskCreateSchema,
@@ -47,14 +52,6 @@ import {
 
 export interface HttpClientOptions {
   actor?: string;
-}
-
-function safeJsonParse(text: string): unknown {
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return null;
-  }
 }
 
 export class HttpApiClient implements ApiClient {
@@ -122,36 +119,171 @@ export class HttpApiClient implements ApiClient {
     } catch {
       throw new ApiError("CONTEXT_WRONG_CONTRACT_VERSION", 400);
     }
-    const streamId = request.stream_id;
+    const requestedId = request.stream_id;
     const actor = this.actor;
     const url = ENDPOINTS.chatStream;
-    async function* chunks(): AsyncGenerator<ChatChunk, void, void> {
-      const response = await requestResponse(
-        url,
-        { method: "POST", kind: "chat", body: request, actor },
-      );
-      const text = await response.text();
-      let yielded = false;
-      for (const line of text.split("\n")) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith("data:")) {
-          continue;
-        }
-        const payload = trimmed.slice("data:".length).trim();
-        if (payload === "" || payload === "[DONE]") {
-          continue;
-        }
-        const parsed = ChatChunkSchema.safeParse(safeJsonParse(payload));
-        if (parsed.success) {
-          yielded = true;
-          yield { ...parsed.data, stream_id: streamId };
-        }
+    let effectiveId = requestedId;
+    let serverIdSeen = false;
+    const adoptServerId = (value: unknown): void => {
+      if (!serverIdSeen && typeof value === "string" && value.length > 0) {
+        effectiveId = value;
+        serverIdSeen = true;
       }
-      if (!yielded) {
-        yield { stream_id: streamId, delta: "", done: true };
+    };
+    function terminal(): ChatChunk {
+      return { stream_id: effectiveId, delta: "", done: true };
+    }
+    let finished = false;
+    function* handleLine(line: string, status: number): Generator<ChatChunk, void, void> {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("data:")) {
+        return;
+      }
+      const payload = trimmed.slice("data:".length).trim();
+      if (payload === "" || payload === "[DONE]") {
+        return;
+      }
+      let event: unknown;
+      try {
+        event = JSON.parse(payload) as unknown;
+      } catch {
+        return;
+      }
+      if (typeof event !== "object" || event === null) {
+        return;
+      }
+      const record = event as Record<string, unknown>;
+      if (typeof record["type"] === "string") {
+        const parsed = ChatStreamEventSchema.safeParse(record);
+        if (!parsed.success) {
+          return;
+        }
+        const wire = parsed.data;
+        switch (wire.type) {
+          case "start": {
+            adoptServerId(wire.stream_id);
+            break;
+          }
+          case "delta": {
+            if (typeof wire.text === "string" && wire.text !== "") {
+              yield {
+                stream_id: effectiveId,
+                delta: wire.text,
+                done: false,
+              };
+            }
+            break;
+          }
+          case "done":
+          case "cancelled": {
+            finished = true;
+            yield terminal();
+            return;
+          }
+          case "error": {
+            throw apiErrorFromCode(wire.code, status);
+          }
+          case "approval": {
+            throw new ApiError("APPROVAL_REQUIRED", status);
+          }
+          default: {
+            break;
+          }
+        }
+      } else if ("delta" in record || "done" in record) {
+        const delta = typeof record["delta"] === "string" ? record["delta"] : "";
+        const done = record["done"] === true;
+        yield { stream_id: effectiveId, delta, done };
+        if (done) {
+          finished = true;
+          return;
+        }
       }
     }
-    return { stream_id: streamId, chunks: chunks() };
+    async function* chunks(): AsyncGenerator<ChatChunk, void, void> {
+      let response: Response;
+      try {
+        response = await requestResponse(
+          url,
+          {
+            method: "POST",
+            kind: "chat",
+            body: { project: request.project_id, message: request.prompt_ref },
+            actor,
+          },
+        );
+      } catch (error) {
+        if (
+          error instanceof ApiError &&
+          (error.code === "CONTEXT_MISSING" || error.status === 404)
+        ) {
+          throw new ApiError("NO_PROVIDER_BOUND", error.status);
+        }
+        throw error;
+      }
+      adoptServerId(response.headers.get("x-stream-id"));
+      const status = response.status;
+      finished = false;
+      const rawBody = response.body;
+      if (
+        rawBody === undefined ||
+        rawBody === null ||
+        typeof TextDecoder === "undefined"
+      ) {
+        const text = await response.text();
+        for (const line of text.split("\n")) {
+          yield* handleLine(line, status);
+          if (finished) {
+            return;
+          }
+        }
+      } else {
+        const reader = rawBody.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        try {
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (value !== undefined) {
+              buffer += decoder.decode(value, { stream: !done });
+            }
+            const lines = buffer.split("\n");
+            buffer = lines.pop() ?? "";
+            for (const line of lines) {
+              yield* handleLine(line, status);
+              if (finished) {
+                return;
+              }
+            }
+            if (done) {
+              buffer += decoder.decode();
+              if (buffer !== "") {
+                yield* handleLine(buffer, status);
+                if (finished) {
+                  return;
+                }
+              }
+              break;
+            }
+          }
+        } finally {
+          try {
+            reader.releaseLock();
+          } catch {
+            /* lock already released */
+          }
+        }
+      }
+      if (!finished) {
+        yield terminal();
+      }
+    }
+    return {
+      get stream_id() {
+        return effectiveId;
+      },
+      chunks: chunks(),
+    };
   }
 
   cancelChatStream(stream_id: string): Promise<void> {

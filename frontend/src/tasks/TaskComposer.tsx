@@ -2,7 +2,10 @@
 // route (POST /api/v1/tasks through the shared ApiClient entry). Prefills
 // the title from a stored task when initialTaskId names one; per A10 a late
 // status load never overwrites a user-edited value (dirty-tracked fields).
-// Numbers shown come from records only. Production caller: wave-3 App
+// Numbers shown come from records only. The result line shows the typed
+// title with a localized status (the id stays only as row key and testid);
+// a successful create dispatches a tasks-changed window event so the tasks
+// list refetches without a reload. Production caller: wave-3 App
 // project-tasks route (CODER-5-Vale frontend/src/app/App.tsx); owned test
 // mounts this component.
 
@@ -13,7 +16,6 @@ import type { TaskRecord } from "../api/iface";
 import { useApiClient } from "../app/ApiClientProvider";
 import { ApiError, apiErrorLocaleKey } from "../api/errors";
 import { t } from "../locale/index";
-import { EmptyState } from "../ui/EmptyState";
 import { ErrorPanel } from "../ui/ErrorPanel";
 import { LoadingState } from "../ui/LoadingState";
 
@@ -37,9 +39,12 @@ const TASK_STATUS_KEYS: Record<string, string> = {
   REJECTED: "tasks.status.rejected",
   BLOCKED: "tasks.status.blocked",
   HANDOFF: "tasks.status.handoff",
+  CREATED: "tasks.status.queued",
 };
 
-function statusLabel(status: string): string {
+export const TASKS_CHANGED_EVENT = "tasks-changed";
+
+export function taskStatusLabel(status: string): string {
   const key = TASK_STATUS_KEYS[status];
   return key === undefined ? status : t(key);
 }
@@ -155,6 +160,11 @@ export function TaskComposer(props: TaskComposerProps): ReactElement {
           window.clearTimeout(timer);
           setCreated(task);
           setPosting(false);
+          window.dispatchEvent(
+            new CustomEvent<{ projectId: string }>(TASKS_CHANGED_EVENT, {
+              detail: { projectId: props.projectId },
+            }),
+          );
         },
         (error: unknown) => {
           if (finished || submitSeqRef.current !== seq) {
@@ -223,19 +233,16 @@ export function TaskComposer(props: TaskComposerProps): ReactElement {
         {t("chat.abort.cancel")}
       </button>
       {created !== null ? (
-        <div data-testid="composer-result">
-          <span data-testid="composer-task-id">{created.task_id}</span>
+        <div data-testid="composer-result" key={created.task_id}>
+          <span data-testid="composer-title-result">{created.title}</span>
+          <span data-testid="composer-task-id" hidden>
+            {created.task_id}
+          </span>
           <span data-testid="composer-status">
-            {statusLabel(created.status)}
+            {taskStatusLabel(created.status)}
           </span>
         </div>
-      ) : (
-        <EmptyState
-          stateKey="tasks.list.empty"
-          actionKey={null}
-          onAction={null}
-        />
-      )}
+      ) : null}
       {blocking !== null ? (
         <ErrorPanel
           errorKey={blocking.errorKey}
