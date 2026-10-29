@@ -72,17 +72,38 @@ export function apiErrorFromCode(code: unknown, status: number): ApiError {
   return errorFromStatus("CONTEXT_WRONG_CONTRACT_VERSION", status);
 }
 
+function missingWhenNotFound(code: string, status: number): ApiError | null {
+  // A 404/offline transport state reads as not-found even when the body
+  // carries the generic fallback code; explicit server codes otherwise
+  // stay preserved (frozen wire contract).
+  if (
+    (status === 404 || status === 0) &&
+    code === "CONTEXT_WRONG_CONTRACT_VERSION"
+  ) {
+    return errorFromStatus("CONTEXT_MISSING", status);
+  }
+  return null;
+}
+
 export function parseErrorBody(data: unknown, status: number): ApiError {
   const checked = ErrorBodySchema.safeParse(data);
   if (checked.success) {
     const raw = (checked.data as { code?: unknown }).code;
     if (typeof raw === "string" && raw.length > 0) {
+      const missing = missingWhenNotFound(raw, status);
+      if (missing !== null) {
+        return missing;
+      }
       return apiErrorFromCode(raw, status);
     }
     const detail = (checked.data as { detail?: unknown }).detail;
     if (typeof detail === "object" && detail !== null) {
       const nested = (detail as { code?: unknown }).code;
       if (typeof nested === "string" && nested.length > 0) {
+        const missing = missingWhenNotFound(nested, status);
+        if (missing !== null) {
+          return missing;
+        }
         return apiErrorFromCode(nested, status);
       }
     }
