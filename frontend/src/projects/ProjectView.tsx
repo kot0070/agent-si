@@ -44,6 +44,7 @@ import {
 } from "./projectsApi";
 import type { ProjectViewName } from "./projectsApi";
 import { RunHistory } from "./RunHistory";
+import { ProjectLimitsSection } from "../settings/projectLimits";
 import { HealthView } from "./observe/HealthView";
 import { MatrixView } from "./observe/MatrixView";
 import { VerifierView } from "./observe/VerifierView";
@@ -344,6 +345,7 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
               labelKey="projects.derived.label"
               value={remainingBudget(data.budget)}
             />
+            <ProjectLimitsSection projectId={data.project.project_id} />
           </div>
         );
       }

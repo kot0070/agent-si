@@ -516,6 +516,13 @@ def create_app(settings: Any = None,
     _k02r3_read.register_read_routes(app)
     _k02r3_write.register_console_projects_write_routes(app)
 
+    # R349A project step limits (additions-only): GET+PUT surface plus
+    # steplimits.json persistence owned by steplimit_routes; the K02 seam
+    # above and the K04 block below are unchanged.
+    from agent_si.backend import steplimit_routes as _r349_steplimits
+
+    _r349_steplimits.register_steplimit_routes(app)
+
     # --- K04 package routes (HD-authorised additions-only block). ---
     # HD_VERDICT_INT1_K04_ROOT + HD_RULING_K04_TESTS: this block only ADDS
     # routes; no existing K02 line above changes. Real wiring: store dir
