@@ -170,6 +170,22 @@ const TaskResponseSchema = z.object({
   task: TaskRecordSchema,
 });
 
+export const TurnTripleSchema = z.object({
+  plan: z.string().min(1),
+  action: z.string().min(1),
+  observation: z.string().min(1),
+});
+
+export type TurnTriple = z.infer<typeof TurnTripleSchema>;
+
+export const TaskTurnsSchema = z.object({
+  turns: z.array(TurnTripleSchema),
+  used: z.number().int().min(0),
+  limit: z.number().int().min(0),
+});
+
+export type TaskTurns = z.infer<typeof TaskTurnsSchema>;
+
 const LedgerResponseSchema = z.object({
   rows: z.array(LedgerRowSchema),
 });
@@ -287,6 +303,14 @@ export async function readTaskRecord(taskId: string): Promise<TaskRecord> {
     { method: "GET", kind: "read" },
     TaskResponseSchema,
   ).then((body) => body.task);
+}
+
+export async function readTaskTurns(taskId: string): Promise<TaskTurns> {
+  return requestJson(
+    `${expandEndpoint(ENDPOINTS.taskById, taskId)}/turns`,
+    { method: "GET", kind: "read" },
+    TaskTurnsSchema,
+  );
 }
 
 export async function createTaskRecord(
