@@ -1577,8 +1577,16 @@ def create_app(settings: Any = None,
                 "diff": _diff}
 
     @app.get("/api/v1/kb/refresh/proposal")
-    def _k09r_get_proposal(kb_id: str) -> dict[str, Any]:
-        if not kb_id or not _K09RPath(kb_id).is_dir():
+    def _k09r_get_proposal(kb_id: str | None = None) -> dict[str, Any]:
+        if not kb_id:
+            _items: list[dict[str, Any]] = []
+            for _known in sorted(app.state.kb_refresh_recorded):
+                if _K09RPath(_known).is_dir():
+                    _items.append(_k09r_status(_known))
+            return {"kb_id": None,
+                    "stale": any(_it["stale"] for _it in _items),
+                    "proposals": _items}
+        if not _K09RPath(kb_id).is_dir():
             raise HTTPException(status_code=404, detail="unknown kb_id")
         return _k09r_status(kb_id)
 
