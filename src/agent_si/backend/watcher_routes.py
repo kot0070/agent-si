@@ -38,9 +38,9 @@ def _watcher_iface():
     try:
         return sys.modules[_IFACE_MODULE]
     except KeyError:
-        raise RuntimeError(
-            "frozen contract %r is not imported" % (_IFACE_MODULE,)
-        )
+        import importlib
+
+        return importlib.import_module(_IFACE_MODULE)
 
 
 __all__ = ("router", "configure", "token_live")

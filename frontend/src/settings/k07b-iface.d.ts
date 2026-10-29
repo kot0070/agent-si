@@ -18,6 +18,7 @@ export type LocaleErrorCode = 'MISSING_LOCALE_KEY' | 'UNSUPPORTED_LOCALE';
 export type LocaleKey =
   | 'about.licence.line'
   | 'about.licence.mitText'
+  | 'about.thirdParty.title'
   | 'howItWorks.codeTests.body'
   | 'howItWorks.codeTests.title'
   | 'howItWorks.localTests.body'
@@ -45,6 +46,7 @@ export type LocaleKey =
   | 'settings.project.needItNow'
   | 'settings.project.purpose'
   | 'settings.project.title'
+  | 'settings.providers.searchPlaceholder'
   | 'settings.routing.needItNow'
   | 'settings.routing.purpose'
   | 'settings.routing.title'

@@ -106,6 +106,10 @@ class ChatStreamRequest:
             raise ChatBadRequest("chat stream needs a JSON object body")
         message = body.get("message", "")
         if not (isinstance(message, str) and message.strip()):
+            alias = body.get("prompt_ref", "")
+            if isinstance(alias, str) and alias.strip():
+                message = alias
+        if not (isinstance(message, str) and message.strip()):
             raise ChatBadRequest("chat stream needs a non-empty message")
         refs = body.get("secret_refs", ())
         if refs is None:

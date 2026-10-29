@@ -398,7 +398,7 @@ describe('G2 full-set parity gate (round 3: Lane A keys added)', () => {
 
   it('full sets stay identical at 155 leaves', () => {
     expect(UK_KEYS).toEqual(EN_KEYS);
-    expect(EN_KEYS).toHaveLength(188);
+    expect(EN_KEYS).toHaveLength(190);
   });
 
   it('keeps all 32 frozen STEP1 paths in both languages', () => {
@@ -417,6 +417,6 @@ describe('G2 LocaleKey union parity gate (round 3: union widened to full set)', 
     const unionKeys = [...block.matchAll(/'([^']+)'/g)].map((m) => m[1]).sort();
     expect(unionKeys).toEqual(EN_KEYS);
     expect(unionKeys).toEqual(UK_KEYS);
-    expect(unionKeys).toHaveLength(188);
+    expect(unionKeys).toHaveLength(190);
   });
 });
