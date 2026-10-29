@@ -998,6 +998,7 @@ ROUTES: Tuple[Tuple[str, str, str, Callable], ...] = (
     ("get", "/api/v1/routing/roles", "list_roles", list_roles),
     ("get", "/api/v1/routing/role", "get_role", get_role),
     ("post", "/api/v1/routing/role", "set_role", set_role),
+    ("put", "/api/v1/routing/role", "set_role_put", set_role),
     ("get", "/api/v1/routing/picker", "get_picker", get_picker),
     ("post", "/api/v1/routing/pick", "post_pick", post_pick),
     ("get", "/api/v1/routing/bindings", "get_bindings", get_bindings),
