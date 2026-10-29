@@ -626,6 +626,55 @@ def _read_secret_value(credential_store: Any, secret_id: str) -> str:
         "chat-bind:secret")
 
 
+def _normalize_gateway_usage(usage: Any) -> dict:
+    """Map OpenAI-compatible usage keys to METRIC_KEYS names.
+
+    prompt_tokens -> input_tokens, completion_tokens -> output_tokens,
+    prompt_tokens_details.cached_tokens -> cached_tokens,
+    completion_tokens_details.reasoning_tokens -> reasoning_tokens.
+    METRIC_KEYS names win when both are present; nothing is invented:
+    a key is set only when an int value is actually present.
+    """
+    if not isinstance(usage, Mapping):
+        return {}
+    out: dict = {}
+
+    def _as_int(value: Any) -> int | None:
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+        return None
+
+    direct = _as_int(usage.get("input_tokens"))
+    if direct is None:
+        direct = _as_int(usage.get("prompt_tokens"))
+    if direct is not None:
+        out["input_tokens"] = direct
+    direct = _as_int(usage.get("output_tokens"))
+    if direct is None:
+        direct = _as_int(usage.get("completion_tokens"))
+    if direct is not None:
+        out["output_tokens"] = direct
+    cached = _as_int(usage.get("cached_tokens"))
+    if cached is None:
+        details = usage.get("prompt_tokens_details")
+        if isinstance(details, Mapping):
+            cached = _as_int(details.get("cached_tokens"))
+    if cached is None:
+        details = usage.get("completion_tokens_details")
+        if isinstance(details, Mapping):
+            cached = _as_int(details.get("cached_tokens"))
+    if cached is not None:
+        out["cached_tokens"] = cached
+    reasoning = _as_int(usage.get("reasoning_tokens"))
+    if reasoning is None:
+        details = usage.get("completion_tokens_details")
+        if isinstance(details, Mapping):
+            reasoning = _as_int(details.get("reasoning_tokens"))
+    if reasoning is not None:
+        out["reasoning_tokens"] = reasoning
+    return out
+
+
 def _gateway_transport(base_url: str, credential_store: Any,
                        secret_ref: Mapping[str, Any]):
     """Build the chat-completions gateway transport (stdlib only).
@@ -649,11 +698,19 @@ def _gateway_transport(base_url: str, credential_store: Any,
         value = _read_secret_value(credential_store, secret_id)
         chat_path = str(request.get("chat_path") or "/chat/completions")
         url = endpoint + chat_path
-        payload = _json.dumps({
+        body_out: dict[str, Any] = {
             "model": request.get("model", ""),
             "messages": [dict(item) for item in request.get("messages", [])],
             "stream": False,
-        }).encode("utf-8")
+        }
+        try:
+            max_tokens = request.get("max_tokens")
+        except Exception:
+            max_tokens = None
+        if isinstance(max_tokens, int) and not isinstance(max_tokens, bool):
+            if max_tokens > 0:
+                body_out["max_tokens"] = max_tokens
+        payload = _json.dumps(body_out).encode("utf-8")
         http_request = _urlrequest.Request(
             url, data=payload,
             headers={"Content-Type": "application/json",
@@ -685,7 +742,7 @@ def _gateway_transport(base_url: str, credential_store: Any,
         return {
             "output_text": content,
             "finish": finish,
-            "usage": dict(usage) if isinstance(usage, Mapping) else {},
+            "usage": _normalize_gateway_usage(usage),
         }
 
     return _transport

@@ -56,13 +56,50 @@ def _safe_raw(payload, safe):
 
 
 def _metrics_from(usage):
-    """Split a usage payload into evidenced ints; missing stays UNAVAILABLE."""
+    """Split a usage payload into evidenced ints; missing stays UNAVAILABLE.
+
+    Accepts METRIC_KEYS names and the OpenAI-compatible wire names
+    (prompt_tokens -> input_tokens, completion_tokens -> output_tokens,
+    prompt_tokens_details.cached_tokens -> cached_tokens,
+    completion_tokens_details.reasoning_tokens -> reasoning_tokens).
+    METRIC_KEYS names win; nothing is invented.
+    """
     usage = usage if isinstance(usage, dict) else {}
     present = {}
-    for key in METRIC_KEYS:
-        value = usage.get(key)
+
+    def _as_int(value):
         if isinstance(value, int) and not isinstance(value, bool):
-            present[key] = value
+            return value
+        return None
+
+    direct = _as_int(usage.get("input_tokens"))
+    if direct is None:
+        direct = _as_int(usage.get("prompt_tokens"))
+    if direct is not None:
+        present["input_tokens"] = direct
+    direct = _as_int(usage.get("output_tokens"))
+    if direct is None:
+        direct = _as_int(usage.get("completion_tokens"))
+    if direct is not None:
+        present["output_tokens"] = direct
+    cached = _as_int(usage.get("cached_tokens"))
+    if cached is None:
+        details = usage.get("prompt_tokens_details")
+        if isinstance(details, dict):
+            cached = _as_int(details.get("cached_tokens"))
+    if cached is None:
+        details = usage.get("completion_tokens_details")
+        if isinstance(details, dict):
+            cached = _as_int(details.get("cached_tokens"))
+    if cached is not None:
+        present["cached_tokens"] = cached
+    reasoning = _as_int(usage.get("reasoning_tokens"))
+    if reasoning is None:
+        details = usage.get("completion_tokens_details")
+        if isinstance(details, dict):
+            reasoning = _as_int(details.get("reasoning_tokens"))
+    if reasoning is not None:
+        present["reasoning_tokens"] = reasoning
     return present
 
 
