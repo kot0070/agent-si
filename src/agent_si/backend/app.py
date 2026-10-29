@@ -527,6 +527,10 @@ def create_app(settings: Any = None,
     _localbench_routes.register_localbench_routes(app)
     _stage_runner.register_stage_routes(app)
 
+    from agent_si.backend import assurance_mount as _k03mnt1_assurance_mount
+
+    _k03mnt1_assurance_mount.register_assurance_routes(app)
+
     # K02R3: project/task read + console write routes (M-ROUTES). Reads
     # need no token; writes enforce the frozen USER_WRITE guard
     # themselves. Never touch the K04 block below.
