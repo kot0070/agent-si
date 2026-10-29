@@ -1,4 +1,4 @@
-// K04 D15 contract stub (types ONLY, zero runtime code).
+// K04 D15 contract types (types ONLY, zero runtime code).
 // Product code never imports this file; the contract test type-checks
 // the real components' props against these interfaces.
 

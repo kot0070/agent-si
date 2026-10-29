@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { ApiClientProvider } from "../../app/ApiClientProvider";
-import { FakeApiClient } from "../../api/client";
+import { FakeApiClient } from "../../api/__tests__/fakeApiClient";
 import { ENDPOINTS } from "../../api/endpoints";
 import { App } from "../../app/App";
 import { SettingsLayout } from "../../shell/SettingsLayout";

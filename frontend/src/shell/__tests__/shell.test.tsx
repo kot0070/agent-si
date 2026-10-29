@@ -10,7 +10,7 @@ import {
 import { Link, RouterProvider, createMemoryRouter, useLocation } from "react-router-dom";
 import type { ReactElement } from "react";
 import { ApiClientProvider, useCurrentProject } from "../../app/ApiClientProvider";
-import { FakeApiClient } from "../../api/client";
+import { FakeApiClient } from "../../api/__tests__/fakeApiClient";
 import {
   LOCALE_STORAGE_KEY,
   resetLocaleForTests,

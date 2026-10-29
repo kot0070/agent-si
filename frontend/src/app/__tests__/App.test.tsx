@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { ApiClientProvider } from "../../app/ApiClientProvider";
-import { FakeApiClient } from "../../api/client";
+import { FakeApiClient } from "../../api/__tests__/fakeApiClient";
 import {
   resetLocaleForTests,
   setLocale,
