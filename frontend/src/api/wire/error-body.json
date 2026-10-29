@@ -1,0 +1,36 @@
+{
+  "budget_400": {
+    "code": "BUDGET_PROJECT_ID_REQUIRED",
+    "message": "project_id required"
+  },
+  "budget_404": {
+    "code": "BUDGET_NOT_CONFIGURED",
+    "message": "no budget state on file for 'wire-no-such-project'"
+  },
+  "chat_400": {
+    "detail": {
+      "code": "CHAT_BAD_REQUEST",
+      "message": "chat stream needs a non-empty message"
+    }
+  },
+  "chat_401": {
+    "detail": {
+      "code": "CHAT_ACTOR_MISSING",
+      "message": "missing x-actor header"
+    }
+  },
+  "no_provider_error_event": {
+    "code": "NO_PROVIDER_BOUND",
+    "message": "no provider is connected; connect a provider to enable chat",
+    "run_id": "wire-run-001",
+    "stream_id": "wire-stream-001",
+    "type": "error"
+  },
+  "no_provider_http_status": 200,
+  "report_404": {
+    "detail": {
+      "code": "REPORT_ROW_NOT_FOUND",
+      "message": "no ledger row for package wire-no-such-pkg"
+    }
+  }
+}

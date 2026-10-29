@@ -1,0 +1,8 @@
+data: {"actor": "tester-livewire", "agents": [], "live_agents": 0, "pool": "", "profile": "", "project": "wire-chat-project", "run_id": "wire-run-001", "stream_id": "wire-stream-001", "task": "", "type": "start"}
+
+data: {"run_id": "wire-run-001", "stream_id": "wire-stream-001", "type": "tool_call"}
+
+data: {"finish_reason": "stop", "mock": true, "output_ref": "artifact:run/wire-manager-run-001/output", "run_id": "wire-run-001", "stream_id": "wire-stream-001", "text": "Wire mock reply one.", "type": "delta"}
+
+data: {"approval_requested": false, "executed": true, "finish_reason": "stop", "mock": true, "output_ref": "artifact:run/wire-manager-run-001/output", "run_id": "wire-run-001", "stream_id": "wire-stream-001", "type": "done"}
+

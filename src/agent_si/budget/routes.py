@@ -4,6 +4,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, Dict, Tuple
 
+#: Stable machine codes for the budget error bodies (M-WIRE L0B-08/11).
+BUDGET_PROJECT_ID_REQUIRED = "BUDGET_PROJECT_ID_REQUIRED"
+BUDGET_NOT_CONFIGURED = "BUDGET_NOT_CONFIGURED"
+
 
 def _query_value(query, name, default=None):
     value = (query or {}).get(name, default)
@@ -38,16 +42,17 @@ def get_budget(ctx, query, body) -> Tuple[int, Dict[str, Any]]:
     if project_id is None:
         project_id = params.get("project_id", "p1")
     if not isinstance(project_id, str) or not project_id:
-        return 400, {"error": "project_id required"}
+        return 400, {"code": BUDGET_PROJECT_ID_REQUIRED,
+                         "message": "project_id required"}
     budget_state = getattr(ctx, "budget_state", None)
     if budget_state is None:
-        return 404, {"error": "no budget state on file for %r" % (project_id,)}
+        return 404, {"code": BUDGET_NOT_CONFIGURED, "message": "no budget state on file for %r" % (project_id,)}
     get_state = getattr(budget_state, "get_state", None)
     if callable(get_state):
         try:
             state = get_state(project_id)
         except (KeyError, LookupError):
-            return 404, {"error": "no budget state on file for %r"
+            return 404, {"code": BUDGET_NOT_CONFIGURED, "message": "no budget state on file for %r"
                          % (project_id,)}
         return 200, {"project_id": project_id,
                      "budget": _state_payload(state)}
@@ -58,13 +63,13 @@ def get_budget(ctx, query, body) -> Tuple[int, Dict[str, Any]]:
                          "budget": dict(node[project_id])}
         if "project_id" in node:
             if node.get("project_id") != project_id:
-                return 404, {"error": "no budget state on file for %r"
+                return 404, {"code": BUDGET_NOT_CONFIGURED, "message": "no budget state on file for %r"
                              % (project_id,)}
             return 200, {"project_id": project_id, "budget": node}
-        return 404, {"error": "no budget state on file for %r" % (project_id,)}
+        return 404, {"code": BUDGET_NOT_CONFIGURED, "message": "no budget state on file for %r" % (project_id,)}
     state_project = getattr(budget_state, "project_id", None)
     if state_project is not None and state_project != project_id:
-        return 404, {"error": "no budget state on file for %r" % (project_id,)}
+        return 404, {"code": BUDGET_NOT_CONFIGURED, "message": "no budget state on file for %r" % (project_id,)}
     return 200, {"project_id": project_id,
                  "budget": _state_payload(budget_state)}
 

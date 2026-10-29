@@ -43,11 +43,12 @@ const ERROR_CODES: ReadonlyArray<ApiErrorCode> = [
   "KB_PROPOSAL_NOT_APPROVED",
   "KEY_SAVE_TIMEOUT",
   "CREDENTIAL_ENTRY_MISSING",
+  "NO_PROVIDER_BOUND",
 ];
 
 export const API_ERROR_CODES: ReadonlyArray<ApiErrorCode> = ERROR_CODES;
 
-function isErrorCode(value: unknown): value is ApiErrorCode {
+export function isErrorCode(value: unknown): value is ApiErrorCode {
   return (
     typeof value === "string" &&
     (ERROR_CODES as ReadonlyArray<string>).includes(value)
@@ -55,7 +56,8 @@ function isErrorCode(value: unknown): value is ApiErrorCode {
 }
 
 const ErrorBodySchema = z.object({
-  code: z.unknown(),
+  code: z.unknown().optional(),
+  detail: z.unknown().optional(),
   detail_ref: z.unknown().optional(),
 });
 
@@ -63,10 +65,27 @@ function errorFromStatus(code: ApiErrorCode, status: number): ApiError {
   return new ApiError(code, status);
 }
 
+export function apiErrorFromCode(code: unknown, status: number): ApiError {
+  if (typeof code === "string" && code.length > 0) {
+    return errorFromStatus(code as ApiErrorCode, status);
+  }
+  return errorFromStatus("CONTEXT_WRONG_CONTRACT_VERSION", status);
+}
+
 export function parseErrorBody(data: unknown, status: number): ApiError {
   const checked = ErrorBodySchema.safeParse(data);
-  if (checked.success && isErrorCode(checked.data.code)) {
-    return errorFromStatus(checked.data.code, status);
+  if (checked.success) {
+    const raw = (checked.data as { code?: unknown }).code;
+    if (typeof raw === "string" && raw.length > 0) {
+      return apiErrorFromCode(raw, status);
+    }
+    const detail = (checked.data as { detail?: unknown }).detail;
+    if (typeof detail === "object" && detail !== null) {
+      const nested = (detail as { code?: unknown }).code;
+      if (typeof nested === "string" && nested.length > 0) {
+        return apiErrorFromCode(nested, status);
+      }
+    }
   }
   if (status === 404) {
     return errorFromStatus("CONTEXT_MISSING", status);
@@ -228,7 +247,7 @@ export async function requestVoid(
   await requestResponse(path, options);
 }
 
-export function apiErrorLocaleKey(code: ApiErrorCode): string {
+export function apiErrorLocaleKey(code: string): string {
   switch (code) {
     case "SCOPE_OVERLAP":
       return "api.error.scope_overlap";
@@ -280,5 +299,9 @@ export function apiErrorLocaleKey(code: ApiErrorCode): string {
       return "api.error.key_save_timeout";
     case "CREDENTIAL_ENTRY_MISSING":
       return "api.error.credential_entry_missing";
+    case "NO_PROVIDER_BOUND":
+      return "firstrun.steps.connectProvider";
+    default:
+      return "errors.generic";
   }
 }

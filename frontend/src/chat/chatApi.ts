@@ -36,10 +36,9 @@ export function streamChat(
   if (!checked.success) {
     throw invalidBody();
   }
-  const streamId = checked.data.stream_id;
+  const stream = client.openChatStream(checked.data);
   let cancelRequested = false;
   const done: Promise<{ aborted: boolean }> = (async () => {
-    const stream = client.openChatStream(checked.data);
     let aborted = false;
     for await (const raw of stream.chunks) {
       if (cancelRequested || progress.isCancelled()) {
@@ -61,11 +60,13 @@ export function streamChat(
     return { aborted: aborted || cancelRequested };
   })();
   return {
-    streamId,
+    get streamId() {
+      return stream.stream_id;
+    },
     done,
     cancel(): Promise<void> {
       cancelRequested = true;
-      return client.cancelChatStream(streamId);
+      return client.cancelChatStream(stream.stream_id);
     },
   };
 }
