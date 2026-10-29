@@ -27,11 +27,11 @@ import type {
 } from "./iface";
 import { ENDPOINTS, expandEndpoint, withPackage, withProject } from "./endpoints";
 import {
-  ApiError,
   parseOrThrow,
   requestJson,
   requestVoid,
 } from "./errors";
+import { readWithSharedRetry } from "./retry";
 
 export type {
   BudgetState,
@@ -238,57 +238,22 @@ function fetchProjectRecordsOnce(): Promise<ProjectRecord[]> {
   ).then((body) => body.projects);
 }
 
-function retryDelayMs(attempt: number): Promise<void> {
-  const waitMs = 10 * 2 ** (attempt - 1);
-  return new Promise((resolve) => {
-    setTimeout(resolve, waitMs);
-  });
-}
-
-let inflightProjectRecords: Promise<ProjectRecord[]> | null = null;
-
 export async function listProjectRecords(): Promise<ProjectRecord[]> {
-  const shared = inflightProjectRecords;
-  if (shared !== null) {
-    return shared;
-  }
-  const task = (async (): Promise<ProjectRecord[]> => {
-    for (let attempt = 1; ; attempt += 1) {
-      try {
-        return await fetchProjectRecordsOnce();
-      } catch (error) {
-        if (
-          error instanceof ApiError &&
-          error.status >= 400 &&
-          error.status < 500
-        ) {
-          throw error;
-        }
-        if (attempt >= 3) {
-          throw error;
-        }
-        await retryDelayMs(attempt);
-      }
-    }
-  })();
-  inflightProjectRecords = task;
-  try {
-    return await task;
-  } finally {
-    if (inflightProjectRecords === task) {
-      inflightProjectRecords = null;
-    }
-  }
+  return readWithSharedRetry("projects:list", () =>
+    fetchProjectRecordsOnce(),
+  );
 }
 
 export async function readProjectRecord(
   projectId: string,
 ): Promise<ProjectRecord> {
-  return requestJson(
-    expandEndpoint(ENDPOINTS.projectById, projectId),
-    { method: "GET", kind: "read" },
-    ProjectResponseSchema,
-  ).then((body) => body.project);
+  return readWithSharedRetry(`projects:read:${projectId}`, () =>
+    requestJson(
+      expandEndpoint(ENDPOINTS.projectById, projectId),
+      { method: "GET", kind: "read" },
+      ProjectResponseSchema,
+    ).then((body) => body.project),
+  );
 }
 
 export async function createProjectRecord(
@@ -322,19 +287,23 @@ export async function deleteProjectRecord(projectId: string): Promise<void> {
 export async function listTaskRecords(
   projectId: string,
 ): Promise<TaskRecord[]> {
-  return requestJson(
-    withProject(ENDPOINTS.tasks, projectId),
-    { method: "GET", kind: "read" },
-    TasksResponseSchema,
-  ).then((body) => body.tasks);
+  return readWithSharedRetry(`tasks:list:${projectId}`, () =>
+    requestJson(
+      withProject(ENDPOINTS.tasks, projectId),
+      { method: "GET", kind: "read" },
+      TasksResponseSchema,
+    ).then((body) => body.tasks),
+  );
 }
 
 export async function readTaskRecord(taskId: string): Promise<TaskRecord> {
-  return requestJson(
-    expandEndpoint(ENDPOINTS.taskById, taskId),
-    { method: "GET", kind: "read" },
-    TaskResponseSchema,
-  ).then((body) => body.task);
+  return readWithSharedRetry(`tasks:read:${taskId}`, () =>
+    requestJson(
+      expandEndpoint(ENDPOINTS.taskById, taskId),
+      { method: "GET", kind: "read" },
+      TaskResponseSchema,
+    ).then((body) => body.task),
+  );
 }
 
 export async function readTaskTurns(taskId: string): Promise<TaskTurns> {
@@ -359,40 +328,48 @@ export async function createTaskRecord(
 export async function readLedgerRows(
   projectId: string,
 ): Promise<LedgerRow[]> {
-  return requestJson(
-    withProject(ENDPOINTS.ledger, projectId),
-    { method: "GET", kind: "read" },
-    LedgerResponseSchema,
-  ).then((body) => body.rows);
+  return readWithSharedRetry(`ledger:read:${projectId}`, () =>
+    requestJson(
+      withProject(ENDPOINTS.ledger, projectId),
+      { method: "GET", kind: "read" },
+      LedgerResponseSchema,
+    ).then((body) => body.rows),
+  );
 }
 
 export async function readPackageReport(
   packageId: string,
 ): Promise<PackageReport> {
-  return requestJson(withPackage(ENDPOINTS.nextPackageNudge, packageId), {
-    method: "GET",
-    kind: "read",
-  }, PackageReportSchema);
+  return readWithSharedRetry(`nudge:read:${packageId}`, () =>
+    requestJson(withPackage(ENDPOINTS.nextPackageNudge, packageId), {
+      method: "GET",
+      kind: "read",
+    }, PackageReportSchema),
+  );
 }
 
 export async function readRoutingWhyDetail(
   decisionId: string,
 ): Promise<RoutingWhy> {
-  return requestJson(
-    expandEndpoint(ENDPOINTS.routingWhy, decisionId),
-    { method: "GET", kind: "read" },
-    RoutingWhySchema,
+  return readWithSharedRetry(`routing-why:read:${decisionId}`, () =>
+    requestJson(
+      expandEndpoint(ENDPOINTS.routingWhy, decisionId),
+      { method: "GET", kind: "read" },
+      RoutingWhySchema,
+    ),
   );
 }
 
 export async function readBudgetState(
   projectId: string,
 ): Promise<BudgetState> {
-  return requestJson(
-    withProject(ENDPOINTS.budget, projectId),
-    { method: "GET", kind: "read" },
-    BudgetResponseSchema,
-  ).then((body) => body.budget);
+  return readWithSharedRetry(`budget:read:${projectId}`, () =>
+    requestJson(
+      withProject(ENDPOINTS.budget, projectId),
+      { method: "GET", kind: "read" },
+      BudgetResponseSchema,
+    ).then((body) => body.budget),
+  );
 }
 
 export async function cancelChatStreamRequest(

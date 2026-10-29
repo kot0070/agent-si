@@ -26,6 +26,7 @@ import {
   parseOrThrow,
   requestResponse,
 } from "./errors";
+import { readWithSharedRetry } from "./retry";
 import { listAgentsLiveRows, parseAgentsLive } from "./agentsApi";
 import { PartRowSchema } from "./agentsApi";
 import {
@@ -62,7 +63,7 @@ export class HttpApiClient implements ApiClient {
   }
 
   listAgentsLive(): Promise<PartRow[]> {
-    return listAgentsLiveRows();
+    return readWithSharedRetry("agents:live", () => listAgentsLiveRows());
   }
 
   readLedger(project_id: string): Promise<LedgerRow[]> {
