@@ -1,6 +1,12 @@
-import { createElement, useState } from 'react';
+import { createElement, useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { t } from '../locale/index';
+import { ApiError } from '../api/errors';
+import {
+  readRoleProfileFromServer,
+  readRoleProfilesFromServer,
+  writeRoleProfileToServer,
+} from './roleProfilesApi';
 
 export type RoleMode = 'PINNED' | 'pool' | 'AUTO';
 
@@ -51,7 +57,7 @@ function isRoleMode(value: unknown): value is RoleMode {
   return value === 'PINNED' || value === 'pool' || value === 'AUTO';
 }
 
-export function readRoleProfiles(projectId: string): RoleProfileMap {
+function readCacheMap(projectId: string): RoleProfileMap {
   try {
     const raw = window.localStorage.getItem(roleProfilesKey(projectId));
     if (raw === null) {
@@ -85,15 +91,55 @@ export function readRoleProfiles(projectId: string): RoleProfileMap {
   }
 }
 
-export function readRoleProfile(projectId: string, role: string): RoleModelProfile | undefined {
-  const profile = readRoleProfiles(projectId)[role];
-  if (profile === undefined) {
-    return undefined;
+function writeCacheMap(projectId: string, map: RoleProfileMap): void {
+  try {
+    window.localStorage.setItem(roleProfilesKey(projectId), JSON.stringify(map));
+  } catch {
+    // Storage unavailable: the in-memory edit still re-renders.
   }
-  return { ...profile };
 }
 
-export function saveRoleProfile(projectId: string, input: RoleProfileInput): RoleProfileValidation {
+// Server value first; the localStorage copy stays only as an offline
+// cache read AFTER the server value (a failed server read falls back to
+// it, never the other way round).
+export async function readRoleProfiles(projectId: string): Promise<RoleProfileMap> {
+  try {
+    const server = await readRoleProfilesFromServer(projectId);
+    writeCacheMap(projectId, server);
+    return server;
+  } catch {
+    return readCacheMap(projectId);
+  }
+}
+
+export async function readRoleProfile(
+  projectId: string,
+  role: string,
+): Promise<RoleModelProfile | undefined> {
+  // Direct per-role server GET (per project+role route): singular reads must
+  // work for any saved role string, while the map stays frozen-roles-based.
+  try {
+    const profile = await readRoleProfileFromServer(projectId, role);
+    if (profile !== undefined) {
+      const map = readCacheMap(projectId);
+      map[role] = profile;
+      writeCacheMap(projectId, map);
+      return { ...profile };
+    }
+  } catch {
+    const cached = readCacheMap(projectId)[role];
+    return cached === undefined ? undefined : { ...cached };
+  }
+  return undefined;
+}
+
+// Server write first; the cache follows only on success. A failed server
+// write rejects (it surfaces, never a silent local-only success) and the
+// cache is left untouched.
+export async function saveRoleProfile(
+  projectId: string,
+  input: RoleProfileInput,
+): Promise<RoleProfileValidation> {
   const validation = validateRoleProfile(input);
   if (!validation.ok) {
     return validation;
@@ -108,13 +154,10 @@ export function saveRoleProfile(projectId: string, input: RoleProfileInput): Rol
   if (model.length > 0) {
     profile.model = model;
   }
-  const map = readRoleProfiles(projectId);
-  map[role] = profile;
-  try {
-    window.localStorage.setItem(roleProfilesKey(projectId), JSON.stringify(map));
-  } catch {
-    // Storage unavailable: the in-memory edit still re-renders.
-  }
+  const saved = await writeRoleProfileToServer(projectId, role, profile);
+  const map = readCacheMap(projectId);
+  map[role] = saved;
+  writeCacheMap(projectId, map);
   return { ok: true, errors: [] };
 }
 
@@ -158,12 +201,47 @@ export function validateRoleProfile(input: RoleProfileInput): RoleProfileValidat
 }
 
 export function RoleProfileEditor(props: RoleProfileEditorProps): ReactElement {
-  const saved = readRoleProfile(props.projectId, props.role);
   const [roleText, setRoleText] = useState(props.role);
-  const [mode, setMode] = useState<RoleMode>(saved?.mode ?? 'AUTO');
-  const [provider, setProvider] = useState(saved?.provider ?? '');
-  const [model, setModel] = useState(saved?.model ?? '');
+  const [mode, setMode] = useState<RoleMode>('AUTO');
+  const [provider, setProvider] = useState('');
+  const [model, setModel] = useState('');
+  const [saveError, setSaveError] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void readRoleProfile(props.projectId, props.role).then((saved) => {
+      if (!alive) {
+        return;
+      }
+      if (saved !== undefined) {
+        setMode(saved.mode);
+        setProvider(saved.provider ?? '');
+        setModel(saved.model ?? '');
+      }
+    }).catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [props.projectId, props.role]);
+  function persist(next: {
+    role: string;
+    mode: RoleMode;
+    provider: string;
+    model: string;
+  }): void {
+    void saveRoleProfile(props.projectId, next).then(
+      () => {
+        setSaveError(null);
+      },
+      (error: unknown) => {
+        setSaveError(error instanceof ApiError ? error.code : 'CONTEXT_MISSING');
+      },
+    );
+  }
   const validation = validateRoleProfile({ role: roleText, mode, provider, model });
+  const errors =
+    saveError === null
+      ? validation.errors
+      : [...validation.errors, `${t('errors.generic')} (${saveError})`];
   const baseId = `role-profile-${props.projectId}-${props.role}`;
   return createElement(
     'form',
@@ -177,7 +255,7 @@ export function RoleProfileEditor(props: RoleProfileEditorProps): ReactElement {
       onChange: (event: { target: { value: string } }) => {
         const next = event.target.value;
         setRoleText(next);
-        saveRoleProfile(props.projectId, { role: next, mode, provider, model });
+        persist({ role: next, mode, provider, model });
       },
     }),
     createElement('label', { htmlFor: `${baseId}-mode` }, t('settings.roleProfile.modeLabel')),
@@ -189,7 +267,7 @@ export function RoleProfileEditor(props: RoleProfileEditorProps): ReactElement {
         onChange: (event: { target: { value: string } }) => {
           const next = event.target.value as RoleMode;
           setMode(next);
-          saveRoleProfile(props.projectId, { role: roleText, mode: next, provider, model });
+          persist({ role: roleText, mode: next, provider, model });
         },
       },
       ROLE_MODES.map((option) =>
@@ -204,7 +282,7 @@ export function RoleProfileEditor(props: RoleProfileEditorProps): ReactElement {
       onChange: (event: { target: { value: string } }) => {
         const next = event.target.value;
         setProvider(next);
-        saveRoleProfile(props.projectId, { role: roleText, mode, provider: next, model });
+        persist({ role: roleText, mode, provider: next, model });
       },
     }),
     createElement('label', { htmlFor: `${baseId}-model` }, t('settings.roleProfile.modelLabel')),
@@ -215,13 +293,13 @@ export function RoleProfileEditor(props: RoleProfileEditorProps): ReactElement {
       onChange: (event: { target: { value: string } }) => {
         const next = event.target.value;
         setModel(next);
-        saveRoleProfile(props.projectId, { role: roleText, mode, provider, model: next });
+        persist({ role: roleText, mode, provider, model: next });
       },
     }),
     createElement(
       'ul',
       null,
-      validation.errors.map((error) => createElement('li', { key: error }, error)),
+      errors.map((error) => createElement('li', { key: error }, error)),
     ),
   );
 }

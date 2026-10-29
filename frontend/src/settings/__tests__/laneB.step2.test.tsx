@@ -1,19 +1,66 @@
 /** @vitest-environment jsdom */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { AcceptedRiskSwitch, RoleProfileEditor, validateRoleProfile } from '../index';
 import type { RoleMode } from '../index';
 import { resetLocaleForTests, setLocale } from '../../locale/index';
 import en from '../../locale/en.json';
 
+const serverRows = new Map<string, Record<string, unknown>>();
+
+function jsonBody(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+// The editor saves through the server now, so the boundary answers the
+// role route; validation assertions below stay exactly as they were.
+function stubBoundary(): void {
+  serverRows.clear();
+  vi.stubGlobal('fetch', async (input: unknown, init?: RequestInit) => {
+    const url = String(input);
+    const method = (init?.method ?? 'GET').toUpperCase();
+    let body: unknown = null;
+    if (typeof init?.body === 'string' && init.body.length > 0) {
+      try {
+        body = JSON.parse(init.body) as unknown;
+      } catch {
+        body = null;
+      }
+    }
+    if (url === '/api/v1/routing/role' && method === 'PUT') {
+      const record = (body ?? {}) as Record<string, unknown>;
+      const row: Record<string, unknown> = {
+        role: String(record['role'] ?? ''),
+        project_id: String(record['project_id'] ?? ''),
+        mode: String(record['mode'] ?? ''),
+        provider: record['provider'] ?? null,
+        model: record['model'] ?? null,
+        binding: 'DEFAULT',
+        version: 1,
+      };
+      serverRows.set(`${row['project_id']}::${row['role']}`, row);
+      return jsonBody({ ok: true, profile: row });
+    }
+    if (url.startsWith('/api/v1/routing/role?') && method === 'GET') {
+      return jsonBody({ error: 'missing' }, 404);
+    }
+    throw new Error(`unexpected fetch ${method} ${url}`);
+  });
+}
+
 beforeEach(() => {
   resetLocaleForTests();
   setLocale('en');
   window.localStorage.clear();
+  stubBoundary();
 });
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   resetLocaleForTests();
   window.localStorage.clear();
 });
