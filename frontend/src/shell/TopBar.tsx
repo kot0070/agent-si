@@ -1,3 +1,4 @@
+// kit BUILD_PLAN:1479 M-R-UX-1 one top bar; pairing as top strip, never overlay chrome
 // Lane A top bar: project switcher, always-on Watcher chip, Stop-all
 // signal and language switch. Language changes flow through the frozen
 // locale surface: setLocale updates the module plus persistence, then a
@@ -98,6 +99,7 @@ export function TopBar(props: TopBarProps): ReactElement {
 
   return (
     <header data-testid="topbar">
+      <span data-testid="k07open10-shell" aria-hidden="true" />
       <div data-testid="pairing-strip">
         <span>{t("shell.topbar.watcher")}</span>
         <span>
