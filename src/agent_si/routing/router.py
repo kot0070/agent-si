@@ -7,6 +7,7 @@ quality threshold -> optimization -> fallback chain."""
 
 from __future__ import annotations
 
+import hashlib
 import threading
 import uuid
 from dataclasses import dataclass, replace
@@ -21,6 +22,13 @@ if TYPE_CHECKING:
 
 UNKNOWN_PRICE_PENALTY = 1e12
 LOCAL_DRAFT_MIN_RATE = 0.50
+
+#: Named refusal when high-risk reasoning is asked of a candidate that
+#: is not measured-capable (K04OPEN3 M1, row 1605).
+HIGH_RISK_CANDIDATE_NOT_MEASURED_CAPABLE = \
+    "HIGH_RISK_CANDIDATE_NOT_MEASURED_CAPABLE"
+#: Named refusal when the high-risk endpoint gets a non-high task risk.
+HIGH_RISK_TASK_RISK_REQUIRED = "HIGH_RISK_TASK_RISK_REQUIRED"
 
 
 def _new_id(prefix: str) -> str:
@@ -136,6 +144,153 @@ def _effective_caps(provider_caps, facts: Optional[KbModelFacts]):
     if facts is None:
         return None
     return set(provider_caps or ()) & set(facts.modalities or ())
+
+
+def measured_capable(facts: Optional[KbModelFacts], policy) -> bool:
+    """Row 1605 shared predicate: MEASURED evidence meeting policy bars.
+
+    Mirrors the CAPABILITY_EVIDENCE branch condition restricted to
+    MEASURED fields_state: the same sample/confidence/freshness bars the
+    selection path enforces. Shared by the in-selection high-risk gate
+    below and the served high-risk endpoint so the two never drift.
+    """
+    if facts is None:
+        return False
+    return (facts.fields_state == "MEASURED"
+            and facts.strict_pass_rate is not None
+            and facts.sample_count is not None
+            and facts.sample_count >= policy.sample_min
+            and facts.confidence is not None
+            and facts.confidence >= policy.confidence_min
+            and _fresh_ok(facts.freshness, policy.freshness_requirement))
+
+
+#: Optimization Policy view fields (ARCH-528): required quality, risk
+#: ceiling and weights, read off the real OptimizationPolicy.
+POLICY_VIEW_FIELDS = (
+    "required_quality", "max_risk", "weight_quality", "weight_cost",
+    "weight_latency", "weight_cloud_tokens",
+)
+
+
+def optimization_policy_view(opt) -> dict:
+    """ARCH-528 Optimization Policy view (kit/BUILD_PLAN.md:1594).
+
+    Quote kit/BUILD_PLAN.md:1594 B0B-UNCOVERED_ARCH-528: "The AI
+    SETTINGS Optimization Policy view presents required quality and
+    risk ceiling and weights and". Presents required quality, risk
+    ceiling and weights derived from the real OptimizationPolicy (or
+    an equivalent mapping); missing values raise ValueError, never a
+    guessed default. Production callers: _finish and blocked_outcome
+    below (every decision reason carries this view on the served
+    routing entry).
+    """
+    if opt is None:
+        raise ValueError(
+            "optimization_policy_view needs an OptimizationPolicy, "
+            "got None")
+    try:
+        if hasattr(opt, "get") and not hasattr(opt, "required_quality"):
+            values = {name: opt.get(name) for name in POLICY_VIEW_FIELDS}
+            extra = {"policy_id": opt.get("policy_id"),
+                     "version": opt.get("version")}
+        else:
+            values = {name: getattr(opt, name)
+                      for name in POLICY_VIEW_FIELDS}
+            extra = {"policy_id": getattr(opt, "policy_id", None),
+                     "version": getattr(opt, "version", None)}
+    except AttributeError as exc:
+        raise ValueError(
+            "optimization_policy_view: policy shape missing %s" % (exc,)
+        ) from None
+    missing = sorted(name for name, value in values.items()
+                     if value is None)
+    if missing:
+        raise ValueError(
+            "optimization_policy_view: policy missing %s"
+            % ", ".join(missing))
+    view = dict(extra)
+    view.update(values)
+    return view
+
+
+def _policy_view_text(opt) -> str:
+    """Evidence-only reason rendering of optimization_policy_view.
+
+    Returns "" on any failure so rendering never breaks selection.
+    """
+    try:
+        view = optimization_policy_view(opt)
+    except Exception:
+        return ""
+    return ("policy_view=required_quality>=%s max_risk<=%s "
+            "weight_quality=%s weight_cost=%s weight_latency=%s "
+            "weight_cloud_tokens=%s"
+            % (view["required_quality"], view["max_risk"],
+               view["weight_quality"], view["weight_cost"],
+               view["weight_latency"], view["weight_cloud_tokens"]))
+
+
+def _pricing_version_id(provider, model, input_price, output_price) -> str:
+    """Deterministic version id for one provider/model/price triple."""
+    raw = "|".join((str(provider), str(model), str(input_price),
+                    str(output_price)))
+    return "psnap-" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
+
+
+def _record_winner_pricing(request, deps, winner) -> str:
+    """ARCH-424 winner-price evidence (kit/BUILD_PLAN.md:1643).
+
+    Records the routed winner's known prices as a new immutable
+    PricingSnapshot version through the bound BudgetGate registry
+    (BudgetGate.publish_pricing_snapshot, guarded by
+    pricing_snapshot_immutable in agent_si.budget.gate); versions
+    accumulate, old rows are never rewritten. Evidence only: returns
+    "" unless the winner has known prices and a versioned registry is
+    bound, and never raises into selection.
+    """
+    try:
+        gate = getattr(deps, "budget_state", None)
+        publish = getattr(gate, "publish_pricing_snapshot", None)
+        if publish is None or winner is None:
+            return ""
+        if not getattr(winner, "cost_known", False):
+            return ""
+        facts = getattr(winner, "facts", None)
+        if facts is None:
+            return ""
+        candidate = getattr(winner, "candidate", None)
+        provider = getattr(facts, "provider", None) or getattr(
+            candidate, "provider", None)
+        model = getattr(facts, "model", None) or getattr(
+            candidate, "model", None)
+        if not provider or not model:
+            return ""
+        input_price = getattr(facts, "input_price", None)
+        output_price = getattr(facts, "output_price", None)
+        if input_price is None or output_price is None:
+            return ""
+        stored = publish({
+            "pricing_snapshot_id": _pricing_version_id(
+                provider, model, input_price, output_price),
+            "provider_id": provider, "model_id": model,
+            "currency": None, "effective_at": T.utcnow(),
+            "source": "routing-decision",
+            "input_token_price": input_price,
+            "output_token_price": output_price,
+            "cached_token_price": None, "reasoning_token_price": None,
+            "request_price": None, "other_rules": [],
+            "created_at": T.utcnow(), "hash": "",
+        })
+        if isinstance(stored, Mapping):
+            stored_id = stored.get("pricing_snapshot_id")
+        else:
+            stored_id = getattr(stored, "pricing_snapshot_id", None)
+        if not stored_id:
+            return ""
+        return "pricing_snapshot=%s" % (stored_id,)
+    except Exception:
+        return ""
 
 
 def _evaluate(request: RoutingRequest, deps: RoutingDeps,
@@ -311,6 +466,21 @@ def _evaluate(request: RoutingRequest, deps: RoutingDeps,
         ev.quality = None  # pin: quality enforced later by ENHANCED verification
     ok("QUALITY_THRESHOLD")
 
+    # Row 1605 — high-risk reasoning/final-verification gate: a
+    # measured-capable candidate (CAPABILITY_EVIDENCE with MEASURED
+    # state) routed for a HIGH/CRITICAL-risk task needs ENHANCED (final)
+    # verification. Pins, verified-static capability and other branches
+    # keep their own level; lower-risk tasks are unaffected.
+    if (ev.branch == "CAPABILITY_EVIDENCE"
+            and measured_capable(ev.facts, policy)
+            and request.task_risk in ("HIGH", "CRITICAL")):
+        ev.required_verification = "ENHANCED"
+        ok("HIGH_RISK_VERIFICATION_GATE",
+           "HIGH/CRITICAL task risk: measured-capable candidate needs "
+           "final (ENHANCED) verification")
+    else:
+        ok("HIGH_RISK_VERIFICATION_GATE", "no elevation")
+
     # Shared descriptors for optimization.
     if ev.facts is not None:
         ev.fit = ev.facts.fit_for(request.task_class)
@@ -384,6 +554,12 @@ def _build_reason(route: str, request: RoutingRequest, winner: Optional[_Eval],
                   ranked: List[_Eval], removed: List[str],
                   rejected: List[_Eval], extra: str = "") -> str:
     parts = ["route=%s task=%s" % (route, request.task_class)]
+    if (winner is not None and winner.branch == "CAPABILITY_EVIDENCE"
+            and winner.required_verification == "ENHANCED"
+            and request.task_risk in ("HIGH", "CRITICAL")):
+        parts.append("HIGH_RISK: final verification required "
+                     "(measured-capable candidate on %s task)"
+                     % request.task_risk)
     if winner is not None:
         parts.append("fit=%s" % (_fmt(winner.fit) if winner.fit is not None
                                  else "unknown"))
@@ -408,6 +584,32 @@ def _build_reason(route: str, request: RoutingRequest, winner: Optional[_Eval],
     for name in removed:
         parts.append("removed: %s" % name)
     return "; ".join(parts)
+
+
+def _target_flow_evidence(request: RoutingRequest, deps: RoutingDeps) -> str:
+    """Row 1673 — explicit TARGET_FLOW resolution evidence for the reason.
+
+    Reports table.resolve for this request's role so the served decide
+    flow shows the explicit per-role result (READY, BLOCKED with
+    NO_PROFILE_BLOCKED, PINNED_UNHEALTHY); never a default, never a
+    swap. Evidence only: any failure yields "" and routing is unchanged.
+    """
+    try:
+        from . import roles as _roles
+        store = getattr(deps, "store", None)
+        if hasattr(store, "get_role_profile"):
+            table = _roles.RoleTable(store=store)
+        else:
+            table = _roles.RoleTable()
+        res = _roles.resolve_target_flow(
+            table, request.project_id, request.role,
+            provider_health=getattr(deps, "provider_health", None),
+            model_health=getattr(deps, "model_health", None),
+            exclude_pairs=tuple(getattr(request, "exclude_pairs", None)
+                                or ()))
+    except Exception:
+        return ""
+    return "target_flow=%s:%s %s" % (res.role, res.status, res.reason)
 
 
 # --------------------------------------------------------------------------
@@ -681,6 +883,16 @@ def _finish(request: RoutingRequest, deps: RoutingDeps,
             optimization_policy_ref=_policy_ref(opt),
             status="PLANNED"))
 
+    flow_evidence = _target_flow_evidence(request, deps)
+    if flow_evidence:
+        reason = "%s; %s" % (reason, flow_evidence)
+    policy_view = _policy_view_text(opt)
+    if policy_view:
+        reason = "%s; %s" % (reason, policy_view)
+    pricing_evidence = _record_winner_pricing(request, deps, winner)
+    if pricing_evidence:
+        reason = "%s; %s" % (reason, pricing_evidence)
+
     candidate_snapshot = tuple(
         {"provider": ev.candidate.provider, "model": ev.candidate.model,
          "provider_type": ev.candidate.provider_type,
@@ -773,6 +985,12 @@ def blocked_outcome(request: RoutingRequest, deps: RoutingDeps,
         if not ev.passed:
             full_reason += ("; rejected: %s (%s at %s)"
                             % (ev.model, ev.fail_detail, ev.failed_step))
+    flow_evidence = _target_flow_evidence(request, deps)
+    if flow_evidence:
+        full_reason += "; %s" % flow_evidence
+    policy_view = _policy_view_text(opt)
+    if policy_view:
+        full_reason += "; %s" % policy_view
     decision = T.RoutingDecision(
         decision_id=decision_id,
         project_id=request.project_id, task_id=request.task_id,
