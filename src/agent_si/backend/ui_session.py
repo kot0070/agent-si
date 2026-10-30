@@ -112,6 +112,14 @@ def create_ask_card(
     return card
 
 
+def _lookup_card(ask_id: str, resume_token: str) -> AskCard:
+    card = _cards_by_token.get(resume_token)
+    if card is None:
+        raise PermissionError(f"unknown resume token for ask {ask_id!r}")
+    if card.ask_id != ask_id:
+        raise PermissionError(f"resume token does not match ask {ask_id!r}")
+    return card
+
 
 def approve_ask(
     *,
@@ -121,12 +129,7 @@ def approve_ask(
 ) -> ApprovalResult:
     if not ask_id or not option_id or not resume_token:
         raise PermissionError("missing ask approval credential")
-    try:
-        card = resume_ask(resume_token=resume_token)
-    except PermissionError:
-        raise PermissionError(f"unknown resume token for ask {ask_id!r}") from None
-    if card.ask_id != ask_id:
-        raise PermissionError(f"resume token does not match ask {ask_id!r}")
+    card = _lookup_card(ask_id, resume_token)
     if option_id not in {o.option_id for o in card.options}:
         raise PermissionError(f"unknown option {option_id!r} for ask {ask_id!r}")
     return ApprovalResult(

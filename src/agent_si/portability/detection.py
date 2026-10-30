@@ -80,33 +80,3 @@ def read_environment_state(keys: list[str]) -> dict[str, Any]:
     if not keys:
         return {}
     return {key: probe(key) for key in keys}
-
-
-def merged_environment_for_project(
-    project_id: str, keys: list[str] | None = None
-) -> dict[str, Any]:
-    """Detect this PC and merge the requested state for one project.
-
-    The detected PC report comes from :func:`detect_this_pc`; the
-    merged state refreshes the requested keys through
-    :func:`read_environment_state` (defaults to the full detected
-    state keys) over that report and stamps the owning project id.
-    Unmeasurable reads stay UNKNOWN and never raise an alarm.
-    """
-    if not isinstance(project_id, str) or not project_id:
-        raise ValueError("project_id must be a non-empty str")
-    detected = detect_this_pc()
-    wanted = list(keys) if keys is not None else [
-        "os", "cpu", "python", "gpu", "local-ai",
-    ]
-    state = read_environment_state(wanted)
-    merged = dict(detected.get("state", {}))
-    merged.update(state)
-    merged["project_id"] = project_id
-    return {
-        "project_id": project_id,
-        "status": detected.get("status", UNKNOWN),
-        "alarm": False,
-        "detected": detected,
-        "environment": merged,
-    }
