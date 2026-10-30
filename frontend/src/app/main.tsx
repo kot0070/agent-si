@@ -9,11 +9,17 @@ import { HttpApiClient } from "../api/client";
 import { LocaleProvider } from "../locale/index";
 import { App } from "./App";
 import "../ui/tokens.css";
+import "../ui/base.css";
+import { applyTheme, readTheme } from "../shell/theme";
 
 const rootElement = document.getElementById("root");
 if (rootElement === null) {
   throw new Error("app root element is missing");
 }
+
+// Single coherent theme before first paint: explicit data-theme on the
+// root (dark default), so cards never sit on an unthemed page.
+applyTheme(readTheme());
 
 const client = new HttpApiClient();
 
