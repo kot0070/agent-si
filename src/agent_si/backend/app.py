@@ -382,6 +382,13 @@ def create_app(settings: Any = None,
         )
     app.include_router(_k08_watcher_routes.router)
 
+    # K02OPEN1B blink (rows 101+102; lane K02BLINK): sibling-router
+    # mount only; no other line in this file changes. Reads stay open,
+    # writes keep the USER_WRITE guard (401 missing x-actor, 403).
+    from agent_si.backend import k02blink_routes as _k02blink_routes
+
+    app.include_router(_k02blink_routes.router)
+
     _K08_WATCHER_STATUS_BY_CODE = {
         "SESSION_TOKEN_MISSING": 401,
         "SESSION_TOKEN_INVALID": 403,
