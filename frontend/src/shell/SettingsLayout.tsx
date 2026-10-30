@@ -1,3 +1,4 @@
+// kit BUILD_PLAN:1480 M-R-UX-2 one H2 plus explainer; jargon carries a Why chip
 import type { ReactElement, ReactNode } from 'react';
 import { t } from '../locale/index';
 
@@ -15,9 +16,9 @@ export function SettingsLayout(props: SettingsLayoutProps): ReactElement {
       <h2>{t(props.titleKey)}</h2>
       <p>{t(props.purposeKey)}</p>
       <p>{t(props.needItNowKey)}</p>
-      <span data-testid="settings-why-chip">
+      <button type="button" data-testid="settings-why-chip">
         {t('projects.why_this_model.title')}
-      </span>
+      </button>
       {props.children}
       {props.advanced}
     </section>
