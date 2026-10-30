@@ -81,6 +81,153 @@ def _ledger_row_payload(package_id: str, agents: int, peak_concurrency: int,
     }
 
 
+def fresh_assurance(turn: Any,
+                    reaudit_of: Any = None,
+                    pair_reuse_ref: Any = None) -> str:
+    """Mint a new audit id through a fresh auditor instance (ROWS 9-13).
+
+    Kit BUILD_PLAN rows 9-13 (BUILD_PLAN.md:1300) plus PRODUCT_SPEC
+    R210: every audit and every re-audit uses a NEW auditor agent with
+    fresh context. Each call builds a new coordinator instance, so per
+    audit and per re-audit the auditor is fresh; ids still come from
+    the real global audit sequence through the real audit entries,
+    never a FakeAuditor. With reaudit_of the prior row is loaded from
+    the real shared record store and the re-audit runs through the
+    real reaudit entry on the fresh instance. Empty work fails.
+    """
+    from agent_si.assurance import audit_coordinator as _ac
+    from agent_si.assurance import audit_records as _ar
+
+    class _FreshAuditor(_ac.AuditCoordinator):
+        """Fresh auditor instance per call; adds no behavior."""
+
+    auditor = _FreshAuditor()
+    if reaudit_of is None:
+        if isinstance(turn, _ac.ServedTurn):
+            served = turn
+        else:
+            fields = turn if isinstance(turn, Mapping) else {}
+            served = _ac.ServedTurn(
+                turn_ref=str(fields.get("turn_ref") or ""),
+                project_id=str(fields.get("project_id") or ""),
+                task_id=str(fields.get("task_id") or ""),
+                run_id=str(fields.get("run_id") or ""),
+                work_refs=tuple(str(v) for v in (
+                    fields.get("work_refs") or ())),
+                artifact_refs=tuple(str(v) for v in (
+                    fields.get("artifact_refs") or ())),
+                evidence_refs=tuple(str(v) for v in (
+                    fields.get("evidence_refs") or ())),
+                producer_session_refs=tuple(str(v) for v in (
+                    fields.get("producer_session_refs") or ())),
+                contract_hash=str(fields.get("contract_hash") or ""),
+            )
+        if not served.work_refs and not served.artifact_refs:
+            raise _ac.EmptyWorkError("served turn carries no work")
+        return auditor.audit_with_fresh_auditor(served)
+    prior_id = str(reaudit_of)
+    prior = _ar._fetch_record(prior_id)
+    if prior is None:
+        raise ValueError("unknown audit_id: %s" % (prior_id,))
+    seed = auditor.__dict__.setdefault("_AUDITS", {})
+    seed[prior_id] = {
+        "scope_id": prior.audit_scope_id,
+        "sequence": prior.audit_sequence,
+        "run_id": prior.run_id,
+        "contract_hash": prior.contract_hash,
+    }
+    scopes = auditor.__dict__.setdefault("_SCOPE_COUNT", {})
+    scopes[prior.audit_scope_id] = max(
+        scopes.get(prior.audit_scope_id, 0), prior.audit_sequence)
+    return auditor.reaudit(prior_id, pair_reuse_ref)
+
+
+def _ref_list(value: Any) -> list:
+    """One body field as a list of strings (missing gives empty)."""
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value]
+    return [str(value)]
+
+
+def runner_contract_verdict(*, project_dir: Any,
+                            tool_rows: Any = (),
+                            files_read: Any = (),
+                            files_written: Any = ()) -> dict:
+    """Judge the real files read and written (R-304).
+
+    Kit BUILD_PLAN row R-304 (BUILD_PLAN.md:1353): the auditor judges
+    the real files read and written. Every listed ref needs both a
+    matching ok tool row and a real file contained in project_dir
+    (the shared checker's rules, through the real checker module);
+    a row alone never suffices. An unreadable project_dir or an
+    empty contract fails closed. Uses only portable stdlib path
+    APIs; no machine paths.
+    """
+    import os as _verdict_os
+
+    from agent_si.assurance.verification import checker as _checker
+
+    if isinstance(tool_rows, (list, tuple)):
+        rows = tuple(tool_rows)
+    elif tool_rows is None:
+        rows = ()
+    else:
+        rows = (tool_rows,)
+    read_refs = _ref_list(files_read)
+    written_refs = _ref_list(files_written)
+    try:
+        base_text = str(project_dir or "")
+    except Exception:
+        base_text = ""
+    dir_ok = bool(base_text)
+    if dir_ok:
+        try:
+            dir_ok = _verdict_os.path.isdir(base_text)
+            if dir_ok:
+                with _verdict_os.scandir(base_text):
+                    pass
+        except (OSError, ValueError):
+            dir_ok = False
+    if not dir_ok:
+        return {
+            "verdict": "FAIL",
+            "reason": "project_dir unreadable",
+            "checked_read": len(read_refs),
+            "checked_written": len(written_refs),
+            "missing": read_refs + written_refs,
+        }
+    if not read_refs and not written_refs and not rows:
+        return {
+            "verdict": "FAIL",
+            "reason": "empty contract: no files and no tool rows",
+            "checked_read": 0,
+            "checked_written": 0,
+            "missing": [],
+        }
+    missing = [
+        ref for ref in read_refs + written_refs
+        if not (_checker._row_resolves(rows, ref)
+                and _checker._file_resolves(base_text, ref))
+    ]
+    if missing:
+        return {
+            "verdict": "FAIL",
+            "reason": "refs need an ok tool row plus a real file",
+            "checked_read": len(read_refs),
+            "checked_written": len(written_refs),
+            "missing": missing,
+        }
+    return {
+        "verdict": "PASS",
+        "reason": "each ref has an ok tool row plus a real file",
+        "checked_read": len(read_refs),
+        "checked_written": len(written_refs),
+        "missing": [],
+    }
+
+
 def create_app(settings: Any = None,
                auth_hook: AuthHook | None = None,
                rate_hook: RateHook | None = None,
@@ -2019,5 +2166,199 @@ def create_app(settings: Any = None,
     def nf7k11a_keychain_seam() -> dict[str, Any]:
         """GET /api/v1/keychain/seam -> keychain_secret_seam."""
         return _nf7k11a_secrets.keychain_secret_seam()
+
+    # --- K03 assurance lane served ops (additions-only). ---
+    # Mounts the three assurance entries over the real lane modules:
+    # audit_served_turn, run_assurance (verify, then audit, then
+    # finalize through the real coordinator) and close_stage. These
+    # are open loopback test ops: JSON body in, JSON out. No provider
+    # calls happen here; the assurance legs run for real through
+    # agent_si.assurance, and empty work fails with 400.
+    from agent_si.assurance import audit_coordinator as _k03a_coordinator
+    from agent_si.assurance import audit_records as _k03a_records
+    from agent_si.assurance import coordinator as _k03a_assurance
+
+    class _K03aAudit(_k03a_coordinator.AuditCoordinator):
+        """Concrete binding of the real audit entries; adds no behavior."""
+
+    def _k03a_tuples(value: Any) -> tuple:
+        """Body list field as a tuple (missing gives empty)."""
+        if value is None:
+            return ()
+        if isinstance(value, (list, tuple)):
+            return tuple(value)
+        return (value,)
+
+    async def _k03a_body(request: Request) -> dict:
+        """Read a JSON object body, tolerating missing/bad payloads."""
+        try:
+            data = await request.json()
+        except Exception:
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _k03a_fail(exc: Exception) -> None:
+        """Map an assurance refusal to its HTTP refusal (always raises)."""
+        if isinstance(exc, HTTPException):
+            raise exc
+        if isinstance(exc, _k03a_coordinator.EmptyWorkError):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": exc.code, "detail": str(exc)})
+        if isinstance(exc, _k03a_assurance.AssuranceRefused):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": exc.code, "detail": str(exc)})
+        if isinstance(exc, (ValueError, TypeError, KeyError)):
+            code = getattr(exc, "code", None) or type(exc).__name__
+            raise HTTPException(
+                status_code=400,
+                detail={"code": code, "detail": str(exc)})
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    @app.post("/api/v1/assurance/audit_served_turn")
+    async def k03a_audit_served_turn(request: Request) -> dict[str, Any]:
+        """POST /api/v1/assurance/audit_served_turn -> audit one turn."""
+        data = await _k03a_body(request)
+        turn = _k03a_coordinator.ServedTurn(
+            turn_ref=str(data.get("turn_ref") or data.get("run_id")
+                         or ""),
+            project_id=str(data.get("project_id") or ""),
+            task_id=str(data.get("task_id") or ""),
+            run_id=str(data.get("run_id") or ""),
+            work_refs=tuple(
+                str(v) for v in _k03a_tuples(data.get("work_refs"))),
+            artifact_refs=tuple(
+                str(v) for v in _k03a_tuples(data.get("artifact_refs"))),
+            evidence_refs=tuple(
+                str(v) for v in _k03a_tuples(data.get("evidence_refs"))),
+            producer_session_refs=tuple(
+                str(v)
+                for v in _k03a_tuples(data.get("producer_session_refs"))),
+            contract_hash=str(data.get("contract_hash") or ""),
+        )
+        try:
+            audit_id = _K03aAudit().audit_served_turn(turn)
+        except Exception as exc:
+            _k03a_fail(exc)
+            raise
+        return {"audit_id": audit_id}
+
+    @app.post("/api/v1/assurance/run_assurance")
+    async def k03a_run_assurance(request: Request) -> dict[str, Any]:
+        """POST /api/v1/assurance/run_assurance -> verify/audit/finalize."""
+        data = await _k03a_body(request)
+        try:
+            outcome = _k03a_coordinator.run_assurance(
+                project_id=str(data.get("project_id") or ""),
+                task_id=str(data.get("task_id") or ""),
+                run_id=str(data.get("run_id") or ""),
+                contract_hash=str(data.get("contract_hash") or ""),
+                artifact_refs=tuple(
+                    _k03a_tuples(data.get("artifact_refs"))),
+                evidence_refs=tuple(
+                    _k03a_tuples(data.get("evidence_refs"))),
+                work_refs=tuple(_k03a_tuples(data.get("work_refs"))),
+                producer_session_refs=tuple(
+                    _k03a_tuples(data.get("producer_session_refs"))),
+                tool_rows=tuple(_k03a_tuples(data.get("tool_rows"))),
+                project_dir=str(data.get("project_dir") or ""),
+                task_state=data.get("task_state"),
+                output_refs=tuple(_k03a_tuples(data.get("output_refs"))),
+                metric_refs=tuple(_k03a_tuples(data.get("metric_refs"))),
+                accounting_complete=bool(
+                    data.get("accounting_complete", False)),
+                budget_settled=bool(data.get("budget_settled", False)),
+                resources_released=bool(
+                    data.get("resources_released", False)),
+            )
+        except Exception as exc:
+            _k03a_fail(exc)
+            raise
+        return {
+            "ok": outcome.ok,
+            "phase": outcome.phase,
+            "verification_id": outcome.verification_id,
+            "audit_id": outcome.audit_id,
+            "finalization_id": outcome.finalization_id,
+            "status_trail": list(outcome.status_trail),
+            "records": [
+                {"leg": step.leg, "status": step.status,
+                 "note": step.note}
+                for step in outcome.records
+            ],
+        }
+
+    @app.post("/api/v1/assurance/close_stage")
+    async def k03a_close_stage(request: Request) -> dict[str, Any]:
+        """POST /api/v1/assurance/close_stage -> close with a row id."""
+        data = await _k03a_body(request)
+        try:
+            row_id = _K03aAudit().close_stage(
+                str(data.get("task_id") or ""),
+                str(data.get("scope_id") or ""),
+                str(data.get("audit_id") or ""),
+            )
+        except Exception as exc:
+            _k03a_fail(exc)
+            raise
+        stored = _k03a_records._fetch_record(row_id)
+        return {
+            "row_id": row_id,
+            "audit_id": row_id,
+            "queryable": stored is not None,
+        }
+
+    # --- DRF3K03A assurance: fresh audit + runner contract
+    # (additions-only). ROWS 9-13 served through fresh_assurance (a new
+    # auditor instance per call, per audit and per re-audit); R-304
+    # served through runner_contract_verdict (the real files read and
+    # written judged on the production call path, never a
+    # FakeAuditor).
+    @app.post("/api/v1/assurance/fresh_assurance")
+    async def k03a_fresh_assurance(request: Request) -> dict[str, Any]:
+        """POST /api/v1/assurance/fresh_assurance -> audit, fresh auditor.
+        """
+        data = await _k03a_body(request)
+        turn = _k03a_coordinator.ServedTurn(
+            turn_ref=str(data.get("turn_ref") or data.get("run_id")
+                         or ""),
+            project_id=str(data.get("project_id") or ""),
+            task_id=str(data.get("task_id") or ""),
+            run_id=str(data.get("run_id") or ""),
+            work_refs=tuple(
+                str(v) for v in _k03a_tuples(data.get("work_refs"))),
+            artifact_refs=tuple(
+                str(v) for v in _k03a_tuples(data.get("artifact_refs"))),
+            evidence_refs=tuple(
+                str(v) for v in _k03a_tuples(data.get("evidence_refs"))),
+            producer_session_refs=tuple(
+                str(v)
+                for v in _k03a_tuples(data.get("producer_session_refs"))),
+            contract_hash=str(data.get("contract_hash") or ""),
+        )
+        try:
+            audit_id = fresh_assurance(
+                turn,
+                reaudit_of=data.get("reaudit_of"),
+                pair_reuse_ref=data.get("pair_reuse_ref"),
+            )
+        except Exception as exc:
+            _k03a_fail(exc)
+            raise
+        return {"audit_id": audit_id}
+
+    @app.post("/api/v1/assurance/runner_contract")
+    async def k03a_runner_contract(request: Request) -> dict[str, Any]:
+        """POST /api/v1/assurance/runner_contract -> judge real files."""
+        data = await _k03a_body(request)
+        return runner_contract_verdict(
+            project_dir=str(data.get("project_dir") or ""),
+            tool_rows=tuple(_k03a_tuples(data.get("tool_rows"))),
+            files_read=tuple(
+                str(v) for v in _k03a_tuples(data.get("files_read"))),
+            files_written=tuple(
+                str(v) for v in _k03a_tuples(data.get("files_written"))),
+        )
 
     return app
