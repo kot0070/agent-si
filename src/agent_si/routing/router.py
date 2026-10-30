@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Tuple
 from . import types as T
 from .kb_port import KbModelFacts, KbReader
 from .telemetry_port import TelemetryEmitter, routing_event
+from agent_si.context_keeper.register import DevelopmentBindingScopeError
+from agent_si.context_keeper.register import check_development_binding_use
 
 if TYPE_CHECKING:
     from .interface import CandidateView, RoutingDecision
@@ -159,6 +161,16 @@ def _evaluate(request: RoutingRequest, deps: RoutingDeps,
                                   True, detail))
 
     is_pin = pin is not None and (candidate.provider, candidate.model) == pin
+    # UID-33 scope gate: the agent_si development binding applies only to
+    # the product development process; AUTO selection never adopts it
+    # (the refusal names the candidate, other candidates still route).
+    # An explicit PINNED choice stays the user's call.
+    try:
+        check_development_binding_use(
+            provider=candidate.provider, model=candidate.model,
+            use=("explicit-pinned-choice" if is_pin else "auto-selection"))
+    except DevelopmentBindingScopeError as exc:
+        return fail("DEV_BINDING_SCOPE", str(exc))
     required = set(request.required_capabilities or ()) | set(request.required_modalities or ())
     provider_caps = tuple((deps.provider_capabilities or {}).get(candidate.provider, ()))
     effective = _effective_caps(provider_caps, ev.facts)
@@ -252,6 +264,23 @@ def _evaluate(request: RoutingRequest, deps: RoutingDeps,
         return fail("ROUTING_POLICY_FILTER",
                     "no valid evidence branch (need measured evidence, "
                     "verified static capability, or explicit pin)")
+
+    # ARCH-726 capable gate: high-risk reasoning plus final verification
+    # run only on measured capable candidates. An explicit PINNED choice
+    # keeps its ENHANCED verification; every other non-measured branch
+    # fails here, before quality or cost are even considered.
+    if request.task_risk in ("HIGH", "CRITICAL"):
+        if ev.branch == "CAPABILITY_EVIDENCE" \
+                and ev.capability_state == "MEASURED":
+            ev.required_verification = "FINAL_VERIFICATION"
+            ok("CAPABLE_GATE",
+               "high-risk on a measured capable candidate "
+               "(final verification required)")
+        elif ev.branch != "EXPLICIT_MODEL_PIN":
+            return fail(
+                "CAPABLE_GATE",
+                "high-risk task needs a measured capable candidate "
+                "(got %s/%s)" % (ev.branch, ev.capability_state))
 
     # Route tag for local candidates (bootstrap 100/85/50 thresholds).
     if candidate.provider_type == "local":
@@ -550,8 +579,11 @@ def _select_single(request, deps, survivors, rejected, removed, traces,
         else:
             detail = ("%s: no eligible candidate survived all hard gates"
                       % _no_survivor_code(request, rejected))
+        # The blocked record keeps every evaluated candidate (eligible
+        # drafts plus rejected rows with their failed step), so the
+        # WHY_THIS_MODEL replay names the refusing gate.
         return blocked_outcome(request, deps, traces, detail, removed=removed,
-                               evals=survivors)
+                               evals=list(survivors) + list(rejected))
     ranked = _rank(eligible, request)
     winner = ranked[0]
     runners = ranked[1:]
@@ -1001,7 +1033,16 @@ def select(task_contract_ref: str, candidates: List[CandidateView],
         raise ValueError(outcome.decision.reason)
     outcome = _select_impl(request, deps)
     if outcome.status == "BLOCKED":
-        raise ValueError(outcome.decision.reason)
+        refusals = "; ".join(
+            "refused: %s at %s (%s)"
+            % (row.get("model"), row.get("failed_step"),
+               row.get("fail_detail"))
+            for row in outcome.snapshot.candidate_snapshot
+            if not row.get("passed") and row.get("failed_step"))
+        reason = outcome.decision.reason
+        if refusals:
+            reason = "%s; %s" % (reason, refusals)
+        raise ValueError(reason)
     _winner = (outcome.decision.selected_provider,
                outcome.decision.selected_model)
     if modality_ok_by_pair.get(_winner, True) is False:

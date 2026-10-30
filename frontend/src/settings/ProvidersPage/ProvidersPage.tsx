@@ -18,6 +18,7 @@ import { createMemorySecretStore, secretIdForProvider } from "./secretStore";
 import type { SecretStorePort } from "./secretStore";
 import { ROLE_KEYS } from "./types";
 import type { ProviderPreset, ProviderState } from "./types";
+import { t } from "../../locale/index";
 
 // Save helper for the project chat model.
 // PUTs {project_id, model_id} to /api/v1/roles/chat-model with the session
@@ -180,7 +181,7 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
           type="search"
           aria-label="Search models"
           value={query}
-          placeholder="Search providers or models"
+          placeholder={t("settings.providers.searchPlaceholder")}
           onChange={(event) => setQuery(event.target.value)}
         />
       </label>

@@ -16,6 +16,7 @@ import {
   t,
 } from "../locale/index";
 import type { SupportedLocale } from "../locale/index";
+import { ThemeToggle } from "./ThemeToggle";
 
 export const TOPBAR_LOCALE_EVENT = "agentsi:locale-changed";
 
@@ -153,6 +154,7 @@ export function TopBar(props: TopBarProps): ReactElement {
           <option value="uk">uk</option>
         </select>
       </label>
+      <ThemeToggle />
     </header>
   );
 }

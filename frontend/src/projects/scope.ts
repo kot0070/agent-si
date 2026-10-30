@@ -16,3 +16,49 @@ export type ScopeKind = (typeof SCOPE_KINDS)[number];
 export function classifyScope(scope: string): ScopeKind {
   return scope.trim() === "" ? "SHOULD" : "MUST";
 }
+
+// ARCH-679: every named menu and view in the console is MUST presence.
+// The test ids mirror Sidebar data-testids; the views mirror PROJECT_VIEWS
+// in projectsApi (the App route table renders one route per view).
+export const NAMED_MENU_TEST_IDS = [
+  "menu-chat",
+  "menu-agents-live",
+  "menu-new-task",
+  "menu-projects",
+  "menu-tasks",
+  "menu-results",
+  "menu-settings",
+] as const;
+
+// ARCH-686: treating a SHOULD breakdown as MUST presence (or the reverse)
+// is a scope breach. The guard below proves it over rendered output: a
+// MUST name missing from the rendered set is MUST_PRESENCE_BREACH; a
+// MUST name whose render required a SHOULD (derived/extended) breakdown
+// is SHOULD_AS_MUST_BREACH. Derived sections stay advisory: they never
+// appear in the must set and never gate MUST rendering.
+export type PresenceBreachKind =
+  | "MUST_PRESENCE_BREACH"
+  | "SHOULD_AS_MUST_BREACH";
+
+export interface PresenceBreach {
+  kind: PresenceBreachKind;
+  name: string;
+}
+
+export function checkPresenceBreach(input: {
+  must: readonly string[];
+  present: readonly string[];
+  gatedByShould?: readonly string[];
+}): PresenceBreach[] {
+  const present = new Set(input.present);
+  const gated = new Set(input.gatedByShould ?? []);
+  const out: PresenceBreach[] = [];
+  for (const name of input.must) {
+    if (!present.has(name)) {
+      out.push({ kind: "MUST_PRESENCE_BREACH", name });
+    } else if (gated.has(name)) {
+      out.push({ kind: "SHOULD_AS_MUST_BREACH", name });
+    }
+  }
+  return out;
+}

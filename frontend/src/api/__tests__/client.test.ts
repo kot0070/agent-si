@@ -8,7 +8,8 @@ import {
   useApiClient,
   useCurrentProject,
 } from "../../app/ApiClientProvider";
-import { FakeApiClient, HttpApiClient } from "../client";
+import { HttpApiClient } from "../client";
+import { FakeApiClient } from "./fakeApiClient";
 import { ENDPOINTS } from "../endpoints";
 import { ApiError, apiErrorLocaleKey } from "../errors";
 import type { ApiClient, ApiErrorCode } from "../iface";

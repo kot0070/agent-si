@@ -25,7 +25,8 @@ import {
   readWhyThisModel,
   updateProjectRecord,
 } from "../projectsApi";
-import { FakeApiClient, HttpApiClient } from "../client";
+import { HttpApiClient } from "../client";
+import { FakeApiClient } from "./fakeApiClient";
 
 afterEach(() => {
   vi.unstubAllGlobals();

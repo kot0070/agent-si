@@ -40,6 +40,46 @@ class DuplicateSettlementError(BudgetError):
         self.existing = existing
 
 
+COMPENSATION_REF_REQUIRED = "COMPENSATION_REF_REQUIRED"
+COMPENSATION_UNKNOWN_RESERVATION = "COMPENSATION_UNKNOWN_RESERVATION"
+COMPENSATION_ALREADY_SETTLED = "COMPENSATION_ALREADY_SETTLED"
+COMPENSATION_REF_CONFLICT = "COMPENSATION_REF_CONFLICT"
+
+
+class CompensationError(BudgetError):
+    """Base error for compensation failures (ARCH-441)."""
+
+    code = "COMPENSATION_FAILED"
+
+
+class CompensationRefRequiredError(CompensationError):
+    """Compensate called without a compensation_ref."""
+
+    code = COMPENSATION_REF_REQUIRED
+
+
+class CompensationUnknownReservationError(CompensationError):
+    """Compensate called for an unknown reservation id."""
+
+    code = COMPENSATION_UNKNOWN_RESERVATION
+
+
+class CompensationAlreadySettledError(CompensationError):
+    """Compensate called for an already SETTLED reservation."""
+
+    code = COMPENSATION_ALREADY_SETTLED
+
+
+class CompensationRefConflictError(CompensationError):
+    """A different compensation_ref already released this reservation."""
+
+    code = COMPENSATION_REF_CONFLICT
+
+    def __init__(self, message, existing=None):
+        super().__init__(message)
+        self.existing = existing
+
+
 def _dec(value):
     from decimal import Decimal
 
@@ -194,6 +234,37 @@ class IncidentRecord:
 
 
 @dataclass
+class CompensationRecord:
+    """One idempotent failed-gate compensation (ARCH-441).
+
+    The compensation_ref is persisted in its own store (not on the
+    reservation row, whose frozen shape is untouched); repeating the
+    same ref returns the stored record, a different ref conflicts.
+    """
+
+    reservation_id: str
+    project_id: str
+    compensation_ref: str
+    reason: str
+    status: str = "RELEASED"
+    compensated_at: str = ""
+
+    def to_dict(self):
+        return {
+            "reservation_id": self.reservation_id,
+            "project_id": self.project_id,
+            "compensation_ref": self.compensation_ref,
+            "reason": self.reason,
+            "status": self.status,
+            "compensated_at": self.compensated_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data):
+        return cls(**data)
+
+
+@dataclass
 class ReserveResult:
     ok: bool
     reservation: BudgetReservation | None
@@ -253,6 +324,7 @@ class BudgetGate:
         self._states = {}
         self._reservations = {}
         self._settlements = {}
+        self._compensations = {}
         self._incidents = []
         self._settlement_seq = 0
         if store_dir is not None:
@@ -288,6 +360,13 @@ class BudgetGate:
         except FileNotFoundError:
             pass
         try:
+            with open(self._path("compensations.json"), encoding="utf-8") as fh:
+                for row in json.load(fh):
+                    rec = CompensationRecord.from_dict(row)
+                    self._compensations[rec.reservation_id] = rec
+        except FileNotFoundError:
+            pass
+        try:
             with open(self._path("settlements.json"), encoding="utf-8") as fh:
                 for row in json.load(fh):
                     stl = BudgetSettlement.from_dict(row)
@@ -308,6 +387,9 @@ class BudgetGate:
             "reservations.json", [r.to_dict() for r in self._reservations.values()])
         self._write_json(
             "settlements.json", [s.to_dict() for s in self._settlements.values()])
+        self._write_json(
+            "compensations.json",
+            [c.to_dict() for c in self._compensations.values()])
 
     def _persist_incident(self, incident):
         self._write_json(
@@ -704,6 +786,60 @@ class BudgetGate:
                 _dec(state.reserved) - _dec(reservation.estimated_amount))
             self._persist()
             return settlement
+
+    def compensate(self, reservation_id, reason, compensation_ref,
+                   now=""):
+        """Compensate a failed gate idempotently to RELEASED (ARCH-441).
+
+        The compensation_ref is persisted in its own store (the frozen
+        reservation shape is untouched). Repeating the call with the same
+        ref returns the stored record without touching the ledger twice;
+        a different ref for an already compensated reservation raises;
+        SETTLED reservations are never compensated.
+        """
+        if not compensation_ref or not str(compensation_ref).strip():
+            raise CompensationRefRequiredError(
+                "compensate needs a compensation_ref "
+                "[COMPENSATION_REF_REQUIRED]")
+        with self._lock:
+            reservation = self._reservations.get(reservation_id)
+            if reservation is None:
+                raise CompensationUnknownReservationError(
+                    "unknown reservation %r "
+                    "[COMPENSATION_UNKNOWN_RESERVATION]" % (reservation_id,))
+            if reservation.status == "SETTLED":
+                raise CompensationAlreadySettledError(
+                    "reservation %s is already SETTLED "
+                    "[COMPENSATION_ALREADY_SETTLED]" % (reservation_id,))
+            stored = self._compensations.get(reservation_id)
+            if stored is not None:
+                if stored.compensation_ref == compensation_ref:
+                    return stored
+                raise CompensationRefConflictError(
+                    "reservation %s already compensated under %r "
+                    "[COMPENSATION_REF_CONFLICT]"
+                    % (reservation_id, stored.compensation_ref),
+                    existing=stored.compensation_ref)
+            record = CompensationRecord(
+                reservation_id=reservation_id,
+                project_id=reservation.project_id,
+                compensation_ref=str(compensation_ref),
+                reason=str(reason or ""),
+                status="RELEASED",
+                compensated_at=now or _utcnow_z())
+            if reservation.status in ("ACTIVE", "CREATED"):
+                state = self._states[reservation.project_id]
+                reservation.status = "RELEASED"
+                state.reserved = str(
+                    _dec(state.reserved) - _dec(reservation.estimated_amount))
+            self._compensations[reservation_id] = record
+            self._persist()
+            return record
+
+    def get_compensation(self, reservation_id):
+        """Return the stored CompensationRecord, or None."""
+        with self._lock:
+            return self._compensations.get(reservation_id)
 
     def release(self, reservation_id, reason, now=""):
         with self._lock:

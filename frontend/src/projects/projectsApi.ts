@@ -200,6 +200,47 @@ export function buildReportNarrative(input: ReportNarrativeInput): string[] {
   ];
 }
 
+export interface DerivedAllocation {
+  packageId: string;
+  wallTimeS: number;
+  derivedCost: number;
+  currency: string;
+  labelKey: string;
+}
+
+// ARCH-683: extended allocations beyond the named menus are a derived
+// display split from authoritative telemetry, never measured truth. The
+// served ledger carries wall_time_s per package but no per-package cost,
+// so the measured budget spent is split across packages proportionally
+// by served wall time. Every row carries the DERIVED label key; an empty
+// ledger yields no rows (never invented zeros presented as measured);
+// a zero wall total yields zero allocations, still labeled derived.
+// Sum of derivedCost equals budget.spent up to float rounding.
+export const DERIVED_SPLIT_LABEL_KEY = "projects.derived.label";
+
+export function buildDerivedSplit(input: {
+  ledger: LedgerRow[];
+  budget: BudgetState;
+}): DerivedAllocation[] {
+  if (input.ledger.length === 0) {
+    return [];
+  }
+  let totalWall = 0;
+  for (const row of input.ledger) {
+    totalWall += row.wall_time_s;
+  }
+  return input.ledger.map((row) => ({
+    packageId: row.package_id,
+    wallTimeS: row.wall_time_s,
+    derivedCost:
+      totalWall > 0
+        ? (input.budget.spent * row.wall_time_s) / totalWall
+        : 0,
+    currency: input.budget.currency,
+    labelKey: DERIVED_SPLIT_LABEL_KEY,
+  }));
+}
+
 export type RowsByPlacement = Record<Placement, PartRow[]>;
 
 // Buckets served agent rows with the documented placement rule from
