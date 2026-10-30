@@ -382,6 +382,11 @@ def create_app(settings: Any = None,
         )
     app.include_router(_k08_watcher_routes.router)
 
+    # K07MISS1 row 1645 (ABBenchmarkRunner): sibling-router mount only.
+    import agent_si.benchmark.routes as _k07miss1_ab_routes
+
+    app.include_router(_k07miss1_ab_routes.router)
+
     _K08_WATCHER_STATUS_BY_CODE = {
         "SESSION_TOKEN_MISSING": 401,
         "SESSION_TOKEN_INVALID": 403,
@@ -1998,5 +2003,19 @@ def create_app(settings: Any = None,
         except _K12Open3Error as err:
             return _k12open3_refuse(err.status, err.code, err.message)
         return {"ok": True, "contribution": record}
+    # NF7K11A R-353 + R-354 (partner research + Keychain seam): open reads
+    # behind the secret-store protocol; additions-only block, no earlier
+    # line changes. Reads need no token, per the frozen route guard.
+    from agent_si.toolguard import secrets as _nf7k11a_secrets
+
+    @app.get("/api/v1/partner/integration")
+    def nf7k11a_partner_integration() -> dict[str, Any]:
+        """GET /api/v1/partner/integration -> partner_integration_record."""
+        return _nf7k11a_secrets.partner_integration_record()
+
+    @app.get("/api/v1/keychain/seam")
+    def nf7k11a_keychain_seam() -> dict[str, Any]:
+        """GET /api/v1/keychain/seam -> keychain_secret_seam."""
+        return _nf7k11a_secrets.keychain_secret_seam()
 
     return app
