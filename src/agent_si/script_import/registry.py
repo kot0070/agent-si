@@ -14,6 +14,10 @@ from .contract import AddScriptResult, ImportContract
 _registered: dict = {}
 
 
+def reset_registry() -> None:
+    _registered.clear()
+
+
 def is_shadow(script_name: str, standard_names: list[str]) -> bool:
     try:
         return script_name in standard_names
