@@ -7,6 +7,7 @@ from typing import Any, Dict, Tuple
 #: Stable machine codes for the budget error bodies (M-WIRE L0B-08/11).
 BUDGET_PROJECT_ID_REQUIRED = "BUDGET_PROJECT_ID_REQUIRED"
 BUDGET_NOT_CONFIGURED = "BUDGET_NOT_CONFIGURED"
+COMPENSATION_RESERVATION_ID_REQUIRED = "COMPENSATION_RESERVATION_ID_REQUIRED"
 
 
 def _query_value(query, name, default=None):
@@ -77,3 +78,44 @@ def get_budget(ctx, query, body) -> Tuple[int, Dict[str, Any]]:
 BUDGET_ROUTES = (
     ("get", "/api/v1/budget", "get_budget", get_budget),
 )
+
+
+def post_compensate(ctx, query, body) -> Tuple[int, Dict[str, Any]]:
+    """Compensate a failed gate to RELEASED (ARCH-441, served entry).
+
+    Body carries reservation_id, reason and compensation_ref. Reads
+    ctx.budget_state, which must be a BudgetGate (has compensate); any
+    other shape is a 404. Gate error codes decide the status.
+    """
+    from agent_si.budget.gate import CompensationError
+    from agent_si.budget.gate import CompensationRefConflictError
+    from agent_si.budget.gate import CompensationAlreadySettledError
+    from agent_si.budget.gate import CompensationUnknownReservationError
+
+    body = body if isinstance(body, Mapping) else {}
+    reservation_id = body.get("reservation_id", "")
+    if not isinstance(reservation_id, str) or not reservation_id:
+        return 400, {"code": COMPENSATION_RESERVATION_ID_REQUIRED,
+                     "message": "reservation_id required"}
+    gate = getattr(ctx, "budget_state", None)
+    compensate = getattr(gate, "compensate", None)
+    if not callable(compensate):
+        return 404, {"code": BUDGET_NOT_CONFIGURED,
+                     "message": "no compensating budget gate on file"}
+    try:
+        record = compensate(
+            reservation_id, body.get("reason", ""),
+            body.get("compensation_ref", ""))
+    except CompensationUnknownReservationError as exc:
+        return 404, {"code": exc.code, "message": str(exc)}
+    except CompensationRefConflictError as exc:
+        return 409, {"code": exc.code, "message": str(exc),
+                     "existing_compensation_ref": exc.existing}
+    except CompensationAlreadySettledError as exc:
+        return 409, {"code": exc.code, "message": str(exc)}
+    except CompensationError as exc:
+        return 400, {"code": exc.code, "message": str(exc)}
+    return 200, {"reservation_id": record.reservation_id,
+                 "status": record.status,
+                 "compensation_ref": record.compensation_ref,
+                 "project_id": record.project_id}

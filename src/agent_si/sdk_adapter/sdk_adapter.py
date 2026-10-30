@@ -75,6 +75,8 @@ SDK_RUN_CONFIG_REQUIRED = "SDK_RUN_CONFIG_REQUIRED"
 SDK_SECRET_REFS_MUST_BE_RECORDS = "SDK_SECRET_REFS_MUST_BE_RECORDS"
 BUILDER_WORKFLOW_HASH_MISMATCH = "BUILDER_WORKFLOW_HASH_MISMATCH"
 BUILDER_WORKFLOW_NOT_REVALIDATED = "BUILDER_WORKFLOW_NOT_REVALIDATED"
+L3_PROVIDER_MUST_DIFFER = "L3_PROVIDER_MUST_DIFFER"
+L3_KEY_REF_REQUIRED = "L3_KEY_REF_REQUIRED"
 
 
 class SdkClientConfigError(ValueError):
@@ -199,6 +201,65 @@ class WorkflowNotRevalidatedError(Exception):
     """An Agent Builder workflow was executed before revalidation (section 6)."""
 
     code = BUILDER_WORKFLOW_NOT_REVALIDATED
+
+
+class L3ProviderMustDifferError(ValueError):
+    """L3 audit bound to the same provider as the audited decision."""
+
+    code = L3_PROVIDER_MUST_DIFFER
+
+
+class L3KeyRefRequiredError(TypeError):
+    """L3 audit bound without its own SecretRef record."""
+
+    code = L3_KEY_REF_REQUIRED
+
+
+@dataclass(frozen=True)
+class L3AuditBinding:
+    """Independent-audit binding (MVP_ACCEPT-168): the L3 auditor runs on
+    a separate cloud provider with its own key ref, never on the
+    decided provider and never on an inline secret value."""
+
+    project_id: str
+    task_id: str
+    run_id: str
+    decision_id: str
+    selected_provider: str
+    selected_model: str
+    l3_provider: str
+    l3_model: str
+    key_ref: SecretRef
+
+
+def bind_l3_audit(decision: RoutingDecisionBinding, *,
+                  l3_provider: str, l3_model: str,
+                  key_ref: SecretRef) -> L3AuditBinding:
+    """Bind an L3 independent audit to a separate provider path (168).
+
+    The L3 provider must differ from the decided provider and the key
+    must be a SecretRef record (refs only, never inline values).
+    """
+    if not isinstance(key_ref, SecretRef):
+        raise L3KeyRefRequiredError(
+            "L3 audit needs its own SecretRef record; inline values "
+            "and missing refs are never accepted [L3_KEY_REF_REQUIRED]")
+    if not l3_provider or not l3_model:
+        raise L3KeyRefRequiredError(
+            "L3 audit needs an l3_provider and l3_model "
+            "[L3_KEY_REF_REQUIRED]")
+    if str(l3_provider).strip().lower() == \
+            str(decision.selected_provider).strip().lower():
+        raise L3ProviderMustDifferError(
+            "L3 audit must run on a separate provider, not %r "
+            "[L3_PROVIDER_MUST_DIFFER]" % (decision.selected_provider,))
+    return L3AuditBinding(
+        project_id=decision.project_id, task_id=decision.task_id,
+        run_id=decision.run_id, decision_id=decision.decision_id,
+        selected_provider=decision.selected_provider,
+        selected_model=decision.selected_model,
+        l3_provider=str(l3_provider), l3_model=str(l3_model),
+        key_ref=key_ref)
 
 
 def revalidate_agent_builder_workflow(
@@ -337,6 +398,69 @@ class OpenAIAgentsSDKAdapter:
             run_config=run_config, input_ref=input_ref, secret_refs=secret_refs
         )
 
+    def run_l3_audit(
+        self,
+        binding: L3AuditBinding,
+        *,
+        input_ref: str,
+        secret_ref: SecretRef,
+        runner: Callable[[Dict[str, Any]], Dict[str, Any]] | None = None,
+    ) -> SdkRunResult:
+        """Run one L3 independent-audit turn (MVP_ACCEPT-168).
+
+        The audit runs on the bound separate provider path with the
+        bound key ref only (refs cross the runner boundary, never
+        values). Exactly one audited turn: a failed audit is recorded,
+        never retried blindly.
+        """
+        if not isinstance(binding, L3AuditBinding):
+            raise L3KeyRefRequiredError(
+                "run_l3_audit needs an L3AuditBinding "
+                "[L3_KEY_REF_REQUIRED]")
+        if not isinstance(secret_ref, SecretRef) or \
+                secret_ref.secret_id != binding.key_ref.secret_id:
+            raise L3KeyRefRequiredError(
+                "run_l3_audit needs the bound L3 SecretRef record "
+                "[L3_KEY_REF_REQUIRED]")
+        effective = runner if runner is not None else self._runner
+        if effective is None:
+            raise RunnerUnboundError(
+                "L3 audit has no runner wired; pass runner=..."
+            )
+        audit_config = RunConfig(
+            decision_id=binding.decision_id,
+            project_id=binding.project_id, task_id=binding.task_id,
+            run_id=binding.run_id,
+            selected_provider=binding.l3_provider,
+            selected_model=binding.l3_model,
+            route="L3_AUDIT", strategy="independent",
+            max_runner_retries=1)
+        outcome = run_sdk_turn(
+            run_config=audit_config,
+            input_ref=input_ref,
+            secret_ids=(secret_ref.secret_id,),
+            transport=transport_for_provider(binding.l3_provider),
+            turn_budget=audit_config.max_runner_retries,
+            sdk_call=effective,
+        )
+        self._calls_made += outcome.attempts_made
+        if outcome.ok:
+            return SdkRunResult(
+                run_id=binding.run_id,
+                output_ref="artifact:run/%s/output" % binding.run_id,
+                provider=binding.l3_provider,
+                model=binding.l3_model,
+                status=manifest.ExecutionAttemptStatus.SUCCEEDED,
+            )
+        return SdkRunResult(
+            run_id=binding.run_id,
+            output_ref="artifact:run/%s/output" % binding.run_id,
+            provider=binding.l3_provider,
+            model=binding.l3_model,
+            status=manifest.ExecutionAttemptStatus.FAILED,
+            error_ref=outcome.error,
+        )
+
 
 __all__ = [
     "SDK_AVAILABLE",
@@ -350,12 +474,18 @@ __all__ = [
     "RunConfig",
     "SdkRunResult",
     "AgentBuilderWorkflow",
+    "L3AuditBinding",
+    "bind_l3_audit",
+    "L3ProviderMustDifferError",
+    "L3KeyRefRequiredError",
     "BuilderWorkflowHashMismatchError",
     "RunConfigRequiredError",
     "SdkClientConfigError",
     "SecretRefTypeError",
     "WorkflowNotRevalidatedError",
     "revalidate_agent_builder_workflow",
+    "L3_PROVIDER_MUST_DIFFER",
+    "L3_KEY_REF_REQUIRED",
     "BUILDER_WORKFLOW_HASH_MISMATCH",
     "BUILDER_WORKFLOW_NOT_REVALIDATED",
     "SDK_CLIENT_MAX_RETRIES_NONZERO",

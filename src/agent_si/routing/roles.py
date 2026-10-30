@@ -249,3 +249,70 @@ def resolve_manager(profile: T.DefaultManagerProfile, *,
         trigger=trigger, trigger_ref=trigger_ref or "",
         project_id=project_id, task_id=task_id, run_id=run_id,
         store=store, emitter=emitter)
+
+
+NO_TARGET_FLOW_DEFAULT = "NO_TARGET_FLOW_DEFAULT"
+
+
+class TargetFlowMissingError(ValueError):
+    """TARGET_FLOW has no configured entry for a role (never a default)."""
+
+    code = NO_TARGET_FLOW_DEFAULT
+
+
+def _target_flow_pair(config, role: str) -> Tuple[str, str]:
+    """Read one TARGET_FLOW entry as a (provider, model) pair.
+
+    Accepts {"provider", "model"} mappings or (provider, model) pairs.
+    Anything else (missing role, unknown role key, incomplete entry)
+    raises TargetFlowMissingError: there is no hard-coded role default.
+    """
+    if not isinstance(config, Mapping) or role not in T.ROLES:
+        raise TargetFlowMissingError(
+            "TARGET_FLOW has no configured entry for role %r "
+            "[NO_TARGET_FLOW_DEFAULT]" % (role,))
+    entry = config.get(role)
+    provider = model = None
+    if isinstance(entry, Mapping):
+        provider, model = entry.get("provider"), entry.get("model")
+    elif isinstance(entry, (tuple, list)) and len(entry) == 2:
+        provider, model = entry
+    if not provider or not model:
+        raise TargetFlowMissingError(
+            "TARGET_FLOW entry for role %r needs provider and model "
+            "[NO_TARGET_FLOW_DEFAULT]" % (role,))
+    return str(provider), str(model)
+
+
+def resolve_target_flow(config, role: str, *, project_id: str) -> ModelRef:
+    """Resolve one role model from TARGET_FLOW configuration (UID-17).
+
+    Every role model comes from the caller's configuration mapping; a
+    role without a configured entry raises instead of falling back to a
+    hard-coded default. project_id is carried for parity with resolve.
+    """
+    _ = project_id
+    provider, model = _target_flow_pair(config, role)
+    return ModelRef(provider=provider, model=model)
+
+
+def load_target_flow(table: RoleTable, config, *,
+                     project_id: str) -> Dict[str, Dict[str, str]]:
+    """Load every role profile from TARGET_FLOW as PINNED (UID-17).
+
+    All-or-nothing: every role in T.ROLES must be configured or nothing
+    is stored (no partial defaults). Returns {role: {provider, model}}.
+    """
+    loaded: Dict[str, Dict[str, str]] = {}
+    for role in T.ROLES:
+        provider, model = _target_flow_pair(config, role)
+        loaded[role] = {"provider": provider, "model": model}
+    for role, pair in loaded.items():
+        table.set_profile(T.RoleModelProfile(
+            role=role, project_id=project_id, mode="PINNED",
+            provider=pair["provider"], model=pair["model"],
+            binding="TARGET_FLOW", version=1,
+            hash=T.stable_hash({"role": role, "project": project_id,
+                                "provider": pair["provider"],
+                                "model": pair["model"]})))
+    return loaded
