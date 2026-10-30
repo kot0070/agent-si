@@ -1633,6 +1633,16 @@ def create_app(settings: Any = None,
                         for o in card.options],
             "resume_token": card.resume_token,
         }
+
+    # --- K06 OC served worker path (MH-1/MH-3 + rows 189/253/254). ---
+    # Additions-only block: binds per-app K06 OC state on app.state and
+    # registers the /api/v1/k06/ handlers over the real worker_tools /
+    # services / script_import modules. No existing line above changes.
+    from agent_si.worker_tools import routes as _k06oc_routes
+
+    _k06oc_routes.bind_k06oc_state(app)
+    _k06oc_routes.register_k06oc_routes(app)
+
     # --- K09-REFRESH stale KB copy refresh (LIVE0-06 additions-only). ---
     # Per-app recorded versions + changelog over local KB dirs (no
     # network; the KB dir is never mutated). GET proposal is an open read
