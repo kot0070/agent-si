@@ -21,6 +21,20 @@ MODEL_ID = "meta/muse-spark-1.3-contributor"
 #: Execution kinds; per-kind counts must sum to the plan total (catalog lane).
 EXECUTION_KINDS = ("CODE", "AI", "HUMAN")
 
+#: OC-K03 M-P3-120: the four built-in test bases shipped with the catalog,
+#: plus their CODE/AI/HUMAN kinds in the same order. Mirrors
+#: agent_si.test_runners.test_bases.BUILTIN_TEST_BASES so the planner can
+#: construct kind-correct plans from bases without a second registry.
+BUILTIN_TEST_BASES = (
+    "base-code-fast",
+    "base-code-full",
+    "base-ai-judge",
+    "base-human-operated",
+)
+
+#: Kind per built-in base, in the same order as BUILTIN_TEST_BASES.
+BUILTIN_BASE_KINDS = ("CODE", "CODE", "AI", "HUMAN")
+
 #: Frozen error-code names for this module (each pinned in its own test).
 ERROR_CODES_PLANNER = (
     "UNKNOWN_TEST_ID",
@@ -135,9 +149,27 @@ def kind_total(plan: TestPlan) -> int:
     return sum(plan.kind_counts.values())
 
 
+def planner_bases() -> Tuple[Tuple[str, str], ...]:
+    """Four built-in test bases with their CODE/AI/HUMAN kinds, in order."""
+    return tuple(zip(BUILTIN_TEST_BASES, BUILTIN_BASE_KINDS))
+
+
+def kind_for_base(base_id: str) -> str:
+    """Kind for one built-in base id; unknown ids are refused."""
+    for known_id, kind in zip(BUILTIN_TEST_BASES, BUILTIN_BASE_KINDS):
+        if base_id == known_id:
+            return kind
+    raise PlannerError(
+        "UNKNOWN_TEST_ID",
+        "test base %r is not a built-in test base" % (base_id,),
+    )
+
+
 #: Entry points: logical name -> symbol in this module.
 ENTRY_POINTS = {
     "derive_plan": "derive_plan",
     "validate_plan_ids": "validate_plan_ids",
     "kind_total": "kind_total",
+    "planner_bases": "planner_bases",
+    "kind_for_base": "kind_for_base",
 }
