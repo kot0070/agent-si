@@ -382,11 +382,6 @@ def create_app(settings: Any = None,
         )
     app.include_router(_k08_watcher_routes.router)
 
-    # K07MISS1 row 1645 (ABBenchmarkRunner): sibling-router mount only.
-    import agent_si.benchmark.routes as _k07miss1_ab_routes
-
-    app.include_router(_k07miss1_ab_routes.router)
-
     _K08_WATCHER_STATUS_BY_CODE = {
         "SESSION_TOKEN_MISSING": 401,
         "SESSION_TOKEN_INVALID": 403,
