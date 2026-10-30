@@ -1645,7 +1645,10 @@ def create_app(settings: Any = None,
     import json as _k09r_json
     from pathlib import Path as _K09RPath
 
-    from src.agent_si.kb import registry as _k09r_registry
+    try:
+        from agent_si.kb import registry as _k09r_registry
+    except ImportError:
+        from src.agent_si.kb import registry as _k09r_registry
 
     _K09R_UNKNOWN = "UNKNOWN"
 

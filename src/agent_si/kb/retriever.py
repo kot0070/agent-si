@@ -13,17 +13,36 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from src.agent_si.kb import guard
-from src.agent_si.kb import models
-from src.agent_si.kb import registry
-from src.agent_si.kb.models import (
-    InstructionBlockedError,
-    KnowledgeChunk,
-    KnowledgeSource,
-    ManifestRequiredError,
-    RetrievalPolicy,
-    WholeKbReadRefused,
+try:  # portable first (PYTHONPATH=src or tests inserting src)
+    from agent_si.kb import guard, models, registry
+    from agent_si.kb.models import (
+        InstructionBlockedError,
+        KnowledgeChunk,
+        KnowledgeSource,
+        ManifestRequiredError,
+        RetrievalPolicy,
+        WholeKbReadRefused,
+    )
+except ImportError:  # legacy root-based harness (import src.agent_si...)
+    from src.agent_si.kb import guard, models, registry
+    from src.agent_si.kb.models import (
+        InstructionBlockedError,
+        KnowledgeChunk,
+        KnowledgeSource,
+        ManifestRequiredError,
+        RetrievalPolicy,
+        WholeKbReadRefused,
+    )
+
+import sys as _mod_sys
+
+_mod_sys.modules.setdefault(
+    "src." + __name__ if not __name__.startswith("src.") else __name__[4:],
+    _mod_sys.modules[__name__],
 )
+"""Dual-harness identity: root-based (src.*) and src-based (agent_si.*)
+imports resolve to this same module object, so module-global lane
+state (_manifest_touched, _RECORDS) is shared whatever path is used."""
 
 _manifest_touched: set = set()
 
@@ -38,6 +57,8 @@ def _record(kind: str, role: str, agent: str, tokens: int, cost: float) -> None:
          "kind": kind}
     )
     try:
+        from agent_si.kb import telemetry as _lane_b
+    except ImportError:
         from src.agent_si.kb import telemetry as _lane_b
 
         _forward = {
