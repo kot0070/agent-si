@@ -8,7 +8,15 @@ the first hit as an evidence reference; None means the text is clean.
 from __future__ import annotations
 
 import hashlib
+import sys as _mod_sys
 from typing import Optional
+
+_mod_sys.modules.setdefault(
+    "src." + __name__ if not __name__.startswith("src.") else __name__[4:],
+    _mod_sys.modules[__name__],
+)
+"""Dual-harness identity: root-based (src.*) and src-based (agent_si.*)
+imports resolve to this same module object."""
 
 INSTRUCTION_MARKERS = (
     "ignore all previous instructions",

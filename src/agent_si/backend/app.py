@@ -610,6 +610,16 @@ def create_app(settings: Any = None,
 
     _r349_steplimits.register_steplimit_routes(app)
 
+    # OC-K02 R-302/R-333 (additions-only): hierarchy run + control-plane
+    # map and the routine-offload switch surface; no existing line above
+    # or the K04 block below changes.
+    from agent_si.backend import hierarchy_routes as _ock02_hierarchy
+
+    _ock02_hierarchy.register_hierarchy_routes(app)
+    from agent_si.backend import offload_routes as _ock02_offload
+
+    _ock02_offload.register_offload_routes(app)
+
     # --- K04 package routes (HD-authorised additions-only block). ---
     # HD_VERDICT_INT1_K04_ROOT + HD_RULING_K04_TESTS: this block only ADDS
     # routes; no existing K02 line above changes. Real wiring: store dir
@@ -1633,6 +1643,16 @@ def create_app(settings: Any = None,
                         for o in card.options],
             "resume_token": card.resume_token,
         }
+
+    # --- K06 OC served worker path (MH-1/MH-3 + rows 189/253/254). ---
+    # Additions-only block: binds per-app K06 OC state on app.state and
+    # registers the /api/v1/k06/ handlers over the real worker_tools /
+    # services / script_import modules. No existing line above changes.
+    from agent_si.worker_tools import routes as _k06oc_routes
+
+    _k06oc_routes.bind_k06oc_state(app)
+    _k06oc_routes.register_k06oc_routes(app)
+
     # --- K09-REFRESH stale KB copy refresh (LIVE0-06 additions-only). ---
     # Per-app recorded versions + changelog over local KB dirs (no
     # network; the KB dir is never mutated). GET proposal is an open read
@@ -1645,7 +1665,10 @@ def create_app(settings: Any = None,
     import json as _k09r_json
     from pathlib import Path as _K09RPath
 
-    from src.agent_si.kb import registry as _k09r_registry
+    try:
+        from agent_si.kb import registry as _k09r_registry
+    except ImportError:
+        from src.agent_si.kb import registry as _k09r_registry
 
     _K09R_UNKNOWN = "UNKNOWN"
 

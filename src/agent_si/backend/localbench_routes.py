@@ -176,6 +176,29 @@ def register_localbench_routes(app: Any) -> Any:
             return _refusal(403, str(exc))
         return JSONResponse(status_code=200, content={"run_id": run_id, "stopped": True})
 
+    @router.post("/api/v1/local/bench/runs/complete")
+    def _post_complete(body: dict[str, Any], request: Request) -> JSONResponse:
+        refused = _guard(request)
+        if refused is not None:
+            return refused
+        run_id = _run_id_from_body(body)
+        if not run_id:
+            return _refusal(400, "run_id is required")
+        try:
+            outcome = complete_route(
+                run_id,
+                (body or {}).get("rows", []),
+                True,
+                project_id=(body or {}).get("project_id", "localbench"),
+            )
+        except KeyError as exc:
+            return _refusal(404, str(exc))
+        except BenchRefusedError as exc:
+            return _refusal(403, str(exc))
+        except (ValueError, TypeError) as exc:
+            return _refusal(400, str(exc))
+        return JSONResponse(status_code=200, content=outcome)
+
     @router.post("/api/v1/local/bench/import")
     def _post_import(body: dict[str, Any], request: Request) -> JSONResponse:
         refused = _guard(request)
@@ -281,6 +304,53 @@ def resume_route(run_id: str) -> None:
 def stop_route(run_id: str) -> None:
     """Entry: stop a run."""
     _runner.stop_run(run_id)
+
+
+def complete_route(
+    run_id: str,
+    rows: list[dict[str, Any]],
+    authorized: bool,
+    project_id: str = "localbench",
+) -> dict[str, Any]:
+    """Entry: finish a run with result rows; unauthorized calls refuse.
+
+    Each row is {case_id, kind, model_id}; hardware comes from the local
+    snapshot (no probing, no contact). Returns the complete_run outcome
+    (run_id, row count, telemetry metric ids). Unauthorized calls raise
+    BenchRefusedError carrying SESSION_TOKEN_REFUSED and change nothing.
+    """
+    if not authorized:
+        raise BenchRefusedError(
+            f"{_runner.SESSION_TOKEN_REFUSED}: bench completion needs a bound "
+            "UI session token (x-actor + x-ui-session-token); state unchanged"
+        )
+    if not isinstance(rows, list) or not rows:
+        raise ValueError(
+            f"rows must be a non-empty list, got {type(rows).__name__}"
+        )
+    hardware = _runner.detect_hardware()
+    built = []
+    for entry in rows:
+        if not isinstance(entry, dict):
+            raise ValueError(
+                f"each row must be an object, got {type(entry).__name__}"
+            )
+        try:
+            kind = ResultKind(entry.get("kind", ""))
+        except ValueError:
+            raise ValueError(
+                f"unknown kind {entry.get('kind')!r}"
+            ) from None
+        case_id = entry.get("case_id", "")
+        model_id = entry.get("model_id", "")
+        if not isinstance(case_id, str) or not case_id:
+            raise ValueError(f"each row needs a case_id, got {case_id!r}")
+        if not isinstance(model_id, str) or not model_id:
+            raise ValueError(f"each row needs a model_id, got {model_id!r}")
+        built.append(BenchResultRow(
+            case_id=case_id, kind=kind, model_id=model_id,
+            hardware=hardware))
+    return _runner.complete_run(run_id, built, project_id=project_id)
 
 
 def results_route(run_id: str) -> list[BenchResultRow]:
@@ -449,15 +519,16 @@ def check_route(endpoint: str) -> GatewayStatus:
 
 
 __all__ = [
-    "register_localbench_routes",
-    "scan_route",
+    "check_route",
+    "complete_route",
     "estimate_route",
-    "runs_route",
-    "pause_route",
-    "resume_route",
-    "stop_route",
-    "results_route",
     "history_route",
     "import_route",
-    "check_route",
+    "pause_route",
+    "register_localbench_routes",
+    "results_route",
+    "resume_route",
+    "runs_route",
+    "scan_route",
+    "stop_route",
 ]

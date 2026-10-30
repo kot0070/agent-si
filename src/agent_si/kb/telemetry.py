@@ -8,6 +8,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import sys as _mod_sys
+
+_mod_sys.modules.setdefault(
+    "src." + __name__ if not __name__.startswith("src.") else __name__[4:],
+    _mod_sys.modules[__name__],
+)
+"""Dual-harness identity: root-based (src.*) and src-based (agent_si.*)
+imports resolve to this same module object, so module-global stores
+(_records) are shared whatever path the harness uses."""
+
 
 @dataclass
 class KbTelemetryRecord:

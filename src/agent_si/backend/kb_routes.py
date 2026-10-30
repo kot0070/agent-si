@@ -18,8 +18,21 @@ from typing import Any, Callable, Dict
 
 from fastapi import HTTPException, Request
 
-from src.agent_si.kb import models as _models
-from src.agent_si.kb import retriever as _behaviour
+try:
+    from agent_si.kb import models as _models
+    from agent_si.kb import retriever as _behaviour
+except ImportError:
+    from src.agent_si.kb import models as _models
+    from src.agent_si.kb import retriever as _behaviour
+
+import sys as _mod_sys
+
+_mod_sys.modules.setdefault(
+    "src." + __name__ if not __name__.startswith("src.") else __name__[4:],
+    _mod_sys.modules[__name__],
+)
+"""Dual-harness identity: root-based (src.*) and src-based (agent_si.*)
+imports resolve to this same route module."""
 
 USER_WRITE = "USER_WRITE"
 

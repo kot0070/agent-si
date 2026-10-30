@@ -1138,3 +1138,104 @@ def k05r7_check_probe_endpoint(
         return _k05r7_probe_envs.guard_probe_endpoint(endpoint, environ)
     except _k05r7_probe_envs.ProbeRefusedError as exc:
         return K05R7ProbeSkip(reason=str(exc))
+
+
+#: --- Additive OC-K05 bench->telemetry bridge (L2-D06b; new names only). ---
+#: Bench runs never touched the telemetry store, so S06 totals stayed empty
+#: even with bench evidence on disk. complete_run() records finished rows and
+#: appends bench metric records (bench_runs/bench_cases) to the bound
+#: telemetry store, making bench evidence visible to
+#: GET /api/v1/analytics/telemetry. Metrics-only (no new event_type: the
+#: TelemetryEvent vocabulary is frozen). Existing names/signatures above are
+#: unchanged.
+BENCH_TELEMETRY_SOURCE = "localbench/bench_runner"
+BENCH_RUNS_METRIC = "bench_runs"
+BENCH_CASES_METRIC = "bench_cases"
+
+
+def complete_run(
+    run_id: str,
+    rows: list,
+    project_id: str = "localbench",
+) -> dict:
+    """Finish a run: store rows, free the slot, record bench telemetry.
+
+    Raises KeyError on unknown run ids, ValueError on empty/non-row lists.
+    Telemetry append is best-effort: with no bound store dir it is skipped
+    and the run still completes (returned ids lists stay empty then).
+    """
+    from agent_si.local.bench_protocol import BenchResultRow as _BenchRow
+
+    progress = _require_progress(run_id)
+    if not isinstance(rows, list) or not rows:
+        raise ValueError(
+            f"complete_run needs a non-empty row list, got {type(rows).__name__}"
+        )
+    for row in rows:
+        if not isinstance(row, _BenchRow):
+            raise ValueError(
+                "complete_run rows must be BenchResultRow, "
+                f"got {type(row).__name__}"
+            )
+    stored = _RUN_ROWS.setdefault(run_id, [])
+    stored.extend(rows)
+    progress.done_cases = len(stored)
+    progress.stopped = True
+    global _ACTIVE_RUN_ID
+    if run_id == _ACTIVE_RUN_ID:
+        _ACTIVE_RUN_ID = None
+    _journal_append("complete_run")
+    outcome: dict = {"run_id": run_id, "rows": len(stored),
+                     "metric_ids": [], "event_id": None}
+    try:
+        from agent_si.telemetry import run_store as _run_store
+        from agent_si.telemetry.metrics import MetricRecord as _MetricRecord
+        from agent_si.telemetry.metrics import MetricState as _MetricState
+    except ImportError:
+        return outcome
+    try:
+        import datetime as _dt
+        import uuid as _uuid
+
+        now = _dt.datetime.now(_dt.UTC).isoformat()
+        pid = str(project_id or "localbench")
+        metrics = [
+            _run_store._metric_to_json(
+                _MetricRecord(
+                    metric_id=f"m-{_uuid.uuid4().hex}",
+                    project_id=pid,
+                    metric_name=BENCH_RUNS_METRIC,
+                    value=1,
+                    unit="count",
+                    state=_MetricState.MEASURED,
+                    source=BENCH_TELEMETRY_SOURCE,
+                    run_id=run_id,
+                    recorded_at=now,
+                )
+            ),
+            _run_store._metric_to_json(
+                _MetricRecord(
+                    metric_id=f"m-{_uuid.uuid4().hex}",
+                    project_id=pid,
+                    metric_name=BENCH_CASES_METRIC,
+                    value=len(stored),
+                    unit="count",
+                    state=_MetricState.MEASURED,
+                    source=BENCH_TELEMETRY_SOURCE,
+                    run_id=run_id,
+                    recorded_at=now,
+                )
+            ),
+        ]
+        stored_doc = _run_store.append_records(metrics, [])
+        names = {
+            row.get("metric_id")
+            for row in stored_doc.get("metric_records", [])
+            if isinstance(row, dict)
+        }
+        outcome["metric_ids"] = [
+            row["metric_id"] for row in metrics if row["metric_id"] in names
+        ]
+    except Exception:
+        pass
+    return outcome
