@@ -263,22 +263,93 @@ def record_provider_usage(
             run_id=run_id,
             recorded_at=now,
         )
-    cost = MetricRecord(
-        metric_id="m-%s" % uuid.uuid4().hex,
-        project_id=pid,
-        metric_name=COST_NAME,
-        value=0.0,
-        unit="unknown",
-        state=MetricState.UNAVAILABLE,
-        source=COST_SOURCE,
-        task_id=task_id,
-        run_id=run_id,
-        recorded_at=now,
-    )
+    _cost_id = "m-%s" % uuid.uuid4().hex
+    _cost_value: Any = None
+    _cost_unit = "unknown"
+    _cost_state = MetricState.UNAVAILABLE
+    try:
+        from agent_si.model_kb import kb_reader as _cost_kbr
+
+        _cost_facts = None
+        try:
+            _cost_facts = _cost_kbr.CatalogKbReader().facts(
+                str(provider or ""), str(model or ""))
+        except Exception:
+            _cost_facts = None
+
+        def _cost_num(value: Any) -> float | None:
+            if isinstance(value, bool):
+                return None
+            if isinstance(value, (int, float)):
+                return float(value)
+            if isinstance(value, str):
+                try:
+                    return float(value.strip())
+                except (TypeError, ValueError):
+                    return None
+            return None
+
+        _p_in = _cost_num(
+            getattr(_cost_facts, "input_price", None)
+            ) if _cost_facts is not None else None
+        _p_out = _cost_num(
+            getattr(_cost_facts, "output_price", None)
+            ) if _cost_facts is not None else None
+        _u = usage if isinstance(usage, dict) else {}
+
+        def _tok(*names: str) -> int | None:
+            for _n in names:
+                _v = _u.get(_n)
+                if isinstance(_v, int) and not isinstance(_v, bool):
+                    return _v
+            return None
+
+        _t_in = _tok("input_tokens", "prompt_tokens")
+        _t_out = _tok("output_tokens", "completion_tokens")
+        if _t_in is None and _t_out is None:
+            pass
+        elif ((_t_in is not None and _p_in is None)
+                or (_t_out is not None and _p_out is None)):
+            pass
+        else:
+            _total = (float(_p_in or 0.0) * int(_t_in or 0)
+                      + float(_p_out or 0.0) * int(_t_out or 0))
+            _cost_value = _total
+            _cost_unit = "USD"
+            _cost_state = MetricState.MEASURED
+    except Exception:
+        pass
+    if _cost_state == MetricState.UNAVAILABLE:
+        cost_json: dict[str, Any] = {
+            "metric_id": _cost_id,
+            "project_id": pid,
+            "metric_name": COST_NAME,
+            "value": None,
+            "unit": _cost_unit,
+            "state": _cost_state.value,
+            "source": COST_SOURCE,
+            "task_id": task_id,
+            "run_id": run_id,
+            "recorded_at": now,
+        }
+    else:
+        cost = MetricRecord(
+            metric_id=_cost_id,
+            project_id=pid,
+            metric_name=COST_NAME,
+            value=float(_cost_value or 0.0),
+            unit=_cost_unit,
+            state=_cost_state,
+            source=COST_SOURCE,
+            task_id=task_id,
+            run_id=run_id,
+            recorded_at=now,
+        )
+        cost_json = _metric_to_json(cost)
     metric_rows = [
         _metric_to_json(cloud),
         _metric_to_json(tokens),
-        _metric_to_json(cost),
+        cost_json,
     ]
     event = TelemetryEvent(
         event_id="e-%s" % uuid.uuid4().hex,
@@ -290,12 +361,12 @@ def record_provider_usage(
         model=str(model or ""),
         event_type="PROVIDER_USAGE_REPORTED",
         metric_refs=(
-            cloud.metric_id, tokens.metric_id, cost.metric_id),
+            cloud.metric_id, tokens.metric_id, _cost_id),
     )
     event_rows = [_event_to_json(event)]
     append_records(metric_rows, event_rows, store_dir=store_dir)
     return {
-        "metric_ids": [cloud.metric_id, tokens.metric_id, cost.metric_id],
+        "metric_ids": [cloud.metric_id, tokens.metric_id, _cost_id],
         "event_id": event.event_id,
     }
 

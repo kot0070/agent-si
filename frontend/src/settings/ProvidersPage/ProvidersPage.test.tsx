@@ -17,6 +17,7 @@ import { createMemorySecretStore, secretIdForProvider } from "./secretStore";
 import type { SecretStorePort } from "./secretStore";
 import { AUTO_SENTINEL, ROLE_KEYS } from "./types";
 import type { ProviderState, SecretRef } from "./types";
+import { resetLocaleForTests, setLocale } from "../../locale/index";
 
 afterEach(() => {
   cleanup();
@@ -249,6 +250,21 @@ describe("ChatSelector", () => {
 });
 
 describe("ProvidersPage", () => {
+  it("search box placeholder follows the locale (en plus uk default)", () => {
+    try {
+      setLocale("en");
+      const enView = render(<ProvidersPage />);
+      expect(screen.getByPlaceholderText("Search providers or models")).toBeTruthy();
+      enView.unmount();
+      cleanup();
+      setLocale("uk");
+      render(<ProvidersPage />);
+      expect(screen.getByPlaceholderText("Шукати постачальників або моделі")).toBeTruthy();
+    } finally {
+      resetLocaleForTests();
+    }
+  });
+
   it("checkbox plus search filters the model list", () => {
     render(<ProvidersPage />);
     expect(screen.getAllByTestId("model-row").length).toBeGreaterThan(0);

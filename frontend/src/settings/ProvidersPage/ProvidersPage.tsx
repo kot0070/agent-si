@@ -2,7 +2,8 @@
 // a search box on top, per-model checkboxes, connect/disconnect dialogs,
 // a chat picker (enabled models only) and the leftover-key finder.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { setUiToken } from "../../api/errors";
 import { PROVIDER_CATALOG } from "./catalog";
 import { ChatModelSelector } from "./ChatModelSelector";
 import { enabledChatChoices } from "./ChatSelector";
@@ -17,6 +18,7 @@ import { createMemorySecretStore, secretIdForProvider } from "./secretStore";
 import type { SecretStorePort } from "./secretStore";
 import { ROLE_KEYS } from "./types";
 import type { ProviderPreset, ProviderState } from "./types";
+import { t } from "../../locale/index";
 
 // Save helper for the project chat model.
 // PUTs {project_id, model_id} to /api/v1/roles/chat-model with the session
@@ -51,6 +53,11 @@ function initialStates(catalog: ProviderPreset[]): Record<string, ProviderState>
 export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
   const catalog = PROVIDER_CATALOG;
   const sessionToken = "local-session";
+  // CODER-2 Sable: sync the page session token into the shared API client
+  // store so pool writes via requestVoid carry it from the first call.
+  useEffect(() => {
+    setUiToken(sessionToken);
+  }, [sessionToken]);
   const project = project_id;
   const [storeInstance] = useState<SecretStorePort>(() => createMemorySecretStore(sessionToken));
   const [states, setStates] = useState<Record<string, ProviderState>>(() => initialStates(catalog));
@@ -86,6 +93,7 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
 
   async function handleRolePoolChange(role: string, value: RolePoolValue): Promise<void> {
     try {
+      setUiToken(sessionToken);
       await saveRolePool(project, role, value, poolOptions);
       setPoolSaveMessage(`Saved ${role}.`);
     } catch {
@@ -173,7 +181,7 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
           type="search"
           aria-label="Search models"
           value={query}
-          placeholder="Search providers or models"
+          placeholder={t("settings.providers.searchPlaceholder")}
           onChange={(event) => setQuery(event.target.value)}
         />
       </label>

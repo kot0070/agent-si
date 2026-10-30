@@ -12,12 +12,19 @@ async function readSettingsPayload() {
   return response.json();
 }
 
-/** Current local-tests switch value: in-memory override wins, else fetch. */
+/** Current local-tests switch value: in-memory override wins, else fetch.
+ * Global default is ON: a missing payload or a missing flag reads True. */
 export async function localTestsEnabled() {
   if (localTestsOverride !== undefined) {
     return localTestsOverride;
   }
   const payload = await readSettingsPayload();
+  if (payload === null || payload === undefined) {
+    return true;
+  }
+  if (payload.local_tests === undefined) {
+    return true;
+  }
   return Boolean(payload.local_tests);
 }
 

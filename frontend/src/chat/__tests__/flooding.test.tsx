@@ -8,7 +8,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { ApiClientProvider } from "../../app/ApiClientProvider";
-import { FakeApiClient } from "../../api/client";
+import { FakeApiClient } from "../../api/__tests__/fakeApiClient";
 import {
   resetLocaleForTests,
   setLocale,

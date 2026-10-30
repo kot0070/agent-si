@@ -14,8 +14,6 @@ when present, raising 401 for a missing actor and 403 for a bad token
 before KB behaviour runs (fail closed).
 """
 
-from __future__ import annotations
-
 from typing import Any, Callable, Dict
 
 from fastapi import HTTPException, Request
