@@ -610,6 +610,16 @@ def create_app(settings: Any = None,
 
     _r349_steplimits.register_steplimit_routes(app)
 
+    # OC-K02 R-302/R-333 (additions-only): hierarchy run + control-plane
+    # map and the routine-offload switch surface; no existing line above
+    # or the K04 block below changes.
+    from agent_si.backend import hierarchy_routes as _ock02_hierarchy
+
+    _ock02_hierarchy.register_hierarchy_routes(app)
+    from agent_si.backend import offload_routes as _ock02_offload
+
+    _ock02_offload.register_offload_routes(app)
+
     # --- K04 package routes (HD-authorised additions-only block). ---
     # HD_VERDICT_INT1_K04_ROOT + HD_RULING_K04_TESTS: this block only ADDS
     # routes; no existing K02 line above changes. Real wiring: store dir
