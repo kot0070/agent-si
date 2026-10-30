@@ -877,31 +877,32 @@ def create_app(settings: Any = None,
                 _k04_ctx.key_save_timeout_s = _k04_save_timeout(settings)
             except Exception:
                 pass
-            # K04BIND1: re-bind persisted providers before the start bind.
-            # KEYECHO1: provider failure reasons are codes/refs only, zero
-            # credential bytes. Exception text must never be interpolated:
-            # the gateway transport formats key bytes into it (urllib
-            # "Invalid header value" carries the rejected header value).
-            _K04BIND_REASON_TIMEOUT = "evidence probe timed out after 10s"
-            _K04BIND_REASON_FAILED = "provider check failed"
-            _K04BIND_PROBE_STATES = ("VERIFIED", "PARTIAL", "UNSUPPORTED",
-                                     "UNKNOWN")
+            # PROVCK2/KEYECHO1: only allowlisted failure codes are ever
+            # surfaced or restored (never exception text, never secret
+            # bytes). Stale free-text reasons persisted on disk are
+            # dropped, never re-surfaced.
+            _PROVCK2_STORE_REASON = "credential store unavailable"
+            _PROVCK2_SURFACED_STATIC = frozenset([
+                "provider check failed",
+                _PROVCK2_STORE_REASON,
+                "evidence probe timed out after 10s",
+                "usage probe returned UNKNOWN",
+                "usage probe returned UNSUPPORTED",
+            ])
 
-            def _k04bind_reason_ok(text: Any) -> bool:
+            def _provck2_surfaced_ok(text: object) -> bool:
                 try:
-                    value = str(text or "")
+                    value = str(text or "")  # type: ignore[arg-type]
                 except Exception:
                     return False
-                if value in (_K04BIND_REASON_TIMEOUT,
-                             _K04BIND_REASON_FAILED):
+                if value in _PROVCK2_SURFACED_STATIC:
                     return True
                 if value.startswith("provider answered HTTP "):
-                    tail = value[len("provider answered HTTP "):]
-                    return tail.isdigit() and 100 <= int(tail) <= 599
-                if value.startswith("usage probe returned "):
-                    return value[len("usage probe returned "):] in (
-                        _K04BIND_PROBE_STATES)
+                    return value[len(
+                        "provider answered HTTP "):].isdigit()
                 return False
+
+            # K04BIND1: re-bind persisted providers before the start bind.
 
             try:
                 from agent_si.providers.registry import (
@@ -936,8 +937,8 @@ def create_app(settings: Any = None,
                         # KEYECHO1: only codes/refs are restored; a stale
                         # free-text reason (possibly pre-fix leak bytes)
                         # is dropped, never re-surfaced.
-                        if isinstance(_err, str) and _err \
-                                and _k04bind_reason_ok(_err):
+                        if (isinstance(_err, str) and _err
+                                and _provck2_surfaced_ok(_err)):
                             try:
                                 _k04_api.set_provider_error(
                                     _pid, _inst, _err)
@@ -1078,10 +1079,48 @@ def create_app(settings: Any = None,
         except Exception:
             pass
 
+    # PROVCK2: connect-time preflight + allowlisted failure classes.
+    # Surfaced reasons are fixed codes only (KEYECHO1: never exception
+    # text, never secret bytes). The machine-readable class/code pair is
+    # recorded on the audit sink (ids + codes + counts only, no values,
+    # no text) so the next live run separates store-read vs network vs
+    # HTTP without leaking anything. _PROVCK2_STORE_REASON and
+    # _provck2_surfaced_ok are defined above (restore gate needs them).
+    _PROVCK2_CODES = {
+        "ok": "EVIDENCE_OK",
+        "store-read": "CREDENTIAL_STORE_UNAVAILABLE",
+        "network": "EVIDENCE_PROBE_NETWORK",
+        "http": "PROVIDER_ANSWERED_HTTP",
+        "probe-timeout": "EVIDENCE_PROBE_TIMEOUT",
+        "unknown": "PROVIDER_CHECK_FAILED",
+    }
+    try:
+        from agent_si.providers.adapters.base import (
+            AdapterConfigError as _PROVCK2_STORE_EXC)
+        from agent_si.providers.adapters.base import (
+            TransportHttpError as _PROVCK2_HTTP_EXC)
+        from agent_si.providers.adapters.base import (
+            TransportTimeoutError as _PROVCK2_NET_EXC)
+    except Exception:
+        _PROVCK2_STORE_EXC = None
+        _PROVCK2_HTTP_EXC = None
+        _PROVCK2_NET_EXC = None
+
+    def _provck2_audit(record: dict) -> None:
+        try:
+            _sink = getattr(_k04_ctx, "audit_sink", None)
+            if _sink is None:
+                return
+            _sink.append(dict(record))
+        except Exception:
+            pass
+
     def _k04bind_evidence(pid: str, inst: str, model: str,
                           base_url: str, secret_map: dict) -> tuple:
         # K04BIND1: real check via the EXISTING usage_probe over the real
         # gateway transport (key from the store by ref, never echoed).
+        _provck2_inst = str(inst or "default")
+        _store_attempts = 0
         try:
             from agent_si.backend import chat_stream as _cs
             from agent_si.providers.adapters import legs as _legs
@@ -1092,6 +1131,54 @@ def create_app(settings: Any = None,
             except Exception:
                 _chat_path = "/chat/completions"
             _store = getattr(_k04_ctx, "credential_store", None)
+            # PROVCK2 preflight: prove the store entry reads BEFORE any
+            # network I/O. One retry on a transient store-read failure
+            # (each attempt is fully audited); then fail closed with the
+            # allowlisted store-read code. The value is dropped at once.
+            _sid = ""
+            try:
+                _sid = str((secret_map or {}).get("secret_id", "") or "")
+            except Exception:
+                _sid = ""
+            _store_ok = False
+            for _attempt in (1, 2):
+                _store_attempts = _attempt
+                try:
+                    _preflight_value = _cs._read_secret_value(_store, _sid)
+                except Exception:
+                    _provck2_audit({
+                        "event": "provck2-store-retry",
+                        "provider_id": pid,
+                        "instance_id": _provck2_inst,
+                        "attempt": _attempt,
+                        "outcome": ("retrying" if _attempt == 1
+                                    else "exhausted"),
+                    })
+                    continue
+                _store_ok = True
+                try:
+                    del _preflight_value
+                except Exception:
+                    pass
+                if _attempt > 1:
+                    _provck2_audit({
+                        "event": "provck2-store-retry",
+                        "provider_id": pid,
+                        "instance_id": _provck2_inst,
+                        "attempt": _attempt,
+                        "outcome": "recovered",
+                    })
+                break
+            if not _store_ok:
+                _provck2_audit({
+                    "event": "provck2-evidence",
+                    "provider_id": pid,
+                    "instance_id": _provck2_inst,
+                    "class": "store-read",
+                    "code": _PROVCK2_CODES["store-read"],
+                    "store_attempts": _store_attempts,
+                })
+                return (False, _PROVCK2_STORE_REASON)
             _real = _cs._gateway_transport(base_url, _store, secret_map)
             _seen: dict = {}
 
@@ -1124,35 +1211,88 @@ def create_app(settings: Any = None,
                 try:
                     _cap = _future.result(timeout=10.0)
                 except _fut.TimeoutError:
-                    return (False, _K04BIND_REASON_TIMEOUT)
+                    _provck2_audit({
+                        "event": "provck2-evidence",
+                        "provider_id": pid,
+                        "instance_id": _provck2_inst,
+                        "class": "probe-timeout",
+                        "code": _PROVCK2_CODES["probe-timeout"],
+                        "store_attempts": _store_attempts,
+                    })
+                    return (False, "evidence probe timed out after 10s")
             _state = ""
             try:
                 _state = str((_cap or {}).get("state", "") or "")
             except Exception:
                 _state = ""
             if _state in ("VERIFIED", "PARTIAL"):
+                _provck2_audit({
+                    "event": "provck2-evidence",
+                    "provider_id": pid,
+                    "instance_id": _provck2_inst,
+                    "class": "ok",
+                    "code": _PROVCK2_CODES["ok"],
+                    "store_attempts": _store_attempts,
+                })
                 return (True, "")
+            # PROVCK2 classification: fixed codes only, never exception
+            # text (KEYECHO1). HTTP carries the int status; the store-read
+            # class carries its own surfaced reason; network and unknown
+            # stay on the generic code so no transport text can escape.
             _exc = _seen.get("exc")
-            if _exc is not None:
+            _cls = "unknown"
+            _code = _PROVCK2_CODES["unknown"]
+            _http_status = None
+            _reason = "provider check failed"
+            if (_exc is not None and _PROVCK2_HTTP_EXC is not None
+                    and isinstance(_exc, _PROVCK2_HTTP_EXC)):
                 try:
-                    _status = getattr(_exc, "status", None)
+                    _maybe_status = getattr(_exc, "status", None)
                 except Exception:
-                    _status = None
-                # KEYECHO1: status code only; never the exception text
-                # (it may carry key bytes, e.g. "Invalid header value").
-                if (isinstance(_status, int)
-                        and not isinstance(_status, bool) and _status):
-                    _reason = "provider answered HTTP %d" % (_status,)
-                else:
-                    _reason = _K04BIND_REASON_FAILED
-            elif _state in _K04BIND_PROBE_STATES and _state not in (
-                    "VERIFIED", "PARTIAL"):
+                    _maybe_status = None
+                if (isinstance(_maybe_status, int)
+                        and not isinstance(_maybe_status, bool)
+                        and _maybe_status):
+                    _http_status = _maybe_status
+                    _cls = "http"
+                    _code = _PROVCK2_CODES["http"]
+                    _reason = "provider answered HTTP %d" % (_http_status,)
+            elif (_exc is not None and _PROVCK2_STORE_EXC is not None
+                    and isinstance(_exc, _PROVCK2_STORE_EXC)):
+                _cls = "store-read"
+                _code = _PROVCK2_CODES["store-read"]
+                _reason = _PROVCK2_STORE_REASON
+            elif isinstance(_exc, ((() if _PROVCK2_NET_EXC is None else _PROVCK2_NET_EXC),
+                                   TimeoutError, ConnectionError, OSError)):
+                _cls = "network"
+                _code = _PROVCK2_CODES["network"]
+                _reason = "provider check failed"
+            elif _exc is None:
                 _reason = "usage probe returned %s" % (_state or "UNKNOWN")
-            else:
-                _reason = _K04BIND_REASON_FAILED
+            _provck2_audit({
+                "event": "provck2-evidence",
+                "provider_id": pid,
+                "instance_id": _provck2_inst,
+                "class": _cls,
+                "code": _code,
+                **({"status": _http_status}
+                   if _http_status is not None else {}),
+                "store_attempts": _store_attempts,
+            })
             return (False, _k04bind_scrub(_reason))
         except Exception:
-            return (False, _K04BIND_REASON_FAILED)
+            try:
+                _provck2_audit({
+                    "event": "provck2-evidence",
+                    "provider_id": pid,
+                    "instance_id": _provck2_inst,
+                    "class": "unknown",
+                    "code": _PROVCK2_CODES["unknown"],
+                    "store_attempts": _store_attempts,
+                })
+            except Exception:
+                pass
+            return (False, "provider check failed")
 
     def _k04bind_rebind(force_clear: bool = False,
                         only_provider: str | None = None) -> None:
