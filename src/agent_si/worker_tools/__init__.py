@@ -11,6 +11,7 @@ from .dispatcher import get_registry, guarded_dispatch
 from .registry import (
     ToolEntryPoint,
     ToolFunc,
+    ToolNotAuthorizedError,
     ToolNotFoundError,
     ToolRegistry,
 )
@@ -21,6 +22,7 @@ __all__ = [
     "AuthMapping",
     "ToolEntryPoint",
     "ToolFunc",
+    "ToolNotAuthorizedError",
     "ToolNotFoundError",
     "ToolRegistry",
     "ToolResult",

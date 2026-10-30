@@ -11,6 +11,7 @@ holds types and signatures only; this module holds every behaviour body.
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any, Optional
 
 try:  # portable first (PYTHONPATH=src or tests inserting src)
@@ -33,6 +34,11 @@ except ImportError:  # legacy root-based harness (import src.agent_si...)
         RetrievalPolicy,
         WholeKbReadRefused,
     )
+
+try:
+    from src.agent_si.domain.contracts import ArtifactRef
+except ImportError:  # alternate layout: the agent_si/ directory itself on sys.path
+    from agent_si.domain.contracts import ArtifactRef
 
 import sys as _mod_sys
 
@@ -193,3 +199,85 @@ def savings_report() -> dict[str, Any]:
         "tokens": tokens,
         "cost": cost,
     }
+
+
+# K09UT1 handoff: size-based KB handoff packaging. Retrieval results at or
+# below HANDOFF_INLINE_TOKEN_LIMIT travel inline; larger results travel by
+# ArtifactRef (payload stored once by sha256; only the reference crosses
+# the provider boundary). instruction_status stays DATA_ONLY either way;
+# every chunk was already screened by guard.screen at read time.
+
+HANDOFF_INLINE_TOKEN_LIMIT = 500
+
+_ARTIFACT_BLOBS: dict[str, bytes] = {}
+
+
+def _handoff_payload(items: list) -> bytes:
+    """Cited payload bytes for one packaged handoff."""
+    lines = ["# %s\n\n%s" % (chunk.citation, chunk.text) for chunk in items]
+    return "\n\n---\n\n".join(lines).encode("utf-8")
+
+
+def _artifact_ref_for(payload: bytes) -> ArtifactRef:
+    """Store payload once by sha256; return its ArtifactRef."""
+    digest = hashlib.sha256(payload).hexdigest()
+    _ARTIFACT_BLOBS.setdefault(digest, payload)
+    return ArtifactRef(
+        artifact_id="artifact-" + digest,
+        hash=digest,
+        hash_algorithm="sha256",
+        media_type="text/markdown",
+        size=len(payload),
+    )
+
+
+def package_handoff(chunks: list) -> dict[str, Any]:
+    """Package retrieved chunks: inline when small, ArtifactRef when large.
+
+    Small results keep every KnowledgeChunk inline. Large results store
+    the cited payload once and return its ArtifactRef; the raw text does
+    not travel in the handoff dict.
+    """
+    items = list(chunks)
+    token_cost = sum(chunk.tokens for chunk in items)
+    if token_cost <= HANDOFF_INLINE_TOKEN_LIMIT:
+        return {
+            "mode": "inline",
+            "chunks": items,
+            "token_cost": token_cost,
+            "instruction_status": "DATA_ONLY",
+        }
+    payload = _handoff_payload(items)
+    ref = _artifact_ref_for(payload)
+    return {
+        "mode": "ref",
+        "ref": ref,
+        "citations": [chunk.citation for chunk in items],
+        "token_cost": token_cost,
+        "instruction_status": "DATA_ONLY",
+    }
+
+
+def resolve_handoff(handoff: dict[str, Any]) -> bytes:
+    """Resolve a packaged handoff back to its payload bytes.
+
+    Inline handoffs rebuild the cited payload from their chunks; ref
+    handoffs look the payload up by ArtifactRef hash. Unknown refs raise
+    KeyError (fail closed, never fabricated).
+    """
+    if handoff.get("mode") == "inline":
+        return _handoff_payload(handoff.get("chunks", []))
+    ref = handoff["ref"]
+    key = ref.hash if hasattr(ref, "hash") else ref["hash"]
+    return _ARTIFACT_BLOBS[key]
+
+
+def retrieve_handoff(
+    query: str,
+    project_id: str,
+    role: str,
+    policy: Optional[RetrievalPolicy] = None,
+) -> dict[str, Any]:
+    """Retrieve through the real KB layer, then package the handoff."""
+    chunks, _section_log = retrieve(query, project_id, role, policy)
+    return package_handoff(chunks)

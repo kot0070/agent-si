@@ -21,6 +21,12 @@ class ToolNotFoundError(KeyError):
     """Raised when no entry point is registered under the requested name."""
 
 
+class ToolNotAuthorizedError(PermissionError):
+    """Raised when the tool is outside the task-authorized list (MH-3)."""
+
+    code = "TOOL_NOT_AUTHORIZED"
+
+
 class ToolEntryPoint(Protocol):
     """Entry point through which a route reaches its real implementation."""
 
