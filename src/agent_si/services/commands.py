@@ -19,13 +19,14 @@ normalisation of any kind).
 
 from __future__ import annotations
 
-from typing import Any, Callable, Literal
+import os
+from typing import Any, Callable, Literal, cast
 
 GuardEvaluate = Callable[
     [list[str], Literal["R0", "R1", "R2", "R3"], dict[str, Any]], dict[str, Any]
 ]
 
-ACTION_CLASSES: tuple[str, ...] = ("R0", "R1", "R2", "R3")
+ACTION_CLASSES: tuple[Literal["R0", "R1", "R2", "R3"], ...] = ("R0", "R1", "R2", "R3")
 
 _SECRET_KEY_HINTS: tuple[str, ...] = (
     "secret",
@@ -134,6 +135,49 @@ def run_command(
     }
 
 
+def _report_declared_service_status(
+    argv: list[str], action_class: str, auth: dict[str, Any]
+) -> dict[str, Any]:
+    """Report the declared services table plus the merged environment.
+
+    Real read-only ``status`` implementation behind the belt entry
+    point: the service table comes from :func:`list_commands`,
+    the environment merge from
+    ``detection.merged_environment_for_project`` scoped to the
+    requesting task, and ``pid`` is this process. No writes and no
+    side effects.
+    """
+    from agent_si.portability.detection import (
+        merged_environment_for_project,
+    )
+
+    task = auth.get("task") if isinstance(auth, dict) else None
+    project_id = str(task) if task else "default-project"
+    return {
+        "ok": True,
+        "service": "status",
+        "services": list_commands(),
+        "argv": list(argv),
+        "action_class": action_class,
+        "pid": os.getpid(),
+        "environment": merged_environment_for_project(project_id),
+    }
+
+
+class _StatusServiceEntryPoint:
+    """Real belt entry point for the declared ``status`` service."""
+
+    name = "status"
+    action_class: Literal["R0", "R1", "R2", "R3"] = "R0"
+
+    def load(self):
+        """Return the real ``status`` implementation."""
+        return _report_declared_service_status
+
+
+_STATUS_ENTRY_POINT = _StatusServiceEntryPoint()
+
+
 def run_declared_service_via_belt(
     argv: list[str],
     action_class: str,
@@ -168,8 +212,18 @@ def run_declared_service_via_belt(
     if name not in list_commands():
         return {"error": "E_UNKNOWN_SERVICE"}
     from agent_si.worker_tools.dispatcher import get_registry, guarded_dispatch
+    from agent_si.worker_tools.registry import ToolNotFoundError
     target = registry if registry is not None else get_registry()
+    if registry is not None and name == _STATUS_ENTRY_POINT.name:
+        try:
+            target.load(name)
+        except ToolNotFoundError:
+            target.register(_STATUS_ENTRY_POINT)
     target.load(name)
-    return guarded_dispatch(
-        list(argv), action_class, dict(auth), tool=name, registry=target
+    return cast(
+        "dict[str, Any]",
+        guarded_dispatch(
+            list(argv), action_class, dict(auth),
+            tool=name, registry=target,
+        ),
     )
