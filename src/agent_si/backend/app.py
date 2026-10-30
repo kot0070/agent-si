@@ -24,6 +24,9 @@ from agent_si.backend.orchestration.parts import PartRow, list_parts
 
 USER_WRITE = "USER_WRITE"
 
+#: Stable machine code for a missing report row (M-WIRE L0B-11).
+REPORT_ROW_NOT_FOUND = "REPORT_ROW_NOT_FOUND"
+
 AuthHook = Callable[[str | None, str, str], bool]
 RateHook = Callable[[str], bool]
 
@@ -303,8 +306,13 @@ def create_app(settings: Any = None,
                            project_id: str | None = None) -> dict[str, Any]:
         ledger = _find_ledger_with(package_id, project_id)
         if ledger is None:
-            raise HTTPException(status_code=404,
-                                detail=f"no ledger row for package {package_id}")
+            from agent_si.backend import chat_stream as _wire_chat
+
+            raise HTTPException(
+                status_code=404,
+                detail=_wire_chat.http_error_detail(
+                    REPORT_ROW_NOT_FOUND,
+                    f"no ledger row for package {package_id}"))
         ids = ledger.package_ids()
         position = ids.index(package_id)
         next_id = ids[position + 1] if position + 1 < len(ids) else None
@@ -321,21 +329,32 @@ def create_app(settings: Any = None,
         # K02R4 engine entry: guard shape unchanged (401 missing
         # x-actor, 403 bad token, 429 rate limited); the accepted+json
         # placeholder is replaced by SSE streaming of a Manager run.
-        actor = (request.headers.get("x-actor") or "").strip()
-        if not actor:
-            raise HTTPException(status_code=401,
-                                detail="missing x-actor header")
-        token = request.headers.get("x-ui-session-token")
-        check_auth: AuthHook = app.state.auth_hook
-        if not check_auth(token, actor, USER_WRITE):
-            raise HTTPException(status_code=403, detail="forbidden")
-        check_rate: RateHook = app.state.rate_hook
-        if not check_rate(actor):
-            raise HTTPException(status_code=429, detail="rate limited")
+        # Every error body carries {code, message} (M-WIRE L0B-11).
         from fastapi.responses import StreamingResponse
 
         from agent_si.backend import chat_stream as _k02r4_chat
         from agent_si.backend.orchestration import graph as _k02r4_graph
+
+        actor = (request.headers.get("x-actor") or "").strip()
+        if not actor:
+            raise HTTPException(
+                status_code=401,
+                detail=_k02r4_chat.http_error_detail(
+                    _k02r4_chat.CHAT_ACTOR_MISSING,
+                    "missing x-actor header"))
+        token = request.headers.get("x-ui-session-token")
+        check_auth: AuthHook = app.state.auth_hook
+        if not check_auth(token, actor, USER_WRITE):
+            raise HTTPException(
+                status_code=403,
+                detail=_k02r4_chat.http_error_detail(
+                    _k02r4_chat.CHAT_FORBIDDEN, "forbidden"))
+        check_rate: RateHook = app.state.rate_hook
+        if not check_rate(actor):
+            raise HTTPException(
+                status_code=429,
+                detail=_k02r4_chat.http_error_detail(
+                    _k02r4_chat.CHAT_RATE_LIMITED, "rate limited"))
 
         try:
             raw = await request.body()
@@ -356,19 +375,79 @@ def create_app(settings: Any = None,
                 body, actor)
         except _k02r4_chat.ChatBadRequest as err:
             raise HTTPException(
-                status_code=400, detail=str(err)) from None
+                status_code=400,
+                detail=_k02r4_chat.http_error_detail(
+                    _k02r4_chat.CHAT_BAD_REQUEST, str(err))) from None
+        # M-WIRE L0B-12: resolve the routed provider adapter at open
+        # (start bind, then the per-project chat record) so the bridge
+        # sees a connected provider with no test help.
+        _k02r4_chat.bind_routed_provider_adapter(
+            app, project_id=chat_request.project or None)
         bridge = _k02r4_chat.bridge_for_app(app)
+        try:
+            from agent_si.runtime import manager as _k04bud1_mgr
+            from agent_si.backend import project_defaults as _k04bud1_defs
+
+            _k04bud1_ctx = getattr(app.state, "k04_ctx", None)
+            _k04bud1_gate = (getattr(_k04bud1_ctx, "budget_state", None)
+                             if _k04bud1_ctx is not None else None)
+            if _k04bud1_gate is not None and hasattr(
+                    _k04bud1_mgr, "set_budget_gate"):
+                _k04bud1_mgr.set_budget_gate(_k04bud1_gate)
+            try:
+                if chat_request.project and _k04bud1_gate is not None:
+                    _k04bud1_pid = str(chat_request.project)
+                    try:
+                        _k04bud1_gate.get_state(_k04bud1_pid)
+                    except (KeyError, LookupError):
+                        _k04bud1_gate.configure_project(
+                            _k04bud1_pid, _k04bud1_defs.CURRENCY,
+                            _k04bud1_defs.BUDGET_LIMIT,
+                            _k04bud1_defs.SOFT_LIMIT,
+                            _k04bud1_defs.HARD_LIMIT)
+            except Exception:
+                pass
+        except Exception:
+            pass
         try:
             stream_id, events = bridge.run(chat_request)
         except _k02r4_graph.DispatchRejected as err:
             raise HTTPException(
-                status_code=400, detail=str(err)) from None
+                status_code=400,
+                detail=_k02r4_chat.http_error_detail(
+                    getattr(err, "code", None)
+                    or _k02r4_chat.CHAT_DISPATCH_REJECTED,
+                    str(err))) from None
         except _k02r4_chat.ChatStreamAbsent as err:
-            raise HTTPException(
-                status_code=404, detail=str(err)) from None
+            if getattr(app.state, "k04_ctx", None) is not None:
+                # Configured app with nothing bound: the terminal
+                # NO_PROVIDER_BOUND error over HTTP 200 SSE, never a 404.
+                # K04BIND1: surface the verbatim last failure reason.
+                _reason: Any = None
+                try:
+                    _fac = getattr(getattr(app.state, "k04_ctx", None),
+                                   "provider_facade", None)
+                    _getter = getattr(_fac, "last_provider_error", None)
+                    if callable(_getter):
+                        _reason = _getter()
+                except Exception:
+                    _reason = None
+                stream_id, events = bridge.no_provider_run(
+                    chat_request, _reason)
+            else:
+                raise HTTPException(
+                    status_code=404,
+                    detail=_k02r4_chat.http_error_detail(
+                        getattr(err, "code", None)
+                        or _k02r4_chat.MANAGER_STREAM_ABSENT,
+                        str(err))) from None
         except _k02r4_chat.ChatStreamFailed as err:
             raise HTTPException(
-                status_code=500, detail=str(err)) from None
+                status_code=500,
+                detail=_k02r4_chat.http_error_detail(
+                    getattr(err, "code", None)
+                    or _k02r4_chat.MANAGER_STREAM_FAILED,
+                    str(err))) from None
         return StreamingResponse(
             events,
             media_type="text/event-stream",
@@ -631,6 +710,10 @@ def create_app(settings: Any = None,
     _localbench_routes.register_localbench_routes(app)
     _stage_runner.register_stage_routes(app)
 
+    from agent_si.backend import assurance_mount as _k03mnt1_assurance_mount
+
+    _k03mnt1_assurance_mount.register_assurance_routes(app)
+
     # K02R3: project/task read + console write routes (M-ROUTES). Reads
     # need no token; writes enforce the frozen USER_WRITE guard
     # themselves. Never touch the K04 block below.
@@ -660,8 +743,29 @@ def create_app(settings: Any = None,
         return None
 
     app.state.k02r3_store_dir = _k02r3_store_dir(settings)
+    from agent_si.telemetry import run_store as _l0c06_telemetry_store
+
+    app.state.telemetry_store_dir = app.state.k02r3_store_dir
+    _l0c06_telemetry_store.bind_store_dir(app.state.k02r3_store_dir)
     _k02r3_read.register_read_routes(app)
     _k02r3_write.register_console_projects_write_routes(app)
+
+    # R349A project step limits (additions-only): GET+PUT surface plus
+    # steplimits.json persistence owned by steplimit_routes; the K02 seam
+    # above and the K04 block below are unchanged.
+    from agent_si.backend import steplimit_routes as _r349_steplimits
+
+    _r349_steplimits.register_steplimit_routes(app)
+
+    # OC-K02 R-302/R-333 (additions-only): hierarchy run + control-plane
+    # map and the routine-offload switch surface; no existing line above
+    # or the K04 block below changes.
+    from agent_si.backend import hierarchy_routes as _ock02_hierarchy
+
+    _ock02_hierarchy.register_hierarchy_routes(app)
+    from agent_si.backend import offload_routes as _ock02_offload
+
+    _ock02_offload.register_offload_routes(app)
 
     # --- K04 package routes (HD-authorised additions-only block). ---
     # HD_VERDICT_INT1_K04_ROOT + HD_RULING_K04_TESTS: this block only ADDS
@@ -706,6 +810,55 @@ def create_app(settings: Any = None,
                 return str(_val)
         return None  # No store key: K04 unconfigured; K04 routes fail loud.
 
+    def _k04_secret_kind(_settings: Any) -> str:
+        _raw: Any = None
+        if isinstance(_settings, Mapping):
+            if "secret_store" in _settings:
+                _raw = _settings["secret_store"]
+        elif _settings is not None and hasattr(_settings, "secret_store"):
+            _raw = getattr(_settings, "secret_store")
+        if isinstance(_raw, str) and _raw.strip():
+            _low = _raw.strip().lower()
+            if _low == "memory":
+                return "memory"
+            if _low == "os":
+                return "os"
+        if isinstance(_settings, Mapping):
+            if _settings.get("testing") is True:
+                return "memory"
+        elif _settings is not None and getattr(
+                _settings, "testing", None) is True:
+            return "memory"
+        return "os"
+
+    def _k04_label_suffix(_settings: Any) -> str:
+        _raw2: Any = None
+        if isinstance(_settings, Mapping):
+            if "secret_label_suffix" in _settings:
+                _raw2 = _settings["secret_label_suffix"]
+        elif _settings is not None and hasattr(
+                _settings, "secret_label_suffix"):
+            _raw2 = getattr(_settings, "secret_label_suffix")
+        if isinstance(_raw2, str) and _raw2.strip():
+            return _raw2.strip()
+        return ""
+
+    def _k04_save_timeout(_settings: Any) -> float:
+        _raw3: Any = None
+        if isinstance(_settings, Mapping):
+            if "key_save_timeout_s" in _settings:
+                _raw3 = _settings["key_save_timeout_s"]
+        elif _settings is not None and hasattr(
+                _settings, "key_save_timeout_s"):
+            _raw3 = getattr(_settings, "key_save_timeout_s")
+        try:
+            _val = float(_raw3)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return 5.0
+        if _val > 0:
+            return _val
+        return 5.0
+
     _k04_dir = _k04_store_dir(settings)
     _k04_config_error: Optional[str] = None
     if _k04_dir is None:
@@ -717,20 +870,266 @@ def create_app(settings: Any = None,
     if _k04_config_error is None:
         assert _k04_dir is not None
         _k04_store = _K04RoutingStore(_k04_dir)
-        _k04_api, _k04_credstore, _k04_auditsink = \
-            _k04_facades.ephemeral_stack()
-        _k04_ctx = _k04_pr.RoutingCtx(
-            store=_k04_store,
-            role_table=_K04RoleTable(_k04_store),
-            kb=_k04_kb_reader.CatalogKbReader(),
-            budget_state=_K04BudgetGate(
-                _k04_os.path.join(_k04_dir, "budget")),
-        )
-        _k04_ctx.provider_facade = _k04_api
-        _k04_ctx.credential_store = _k04_credstore
-        _k04_ctx.audit_sink = _k04_auditsink
+        _k04_kind = _k04_secret_kind(settings)
+        _k04_suffix = _k04_label_suffix(settings)
+        if _k04_kind == "memory":
+            _k04_api, _k04_credstore, _k04_auditsink = \
+                _k04_facades.memory_stack()
+        else:
+            try:
+                _k04_api, _k04_credstore, _k04_auditsink = \
+                    _k04_facades.os_stack(
+                        label_suffix=_k04_suffix,
+                        audit_path=_k04_os.path.join(
+                            _k04_dir, "provider_audit.jsonl"))
+            except Exception as _k04_os_exc:
+                _k04_config_error = (
+                    "K04 OS credential store unavailable: %s: %s"
+                    % (type(_k04_os_exc).__name__, _k04_os_exc))
+        if _k04_config_error is None:
+            _k04_ctx = _k04_pr.RoutingCtx(
+                store=_k04_store,
+                role_table=_K04RoleTable(_k04_store),
+                kb=_k04_kb_reader.CatalogKbReader(),
+                budget_state=_K04BudgetGate(
+                    _k04_os.path.join(_k04_dir, "budget")),
+            )
+            _k04_ctx.provider_facade = _k04_api
+            _k04_ctx.credential_store = _k04_credstore
+            _k04_ctx.audit_sink = _k04_auditsink
+            try:
+                from agent_si.runtime import manager as _k04_mgr
+                if hasattr(_k04_mgr, "set_budget_gate"):
+                    _k04_mgr.set_budget_gate(_k04_ctx.budget_state)
+            except Exception:
+                pass
+            try:
+
+                class _ChatKbEnriched:
+                    """KB reader plus connected models and preset catalogue.
+
+                    Kit BUILD_PLAN 644-649: every model the connected
+                    accounts offer; a field without a source is UNKNOWN.
+                    Chat models are the connected plus evidenced providers
+                    models (their connect model plus preset catalogue);
+                    KB facts only enrich them.
+                    """
+
+                    def __init__(self, base: Any, facade: Any) -> None:
+                        self._base = base
+                        self._facade = facade
+
+                    def facts(self, provider: str, model: str) -> Any:
+                        try:
+                            return self._base.facts(provider, model)
+                        except Exception:
+                            return None
+
+                    def models(self, provider: Any = None) -> list:
+                        try:
+                            base_rows = list(self._base.models(provider) or [])
+                        except Exception:
+                            base_rows = []
+                        try:
+                            seen = set()
+                            for row in base_rows:
+                                try:
+                                    p = str(getattr(row, "provider", "") or "")
+                                    m = str(getattr(row, "model", "") or "")
+                                except Exception:
+                                    continue
+                                if "/" in m:
+                                    m = m.split("/")[-1]
+                                seen.add((p, m))
+                        except Exception:
+                            seen = set()
+                        extra: list = []
+                        try:
+                            from agent_si.model_kb import kb as _kbmod
+                            from agent_si.model_kb import kb_reader as _kbr
+                            from agent_si.providers.registry import (
+                                presets as _presets)
+                        except Exception:
+                            return base_rows
+                        try:
+                            views = self._facade.list_providers(True)
+                        except Exception:
+                            views = []
+                        wanted: list = []
+                        for view in views or []:
+                            try:
+                                pid = str(getattr(view, "evidenced", False)
+                                          and getattr(view, "provider_id", "")
+                                          or "")
+                            except Exception:
+                                continue
+                            if not pid:
+                                continue
+                            if provider is not None and pid != str(provider):
+                                continue
+                            wanted.append(pid)
+                        if provider is not None and str(provider) not in wanted:
+                            # listing for one provider still offers its
+                            # catalogue even before evidence
+                            wanted.append(str(provider))
+                        for pid in wanted:
+                            bare_models: list = []
+                            try:
+                                provs = getattr(self._facade, "_providers", {})
+                                rec = provs.get(pid, {}) if isinstance(
+                                    provs, dict) else {}
+                                mmap = rec.get("models", {}) if isinstance(
+                                    rec, dict) else {}
+                                for val in (mmap.values() if isinstance(
+                                        mmap, dict) else []):
+                                    text = str(val or "")
+                                    if "/" in text:
+                                        head, _, tail = text.partition("/")
+                                        if head == pid and tail:
+                                            text = tail
+                                    if text and text not in bare_models:
+                                        bare_models.append(text)
+                            except Exception:
+                                pass
+                            try:
+                                preset = _presets.get_preset(pid)
+                                cat = (preset or {}).get("catalogue", ()) or ()
+                            except Exception:
+                                cat = ()
+                            for entry in cat or []:
+                                text = str(entry or "")
+                                if "/" in text:
+                                    text = text.split("/")[-1]
+                                if text and text not in bare_models:
+                                    bare_models.append(text)
+                            if pid == "meta":
+                                try:
+                                    mcat = tuple(
+                                        _presets.META_CATALOGUE or ())
+                                except Exception:
+                                    mcat = ()
+                                for entry in mcat:
+                                    text = str(entry or "")
+                                    if "/" in text:
+                                        text = text.split("/")[-1]
+                                    if text and text not in bare_models:
+                                        bare_models.append(text)
+                            for bare in bare_models:
+                                if (pid, bare) in seen:
+                                    continue
+                                try:
+                                    row = _kbmod.make_model_row(pid, bare)
+                                    fact = _kbr.row_to_facts(row)
+                                except Exception:
+                                    continue
+                                seen.add((pid, bare))
+                                extra.append(fact)
+                        return base_rows + extra
+
+                _k04_ctx.kb = _ChatKbEnriched(
+                    _k04_ctx.kb, _k04_ctx.provider_facade)
+            except Exception:
+                pass
+            try:
+                _k04_ctx.key_save_timeout_s = _k04_save_timeout(settings)
+            except Exception:
+                pass
+            # PROVCK2/KEYECHO1: only allowlisted failure codes are ever
+            # surfaced or restored (never exception text, never secret
+            # bytes). Stale free-text reasons persisted on disk are
+            # dropped, never re-surfaced.
+            _PROVCK2_STORE_REASON = "credential store unavailable"
+            _PROVCK2_SURFACED_STATIC = frozenset([
+                "provider check failed",
+                _PROVCK2_STORE_REASON,
+                "evidence probe timed out after 10s",
+                "usage probe returned UNKNOWN",
+                "usage probe returned UNSUPPORTED",
+            ])
+
+            def _provck2_surfaced_ok(text: object) -> bool:
+                try:
+                    value = str(text or "")  # type: ignore[arg-type]
+                except Exception:
+                    return False
+                if value in _PROVCK2_SURFACED_STATIC:
+                    return True
+                if value.startswith("provider answered HTTP "):
+                    return value[len(
+                        "provider answered HTTP "):].isdigit()
+                return False
+
+            # K04BIND1: re-bind persisted providers before the start bind.
+
+            try:
+                from agent_si.providers.registry import (
+                    provider_store as _k04bind_store)
+                for _rec in _k04bind_store.load_connections(_k04_dir):
+                    try:
+                        _pid = str((_rec or {}).get("provider_id") or "")
+                        _model = str((_rec or {}).get("model") or "")
+                        _kr = (_rec or {}).get("key_ref") or {}
+                        _eref = (_rec or {}).get("evidence_ref")
+                        _type = str((_rec or {}).get("type") or _pid)
+                        _burl = str((_rec or {}).get("base_url") or "")
+                        _inst = str((_rec or {}).get("instance_id")
+                                    or "default")
+                        if not _pid or not _model or not _burl:
+                            continue
+                        if not isinstance(_kr, dict) or not _kr.get(
+                                "secret_id"):
+                            continue
+                        try:
+                            _k04_api.register_provider(
+                                {"provider_id": _pid, "type": _type,
+                                 "base_url": _burl, "model": _model,
+                                 "instance_id": _inst},
+                                _kr,
+                                instance_id=_inst,
+                                evidence_ref=(str(_eref) if _eref else None),
+                                mock=bool((_rec or {}).get("mock", False)))
+                        except ValueError:
+                            pass
+                        _err = (_rec or {}).get("error")
+                        # KEYECHO1: only codes/refs are restored; a stale
+                        # free-text reason (possibly pre-fix leak bytes)
+                        # is dropped, never re-surfaced.
+                        if (isinstance(_err, str) and _err
+                                and _provck2_surfaced_ok(_err)):
+                            try:
+                                _k04_api.set_provider_error(
+                                    _pid, _inst, _err)
+                            except Exception:
+                                pass
+                        elif _eref:
+                            try:
+                                _k04_api.clear_provider_error(_pid, _inst)
+                            except Exception:
+                                pass
+                            try:
+                                _k04_api.record_health(_pid, _inst, "ONLINE")
+                            except Exception:
+                                pass
+                    except Exception:
+                        continue
+            except Exception:
+                pass
     app.state.k04_ctx = _k04_ctx
     app.state.k04_config_error = _k04_config_error
+    # M-WIRE L0B-12: bind the routed provider adapter at app start via
+    # the K04 public API, so bridge_for_app sees
+    # app.state.chat_provider_adapter with no test help. No connected
+    # provider (or no K04) leaves it unset: the chat route then answers
+    # the terminal NO_PROVIDER_BOUND event over HTTP 200 SSE. Never
+    # raises: start stays total even when binding cannot complete.
+    app.state.chat_provider_adapter = None
+    if _k04_ctx is not None:
+        try:
+            from agent_si.backend import chat_stream as _wire_chat_bind
+
+            _wire_chat_bind.bind_routed_provider_adapter(app)
+        except Exception:
+            pass
 
     # BEDEF1 ensure-at-start: projects loaded from the store that have no
     # budget state or step limits get the product starting values
@@ -747,12 +1146,360 @@ def create_app(settings: Any = None,
     except Exception:
         pass
 
+    # K04BIND1: evidence + persistence + rebind helpers (additions-only).
+    # (KEYECHO1 reason codes/allowlist live above with the restore gate.)
+    def _k04bind_scrub(text: str) -> str:
+        try:
+            out = str(text or "")
+        except Exception:
+            return "provider check failed"
+        try:
+            store = getattr(_k04_ctx, "credential_store", None)
+            if store is not None:
+                for attr in ("get_secret", "get", "retrieve", "read",
+                             "get_secret_value"):
+                    fn = getattr(store, attr, None)
+                    if not callable(fn):
+                        continue
+                    try:
+                        for sid in ("openai", "meta", "anthropic"):
+                            try:
+                                val = fn(sid)
+                            except Exception:
+                                continue
+                            if isinstance(val, dict):
+                                val = val.get("value", "")
+                            if isinstance(val, str) and val and val in out:
+                                out = out.replace(val, "[redacted]")
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        return out
+
+    def _k04bind_snapshot() -> list:
+        try:
+            api = getattr(_k04_ctx, "provider_facade", None)
+            if api is None:
+                return []
+            rows = []
+            providers = getattr(api, "_providers", {}) or {}
+            for pid in sorted(providers):
+                try:
+                    view = api.get_provider(pid)
+                    if view is None:
+                        continue
+                    try:
+                        secret_desc = view.secret_ref.describe()
+                    except Exception:
+                        secret_desc = {"secret_id": "",
+                                       "provider_id": pid}
+                    try:
+                        eref = api.get_evidence_ref(
+                            pid, getattr(view, "instance_id", "default"))
+                    except Exception:
+                        eref = None
+                    try:
+                        err = api.get_provider_error(pid)
+                    except Exception:
+                        err = None
+                    rows.append({
+                        "provider_id": pid,
+                        "model": str(
+                            (providers[pid].get("models", {}) or {}).get(
+                                getattr(view, "instance_id", "default"),
+                                "") or ""),
+                        "instance_id": str(getattr(
+                            view, "instance_id", "default") or "default"),
+                        "type": str(getattr(view, "type", "") or ""),
+                        "base_url": str(getattr(view, "base_url", "") or ""),
+                        "key_ref": dict(secret_desc) if isinstance(
+                            secret_desc, dict) else {},
+                        "evidence_ref": eref,
+                        "health": str(getattr(view, "health", "") or ""),
+                        "error": err,
+                        "mock": bool(getattr(view, "mock", False)),
+                    })
+                except Exception:
+                    continue
+            return rows
+        except Exception:
+            return []
+
+    def _k04bind_save() -> None:
+        try:
+            if _k04_dir is None:
+                return
+            from agent_si.providers.registry import (
+                provider_store as _k04bind_pstore)
+            _k04bind_pstore.save_connections(_k04_dir, _k04bind_snapshot())
+        except Exception:
+            pass
+
+    # PROVCK2: connect-time preflight + allowlisted failure classes.
+    # Surfaced reasons are fixed codes only (KEYECHO1: never exception
+    # text, never secret bytes). The machine-readable class/code pair is
+    # recorded on the audit sink (ids + codes + counts only, no values,
+    # no text) so the next live run separates store-read vs network vs
+    # HTTP without leaking anything. _PROVCK2_STORE_REASON and
+    # _provck2_surfaced_ok are defined above (restore gate needs them).
+    _PROVCK2_CODES = {
+        "ok": "EVIDENCE_OK",
+        "store-read": "CREDENTIAL_STORE_UNAVAILABLE",
+        "network": "EVIDENCE_PROBE_NETWORK",
+        "http": "PROVIDER_ANSWERED_HTTP",
+        "probe-timeout": "EVIDENCE_PROBE_TIMEOUT",
+        "unknown": "PROVIDER_CHECK_FAILED",
+    }
+    try:
+        from agent_si.providers.adapters.base import (
+            AdapterConfigError as _PROVCK2_STORE_EXC)
+        from agent_si.providers.adapters.base import (
+            TransportHttpError as _PROVCK2_HTTP_EXC)
+        from agent_si.providers.adapters.base import (
+            TransportTimeoutError as _PROVCK2_NET_EXC)
+    except Exception:
+        _PROVCK2_STORE_EXC = None
+        _PROVCK2_HTTP_EXC = None
+        _PROVCK2_NET_EXC = None
+
+    def _provck2_audit(record: dict) -> None:
+        try:
+            _sink = getattr(_k04_ctx, "audit_sink", None)
+            if _sink is None:
+                return
+            _sink.append(dict(record))
+        except Exception:
+            pass
+
+    def _k04bind_evidence(pid: str, inst: str, model: str,
+                          base_url: str, secret_map: dict) -> tuple:
+        # K04BIND1: real check via the EXISTING usage_probe over the real
+        # gateway transport (key from the store by ref, never echoed).
+        _provck2_inst = str(inst or "default")
+        _store_attempts = 0
+        try:
+            from agent_si.backend import chat_stream as _cs
+            from agent_si.providers.adapters import legs as _legs
+            from agent_si.providers.adapters import (
+                usage_probe as _uprobe)
+            try:
+                _chat_path = _legs.leg_descriptor(pid)["chat_path"]
+            except Exception:
+                _chat_path = "/chat/completions"
+            _store = getattr(_k04_ctx, "credential_store", None)
+            # PROVCK2 preflight: prove the store entry reads BEFORE any
+            # network I/O. One retry on a transient store-read failure
+            # (each attempt is fully audited); then fail closed with the
+            # allowlisted store-read code. The value is dropped at once.
+            _sid = ""
+            try:
+                _sid = str((secret_map or {}).get("secret_id", "") or "")
+            except Exception:
+                _sid = ""
+            _store_ok = False
+            for _attempt in (1, 2):
+                _store_attempts = _attempt
+                try:
+                    _preflight_value = _cs._read_secret_value(_store, _sid)
+                except Exception:
+                    _provck2_audit({
+                        "event": "provck2-store-retry",
+                        "provider_id": pid,
+                        "instance_id": _provck2_inst,
+                        "attempt": _attempt,
+                        "outcome": ("retrying" if _attempt == 1
+                                    else "exhausted"),
+                    })
+                    continue
+                _store_ok = True
+                try:
+                    del _preflight_value
+                except Exception:
+                    pass
+                if _attempt > 1:
+                    _provck2_audit({
+                        "event": "provck2-store-retry",
+                        "provider_id": pid,
+                        "instance_id": _provck2_inst,
+                        "attempt": _attempt,
+                        "outcome": "recovered",
+                    })
+                break
+            if not _store_ok:
+                _provck2_audit({
+                    "event": "provck2-evidence",
+                    "provider_id": pid,
+                    "instance_id": _provck2_inst,
+                    "class": "store-read",
+                    "code": _PROVCK2_CODES["store-read"],
+                    "store_attempts": _store_attempts,
+                })
+                return (False, _PROVCK2_STORE_REASON)
+            _real = _cs._gateway_transport(base_url, _store, secret_map)
+            _seen: dict = {}
+
+            def _usage_trans(req: dict) -> dict:
+                try:
+                    reply = _real({
+                        "model": model,
+                        "messages": [{"role": "user",
+                                      "content": "ping"}],
+                        "max_tokens": 1,
+                        "stream": False,
+                        "chat_path": _chat_path,
+                    })
+                except Exception as _exc:
+                    _seen["exc"] = _exc
+                    raise
+                usage = {}
+                if isinstance(reply, dict):
+                    usage = reply.get("usage", {})
+                    if not isinstance(usage, dict):
+                        usage = {}
+                return {"usage": dict(usage)}
+
+            def _run() -> dict:
+                return _uprobe.probe_usage(pid, inst or "default",
+                                            _usage_trans)
+            import concurrent.futures as _fut
+            with _fut.ThreadPoolExecutor(max_workers=1) as _pool:
+                _future = _pool.submit(_run)
+                try:
+                    _cap = _future.result(timeout=10.0)
+                except _fut.TimeoutError:
+                    _provck2_audit({
+                        "event": "provck2-evidence",
+                        "provider_id": pid,
+                        "instance_id": _provck2_inst,
+                        "class": "probe-timeout",
+                        "code": _PROVCK2_CODES["probe-timeout"],
+                        "store_attempts": _store_attempts,
+                    })
+                    return (False, "evidence probe timed out after 10s")
+            _state = ""
+            try:
+                _state = str((_cap or {}).get("state", "") or "")
+            except Exception:
+                _state = ""
+            if _state in ("VERIFIED", "PARTIAL"):
+                _provck2_audit({
+                    "event": "provck2-evidence",
+                    "provider_id": pid,
+                    "instance_id": _provck2_inst,
+                    "class": "ok",
+                    "code": _PROVCK2_CODES["ok"],
+                    "store_attempts": _store_attempts,
+                })
+                return (True, "")
+            # PROVCK2 classification: fixed codes only, never exception
+            # text (KEYECHO1). HTTP carries the int status; the store-read
+            # class carries its own surfaced reason; network and unknown
+            # stay on the generic code so no transport text can escape.
+            _exc = _seen.get("exc")
+            _cls = "unknown"
+            _code = _PROVCK2_CODES["unknown"]
+            _http_status = None
+            _reason = "provider check failed"
+            if (_exc is not None and _PROVCK2_HTTP_EXC is not None
+                    and isinstance(_exc, _PROVCK2_HTTP_EXC)):
+                try:
+                    _maybe_status = getattr(_exc, "status", None)
+                except Exception:
+                    _maybe_status = None
+                if (isinstance(_maybe_status, int)
+                        and not isinstance(_maybe_status, bool)
+                        and _maybe_status):
+                    _http_status = _maybe_status
+                    _cls = "http"
+                    _code = _PROVCK2_CODES["http"]
+                    _reason = "provider answered HTTP %d" % (_http_status,)
+            elif (_exc is not None and _PROVCK2_STORE_EXC is not None
+                    and isinstance(_exc, _PROVCK2_STORE_EXC)):
+                _cls = "store-read"
+                _code = _PROVCK2_CODES["store-read"]
+                _reason = _PROVCK2_STORE_REASON
+            elif isinstance(_exc, ((() if _PROVCK2_NET_EXC is None else _PROVCK2_NET_EXC),
+                                   TimeoutError, ConnectionError, OSError)):
+                _cls = "network"
+                _code = _PROVCK2_CODES["network"]
+                _reason = "provider check failed"
+            elif _exc is None:
+                _reason = "usage probe returned %s" % (_state or "UNKNOWN")
+            _provck2_audit({
+                "event": "provck2-evidence",
+                "provider_id": pid,
+                "instance_id": _provck2_inst,
+                "class": _cls,
+                "code": _code,
+                **({"status": _http_status}
+                   if _http_status is not None else {}),
+                "store_attempts": _store_attempts,
+            })
+            return (False, _k04bind_scrub(_reason))
+        except Exception:
+            try:
+                _provck2_audit({
+                    "event": "provck2-evidence",
+                    "provider_id": pid,
+                    "instance_id": _provck2_inst,
+                    "class": "unknown",
+                    "code": _PROVCK2_CODES["unknown"],
+                    "store_attempts": _store_attempts,
+                })
+            except Exception:
+                pass
+            return (False, "provider check failed")
+
+    def _k04bind_rebind(force_clear: bool = False,
+                        only_provider: str | None = None) -> None:
+        try:
+            from agent_si.backend import chat_stream as _cs2
+            if force_clear:
+                try:
+                    cur = getattr(app.state, "chat_provider_adapter", None)
+                    cur_pid = getattr(
+                        getattr(cur, "config", None), "provider_id", "")
+                    if only_provider is None or cur_pid == only_provider:
+                        app.state.chat_provider_adapter = None
+                        try:
+                            _bridge = getattr(
+                                app.state, "chat_stream_bridge", None)
+                            if _bridge is not None:
+                                _bridge._provider_adapter = None
+                        except Exception:
+                            pass
+                    elif only_provider is not None:
+                        return
+                except Exception:
+                    pass
+            else:
+                try:
+                    app.state.chat_provider_adapter = None
+                except Exception:
+                    pass
+            try:
+                _new = _cs2.bind_routed_provider_adapter(app)
+            except Exception:
+                _new = None
+            try:
+                _bridge2 = getattr(app.state, "chat_stream_bridge", None)
+                if _bridge2 is not None and _new is not None:
+                    if getattr(_bridge2, "_provider_adapter", None) is None:
+                        _bridge2._provider_adapter = _new
+                    else:
+                        _bridge2._provider_adapter = _new
+            except Exception:
+                pass
+        except Exception:
+            pass
+
     def _k04_make_endpoint(_fn: Callable, _is_write: bool,
                            _name: str = "") -> Callable:
         async def _k04_endpoint(request: Request) -> _K04JSONResponse:
             if _k04_config_error is not None:
                 return _K04JSONResponse(
-                    status_code=500,
+                    status_code=503,
                     content={"error": _k04_config_error})
             _query: dict = dict(request.query_params)
             for _k, _v in request.path_params.items():
@@ -817,6 +1564,129 @@ def create_app(settings: Any = None,
                     status_code=500,
                     content={"error": "%s: %s" % (type(_exc).__name__,
                                                  _exc)})
+            # K04BIND1: connect runs the real evidence check, persists and
+            # re-binds; disconnect clears the bound adapter and persists.
+            try:
+                if _name == "connect_provider" and _status == 200:
+                    _api = getattr(_k04_ctx, "provider_facade", None)
+                    _prov = {}
+                    try:
+                        _prov = (_payload or {}).get("provider", {}) or {}
+                    except Exception:
+                        _prov = {}
+                    _pid = str(_prov.get("provider_id", "") or "")
+                    _inst = str(_prov.get("instance_id", "") or "default")
+                    _model = ""
+                    try:
+                        _body_m = (_body or {}).get("model", "")
+                        if isinstance(_body_m, str) and _body_m:
+                            _model = _body_m
+                    except Exception:
+                        pass
+                    if _api is not None and _pid and _model:
+                        try:
+                            _view0 = _api.get_provider(_pid)
+                        except Exception:
+                            _view0 = None
+                        _burl = ""
+                        _smap: dict = {}
+                        try:
+                            _burl = str(getattr(_view0, "base_url", "") or "")
+                            _sref = getattr(_view0, "secret_ref", None)
+                            _desc = _sref.describe() if hasattr(
+                                _sref, "describe") else {}
+                            if isinstance(_desc, dict):
+                                _smap = {k: v for k, v in _desc.items()
+                                         if k != "value"}
+                        except Exception:
+                            pass
+                        if _burl and _smap:
+                            _ok, _reason = _k04bind_evidence(
+                                _pid, _inst, _model, _burl, _smap)
+                            try:
+                                if _ok:
+                                    import datetime as _dt
+                                    _eref = "connect-probe:%s/%s:%s" % (
+                                        _pid, _inst,
+                                        _dt.datetime.now(
+                                            _dt.timezone.utc).isoformat())
+                                    try:
+                                        _api._registry.record_credential_evidence(
+                                            _pid, _inst, _eref)
+                                    except Exception:
+                                        pass
+                                    try:
+                                        _api.clear_provider_error(_pid, _inst)
+                                    except Exception:
+                                        pass
+                                    try:
+                                        _api.record_health(_pid, _inst,
+                                                           "ONLINE")
+                                    except Exception:
+                                        pass
+                                else:
+                                    try:
+                                        _api.set_provider_error(
+                                            _pid, _inst, _reason)
+                                    except Exception:
+                                        pass
+                            except Exception:
+                                pass
+                            try:
+                                _fresh = _api.get_provider(_pid)
+                                if _fresh is not None:
+                                    _payload = {"provider": _fresh.describe()}
+                                    try:
+                                        _err2 = _api.get_provider_error(_pid)
+                                        if _err2:
+                                            _payload["error"] = _err2
+                                    except Exception:
+                                        pass
+                            except Exception:
+                                pass
+                            try:
+                                _k04bind_save()
+                            except Exception:
+                                pass
+                            try:
+                                if _fresh is not None and getattr(
+                                        _fresh, "evidenced", False):
+                                    _k04bind_rebind()
+                            except Exception:
+                                pass
+                        else:
+                            try:
+                                _k04bind_save()
+                            except Exception:
+                                pass
+                elif _name == "disconnect_provider" and _status == 200:
+                    try:
+                        _dpid = ""
+                        try:
+                            _dpid = str((_payload or {}).get(
+                                "provider_id", "") or "")
+                        except Exception:
+                            pass
+                        if not _dpid:
+                            try:
+                                _dpid = str((_query or {}).get("id", "") or "")
+                            except Exception:
+                                pass
+                        _k04bind_save()
+                    except Exception:
+                        pass
+                    try:
+                        _k04bind_rebind(force_clear=True,
+                                        only_provider=_dpid or None)
+                    except Exception:
+                        pass
+                elif _name == "put_chat_model" and _status == 200:
+                    try:
+                        _k04bind_rebind(force_clear=True)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             return _K04JSONResponse(status_code=_status,
                                     content=_k04_jsonable(_payload))
         return _k04_endpoint
@@ -828,6 +1698,17 @@ def create_app(settings: Any = None,
                 _fn, _method.lower() in _k04_pr._USER_WRITE_METHODS, _name),
             methods=[_method.upper()],
             name="k04_" + _name)
+
+    try:
+        from agent_si.providers.registry import key_routes as _k04_keys
+
+        app.add_api_route(
+            "/api/v1/providers/keys",
+            _k04_make_endpoint(_k04_keys.save_key, True, "save_key"),
+            methods=["POST"],
+            name="k04_save_key")
+    except Exception:
+        pass
 
     # K13F1 routes: amend / finalize-read / stop over the real K13 entries.
     # Additions-only block: binds per-app in-memory K13 state on app.state
@@ -909,6 +1790,16 @@ def create_app(settings: Any = None,
                         for o in card.options],
             "resume_token": card.resume_token,
         }
+
+    # --- K06 OC served worker path (MH-1/MH-3 + rows 189/253/254). ---
+    # Additions-only block: binds per-app K06 OC state on app.state and
+    # registers the /api/v1/k06/ handlers over the real worker_tools /
+    # services / script_import modules. No existing line above changes.
+    from agent_si.worker_tools import routes as _k06oc_routes
+
+    _k06oc_routes.bind_k06oc_state(app)
+    _k06oc_routes.register_k06oc_routes(app)
+
     # --- K09-REFRESH stale KB copy refresh (LIVE0-06 additions-only). ---
     # Per-app recorded versions + changelog over local KB dirs (no
     # network; the KB dir is never mutated). GET proposal is an open read
@@ -921,7 +1812,10 @@ def create_app(settings: Any = None,
     import json as _k09r_json
     from pathlib import Path as _K09RPath
 
-    from src.agent_si.kb import registry as _k09r_registry
+    try:
+        from agent_si.kb import registry as _k09r_registry
+    except ImportError:
+        from src.agent_si.kb import registry as _k09r_registry
 
     _K09R_UNKNOWN = "UNKNOWN"
 
@@ -993,8 +1887,16 @@ def create_app(settings: Any = None,
                 "diff": _diff}
 
     @app.get("/api/v1/kb/refresh/proposal")
-    def _k09r_get_proposal(kb_id: str) -> dict[str, Any]:
-        if not kb_id or not _K09RPath(kb_id).is_dir():
+    def _k09r_get_proposal(kb_id: str | None = None) -> dict[str, Any]:
+        if not kb_id:
+            _items: list[dict[str, Any]] = []
+            for _known in sorted(app.state.kb_refresh_recorded):
+                if _K09RPath(_known).is_dir():
+                    _items.append(_k09r_status(_known))
+            return {"kb_id": None,
+                    "stale": any(_it["stale"] for _it in _items),
+                    "proposals": _items}
+        if not _K09RPath(kb_id).is_dir():
             raise HTTPException(status_code=404, detail="unknown kb_id")
         return _k09r_status(kb_id)
 
@@ -1054,6 +1956,209 @@ def create_app(settings: Any = None,
                 "recorded_version": _status["source_version"],
                 "source_version": _status["source_version"],
                 **_row}
+
+    # K12OPEN1 Beacon (rows R-350 + HC-3): idea/demo public-text rules
+    # plus submission secret/private scan; sibling-mount pattern only.
+    from agent_si.backend import k12open1_routes as _k12open1_routes
+
+    _k12open1_routes.register_k12open1_routes(app)
+
+    # K12OPEN2 rows (R-350 + HC-3): same pure logic, new /k12open2/ paths.
+    from agent_si.backend import k12open2_routes as _k12open2_routes
+
+    _k12open2_routes.register_k12open2_routes(app)
+
+    # K12OPEN3 Beacon (rows HC-2 + HC-3, TESTID k12open3-hc):
+    # contribution marks over the production ledger lookup plus
+    # submission finalize over the real secretscan; additions-only
+    # block with the same USER_WRITE guard shape (401 missing
+    # x-actor, 403 bad token; every refusal body {code, message}).
+    import datetime as _k12open3_datetime
+
+    from fastapi.responses import JSONResponse as _K12Open3JSONResponse
+
+    from agent_si.backend import secretscan as _k12open3_secretscan
+
+    _K12OPEN3_ACTOR_MISSING = "ACTOR_MISSING"
+    _K12OPEN3_FORBIDDEN = "FORBIDDEN"
+    _K12OPEN3_EMPTY_PACKAGE_ID = "EMPTY_PACKAGE_ID"
+    _K12OPEN3_DUPLICATE_CONTRIBUTION = "DUPLICATE_CONTRIBUTION"
+    _K12OPEN3_PACKAGE_NOT_ACCEPTED = "PACKAGE_NOT_ACCEPTED"
+    _K12OPEN3_EMPTY_SUBMISSION = "EMPTY_SUBMISSION"
+    _K12OPEN3_SECRET_SCAN_BLOCKED = "SECRET_SCAN_BLOCKED"
+
+    class _K12Open3Error(Exception):
+        """Refusal carrying an HTTP status plus {code, message}."""
+
+        def __init__(self, status, code, message):
+            super().__init__(message)
+            self.status = status
+            self.code = code
+            self.message = message
+
+    def contributions_mark(store, package_id, evidence_ref=None,
+                           recorded_at=None):
+        """Record one contribution mark in store; pure, no I/O.
+
+        A blank package_id raises EMPTY_PACKAGE_ID (400) and a
+        repeated package_id raises DUPLICATE_CONTRIBUTION (409);
+        recorded_at defaults to today's ISO date. Returns the
+        recorded contribution {package_id, evidence_ref,
+        recorded_at}.
+        """
+        if not (isinstance(package_id, str) and package_id.strip()):
+            raise _K12Open3Error(
+                400, _K12OPEN3_EMPTY_PACKAGE_ID,
+                "mark needs a non-empty package_id")
+        if package_id in store:
+            raise _K12Open3Error(
+                409, _K12OPEN3_DUPLICATE_CONTRIBUTION,
+                "contribution already marked for package %s"
+                % package_id)
+        if recorded_at is None:
+            recorded_at = _k12open3_datetime.date.today().isoformat()
+        record = {
+            "package_id": package_id,
+            "evidence_ref": evidence_ref,
+            "recorded_at": recorded_at,
+        }
+        store[package_id] = record
+        return record
+
+    def secret_scan_gate(files, notes):
+        """Scan submission files plus notes via the real secretscan.
+
+        Pure wrapper: an empty submission (no files and blank notes)
+        raises EMPTY_SUBMISSION (400); otherwise the secretscan
+        findings list is returned (empty when clean).
+        """
+        entries = files if isinstance(files, list) else []
+        has_files = len(entries) > 0
+        has_notes = isinstance(notes, str) and bool(notes.strip())
+        if not has_files and not has_notes:
+            raise _K12Open3Error(
+                400, _K12OPEN3_EMPTY_SUBMISSION,
+                "finalize needs files or notes")
+        return _k12open3_secretscan.scan_files(files, notes)
+
+    globals()["contributions_mark"] = contributions_mark
+    globals()["secret_scan_gate"] = secret_scan_gate
+
+    app.state.k12open3_contributions = {}
+
+    def _k12open3_refuse(status, code, message):
+        return _K12Open3JSONResponse(
+            status_code=status, content={"code": code, "message": message})
+
+    def _k12open3_guard(request):
+        """Frozen USER_WRITE guard shape; None when the write proceeds."""
+        actor = (request.headers.get("x-actor") or "").strip()
+        if not actor:
+            return _k12open3_refuse(
+                401, _K12OPEN3_ACTOR_MISSING, "missing x-actor header")
+        token = request.headers.get("x-ui-session-token")
+        check = getattr(app.state, "auth_hook", None)
+        allowed = False
+        if callable(check):
+            try:
+                allowed = bool(check(token, actor, USER_WRITE))
+            except Exception:
+                allowed = False
+        else:
+            expected = getattr(app.state, "ui_session_token", None)
+            allowed = expected is not None and token == expected
+        if not allowed:
+            return _k12open3_refuse(
+                403, _K12OPEN3_FORBIDDEN, "forbidden")
+        return None
+
+    async def _k12open3_json_body(request):
+        try:
+            body = await request.json()
+        except Exception:
+            return {}
+        return body if isinstance(body, dict) else {}
+
+    @app.post("/api/v1/k12open3/contributions/mark")
+    async def _k12open3_post_mark(request: Request):
+        refused = _k12open3_guard(request)
+        if refused is not None:
+            return refused
+        body = await _k12open3_json_body(request)
+        package_id = body.get("package_id")
+        if not (isinstance(package_id, str) and package_id.strip()):
+            return _k12open3_refuse(
+                400, _K12OPEN3_EMPTY_PACKAGE_ID,
+                "mark needs a non-empty package_id")
+        if _find_ledger_with(package_id, None) is None:
+            return _k12open3_refuse(
+                404, _K12OPEN3_PACKAGE_NOT_ACCEPTED,
+                "package %s is not accepted" % package_id)
+        try:
+            record = contributions_mark(
+                app.state.k12open3_contributions, package_id,
+                body.get("evidence_ref"), body.get("recorded_at"))
+        except _K12Open3Error as err:
+            return _k12open3_refuse(err.status, err.code, err.message)
+        return {"contribution": record}
+
+    @app.get("/api/v1/k12open3/contributions")
+    def _k12open3_get_contributions():
+        return {
+            "contributions": list(app.state.k12open3_contributions.values())
+        }
+
+    @app.post("/api/v1/k12open3/submission/finalize")
+    async def _k12open3_post_finalize(request: Request):
+        refused = _k12open3_guard(request)
+        if refused is not None:
+            return refused
+        body = await _k12open3_json_body(request)
+        raw_files = body.get("files")
+        files = raw_files if isinstance(raw_files, list) else []
+        notes = body.get("notes")
+        try:
+            findings = secret_scan_gate(files, notes)
+        except _K12Open3Error as err:
+            return _k12open3_refuse(err.status, err.code, err.message)
+        package_id = body.get("package_id")
+        if not (isinstance(package_id, str) and package_id.strip()):
+            return _k12open3_refuse(
+                400, _K12OPEN3_EMPTY_PACKAGE_ID,
+                "finalize needs a non-empty package_id")
+        if _find_ledger_with(package_id, None) is None:
+            return _k12open3_refuse(
+                404, _K12OPEN3_PACKAGE_NOT_ACCEPTED,
+                "package %s is not accepted" % package_id)
+        if findings:
+            return _K12Open3JSONResponse(
+                status_code=409,
+                content={
+                    "code": _K12OPEN3_SECRET_SCAN_BLOCKED,
+                    "message": "submission carries a possible secret",
+                    "findings": findings,
+                })
+        try:
+            record = contributions_mark(
+                app.state.k12open3_contributions, package_id,
+                body.get("evidence_ref"), body.get("recorded_at"))
+        except _K12Open3Error as err:
+            return _k12open3_refuse(err.status, err.code, err.message)
+        return {"ok": True, "contribution": record}
+    # NF7K11A R-353 + R-354 (partner research + Keychain seam): open reads
+    # behind the secret-store protocol; additions-only block, no earlier
+    # line changes. Reads need no token, per the frozen route guard.
+    from agent_si.toolguard import secrets as _nf7k11a_secrets
+
+    @app.get("/api/v1/partner/integration")
+    def nf7k11a_partner_integration() -> dict[str, Any]:
+        """GET /api/v1/partner/integration -> partner_integration_record."""
+        return _nf7k11a_secrets.partner_integration_record()
+
+    @app.get("/api/v1/keychain/seam")
+    def nf7k11a_keychain_seam() -> dict[str, Any]:
+        """GET /api/v1/keychain/seam -> keychain_secret_seam."""
+        return _nf7k11a_secrets.keychain_secret_seam()
 
     # --- K03 assurance lane served ops (additions-only). ---
     # Mounts the three assurance entries over the real lane modules:
