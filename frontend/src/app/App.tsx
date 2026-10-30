@@ -33,6 +33,7 @@ import {
 } from "../locale/index";
 import type { SupportedLocale } from "../locale/index";
 import { SETTINGS_ROUTES, AcceptedRiskSwitch, RoleProfileEditor } from "../settings/index";
+import { OptimizationPolicySection } from "../settings/optimizationPolicy";
 import { ProvidersPage } from "../settings/ProvidersPage";
 import {
   LocalBenchDecisionList,
@@ -494,9 +495,13 @@ function SettingsSectionRoute(): ReactElement {
         </span>
       ) : route.path === "models" ||
         route.path === "routing" ||
-        route.path === "optimization" ||
         route.path === "capabilityDB" ? (
         <span data-testid="settings-section-body">
+          <ProvidersPage project_id={projectId ?? "local"} />
+        </span>
+      ) : route.path === "optimization" ? (
+        <span data-testid="settings-section-body">
+          <OptimizationPolicySection />
           <ProvidersPage project_id={projectId ?? "local"} />
         </span>
       ) : (

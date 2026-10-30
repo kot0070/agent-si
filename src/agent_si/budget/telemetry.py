@@ -114,8 +114,27 @@ def make_snapshot(pricing_snapshot_id, provider_id, model_id, currency,
     }
     snapshot = PricingSnapshot(hash=_canonical_hash(body), **body)
     with _REGISTRY_LOCK:
+        stored = _SNAPSHOT_REGISTRY.get(snapshot.pricing_snapshot_id)
+        if stored is not None:
+            if stored.hash == snapshot.hash and stored.to_dict() == \
+                    snapshot.to_dict():
+                return stored
+            raise SnapshotIdReuseError(
+                "pricing snapshot id %r is already registered with "
+                "different prices; new prices arrive only as a new "
+                "immutable version [SNAPSHOT_ID_REUSE]"
+                % (snapshot.pricing_snapshot_id,))
         _SNAPSHOT_REGISTRY[snapshot.pricing_snapshot_id] = snapshot
     return snapshot
+
+
+SNAPSHOT_ID_REUSE = "SNAPSHOT_ID_REUSE"
+
+
+class SnapshotIdReuseError(ValueError):
+    """A registered snapshot id is re-registered with different prices."""
+
+    code = SNAPSHOT_ID_REUSE
 
 
 @dataclass
