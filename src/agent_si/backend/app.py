@@ -1429,6 +1429,10 @@ def create_app(settings: Any = None,
     # line above changes. Tokens travel in the x-ui-session-token header
     # only, never in a URL.
     from agent_si.backend import ui_session as _k06_ui_session
+    import agent_si.backend.chat_adapter as _k06open9_chat_adapter
+    import agent_si.portability.commands as _k06open9_portable
+
+    from agent_si.toolguard.guard import evaluate as _k06open9_guard_evaluate
 
     def _k06_session_payload(summary: Any) -> dict[str, Any]:
         return {
@@ -1467,32 +1471,90 @@ def create_app(settings: Any = None,
             body = {}
         if not isinstance(body, dict):
             body = {}
-        raw_options = body.get("options", [])
-        options = []
-        if isinstance(raw_options, list):
-            for raw in raw_options:
-                if (isinstance(raw, dict) and raw.get("option_id")
-                        and raw.get("label")):
-                    options.append(
-                        _k06_ui_session.AskOption(
-                            option_id=str(raw["option_id"]),
-                            label=str(raw["label"])))
         try:
-            card = _k06_ui_session.create_ask_card(
+            return _k06open9_chat_adapter.request_chat_approval(
                 kind=body.get("kind", "approval"),
                 summary=body.get("summary", ""),
-                options=options,
+                options=body.get("options", []),
                 secret_ref=body.get("secret_ref"))
         except (ValueError, TypeError) as exc:
             raise HTTPException(status_code=400, detail=str(exc))
-        return {
-            "ask_id": card.ask_id,
-            "kind": card.kind,
-            "summary": card.summary,
-            "options": [{"option_id": o.option_id, "label": o.label}
-                        for o in card.options],
-            "resume_token": card.resume_token,
-        }
+
+    @app.post("/asks/{ask_id}/approve")
+    async def k06open9_approve_ask(
+        ask_id: str, request: Request
+    ) -> dict[str, Any]:
+        """POST /asks/{ask_id}/approve -> decide through approve_ask."""
+        actor = (request.headers.get("x-actor") or "").strip()
+        if not actor:
+            raise HTTPException(status_code=401,
+                                detail="missing x-actor header")
+        token = request.headers.get("x-ui-session-token")
+        if not token:
+            raise HTTPException(status_code=401,
+                                detail="missing x-ui-session-token header")
+        check_auth: AuthHook = app.state.auth_hook
+        try:
+            ok = bool(check_auth(token, actor, USER_WRITE))
+        except Exception:
+            ok = False
+        if not ok:
+            raise HTTPException(status_code=403, detail="forbidden")
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        try:
+            return _k06open9_chat_adapter.decide_chat_approval(
+                ask_id=ask_id,
+                option_id=str(body.get("option_id", "")),
+                resume_token=str(body.get("resume_token", "")))
+        except PermissionError as exc:
+            raise HTTPException(
+                status_code=403, detail=str(exc)) from None
+
+    @app.post("/portability/run")
+    async def k06open9_portable_run(request: Request) -> dict[str, Any]:
+        """POST /portability/run -> run_command over the real guard."""
+        actor = (request.headers.get("x-actor") or "").strip()
+        if not actor:
+            raise HTTPException(status_code=401,
+                                detail="missing x-actor header")
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        argv = body.get("argv", [])
+        if not isinstance(argv, list) or not all(
+            isinstance(part, str) for part in argv
+        ):
+            raise HTTPException(
+                status_code=400, detail="argv must be a list of str")
+        action_class = body.get("action_class", "R0")
+        if not isinstance(action_class, str):
+            raise HTTPException(
+                status_code=400, detail="action_class must be str")
+        params = body.get("params")
+        if params is not None and not isinstance(params, dict):
+            raise HTTPException(
+                status_code=400, detail="params must be a mapping")
+        auth = {"subject": actor, "task": body.get("task", "served")}
+        return _k06open9_portable.run_command(
+            list(argv),
+            action_class,
+            auth,
+            _k06open9_guard_evaluate,
+            params=dict(params) if params is not None else None)
+
+    @app.get("/portability/environment")
+    def k06open9_environment() -> dict[str, Any]:
+        """GET /portability/environment -> detected-environment page."""
+        return _k06open9_portable.get_environment_page()
+
     # --- K09-REFRESH stale KB copy refresh (LIVE0-06 additions-only). ---
     # Per-app recorded versions + changelog over local KB dirs (no
     # network; the KB dir is never mutated). GET proposal is an open read

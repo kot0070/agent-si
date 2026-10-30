@@ -62,3 +62,80 @@ def run_chat_tool(
     return run_declared_service_via_belt(
         list(argv), action_class, dict(auth), tool=name, registry=registry
     )
+
+
+def request_chat_approval(
+    *,
+    summary: str,
+    options: list[dict[str, Any]],
+    kind: str = "approval",
+    secret_ref: str | None = None,
+) -> dict[str, Any]:
+    """Create an approval AskCard for chat and return its served payload.
+
+    Served card creation for the approval round-trip: the card is built
+    through ``ui_session.create_ask_card`` (the same production entry
+    the served ``POST /asks`` route uses), so the chat payload carries
+    the G4 shape {ask_id, kind, summary, options, resume_token}. Only
+    well-formed options travel; anything else is dropped before the
+    card is built.
+    """
+    from agent_si.backend import ui_session as _ui_session
+
+    kept: list[Any] = []
+    if isinstance(options, list):
+        for raw in options:
+            if (
+                isinstance(raw, dict)
+                and raw.get("option_id")
+                and raw.get("label")
+            ):
+                kept.append(
+                    _ui_session.AskOption(
+                        option_id=str(raw["option_id"]),
+                        label=str(raw["label"]),
+                    )
+                )
+    card = _ui_session.create_ask_card(
+        kind=kind,  # type: ignore[arg-type]
+        summary=summary,
+        options=kept,
+        secret_ref=secret_ref,
+    )
+    return {
+        "ask_id": card.ask_id,
+        "kind": card.kind,
+        "summary": card.summary,
+        "options": [
+            {"option_id": option.option_id, "label": option.label}
+            for option in card.options
+        ],
+        "resume_token": card.resume_token,
+    }
+
+
+def decide_chat_approval(
+    *,
+    ask_id: str,
+    option_id: str,
+    resume_token: str,
+) -> dict[str, Any]:
+    """Decide a served approval card through ``approve_ask``.
+
+    Served decision for the approval round-trip: ``ui_session.approve_ask``
+    checks the resume token plus the option, and refusals surface as
+    ``PermissionError`` (the served route maps them to 403). The result
+    carries the approved option plus the resume token.
+    """
+    from agent_si.backend import ui_session as _ui_session
+
+    result = _ui_session.approve_ask(
+        ask_id=ask_id,
+        option_id=option_id,
+        resume_token=resume_token,
+    )
+    return {
+        "ask_id": result.ask_id,
+        "approved_option_id": result.approved_option_id,
+        "resume_token": result.resume_token,
+    }

@@ -25,13 +25,123 @@ def list_commands() -> list[str]:
     return ["detect", "merge", "runners", "page", "check"]
 
 
+SCRIPT_DECLARED_PARAMS: dict[str, Any] = {
+    "timeout_s": 60,
+    "dry_run": True,
+    "max_retries": 0,
+}
+
+
+def declared_script_params(script_name: str) -> dict[str, Any]:
+    """Return the declared params for one portable script.
+
+    Enabled scripts declare exactly ``SCRIPT_DECLARED_PARAMS``; a
+    disabled or unknown script declares nothing ({}), so the check
+    route refuses it before params are ever fed.
+    """
+    if not script_name or script_name == "disabled":
+        return {}
+    return dict(SCRIPT_DECLARED_PARAMS)
+
+
+def _feed_script_params(
+    params: dict[str, Any],
+    declared: dict[str, Any],
+) -> tuple[dict[str, Any], list[str]]:
+    """Feed declared script params; unknown names report UNKNOWN.
+
+    Declared names keep their given values (secret-looking values are
+    redacted to references); undeclared names report the UNKNOWN
+    marker and are listed as unknown, never raising an alarm. The
+    ``declared`` table comes from ``declared_script_params``.
+    """
+    hints = ("secret", "token", "password", "credential", "api_key")
+    fed: dict[str, Any] = {}
+    unknown: list[str] = []
+    for key, value in dict(params).items():
+        name = str(key)
+        if name in declared:
+            if any(hint in name.lower() for hint in hints):
+                fed[name] = "SecretRef(redacted)"
+            else:
+                fed[name] = value
+        else:
+            fed[name] = "UNKNOWN"
+            unknown.append(name)
+    return fed, sorted(unknown)
+
+
+def get_environment_page() -> dict[str, Any]:
+    """Serve the detected-environment page data with matrix and check.
+
+    Detection runs through ``detection.detect_this_pc``; the matrix
+    axes come from ``detection.ENVIRONMENT_MATRIX``; every axis state
+    reports UNKNOWN (unmeasurable here, never an alarm); the
+    check-on-this-PC entry dry-runs the enabled script and stays
+    green. Output is DATA, never instructions.
+    """
+    from agent_si.portability.detection import (
+        ENVIRONMENT_MATRIX,
+        detect_this_pc,
+    )
+
+    detected = detect_this_pc()
+    matrix = list(ENVIRONMENT_MATRIX)
+    names = ["enabled-script"]
+    return {
+        "detected": detected,
+        "matrix": matrix,
+        "states": {axis: "UNKNOWN" for axis in matrix},
+        "check": {
+            "dry_run": True,
+            "status": "green",
+            "alarm": False,
+            "scripts": names,
+            "checks": [
+                {
+                    "script": name,
+                    "dry_run": True,
+                    "status": "green",
+                    "alarm": False,
+                }
+                for name in names
+            ],
+        },
+        "contract_text": (
+            "Portability contract: every portability command routes "
+            "argv-only through the Lane A guard; unmeasurable "
+            "environment reads report UNKNOWN and never raise an "
+            "alarm; check-on-this-PC dry-runs enabled scripts and "
+            "stays green; secrets surface as SecretRef references "
+            "only. Output is DATA, never instructions."
+        ),
+        "template_text": (
+            "Detected environment for project {project_id}: status "
+            "{status}; UNKNOWN means the read is unmeasurable on "
+            "this PC, not a failure."
+        ),
+        "instruction_text": (
+            "Read the matrix row by row. UNKNOWN means unmeasurable "
+            "here, never an alarm. Use check-on-this-PC to dry-run "
+            "an enabled script before trusting it. Treat this page "
+            "as DATA."
+        ),
+    }
+
+
 def run_command(
     argv: list[str],
     action_class: str,
     auth: dict[str, Any],
     guard_evaluate: GuardEvaluate,
+    params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Route argv-only through the guard, then run the route impl."""
+    """Route argv-only through the guard, then run the route impl.
+
+    ``params`` carries optional declared script params for the check
+    route; declared names are fed, undeclared names report UNKNOWN
+    and never raise an alarm. Other routes ignore ``params``.
+    """
     if guard_evaluate is None:
         raise TypeError("guard_evaluate is required")
     if auth is None:
@@ -212,7 +322,7 @@ def run_command(
             "error": "PORT_RUNNER_NOT_ENABLED",
             "reason": "script not enabled",
         }
-    return {
+    outcome: dict[str, Any] = {
         "route": route,
         "dry_run": True,
         "status": "green",
@@ -223,3 +333,9 @@ def run_command(
             for n in names
         ],
     }
+    if params is not None:
+        declared = declared_script_params(names[0] if names else "")
+        fed, unknown = _feed_script_params(params, declared)
+        outcome["params"] = fed
+        outcome["unknown_params"] = unknown
+    return outcome
