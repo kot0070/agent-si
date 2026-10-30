@@ -22,7 +22,20 @@ import json
 from pathlib import Path
 from typing import Optional
 
-from src.agent_si.kb.models import KnowledgeSource
+try:
+    from agent_si.kb.models import KnowledgeSource
+except ImportError:
+    from src.agent_si.kb.models import KnowledgeSource
+
+import sys as _mod_sys
+
+_mod_sys.modules.setdefault(
+    "src." + __name__ if not __name__.startswith("src.") else __name__[4:],
+    _mod_sys.modules[__name__],
+)
+"""Dual-harness identity: root-based (src.*) and src-based (agent_si.*)
+imports resolve to this same module object, so the attached-source
+store (_SOURCES) is shared whatever path the harness uses."""
 
 _VALID_KINDS = ("LOCAL_CAPABILITY", "DEV_ROLE", "DEV_SHARED")
 
