@@ -1588,4 +1588,193 @@ def create_app(settings: Any = None,
                 "source_version": _status["source_version"],
                 **_row}
 
+    # K12OPEN1 Beacon (rows R-350 + HC-3): idea/demo public-text rules
+    # plus submission secret/private scan; sibling-mount pattern only.
+    from agent_si.backend import k12open1_routes as _k12open1_routes
+
+    _k12open1_routes.register_k12open1_routes(app)
+
+    # K12OPEN2 rows (R-350 + HC-3): same pure logic, new /k12open2/ paths.
+    from agent_si.backend import k12open2_routes as _k12open2_routes
+
+    _k12open2_routes.register_k12open2_routes(app)
+
+    # K12OPEN3 Beacon (rows HC-2 + HC-3, TESTID k12open3-hc):
+    # contribution marks over the production ledger lookup plus
+    # submission finalize over the real secretscan; additions-only
+    # block with the same USER_WRITE guard shape (401 missing
+    # x-actor, 403 bad token; every refusal body {code, message}).
+    import datetime as _k12open3_datetime
+
+    from fastapi.responses import JSONResponse as _K12Open3JSONResponse
+
+    from agent_si.backend import secretscan as _k12open3_secretscan
+
+    _K12OPEN3_ACTOR_MISSING = "ACTOR_MISSING"
+    _K12OPEN3_FORBIDDEN = "FORBIDDEN"
+    _K12OPEN3_EMPTY_PACKAGE_ID = "EMPTY_PACKAGE_ID"
+    _K12OPEN3_DUPLICATE_CONTRIBUTION = "DUPLICATE_CONTRIBUTION"
+    _K12OPEN3_PACKAGE_NOT_ACCEPTED = "PACKAGE_NOT_ACCEPTED"
+    _K12OPEN3_EMPTY_SUBMISSION = "EMPTY_SUBMISSION"
+    _K12OPEN3_SECRET_SCAN_BLOCKED = "SECRET_SCAN_BLOCKED"
+
+    class _K12Open3Error(Exception):
+        """Refusal carrying an HTTP status plus {code, message}."""
+
+        def __init__(self, status, code, message):
+            super().__init__(message)
+            self.status = status
+            self.code = code
+            self.message = message
+
+    def contributions_mark(store, package_id, evidence_ref=None,
+                           recorded_at=None):
+        """Record one contribution mark in store; pure, no I/O.
+
+        A blank package_id raises EMPTY_PACKAGE_ID (400) and a
+        repeated package_id raises DUPLICATE_CONTRIBUTION (409);
+        recorded_at defaults to today's ISO date. Returns the
+        recorded contribution {package_id, evidence_ref,
+        recorded_at}.
+        """
+        if not (isinstance(package_id, str) and package_id.strip()):
+            raise _K12Open3Error(
+                400, _K12OPEN3_EMPTY_PACKAGE_ID,
+                "mark needs a non-empty package_id")
+        if package_id in store:
+            raise _K12Open3Error(
+                409, _K12OPEN3_DUPLICATE_CONTRIBUTION,
+                "contribution already marked for package %s"
+                % package_id)
+        if recorded_at is None:
+            recorded_at = _k12open3_datetime.date.today().isoformat()
+        record = {
+            "package_id": package_id,
+            "evidence_ref": evidence_ref,
+            "recorded_at": recorded_at,
+        }
+        store[package_id] = record
+        return record
+
+    def secret_scan_gate(files, notes):
+        """Scan submission files plus notes via the real secretscan.
+
+        Pure wrapper: an empty submission (no files and blank notes)
+        raises EMPTY_SUBMISSION (400); otherwise the secretscan
+        findings list is returned (empty when clean).
+        """
+        entries = files if isinstance(files, list) else []
+        has_files = len(entries) > 0
+        has_notes = isinstance(notes, str) and bool(notes.strip())
+        if not has_files and not has_notes:
+            raise _K12Open3Error(
+                400, _K12OPEN3_EMPTY_SUBMISSION,
+                "finalize needs files or notes")
+        return _k12open3_secretscan.scan_files(files, notes)
+
+    globals()["contributions_mark"] = contributions_mark
+    globals()["secret_scan_gate"] = secret_scan_gate
+
+    app.state.k12open3_contributions = {}
+
+    def _k12open3_refuse(status, code, message):
+        return _K12Open3JSONResponse(
+            status_code=status, content={"code": code, "message": message})
+
+    def _k12open3_guard(request):
+        """Frozen USER_WRITE guard shape; None when the write proceeds."""
+        actor = (request.headers.get("x-actor") or "").strip()
+        if not actor:
+            return _k12open3_refuse(
+                401, _K12OPEN3_ACTOR_MISSING, "missing x-actor header")
+        token = request.headers.get("x-ui-session-token")
+        check = getattr(app.state, "auth_hook", None)
+        allowed = False
+        if callable(check):
+            try:
+                allowed = bool(check(token, actor, USER_WRITE))
+            except Exception:
+                allowed = False
+        else:
+            expected = getattr(app.state, "ui_session_token", None)
+            allowed = expected is not None and token == expected
+        if not allowed:
+            return _k12open3_refuse(
+                403, _K12OPEN3_FORBIDDEN, "forbidden")
+        return None
+
+    async def _k12open3_json_body(request):
+        try:
+            body = await request.json()
+        except Exception:
+            return {}
+        return body if isinstance(body, dict) else {}
+
+    @app.post("/api/v1/k12open3/contributions/mark")
+    async def _k12open3_post_mark(request: Request):
+        refused = _k12open3_guard(request)
+        if refused is not None:
+            return refused
+        body = await _k12open3_json_body(request)
+        package_id = body.get("package_id")
+        if not (isinstance(package_id, str) and package_id.strip()):
+            return _k12open3_refuse(
+                400, _K12OPEN3_EMPTY_PACKAGE_ID,
+                "mark needs a non-empty package_id")
+        if _find_ledger_with(package_id, None) is None:
+            return _k12open3_refuse(
+                404, _K12OPEN3_PACKAGE_NOT_ACCEPTED,
+                "package %s is not accepted" % package_id)
+        try:
+            record = contributions_mark(
+                app.state.k12open3_contributions, package_id,
+                body.get("evidence_ref"), body.get("recorded_at"))
+        except _K12Open3Error as err:
+            return _k12open3_refuse(err.status, err.code, err.message)
+        return {"contribution": record}
+
+    @app.get("/api/v1/k12open3/contributions")
+    def _k12open3_get_contributions():
+        return {
+            "contributions": list(app.state.k12open3_contributions.values())
+        }
+
+    @app.post("/api/v1/k12open3/submission/finalize")
+    async def _k12open3_post_finalize(request: Request):
+        refused = _k12open3_guard(request)
+        if refused is not None:
+            return refused
+        body = await _k12open3_json_body(request)
+        raw_files = body.get("files")
+        files = raw_files if isinstance(raw_files, list) else []
+        notes = body.get("notes")
+        try:
+            findings = secret_scan_gate(files, notes)
+        except _K12Open3Error as err:
+            return _k12open3_refuse(err.status, err.code, err.message)
+        package_id = body.get("package_id")
+        if not (isinstance(package_id, str) and package_id.strip()):
+            return _k12open3_refuse(
+                400, _K12OPEN3_EMPTY_PACKAGE_ID,
+                "finalize needs a non-empty package_id")
+        if _find_ledger_with(package_id, None) is None:
+            return _k12open3_refuse(
+                404, _K12OPEN3_PACKAGE_NOT_ACCEPTED,
+                "package %s is not accepted" % package_id)
+        if findings:
+            return _K12Open3JSONResponse(
+                status_code=409,
+                content={
+                    "code": _K12OPEN3_SECRET_SCAN_BLOCKED,
+                    "message": "submission carries a possible secret",
+                    "findings": findings,
+                })
+        try:
+            record = contributions_mark(
+                app.state.k12open3_contributions, package_id,
+                body.get("evidence_ref"), body.get("recorded_at"))
+        except _K12Open3Error as err:
+            return _k12open3_refuse(err.status, err.code, err.message)
+        return {"ok": True, "contribution": record}
+
     return app
