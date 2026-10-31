@@ -1166,3 +1166,57 @@ class BudgetGate:
     def get_reservation(self, reservation_id):
         with self._lock:
             return self._reservations[reservation_id]
+
+
+#: Stable machine codes for the reserveTokens budget entry (ARCH-416,
+#: B0B-UNCOVERED_ARCH-416): the single doorway for billable reserves.
+CURRENCY_MISMATCH = "CURRENCY_MISMATCH"
+RESERVE_AMOUNT_REQUIRED = "RESERVE_AMOUNT_REQUIRED"
+RESERVE_CURRENCY_REQUIRED = "RESERVE_CURRENCY_REQUIRED"
+
+
+class ReserveTokensError(BudgetError):
+    """Refusal carrying the machine code for the reserveTokens entry."""
+
+    def __init__(self, message, code):
+        super().__init__(message)
+        self.code = code
+
+
+def reserveTokens(gate, request, *, currency):
+    """Reserve budget only through reserveTokens (ARCH-416).
+
+    The single doorway for billable reserves: the caller states an
+    explicit estimated_amount plus an explicit currency, and the
+    currency must equal the project's configured currency. Unknown
+    projects raise KeyError (the served entry maps it to 404); an
+    invented denomination or amount is refused, never converted.
+    Returns the ReserveResult from the real gate.
+    """
+    from collections.abc import Mapping as _Mapping
+
+    if not isinstance(request, _Mapping):
+        raise ReserveTokensError(
+            "reserveTokens needs the request as a mapping "
+            "[RESERVE_AMOUNT_REQUIRED]", RESERVE_AMOUNT_REQUIRED)
+    project_id = request.get("project_id")
+    amount = request.get("estimated_amount")
+    if amount is None \
+            or (isinstance(amount, str) and not amount.strip()):
+        raise ReserveTokensError(
+            "reserveTokens needs an explicit estimated_amount; "
+            "amounts are never invented "
+            "[RESERVE_AMOUNT_REQUIRED]", RESERVE_AMOUNT_REQUIRED)
+    if not (isinstance(currency, str) and currency.strip()):
+        raise ReserveTokensError(
+            "reserveTokens needs an explicit currency matching "
+            "the project currency "
+            "[RESERVE_CURRENCY_REQUIRED]", RESERVE_CURRENCY_REQUIRED)
+    state = gate.get_state(project_id)
+    if state.currency != str(currency):
+        raise ReserveTokensError(
+            "reserveTokens refused: request currency %r is not "
+            "the project currency %r "
+            "[CURRENCY_MISMATCH]" % (currency, state.currency),
+            CURRENCY_MISMATCH)
+    return gate.compare_and_reserve(dict(request))
