@@ -331,6 +331,7 @@ def runner_contract_verdict(*, project_dir: Any,
         "missing": [],
     }
 
+
 def create_app(settings: Any = None,
                auth_hook: AuthHook | None = None,
                rate_hook: RateHook | None = None,
@@ -343,7 +344,7 @@ def create_app(settings: Any = None,
     """
     _parts_store._store.clear()
 
-# K10ST1-B (M-P4-134 / LIVE0-04): consumer-layer data dir behind
+    # K10ST1-B (M-P4-134 / LIVE0-04): consumer-layer data dir behind
     # the single get_data_dir call-site. First start migrates
     # settings + credentials, keeping originals.
     _k10_data_dir = get_data_dir(settings)
