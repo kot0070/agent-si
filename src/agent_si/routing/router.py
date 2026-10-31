@@ -502,7 +502,8 @@ def _evaluate(request: RoutingRequest, deps: RoutingDeps,
     # keep their own level; lower-risk tasks are unaffected.
     if (ev.branch == "CAPABILITY_EVIDENCE"
             and measured_capable(ev.facts, policy)
-            and request.task_risk in ("HIGH", "CRITICAL")):
+            and request.task_risk in ("HIGH", "CRITICAL")
+            and ev.required_verification != "FINAL_VERIFICATION"):
         ev.required_verification = "ENHANCED"
         ok("HIGH_RISK_VERIFICATION_GATE",
            "HIGH/CRITICAL task risk: measured-capable candidate needs "
