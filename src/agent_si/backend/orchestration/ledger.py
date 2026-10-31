@@ -274,3 +274,35 @@ def build_ledger_report(
         ]
         hot_write_text(out_path, "\n".join(lines) + "\n")
     return report
+
+
+def serve_package_nudge(packages: Any, package_id: Any) -> dict[str, Any]:
+    """Serve row 35: ledger report nudge for the next package.
+
+    Records the given package rows on a fresh ledger and reports the
+    nudge for package_id. Refuses a bad body with ValueError (served
+    HTTP 400); an unknown package_id raises KeyError (served HTTP 404).
+    """
+    if not isinstance(package_id, str) or not package_id.strip():
+        raise ValueError("package_id must be a non-empty string")
+    if not isinstance(packages, (list, tuple)):
+        raise ValueError("packages must be a list of ledger rows")
+    ledger = PackageLedger()
+    for item in packages:
+        if not isinstance(item, Mapping):
+            raise ValueError("each package must be an object")
+        try:
+            row_id = item["package_id"]
+            agents = item["agents"]
+            peak = item["peak_concurrency"]
+            wall = item["wall_time_s"]
+        except KeyError as err:
+            raise ValueError(f"package row misses {err}") from None
+        ledger.record_row(row_id, agents, peak, wall)
+    report = package_report(ledger, package_id.strip())
+    return {
+        "package_id": package_id.strip(),
+        "load": dict(report["row"]),
+        "nudge": report["nudge"],
+        "auto_push": report["auto_push"],
+    }

@@ -17,7 +17,7 @@ PASS and the served audit verdict is PASS.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Literal
+from typing import Any, Literal, Mapping  # noqa: UP035
 
 from .common import (
     ApplyOutcome,
@@ -236,7 +236,53 @@ __all__ = [
     "package_report",
     "persist_ledger",
     "register_part",
+    "serve_part_register",
+    "serve_register_part",
     "surface_rejection",
     "update_status",
     "utc_now",
 ]
+
+
+def _row_payload(row: PartRow) -> dict[str, str]:
+    """Serve one PartRow as a plain JSON payload."""
+    return {
+        "agent": row.agent,
+        "scope": row.scope,
+        "deliverable": row.deliverable,
+        "status": row.status,
+    }
+
+
+def serve_register_part(data: Mapping[str, Any]) -> dict[str, str]:
+    """Serve row 33 write: register one part row, not a markdown file.
+
+    Refuses a non-object body or a blank agent/scope/deliverable with
+    ValueError (served HTTP 400); a duplicate scope also refuses.
+    """
+    if not isinstance(data, Mapping):
+        raise ValueError("part body must be an object")
+    agent = data.get("agent")
+    scope = data.get("scope")
+    deliverable = data.get("deliverable")
+    if not isinstance(agent, str) or not agent.strip():
+        raise ValueError("part agent must be a non-empty string")
+    if not isinstance(scope, str) or not scope.strip():
+        raise ValueError("part scope must be a non-empty string")
+    if not isinstance(deliverable, str) or not deliverable.strip():
+        raise ValueError("part deliverable must be a non-empty string")
+    stored = register_part(
+        PartRow(
+            agent=agent.strip(),
+            scope=scope.strip(),
+            deliverable=deliverable.strip(),
+            status=data.get("status", "QUEUED"),
+        )
+    )
+    return _row_payload(stored)
+
+
+def serve_part_register() -> dict[str, list[dict[str, str]]]:
+    """Serve row 33 read: the served part register rows."""
+    return {"rows": [_row_payload(row) for row in list_parts(None)]}
+

@@ -359,3 +359,55 @@ _INT2_KERNEL = (
     _int2_common.utc_now,
     _int2_common.hot_write_text,
 )
+
+
+def serve_decomposition_facts(data: Mapping[str, Any]) -> dict[str, Any]:
+    """Serve row R-301: team card in context, facts named in the record.
+
+    Records the decomposition for part_id with size_units and returns
+    the record plus the team card. Refuses a non-object body, a blank
+    part_id/provider, a missing/non-int size_units, or non-object
+    model_kb_facts/budget_left/limits with ValueError (served HTTP 400).
+    """
+    if not isinstance(data, Mapping):
+        raise ValueError("decomposition body must be an object")
+    part_id = data.get("part_id")
+    if not isinstance(part_id, str) or not part_id.strip():
+        raise ValueError("part_id must be a non-empty string")
+    if "size_units" not in data or isinstance(data["size_units"], bool):
+        raise ValueError("size_units must be an int")
+    size_units = data["size_units"]
+    if not isinstance(size_units, int):
+        raise ValueError("size_units must be an int")
+    provider = data.get("provider")
+    if not isinstance(provider, str) or not provider.strip():
+        raise ValueError("provider must be a non-empty string")
+    facts = data.get("model_kb_facts")
+    budget = data.get("budget_left")
+    limits = data.get("limits")
+    if not isinstance(facts, dict):
+        raise ValueError("model_kb_facts must be an object")
+    if not isinstance(budget, dict):
+        raise ValueError("budget_left must be an object")
+    if not isinstance(limits, dict):
+        raise ValueError("limits must be an object")
+    record = record_decomposition(part_id.strip(), size_units)
+    card = build_team_card(provider.strip(), dict(facts), dict(budget),
+                           dict(limits))
+    return {
+        "record": {
+            "record_id": record.record_id,
+            "part_id": record.part_id,
+            "facts_used": list(record.facts_used),
+            "route": record.route,
+            "reason": record.reason,
+            "artifact_ref": record.artifact_ref,
+        },
+        "team_card": {
+            "provider": card.provider,
+            "model": card.model,
+            "model_kb_facts": dict(card.model_kb_facts),
+            "budget_left": dict(card.budget_left),
+            "limits": dict(card.limits),
+        },
+    }
