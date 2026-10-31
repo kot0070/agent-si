@@ -36,6 +36,38 @@ module loads before the provider module lands; while it is absent they
 answer HTTP 503 ROW_UNSERVED (never a double: no canned provider
 lives here or in any mount file). Writes keep the frozen USER_WRITE
 guard shape (401 missing x-actor, 403 bad token).
+
+K02NEXT5 adds 8 routes (additive-only; every R1-R8 path, handler
+name and orchestration signature above stays unchanged):
+
+- POST /hierarchy/cap-queue (ARCH-762): split.split_package then
+  split.capped_queue; every slot carries its serial position and
+  estimated start, newcomers past the cap queue with positions.
+- POST /hierarchy/chain-activate (ARCH-766): the real
+  graph.HierarchyConfigStore.activate_chain; a manager running as a
+  tool agent or duplicated tool agents refuse with HTTP 409.
+- POST /hierarchy/parts-disjoint (BP01-72): split.split_package then
+  split.validate_disjoint; overlapping part scopes refuse with
+  HTTP 409 carrying SCOPE_OVERLAP before any fan-out.
+- POST /hierarchy/user-correction (ARCH-704): the real
+  graph.HierarchyConfigStore.append_user_correction; only the USER
+  appends, any other actor refuses with HTTP 403.
+- POST /hierarchy/offload-switch (UI_DELTA-57): the real
+  offload.apply_offload_config_change plus the live
+  offload_enabled/maybe_offload state; unknown pairs stay off and the
+  auditor never offloads.
+- POST /hierarchy/combined-flow (UI_DELTA-59): one served run of the
+  real primitives in order -- split.split_package (project
+  creation), activate_chain (hierarchy), grant_role_authority
+  (binding), apply_offload_config_change (offload toggle),
+  delta.apply_config_change (pause/archive lifecycle); the first
+  refusing step names itself in the HTTP error.
+- POST /hierarchy/decision-record (UI_DELTA-60): the real
+  delta.apply_config_change; an accepted change persists exactly one
+  decision row carrying actor and timestamp.
+- POST /hierarchy/rejection-surface (UI_DELTA-62): the real
+  offload.apply_offload_config_change with a violating change; the
+  refusal reason code is surfaced and no decision row is added.
 """
 
 from __future__ import annotations
@@ -415,5 +447,439 @@ def register_hierarchy_routes(app: Any) -> Any:
                 detail={"code": getattr(err, "code", "CAPS_EXCEEDED"),
                         "message": str(err)}) from None
         return {"ok": True, "queue": queued}
+
+    @app.post("/hierarchy/cap-queue")
+    async def post_cap_queue(request: Request) -> dict[str, Any]:
+        """K02NEXT5 ARCH-762: capped queue slots carry position + start."""
+        from agent_si.backend.orchestration import split as _split
+
+        _write_guard(request)
+        data = await _json_body(request)
+        package_id = data.get("package_id")
+        goal = data.get("goal")
+        refs = data.get("context_refs")
+        max_parts = data.get("max_parts")
+        cap = data.get("max_parallel_managers")
+        wall = data.get("wall_time_s", 1.0)
+        if not isinstance(package_id, str) or not package_id.strip():
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "package_id must be a non-empty string"})
+        if not isinstance(goal, str) or not goal.strip():
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "goal must be a non-empty string"})
+        if not isinstance(refs, list) or not refs:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "context_refs must be a non-empty list"})
+        if (not isinstance(max_parts, int)
+                or isinstance(max_parts, bool) or max_parts < 1):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "max_parts must be an int >= 1"})
+        if (not isinstance(cap, int)
+                or isinstance(cap, bool) or cap < 1):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "max_parallel_managers must be "
+                                   "an int >= 1"})
+        try:
+            parts = _split.split_package(
+                package_id.strip(), goal.strip(), refs, max_parts)
+        except ValueError as err:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": str(err)}) from None
+        settings = _split.MultiManagerSettings(
+            multi_manager_mode=cap > 1,
+            max_parallel_managers=cap,
+            overlap=False,
+            integration_policy="manager-integrates",
+        )
+        try:
+            slots = _split.capped_queue(parts, settings, wall)
+        except ValueError as err:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": str(err)}) from None
+        running, queued = _split.fanout(parts, settings)
+        running_refs = [part.gate_verdict_ref for part in running]
+        queued_refs = [part.gate_verdict_ref for part in queued]
+        return {
+            "slots": [{"gate_ref": slot.part.gate_verdict_ref,
+                       "position": slot.position,
+                       "estimated_start_s": slot.estimated_start_s}
+                      for slot in slots],
+            "running": running_refs,
+            "queued": queued_refs,
+        }
+
+    @app.post("/hierarchy/chain-activate")
+    async def post_chain_activate(request: Request) -> dict[str, Any]:
+        """K02NEXT5 ARCH-766: distinct Manager agents, no duplication."""
+        actor = _write_guard(request)
+        data = await _json_body(request)
+        chain_data = data.get("chain")
+        if not isinstance(chain_data, dict):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "chain must be a mapping"})
+        tools = chain_data.get("tool_agent_ids")
+        if not isinstance(tools, list) or not tools or not all(
+                isinstance(entry, str) and entry.strip() for entry in tools):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "chain.tool_agent_ids must be a "
+                                   "non-empty list of non-empty strings"})
+        try:
+            chain = _graph.HierarchyChain(
+                director_id=str(chain_data.get("director_id") or ""),
+                manager_id=str(chain_data.get("manager_id") or ""),
+                tool_agent_ids=[str(entry).strip() for entry in tools],
+            )
+        except (ValueError, TypeError) as err:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": str(err)}) from None
+        store = _graph.HierarchyConfigStore()
+        try:
+            outcome = store.activate_chain(chain, actor)
+        except _graph.HierarchyRefused as err:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "CHAIN_REFUSED",
+                        "message": str(err)}) from None
+        return {"accepted": outcome.accepted, "reason": outcome.reason,
+                "surfaced": outcome.surfaced}
+
+    @app.post("/hierarchy/parts-disjoint")
+    async def post_parts_disjoint(request: Request) -> dict[str, Any]:
+        """K02NEXT5 BP01-72: overlapping part scopes refused pre fan-out."""
+        from agent_si.backend.orchestration import split as _split
+
+        _write_guard(request)
+        data = await _json_body(request)
+        package_id = data.get("package_id")
+        goal = data.get("goal")
+        refs = data.get("context_refs")
+        max_parts = data.get("max_parts")
+        if not isinstance(package_id, str) or not package_id.strip():
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "package_id must be a non-empty string"})
+        if not isinstance(goal, str) or not goal.strip():
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "goal must be a non-empty string"})
+        if not isinstance(refs, list) or not refs:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "context_refs must be a non-empty list"})
+        if (not isinstance(max_parts, int)
+                or isinstance(max_parts, bool) or max_parts < 1):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "max_parts must be an int >= 1"})
+        try:
+            parts = _split.split_package(
+                package_id.strip(), goal.strip(), refs, max_parts)
+        except ValueError as err:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": str(err)}) from None
+        try:
+            _split.validate_disjoint(parts)
+        except _split.SCOPE_OVERLAP as err:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "SCOPE_OVERLAP",
+                        "message": str(err)}) from None
+        except ValueError as err:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": str(err)}) from None
+        return {"disjoint": True,
+                "parts": [part.gate_verdict_ref for part in parts]}
+
+    @app.post("/hierarchy/user-correction")
+    async def post_user_correction(request: Request) -> dict[str, Any]:
+        """K02NEXT5 ARCH-704: only the USER appends user corrections."""
+        actor = _write_guard(request)
+        data = await _json_body(request)
+        text = data.get("text")
+        if not isinstance(text, str) or not text.strip():
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "text must be a non-empty string"})
+        store = _graph.HierarchyConfigStore()
+        try:
+            outcome = store.append_user_correction(actor, text.strip())
+        except _graph.HierarchyRefused as err:
+            raise HTTPException(
+                status_code=403,
+                detail={"code": "USER_CORRECTION_USER_ONLY",
+                        "message": str(err)}) from None
+        corrections = list(store.config.get("user_corrections", ()))
+        entry = dict(corrections[-1]) if corrections else {
+            "actor": actor, "text": text.strip(), "created_at": ""}
+        return {"recorded": outcome.accepted, "reason": outcome.reason,
+                "entry": entry}
+
+    @app.post("/hierarchy/offload-switch")
+    async def post_offload_switch(request: Request) -> dict[str, Any]:
+        """K02NEXT5 UI_DELTA-57: routine handoff switch per project+role."""
+        from agent_si.backend.orchestration import offload as _offload
+
+        _write_guard(request)
+        data = await _json_body(request)
+        change = data.get("change")
+        if not isinstance(change, dict):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "change must be a mapping"})
+        outcome = _offload.apply_offload_config_change(change)
+        project_id = change.get("project_id")
+        role = change.get("role")
+        if isinstance(project_id, str) and isinstance(role, str):
+            enabled = _offload.offload_enabled(project_id, role)
+            unknown = _offload.offload_enabled(project_id, "__unconfigured__")
+        else:
+            enabled = False
+            unknown = False
+        handover: dict[str, Any] | None = None
+        probe_task = data.get("probe_task")
+        probe_role = data.get("probe_role")
+        if (outcome.applied and isinstance(probe_task, str)
+                and isinstance(probe_role, str)):
+            record = _offload.maybe_offload(probe_task, probe_role, True)
+            if record is not None:
+                handover = {"task_id": record.task_id,
+                            "from_role": record.from_role,
+                            "to_role": record.to_role,
+                            "reason": record.reason,
+                            "created_at": record.created_at}
+        return {"applied": outcome.applied, "reason": outcome.reason,
+                "decision_ref": outcome.decision_ref,
+                "offload_enabled": enabled, "handover": handover,
+                "unknown_pair_enabled": unknown}
+
+    @app.post("/hierarchy/combined-flow")
+    async def post_combined_flow(request: Request) -> dict[str, Any]:
+        """K02NEXT5 UI_DELTA-59: project+hierarchy+binding+offload+life."""
+        from agent_si.backend.orchestration import delta as _delta
+        from agent_si.backend.orchestration import offload as _offload
+        from agent_si.backend.orchestration import split as _split
+
+        actor = _write_guard(request)
+        data = await _json_body(request)
+        project_id = data.get("project_id")
+        goal = data.get("goal")
+        refs = data.get("context_refs")
+        max_parts = data.get("max_parts")
+        chain_data = data.get("chain")
+        role_models = data.get("role_models")
+        binding_data = data.get("binding")
+        offload_change = data.get("offload_change")
+        lifecycle = data.get("lifecycle")
+        if not isinstance(project_id, str) or not project_id.strip():
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "project_id must be a non-empty string"})
+        if not isinstance(goal, str) or not goal.strip():
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "goal must be a non-empty string"})
+        if not isinstance(refs, list) or not refs:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "context_refs must be a non-empty list"})
+        if (not isinstance(max_parts, int)
+                or isinstance(max_parts, bool) or max_parts < 1):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "max_parts must be an int >= 1"})
+        if not isinstance(chain_data, dict):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "chain must be a mapping"})
+        if not isinstance(role_models, dict) or not role_models:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "role_models must be a non-empty mapping"})
+        if not isinstance(binding_data, dict):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "binding must be a mapping"})
+        if not isinstance(offload_change, dict):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "offload_change must be a mapping"})
+        if not isinstance(lifecycle, dict):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "lifecycle must be a mapping"})
+        clean_project = project_id.strip()
+        try:
+            parts = _split.split_package(
+                clean_project, goal.strip(), refs, max_parts)
+        except ValueError as err:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "COMBINED_SPLIT_REFUSED",
+                        "step": "project-creation",
+                        "message": str(err)}) from None
+        tools = chain_data.get("tool_agent_ids")
+        if not isinstance(tools, list) or not tools:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "chain.tool_agent_ids must be "
+                                   "a non-empty list"})
+        try:
+            chain = _graph.HierarchyChain(
+                director_id=str(chain_data.get("director_id") or ""),
+                manager_id=str(chain_data.get("manager_id") or ""),
+                tool_agent_ids=[str(entry) for entry in tools],
+            )
+        except (ValueError, TypeError) as err:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": str(err)}) from None
+        store = _graph.HierarchyConfigStore()
+        try:
+            chain_outcome = store.activate_chain(chain, actor)
+        except _graph.HierarchyRefused as err:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "COMBINED_CHAIN_REFUSED",
+                        "step": "hierarchy",
+                        "message": str(err)}) from None
+        bind_role = binding_data.get("role")
+        bind_mapping = binding_data.get("binding")
+        if not isinstance(bind_role, str) or not bind_role.strip():
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "binding.role must be a non-empty "
+                                   "string"})
+        if not isinstance(bind_mapping, dict):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "binding.binding must be a mapping"})
+        bind_store = _graph.HierarchyConfigStore(
+            config={"role_models": dict(role_models)})
+        try:
+            bind_outcome = bind_store.grant_role_authority(
+                bind_role.strip(), dict(bind_mapping), actor)
+        except _graph.HierarchyRefused as err:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "COMBINED_BINDING_REFUSED",
+                        "step": "binding",
+                        "message": str(err)}) from None
+        full_change = dict(offload_change)
+        full_change.setdefault("project_id", clean_project)
+        off_outcome = _offload.apply_offload_config_change(full_change)
+        if not off_outcome.applied:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "COMBINED_OFFLOAD_REFUSED",
+                        "step": "offload-toggle",
+                        "message": off_outcome.reason}) from None
+        paused = lifecycle.get("paused", False)
+        archived = lifecycle.get("archived", False)
+        if not isinstance(paused, bool) or not isinstance(archived, bool):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "lifecycle.paused/archived must be "
+                                   "booleans"})
+        life_log: list = []
+        life_result = _delta.apply_config_change(
+            {}, life_log, "project:lifecycle",
+            f"pause and archive flags for {clean_project}",
+            "lifecycle recorded", actor,
+            {"paused": paused, "archived": archived})
+        if not life_result["applied"]:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "COMBINED_LIFECYCLE_REFUSED",
+                        "step": "lifecycle",
+                        "message": life_result["reason"]}) from None
+        return {
+            "project_id": clean_project,
+            "parts": [part.gate_verdict_ref for part in parts],
+            "chain": {"accepted": chain_outcome.accepted},
+            "binding": {"accepted": bind_outcome.accepted},
+            "offload": {"applied": off_outcome.applied,
+                        "decision_ref": off_outcome.decision_ref},
+            "lifecycle": {"applied": life_result["applied"],
+                          "decision_ref": life_result["decision_ref"]},
+        }
+
+    @app.post("/hierarchy/decision-record")
+    async def post_decision_record(request: Request) -> dict[str, Any]:
+        """K02NEXT5 UI_DELTA-60: validated change persists one row."""
+        from agent_si.backend.orchestration import delta as _delta
+
+        _write_guard(request)
+        data = await _json_body(request)
+        rows: list = []
+        result = _delta.apply_config_change(
+            {}, rows, data.get("scope"), data.get("statement"),
+            data.get("reason"), data.get("authority"), data.get("patch"))
+        return {"applied": result["applied"], "reason": result["reason"],
+                "decision_ref": result["decision_ref"], "rows": rows}
+
+    @app.post("/hierarchy/rejection-surface")
+    async def post_rejection_surface(request: Request) -> dict[str, Any]:
+        """K02NEXT5 UI_DELTA-62: rejections surfaced, nothing mutates."""
+        from agent_si.backend.orchestration import offload as _offload
+
+        _write_guard(request)
+        data = await _json_body(request)
+        change = data.get("change")
+        if not isinstance(change, dict):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "change must be a mapping"})
+        before = len(_offload._DECISIONS)
+        outcome = _offload.apply_offload_config_change(change)
+        after = len(_offload._DECISIONS)
+        return {"applied": outcome.applied, "reason": outcome.reason,
+                "decision_ref": outcome.decision_ref,
+                "decisions_before": before, "decisions_after": after,
+                "surfaced": outcome.reason}
 
     return app
