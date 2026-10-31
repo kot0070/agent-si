@@ -991,6 +991,114 @@ def _decide_payload(outcome: R.RoutingOutcome) -> Tuple[int, Dict]:
     }
 
 
+def post_compensate(ctx, query, body) -> Tuple[int, Dict]:
+    """Compensate a failed gate to RELEASED (ARCH-441, served entry).
+
+    Delegates to the budget lane at call time: backend never imports
+    budget at module level (no cycle, budget/__init__ docstring).
+    """
+    from agent_si.budget.routes import post_compensate as _impl
+    return _impl(ctx, query, body)
+
+
+def get_optimization_policy(ctx, query, body) -> Tuple[int, Dict]:
+    """Serve the active OptimizationPolicy (ARCH-528 read leg).
+
+    Returns required quality, the risk ceiling and the weights from the
+    served context default (reads are open, no session token needed).
+    """
+    opt = ctx.default_opt()
+    return 200, {
+        "policy_id": opt.policy_id,
+        "version": opt.version,
+        "required_quality": opt.required_quality,
+        "max_risk": opt.max_risk,
+        "weights": {
+            "weight_quality": opt.weight_quality,
+            "weight_cost": opt.weight_cost,
+            "weight_latency": opt.weight_latency,
+            "weight_cloud_tokens": opt.weight_cloud_tokens,
+        },
+        "local_preference": opt.local_preference,
+    }
+
+
+def post_target_flow(ctx, query, body) -> Tuple[int, Dict]:
+    """Load every role profile from TARGET_FLOW configuration (UID-17).
+
+    All-or-nothing: a role without a configured entry refuses the whole
+    load (no hard-coded role default), so partial configuration never
+    stores partial defaults.
+    """
+    body = body if isinstance(body, Mapping) else {}
+    project_id = body.get("project_id", "p1")
+    config = body.get("target_flow") or {}
+    try:
+        loaded = RL.load_target_flow(ctx.role_table, config,
+                                     project_id=project_id)
+    except RL.TargetFlowMissingError as exc:
+        return 400, {"code": exc.code, "message": str(exc)}
+    return 200, {"project_id": project_id, "loaded": loaded}
+
+
+def post_l3_audit(ctx, query, body) -> Tuple[int, Dict]:
+    """Run an L3 independent audit on the separate provider path (168).
+
+    The binding plus the key ref arrive in the body; the runner comes
+    from the server-side ctx binding (production: the wired SDK runner).
+    Validation legs (same provider, missing key) fail before anything
+    runs; a missing runner is an honest 502, never a silent local pass.
+    """
+    from agent_si.sdk_adapter import sdk_adapter as _sa
+
+    body = body if isinstance(body, Mapping) else {}
+    key = body.get("key_ref")
+    key_ref = None
+    if isinstance(key, Mapping):
+        try:
+            key_ref = _sa.SecretRef(
+                secret_id=str(key.get("secret_id") or ""),
+                provider_id=str(key.get("provider_id") or ""),
+                type=str(key.get("type") or ""),
+                scope=str(key.get("scope") or ""),
+                source=str(key.get("source") or ""),
+                created_at=str(key.get("created_at") or ""),
+                last_rotated_at=str(key.get("last_rotated_at") or ""))
+        except TypeError:
+            key_ref = None
+    if key_ref is None or not key_ref.secret_id:
+        key_ref = None
+    decision = _sa.RoutingDecisionBinding(
+        decision_id=str(body.get("decision_id") or ""),
+        project_id=str(body.get("project_id") or "p1"),
+        task_id=str(body.get("task_id") or "t1"),
+        run_id=str(body.get("run_id") or "r1"),
+        selected_provider=str(body.get("selected_provider") or ""),
+        selected_model=str(body.get("selected_model") or ""))
+    try:
+        binding = _sa.bind_l3_audit(
+            decision, l3_provider=str(body.get("l3_provider") or ""),
+            l3_model=str(body.get("l3_model") or ""), key_ref=key_ref)
+    except _sa.L3ProviderMustDifferError as exc:
+        return 400, {"code": exc.code, "message": str(exc)}
+    except _sa.L3KeyRefRequiredError as exc:
+        return 400, {"code": exc.code, "message": str(exc)}
+    runner = getattr(ctx, "l3_runner", None)
+    adapter = _sa.OpenAIAgentsSDKAdapter(runner=runner)
+    try:
+        result = adapter.run_l3_audit(
+            binding,
+            input_ref=str(body.get("input_ref") or
+                          "audit:%s:%s" % (binding.task_id, binding.run_id)),
+            secret_ref=key_ref, runner=runner)
+    except _sa.RunnerUnboundError as exc:
+        return 502, {"code": exc.code, "message": str(exc)}
+    return 200, {"provider": result.provider, "model": result.model,
+                 "output_ref": result.output_ref,
+                 "status": str(result.status),
+                 "error_ref": result.error_ref}
+
+
 # --------------------------------------------------------------------------
 # Route table + mount + stdlib serve
 
@@ -1005,6 +1113,13 @@ ROUTES: Tuple[Tuple[str, str, str, Callable], ...] = (
     ("get", "/api/v1/routing/why", "get_why", get_why),
     ("get", "/api/v1/routing/suggest", "get_suggest", get_suggest),
     ("post", "/api/v1/routing/decide", "post_decide", post_decide),
+    ("post", "/api/v1/budget/compensations", "post_compensate",
+     post_compensate),
+    ("get", "/api/v1/routing/optimization-policy",
+     "get_optimization_policy", get_optimization_policy),
+    ("post", "/api/v1/roles/target-flow", "post_target_flow",
+     post_target_flow),
+    ("post", "/api/v1/routing/l3-audit", "post_l3_audit", post_l3_audit),
     ("get", "/api/v1/roles/pools", "list_role_pools", list_role_pools),
     ("put", "/api/v1/roles/pools", "put_role_pools", put_role_pools),
     ("get", "/api/v1/routing/decision/{id}/why", "get_decision_why",

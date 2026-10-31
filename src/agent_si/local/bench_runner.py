@@ -19,9 +19,12 @@ import os
 import socket
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from enum import Enum
 from urllib.parse import urlparse
 
+from agent_si.capability_store import store as _cap_store
+from agent_si.local import adapter as _adapter
 from agent_si.local import bench_cases as _bench_cases
 from agent_si.local.bench_protocol import (
     BenchEstimate,
@@ -152,6 +155,10 @@ _ACTIVE_RUN_ID: str | None = None
 _RUNS: dict[str, RunHandle] = {}
 _PROGRESS: dict[str, RunProgress] = {}
 _RUN_ROWS: dict[str, list[BenchResultRow]] = {}
+#: Per-run hardware snapshots (R-371): profile carried by each served run.
+_RUN_HARDWARE: dict[str, HardwareProfile] = {}
+#: Per-run admission verdicts (R-371): recorded when the caller binds refs.
+_RUN_ADMISSION: dict[str, _adapter.AdmissionVerdict] = {}
 
 
 def _loopback_reachable(host: str, port: int) -> bool:
@@ -315,6 +322,68 @@ def estimate_run(
     )
 
 
+#: --- Additive benchmark-steered split record (M-P4-129; new names only).
+#: The queue_run benchmark path writes how deep the benchmark went; the
+#: cloud-vs-local split decision reads it. With no benchmark recorded the
+#: split stays fail-closed to cloud; with a benchmark, deeper measured
+#: evidence steers local exactly like the adapter steering rule.
+_STEER_LEVEL_DEPTH = {"quick": 0, "standard": 1, "deep": 2}
+
+#: Pristine steer state: no benchmark, no level, zero depth.
+_SPLIT_STEER_INITIAL = {"benchmarked": False, "level": None, "depth": 0}
+
+#: Live steer state: replaced wholesale by _note_benchmark_steer.
+_SPLIT_STEER: dict = dict(_SPLIT_STEER_INITIAL)
+
+
+def split_steer_record() -> dict:
+    """Steering record (M-P4-129): how deep the benchmark path went.
+
+    Pristine until a benchmark run starts on the queue_run benchmark
+    path (served POST /runs goes through start_run directly and leaves
+    the record pristine): ``benchmarked`` False with no level. Written
+    by the benchmark path, read by the split decision.
+    """
+    return dict(_SPLIT_STEER)
+
+
+def _note_benchmark_steer(level: BenchLevel) -> None:
+    """Record that a benchmark run started at a level (never raises)."""
+    try:
+        lvl = BenchLevel(level)
+    except (ValueError, TypeError, AttributeError):
+        return
+    _SPLIT_STEER.clear()
+    _SPLIT_STEER.update(
+        {
+            "benchmarked": True,
+            "level": lvl.value,
+            "depth": _STEER_LEVEL_DEPTH.get(lvl.value.lower(), 0),
+        }
+    )
+
+
+def steered_split(summary: dict) -> dict:
+    """Cloud-vs-local split steered by benchmark results (M-P4-129).
+
+    With no benchmark recorded the verdict is fail-closed to cloud, even
+    for a Deep measured summary. With a benchmark, the summary steers by
+    the adapter steering rule: measured evidence beating proxy at
+    Standard depth or deeper goes local, anything else stays cloud.
+    """
+    if not isinstance(summary, dict):
+        raise TypeError(f"summary must be a dict, got {type(summary).__name__}")
+    if not _SPLIT_STEER.get("benchmarked"):
+        return {
+            "split": "cloud",
+            "reason": (
+                "CLOUD: no benchmark recorded on the benchmark path; "
+                "fail-closed to cloud"
+            ),
+        }
+    return _adapter.recommend_split(summary)
+
+
 def _reconcile_slot_on_skip() -> None:
     """Settle an in-flight run when a skip proves the gateway unreachable."""
     global _ACTIVE_RUN_ID
@@ -326,8 +395,135 @@ def _reconcile_slot_on_skip() -> None:
     _journal_append("slot_reconciled")
 
 
-def start_run(model_id: str, level: BenchLevel, authorized: bool) -> RunHandle | RunSkip:
-    """Start a serial run: passive check, then auth, then the busy guard."""
+#: Task class for busy-skip safety evidence (R-360): the passive check
+#: refusing a run while the machine is busy records ambient evidence.
+_BUSY_SKIP_TASK_CLASS = "localbench:busy-skip"
+
+#: Task-class family for run evidence rows (R-371): one per bench level.
+_RUN_EVIDENCE_TASK_CLASS_PREFIX = "localbench:"
+
+
+def _utc_now_iso() -> str:
+    """Current UTC time as an ISO-8601 string for evidence rows."""
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _hardware_fingerprint(hardware: HardwareProfile) -> str:
+    """Stable fingerprint of a hardware snapshot (no machine paths)."""
+    return "|".join(
+        [
+            str(hardware.gpu_vendor),
+            str(hardware.gpu_model),
+            str(hardware.vram_mb),
+            str(hardware.ram_mb),
+            str(hardware.cpu_only),
+        ]
+    )
+
+
+def _record_busy_skip_evidence(model_id: str) -> None:
+    """Record ambient evidence for a busy-skip (R-360); never raises.
+
+    Best-effort: a store failure never breaks the busy refusal itself.
+    """
+    try:
+        task_class = _BUSY_SKIP_TASK_CLASS
+        _cap_store._register_row(
+            _cap_store.CapabilityEvidenceRecord(
+                model_id=model_id,
+                task_class=task_class,
+                tier=_cap_store.EvidenceTier.PROXY,
+                score=None,
+                score_type=None,
+                sample_count=None,
+                confidence=None,
+                benchmark_version=None,
+                measured_at=_utc_now_iso(),
+                runtime="localbench",
+                runtime_version=None,
+                environment_fingerprint=None,
+                freshness_state=_cap_store.FreshnessState.CURRENT.value,
+                evidence_ref=f"cap:{model_id}:{task_class}:v1",
+                source="localbench passive check",
+            )
+        )
+    except Exception:
+        return
+
+
+def _record_run_proxy_evidence(
+    model_id: str, level: BenchLevel, hardware: HardwareProfile
+) -> None:
+    """Record PROXY evidence for a started run (R-371); never raises.
+
+    The row carries the run's hardware profile fingerprint while no
+    benchmark measurement exists yet; a later MEASURED row for the same
+    key supersedes it. Best-effort: never breaks the run start itself.
+    """
+    try:
+        task_class = f"{_RUN_EVIDENCE_TASK_CLASS_PREFIX}{BenchLevel(level).value}"
+        _cap_store._register_row(
+            _cap_store.CapabilityEvidenceRecord(
+                model_id=model_id,
+                task_class=task_class,
+                tier=_cap_store.EvidenceTier.PROXY,
+                score=None,
+                score_type=None,
+                sample_count=None,
+                confidence=None,
+                benchmark_version=None,
+                measured_at=_utc_now_iso(),
+                runtime="localbench",
+                runtime_version=None,
+                environment_fingerprint=_hardware_fingerprint(hardware),
+                freshness_state=_cap_store.FreshnessState.CURRENT.value,
+                evidence_ref=f"cap:proxy:{model_id}:{task_class}:v1",
+                source="localbench run start",
+            )
+        )
+    except Exception:
+        return
+
+
+def _require_admission_refs(admission: dict) -> dict[str, str]:
+    """Validate a caller-bound admission bundle (R-371).
+
+    Returns the four admission refs; malformed bundles raise ValueError
+    (programmer error, never a run refusal).
+    """
+    if not isinstance(admission, dict):
+        raise ValueError(f"admission must be a refs dict, got {admission!r}")
+    refs: dict[str, str] = {}
+    for key in (
+        "capability_store_ref",
+        "health_ref",
+        "gateway_state_ref",
+        "permission_scope",
+    ):
+        value = admission.get(key)
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"admission bundle needs a non-empty string {key!r}")
+        refs[key] = value
+    return refs
+
+
+def start_run(
+    model_id: str,
+    level: BenchLevel,
+    authorized: bool,
+    admission: dict | None = None,
+) -> RunHandle | RunSkip:
+    """Start a serial run: passive check, then auth, then the busy guard.
+
+    While the machine is busy the passive check skips with reason
+    BUSY_SKIP: the skip records capability evidence, and nothing is
+    pulled or deleted (R-360). Every started run carries its hardware
+    profile snapshot with PROXY evidence until a benchmark measurement
+    lands (R-371). When the caller binds the four admission refs, the
+    run is admitted through the production admission path first and a
+    refusal raises fail-closed with no run created; without refs the
+    start behaves exactly as before.
+    """
     lvl = BenchLevel(level)
     if not isinstance(model_id, str) or not model_id:
         raise ValueError(f"model_id must be a non-empty string, got {model_id!r}")
@@ -346,10 +542,25 @@ def start_run(model_id: str, level: BenchLevel, authorized: bool) -> RunHandle |
         )
     global _ACTIVE_RUN_ID
     if _ACTIVE_RUN_ID is not None:
+        _record_busy_skip_evidence(model_id)
         raise BenchBusyError(
-            f"serial one-model machine busy: run '{_ACTIVE_RUN_ID}' is active; "
-            "wait or stop it first; state unchanged"
+            f"BUSY_SKIP: serial one-model machine busy: run '{_ACTIVE_RUN_ID}' "
+            "is active; wait or stop it first; skipped by the passive check "
+            "without contact; nothing pulled or deleted; state unchanged"
         )
+    admission_verdict = None
+    if admission is not None:
+        refs = _require_admission_refs(admission)
+        admission_verdict = _adapter.check_admission(
+            refs["capability_store_ref"],
+            refs["health_ref"],
+            refs["gateway_state_ref"],
+            refs["permission_scope"],
+        )
+        if not admission_verdict.admitted:
+            raise BenchRefusedError(
+                f"{admission_verdict.reason}; state unchanged"
+            )
     run_id = f"run-{next(_RUN_SEQ):04d}"
     handle = RunHandle(run_id=run_id, model_id=model_id, level=lvl)
     _RUNS[run_id] = handle
@@ -362,6 +573,11 @@ def start_run(model_id: str, level: BenchLevel, authorized: bool) -> RunHandle |
     )
     _RUN_ROWS[run_id] = []
     _ACTIVE_RUN_ID = run_id
+    hardware = detect_hardware()
+    _RUN_HARDWARE[run_id] = hardware
+    _record_run_proxy_evidence(model_id, lvl, hardware)
+    if admission_verdict is not None:
+        _RUN_ADMISSION[run_id] = admission_verdict
     _journal_append("start_run")
     return handle
 
@@ -410,6 +626,137 @@ def run_result_rows(run_id: str) -> list[BenchResultRow]:
     """Rows recorded for a run (empty until a real run records rows)."""
     _require_progress(run_id)
     return list(_RUN_ROWS.get(run_id, []))
+
+
+def run_hardware(run_id: str) -> HardwareProfile:
+    """Hardware profile snapshot carried by a run (R-371).
+
+    KeyError on unknown run ids, mirroring run_result_rows.
+    """
+    _require_progress(run_id)
+    try:
+        return _RUN_HARDWARE[run_id]
+    except KeyError:
+        raise KeyError(f"no hardware snapshot for run_id: {run_id!r}") from None
+
+
+def run_admission(run_id: str) -> _adapter.AdmissionVerdict | None:
+    """Admission verdict bound at run start (R-371), if refs were bound.
+
+    None when the run started without an admission bundle; KeyError on
+    unknown run ids, mirroring run_result_rows.
+    """
+    _require_progress(run_id)
+    return _RUN_ADMISSION.get(run_id)
+
+
+#: Warning code for a bench record whose floors promise real wall-clock
+#: time (R-341): every scan record carries it.
+_BENCH_DURATION_WARNING = "BENCH_DURATION"
+
+#: Warning code for a bench record started while the PC is in use
+#: (R-341): carried only when pc_in_use is true.
+_BENCH_PC_IN_USE_WARNING = "BENCH_PC_IN_USE"
+
+
+def bench_scan_record(
+    allowlist_dirs: list[str],
+    requested_path: str,
+    model_id: str,
+    model_params_b: float,
+    level: BenchLevel | str,
+    pc_in_use: bool,
+    work_dir: str,
+) -> dict:
+    """Scan -> level -> run record with duration + warnings (R-341).
+
+    Read-only model scan first (allowlist-first, never creds/browser/SSH
+    paths), then the size-scaled level floors for the model, then the
+    record: models found, level, floor range, warnings (BENCH_DURATION
+    always, plus BENCH_PC_IN_USE while the PC is in use), scan
+    duration, task class and evidence ref. The record lands in the
+    capability base as MEASURED evidence so get_evidence(model_id,
+    task_class) serves it and require_current(evidence_ref) resolves to
+    the model. The work dir must be a real directory: the record belongs
+    to a run workspace, never to a phantom path. Scan refusals raise
+    BenchRefusedError; malformed inputs raise ValueError.
+    """
+    if not isinstance(model_id, str) or not model_id:
+        raise ValueError(f"model_id must be a non-empty string, got {model_id!r}")
+    try:
+        lvl = BenchLevel(level)
+    except (ValueError, TypeError, AttributeError):
+        raise ValueError(f"level must be a bench level, got {level!r}") from None
+    try:
+        params_b = float(model_params_b)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"model_params_b must be a number, got {model_params_b!r}"
+        ) from None
+    if isinstance(params_b, bool) or not params_b > 0.0 or params_b != params_b:
+        raise ValueError(
+            f"model_params_b must be a positive finite number, got {model_params_b!r}"
+        )
+    if not isinstance(pc_in_use, bool):
+        raise ValueError(f"pc_in_use must be a bool, got {pc_in_use!r}")
+    if not isinstance(work_dir, str) or not work_dir:
+        raise ValueError(f"work_dir must be a non-empty string, got {work_dir!r}")
+    if not os.path.isdir(work_dir):
+        raise ValueError(f"work_dir is not a directory: {work_dir!r}")
+    started = time.perf_counter()
+    models = scan_models(allowlist_dirs, requested_path)
+    duration_s = max(0.0, time.perf_counter() - started)
+    floor_min, floor_max = level_floor_minutes(lvl, params_b)
+    warnings = [
+        {
+            "code": _BENCH_DURATION_WARNING,
+            "message": (
+                f"level {lvl.value} floor promises "
+                f"{floor_min:.1f}-{floor_max:.1f} minutes of wall-clock "
+                "benchmark time"
+            ),
+        }
+    ]
+    if pc_in_use:
+        warnings.append(
+            {
+                "code": _BENCH_PC_IN_USE_WARNING,
+                "message": "PC is in use: benchmark shares the machine",
+            }
+        )
+    task_class = f"localbench:scan:{lvl.value}"
+    evidence_ref = f"cap:{model_id}:{task_class}:v1"
+    hardware = detect_hardware()
+    _cap_store._register_row(
+        _cap_store.CapabilityEvidenceRecord(
+            model_id=model_id,
+            task_class=task_class,
+            tier=_cap_store.EvidenceTier.MEASURED,
+            score=float(len(models)),
+            score_type="scanned_model_count",
+            sample_count=len(models),
+            confidence=1.0 if models else 0.0,
+            benchmark_version=None,
+            measured_at=_utc_now_iso(),
+            runtime="localbench",
+            runtime_version=None,
+            environment_fingerprint=_hardware_fingerprint(hardware),
+            freshness_state=_cap_store.FreshnessState.CURRENT.value,
+            evidence_ref=evidence_ref,
+            source=os.path.abspath(requested_path),
+        )
+    )
+    return {
+        "models": models,
+        "level": lvl.value,
+        "floor_minutes_min": floor_min,
+        "floor_minutes_max": floor_max,
+        "warnings": warnings,
+        "duration_s": duration_s,
+        "evidence_ref": evidence_ref,
+        "task_class": task_class,
+        "work_dir": work_dir,
+    }
 
 
 def list_run_ids() -> list[str]:
@@ -564,6 +911,7 @@ def queue_run(
     if _ACTIVE_RUN_ID is None and not live:
         handle = start_run(model_id, lvl, True)
         assert isinstance(handle, RunHandle)
+        _note_benchmark_steer(lvl)
         _create_lease(handle.run_id, owner, lease_ttl, now)
         _journal_append("queue_run_started")
         return handle
@@ -613,6 +961,7 @@ def pump_queue(lease_ttl_s: float = DEFAULT_LEASE_TTL_S) -> RunHandle | None:
         _QUEUE.pop(0)
         handle = start_run(rsv.model_id, rsv.level, True)
         assert isinstance(handle, RunHandle)
+        _note_benchmark_steer(rsv.level)
         rsv.status = "promoted"
         _create_lease(handle.run_id, rsv.owner, lease_ttl, _now_s())
         _journal_append("pump_promoted")
@@ -1138,3 +1487,104 @@ def k05r7_check_probe_endpoint(
         return _k05r7_probe_envs.guard_probe_endpoint(endpoint, environ)
     except _k05r7_probe_envs.ProbeRefusedError as exc:
         return K05R7ProbeSkip(reason=str(exc))
+
+
+#: --- Additive OC-K05 bench->telemetry bridge (L2-D06b; new names only). ---
+#: Bench runs never touched the telemetry store, so S06 totals stayed empty
+#: even with bench evidence on disk. complete_run() records finished rows and
+#: appends bench metric records (bench_runs/bench_cases) to the bound
+#: telemetry store, making bench evidence visible to
+#: GET /api/v1/analytics/telemetry. Metrics-only (no new event_type: the
+#: TelemetryEvent vocabulary is frozen). Existing names/signatures above are
+#: unchanged.
+BENCH_TELEMETRY_SOURCE = "localbench/bench_runner"
+BENCH_RUNS_METRIC = "bench_runs"
+BENCH_CASES_METRIC = "bench_cases"
+
+
+def complete_run(
+    run_id: str,
+    rows: list,
+    project_id: str = "localbench",
+) -> dict:
+    """Finish a run: store rows, free the slot, record bench telemetry.
+
+    Raises KeyError on unknown run ids, ValueError on empty/non-row lists.
+    Telemetry append is best-effort: with no bound store dir it is skipped
+    and the run still completes (returned ids lists stay empty then).
+    """
+    from agent_si.local.bench_protocol import BenchResultRow as _BenchRow
+
+    progress = _require_progress(run_id)
+    if not isinstance(rows, list) or not rows:
+        raise ValueError(
+            f"complete_run needs a non-empty row list, got {type(rows).__name__}"
+        )
+    for row in rows:
+        if not isinstance(row, _BenchRow):
+            raise ValueError(
+                "complete_run rows must be BenchResultRow, "
+                f"got {type(row).__name__}"
+            )
+    stored = _RUN_ROWS.setdefault(run_id, [])
+    stored.extend(rows)
+    progress.done_cases = len(stored)
+    progress.stopped = True
+    global _ACTIVE_RUN_ID
+    if run_id == _ACTIVE_RUN_ID:
+        _ACTIVE_RUN_ID = None
+    _journal_append("complete_run")
+    outcome: dict = {"run_id": run_id, "rows": len(stored),
+                     "metric_ids": [], "event_id": None}
+    try:
+        from agent_si.telemetry import run_store as _run_store
+        from agent_si.telemetry.metrics import MetricRecord as _MetricRecord
+        from agent_si.telemetry.metrics import MetricState as _MetricState
+    except ImportError:
+        return outcome
+    try:
+        import datetime as _dt
+        import uuid as _uuid
+
+        now = _dt.datetime.now(_dt.UTC).isoformat()
+        pid = str(project_id or "localbench")
+        metrics = [
+            _run_store._metric_to_json(
+                _MetricRecord(
+                    metric_id=f"m-{_uuid.uuid4().hex}",
+                    project_id=pid,
+                    metric_name=BENCH_RUNS_METRIC,
+                    value=1,
+                    unit="count",
+                    state=_MetricState.MEASURED,
+                    source=BENCH_TELEMETRY_SOURCE,
+                    run_id=run_id,
+                    recorded_at=now,
+                )
+            ),
+            _run_store._metric_to_json(
+                _MetricRecord(
+                    metric_id=f"m-{_uuid.uuid4().hex}",
+                    project_id=pid,
+                    metric_name=BENCH_CASES_METRIC,
+                    value=len(stored),
+                    unit="count",
+                    state=_MetricState.MEASURED,
+                    source=BENCH_TELEMETRY_SOURCE,
+                    run_id=run_id,
+                    recorded_at=now,
+                )
+            ),
+        ]
+        stored_doc = _run_store.append_records(metrics, [])
+        names = {
+            row.get("metric_id")
+            for row in stored_doc.get("metric_records", [])
+            if isinstance(row, dict)
+        }
+        outcome["metric_ids"] = [
+            row["metric_id"] for row in metrics if row["metric_id"] in names
+        ]
+    except Exception:
+        pass
+    return outcome

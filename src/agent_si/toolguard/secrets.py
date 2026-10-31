@@ -12,6 +12,7 @@ logs, telemetry, reports and records.
 from __future__ import annotations
 
 import os
+import sys
 from typing import Any
 
 SecretRef = str
@@ -178,3 +179,63 @@ def redact_value(
     if isinstance(value, tuple):
         return tuple(redact_value(item) for item in value)
     return value
+
+_NF7K11A_TESTID = "nf7k11a-partner"
+_NF7K11A_PARTNER_ID = "nf7k11a-loopback-partner"
+_NF7K11A_KEYCHAIN_ENTRY = "nf7k11a-keychain"
+
+
+def partner_integration_record(
+    partner_id: str = "nf7k11a-loopback-partner",
+    store: str = "memory",
+    label: str = "TEST",
+) -> dict[str, Any]:
+    """Describe one loopback partner behind the secret-store protocol.
+
+    Research note: the served record keeps key material out of the
+    payload; access travels as an opaque SecretRef handle minted by
+    make_secret_ref, and the raw value never appears in the record,
+    in logs or in telemetry. Loopback TEST data only; no network.
+    """
+    pid = partner_id.strip() if isinstance(partner_id, str) and partner_id.strip() else _NF7K11A_PARTNER_ID
+    kept_store = store.strip() if isinstance(store, str) and store.strip() else "memory"
+    kept_label = label.strip() if isinstance(label, str) and label.strip() else "TEST"
+    handle = make_secret_ref("nf7k11a-partner")
+    assert is_secret_ref(handle)
+    return {
+        "testid": _NF7K11A_TESTID,
+        "partner_id": pid,
+        "secret_ref": handle,
+        "source": "secret_store",
+        "store": kept_store,
+        "label": kept_label,
+    }
+
+
+def keychain_secret_seam(
+    entry: str = "nf7k11a-keychain",
+    store: str = "memory",
+    label: str = "TEST",
+) -> dict[str, Any]:
+    """Describe the macOS Keychain path behind the same seam.
+
+    The record travels the secret-store protocol: an opaque SecretRef
+    handle minted by make_secret_ref, never the raw value. Loopback
+    TEST data only; on macOS the backend reports "keychain" while the
+    payload stays a loopback TEST record with no OS store call, and
+    elsewhere it reports "loopback-test".
+    """
+    kept_entry = entry.strip() if isinstance(entry, str) and entry.strip() else _NF7K11A_KEYCHAIN_ENTRY
+    kept_store = store.strip() if isinstance(store, str) and store.strip() else "memory"
+    kept_label = label.strip() if isinstance(label, str) and label.strip() else "TEST"
+    backend = "keychain" if sys.platform == "darwin" else "loopback-test"
+    handle = make_secret_ref(kept_entry)
+    assert is_secret_ref(handle)
+    return {
+        "testid": _NF7K11A_TESTID,
+        "backend": backend,
+        "secret_ref": handle,
+        "source": "secret_store",
+        "store": kept_store,
+        "label": kept_label,
+    }

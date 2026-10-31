@@ -58,6 +58,15 @@ class MetricWriteError(KBUpdateError):
     """Raised when a MetricRecord breaks the K13 write rules."""
 
 
+PRICE_VERSION_MUST_ADVANCE = "PRICE_VERSION_MUST_ADVANCE"
+
+
+class PriceVersionError(KBUpdateError):
+    """New prices refused as anything but a new snapshot version."""
+
+    code = PRICE_VERSION_MUST_ADVANCE
+
+
 class MetricState:
     MEASURED = "MEASURED"
     CALCULATED = "CALCULATED"
@@ -210,7 +219,25 @@ def attach_metric_by_usage_ref(store, usage_ref, record):
 
 def new_snapshot_version(snapshot, pricing_snapshot_id, created_at,
                          **overrides):
-    """Corrections arrive as a new immutable snapshot version."""
+    """Corrections arrive as a new immutable snapshot version (ARCH-424).
+
+    New prices are accepted only as a NEW version: a missing/unchanged id
+    (silent in-place mutation path) and unknown price fields are refused.
+    The input snapshot is never touched; the derived copy carries the new
+    id, the new prices and the creation time.
+    """
+    current_id = snapshot.get("pricing_snapshot_id") \
+        if isinstance(snapshot, dict) else None
+    if not pricing_snapshot_id or pricing_snapshot_id == current_id:
+        raise PriceVersionError(
+            "new prices need a new pricing_snapshot_id, got %r "
+            "[PRICE_VERSION_MUST_ADVANCE]" % (pricing_snapshot_id,))
+    allowed = set(snapshot.keys()) if isinstance(snapshot, dict) else set()
+    unknown = [name for name in overrides if name not in allowed]
+    if unknown:
+        raise PriceVersionError(
+            "unknown snapshot price fields %r "
+            "[PRICE_VERSION_MUST_ADVANCE]" % (sorted(unknown),))
     next_snapshot = copy.deepcopy(snapshot)
     next_snapshot.update(overrides)
     next_snapshot["pricing_snapshot_id"] = pricing_snapshot_id

@@ -105,31 +105,24 @@ def migrate_legacy_data(data_dir: str,
 def get_data_dir(settings: Any = None) -> str | None:
     """Resolve the consumer-layer product data dir (K10ST1-B).
 
-    Single AGENT_SI_DATA_DIR read call-site in this module. The env dir
+    The single environment read call-site lives in k10_start so this
+    module never touches process environment directly (K04WIRE1 rule). The env dir
     wins; a differing harness settings dir is rejected (ValueError); with
     no env dir the harness dir (if any) is returned for the legacy path,
     else None. An explicitly blank env value fails loud (never a silent
     fallback). Resolving from env also ensures the dir exists and runs
     the first-start legacy migration (originals kept).
     """
-    _raw = os.environ.get(DATA_DIR_ENV_VAR)
+    from agent_si.k10_start import resolve_env_data_dir
+    _resolved = resolve_env_data_dir()
     _harness = _harness_store_dir(settings)
-    if _raw is not None:
-        _text = str(_raw).strip()
-        if not _text:
+    if _resolved is not None:
+        if (_harness is not None
+                and os.path.abspath(_harness) != _resolved):
             raise ValueError(
-                f"K10ST1-B: {DATA_DIR_ENV_VAR} is set but empty: pass "
-                "a real dir, never a silent fallback")
-        _resolved = os.path.abspath(os.path.expanduser(_text))
-        if (
-            _harness is not None
-            and os.path.abspath(_harness) != _resolved
-        ):
-            raise ValueError(
-                f"K10ST1-B: harness settings data dir {_harness!r} "
-                f"rejected: the data dir comes from {DATA_DIR_ENV_VAR} "
-                "only")
-        os.makedirs(_resolved, exist_ok=True)
+                "K10ST1-B: harness settings data dir %r "
+                "rejected: the data dir comes from %s "
+                "only" % (_harness, "AGENT_SI_DATA_DIR"))
         migrate_legacy_data(_resolved)
         return _resolved
     return _harness
@@ -639,6 +632,13 @@ def create_app(settings: Any = None,
         )
     app.include_router(_k08_watcher_routes.router)
 
+    # K02OPEN1B blink (rows 101+102; lane K02BLINK): sibling-router
+    # mount only; no other line in this file changes. Reads stay open,
+    # writes keep the USER_WRITE guard (401 missing x-actor, 403).
+    from agent_si.backend import k02blink_routes as _k02blink_routes
+
+    app.include_router(_k02blink_routes.router)
+
     _K08_WATCHER_STATUS_BY_CODE = {
         "SESSION_TOKEN_MISSING": 401,
         "SESSION_TOKEN_INVALID": 403,
@@ -816,6 +816,8 @@ def create_app(settings: Any = None,
     from agent_si.test_runners import stage_runner as _stage_runner
 
     _kb_routes.register_kb_routes(app)
+    from agent_si.backend.k09rows import k09b_router
+    app.include_router(k09b_router)
     _local_connect.register_local_connect_routes(app)
     _localbench_routes.register_localbench_routes(app)
     _stage_runner.register_stage_routes(app)
@@ -870,6 +872,16 @@ def create_app(settings: Any = None,
     from agent_si.backend import steplimit_routes as _r349_steplimits
 
     _r349_steplimits.register_steplimit_routes(app)
+
+    # OC-K02 R-302/R-333 (additions-only): hierarchy run + control-plane
+    # map and the routine-offload switch surface; no existing line above
+    # or the K04 block below changes.
+    from agent_si.backend import hierarchy_routes as _ock02_hierarchy
+
+    _ock02_hierarchy.register_hierarchy_routes(app)
+    from agent_si.backend import offload_routes as _ock02_offload
+
+    _ock02_offload.register_offload_routes(app)
 
     # --- K04 package routes (HD-authorised additions-only block). ---
     # HD_VERDICT_INT1_K04_ROOT + HD_RULING_K04_TESTS: this block only ADDS
@@ -1142,31 +1154,32 @@ def create_app(settings: Any = None,
                 _k04_ctx.key_save_timeout_s = _k04_save_timeout(settings)
             except Exception:
                 pass
-            # K04BIND1: re-bind persisted providers before the start bind.
-            # KEYECHO1: provider failure reasons are codes/refs only, zero
-            # credential bytes. Exception text must never be interpolated:
-            # the gateway transport formats key bytes into it (urllib
-            # "Invalid header value" carries the rejected header value).
-            _K04BIND_REASON_TIMEOUT = "evidence probe timed out after 10s"
-            _K04BIND_REASON_FAILED = "provider check failed"
-            _K04BIND_PROBE_STATES = ("VERIFIED", "PARTIAL", "UNSUPPORTED",
-                                     "UNKNOWN")
+            # PROVCK2/KEYECHO1: only allowlisted failure codes are ever
+            # surfaced or restored (never exception text, never secret
+            # bytes). Stale free-text reasons persisted on disk are
+            # dropped, never re-surfaced.
+            _PROVCK2_STORE_REASON = "credential store unavailable"
+            _PROVCK2_SURFACED_STATIC = frozenset([
+                "provider check failed",
+                _PROVCK2_STORE_REASON,
+                "evidence probe timed out after 10s",
+                "usage probe returned UNKNOWN",
+                "usage probe returned UNSUPPORTED",
+            ])
 
-            def _k04bind_reason_ok(text: Any) -> bool:
+            def _provck2_surfaced_ok(text: object) -> bool:
                 try:
-                    value = str(text or "")
+                    value = str(text or "")  # type: ignore[arg-type]
                 except Exception:
                     return False
-                if value in (_K04BIND_REASON_TIMEOUT,
-                             _K04BIND_REASON_FAILED):
+                if value in _PROVCK2_SURFACED_STATIC:
                     return True
                 if value.startswith("provider answered HTTP "):
-                    tail = value[len("provider answered HTTP "):]
-                    return tail.isdigit() and 100 <= int(tail) <= 599
-                if value.startswith("usage probe returned "):
-                    return value[len("usage probe returned "):] in (
-                        _K04BIND_PROBE_STATES)
+                    return value[len(
+                        "provider answered HTTP "):].isdigit()
                 return False
+
+            # K04BIND1: re-bind persisted providers before the start bind.
 
             try:
                 from agent_si.providers.registry import (
@@ -1201,8 +1214,8 @@ def create_app(settings: Any = None,
                         # KEYECHO1: only codes/refs are restored; a stale
                         # free-text reason (possibly pre-fix leak bytes)
                         # is dropped, never re-surfaced.
-                        if isinstance(_err, str) and _err \
-                                and _k04bind_reason_ok(_err):
+                        if (isinstance(_err, str) and _err
+                                and _provck2_surfaced_ok(_err)):
                             try:
                                 _k04_api.set_provider_error(
                                     _pid, _inst, _err)
@@ -1343,10 +1356,48 @@ def create_app(settings: Any = None,
         except Exception:
             pass
 
+    # PROVCK2: connect-time preflight + allowlisted failure classes.
+    # Surfaced reasons are fixed codes only (KEYECHO1: never exception
+    # text, never secret bytes). The machine-readable class/code pair is
+    # recorded on the audit sink (ids + codes + counts only, no values,
+    # no text) so the next live run separates store-read vs network vs
+    # HTTP without leaking anything. _PROVCK2_STORE_REASON and
+    # _provck2_surfaced_ok are defined above (restore gate needs them).
+    _PROVCK2_CODES = {
+        "ok": "EVIDENCE_OK",
+        "store-read": "CREDENTIAL_STORE_UNAVAILABLE",
+        "network": "EVIDENCE_PROBE_NETWORK",
+        "http": "PROVIDER_ANSWERED_HTTP",
+        "probe-timeout": "EVIDENCE_PROBE_TIMEOUT",
+        "unknown": "PROVIDER_CHECK_FAILED",
+    }
+    try:
+        from agent_si.providers.adapters.base import (
+            AdapterConfigError as _PROVCK2_STORE_EXC)
+        from agent_si.providers.adapters.base import (
+            TransportHttpError as _PROVCK2_HTTP_EXC)
+        from agent_si.providers.adapters.base import (
+            TransportTimeoutError as _PROVCK2_NET_EXC)
+    except Exception:
+        _PROVCK2_STORE_EXC = None
+        _PROVCK2_HTTP_EXC = None
+        _PROVCK2_NET_EXC = None
+
+    def _provck2_audit(record: dict) -> None:
+        try:
+            _sink = getattr(_k04_ctx, "audit_sink", None)
+            if _sink is None:
+                return
+            _sink.append(dict(record))
+        except Exception:
+            pass
+
     def _k04bind_evidence(pid: str, inst: str, model: str,
                           base_url: str, secret_map: dict) -> tuple:
         # K04BIND1: real check via the EXISTING usage_probe over the real
         # gateway transport (key from the store by ref, never echoed).
+        _provck2_inst = str(inst or "default")
+        _store_attempts = 0
         try:
             from agent_si.backend import chat_stream as _cs
             from agent_si.providers.adapters import legs as _legs
@@ -1357,6 +1408,54 @@ def create_app(settings: Any = None,
             except Exception:
                 _chat_path = "/chat/completions"
             _store = getattr(_k04_ctx, "credential_store", None)
+            # PROVCK2 preflight: prove the store entry reads BEFORE any
+            # network I/O. One retry on a transient store-read failure
+            # (each attempt is fully audited); then fail closed with the
+            # allowlisted store-read code. The value is dropped at once.
+            _sid = ""
+            try:
+                _sid = str((secret_map or {}).get("secret_id", "") or "")
+            except Exception:
+                _sid = ""
+            _store_ok = False
+            for _attempt in (1, 2):
+                _store_attempts = _attempt
+                try:
+                    _preflight_value = _cs._read_secret_value(_store, _sid)
+                except Exception:
+                    _provck2_audit({
+                        "event": "provck2-store-retry",
+                        "provider_id": pid,
+                        "instance_id": _provck2_inst,
+                        "attempt": _attempt,
+                        "outcome": ("retrying" if _attempt == 1
+                                    else "exhausted"),
+                    })
+                    continue
+                _store_ok = True
+                try:
+                    del _preflight_value
+                except Exception:
+                    pass
+                if _attempt > 1:
+                    _provck2_audit({
+                        "event": "provck2-store-retry",
+                        "provider_id": pid,
+                        "instance_id": _provck2_inst,
+                        "attempt": _attempt,
+                        "outcome": "recovered",
+                    })
+                break
+            if not _store_ok:
+                _provck2_audit({
+                    "event": "provck2-evidence",
+                    "provider_id": pid,
+                    "instance_id": _provck2_inst,
+                    "class": "store-read",
+                    "code": _PROVCK2_CODES["store-read"],
+                    "store_attempts": _store_attempts,
+                })
+                return (False, _PROVCK2_STORE_REASON)
             _real = _cs._gateway_transport(base_url, _store, secret_map)
             _seen: dict = {}
 
@@ -1389,35 +1488,88 @@ def create_app(settings: Any = None,
                 try:
                     _cap = _future.result(timeout=10.0)
                 except _fut.TimeoutError:
-                    return (False, _K04BIND_REASON_TIMEOUT)
+                    _provck2_audit({
+                        "event": "provck2-evidence",
+                        "provider_id": pid,
+                        "instance_id": _provck2_inst,
+                        "class": "probe-timeout",
+                        "code": _PROVCK2_CODES["probe-timeout"],
+                        "store_attempts": _store_attempts,
+                    })
+                    return (False, "evidence probe timed out after 10s")
             _state = ""
             try:
                 _state = str((_cap or {}).get("state", "") or "")
             except Exception:
                 _state = ""
             if _state in ("VERIFIED", "PARTIAL"):
+                _provck2_audit({
+                    "event": "provck2-evidence",
+                    "provider_id": pid,
+                    "instance_id": _provck2_inst,
+                    "class": "ok",
+                    "code": _PROVCK2_CODES["ok"],
+                    "store_attempts": _store_attempts,
+                })
                 return (True, "")
+            # PROVCK2 classification: fixed codes only, never exception
+            # text (KEYECHO1). HTTP carries the int status; the store-read
+            # class carries its own surfaced reason; network and unknown
+            # stay on the generic code so no transport text can escape.
             _exc = _seen.get("exc")
-            if _exc is not None:
+            _cls = "unknown"
+            _code = _PROVCK2_CODES["unknown"]
+            _http_status = None
+            _reason = "provider check failed"
+            if (_exc is not None and _PROVCK2_HTTP_EXC is not None
+                    and isinstance(_exc, _PROVCK2_HTTP_EXC)):
                 try:
-                    _status = getattr(_exc, "status", None)
+                    _maybe_status = getattr(_exc, "status", None)
                 except Exception:
-                    _status = None
-                # KEYECHO1: status code only; never the exception text
-                # (it may carry key bytes, e.g. "Invalid header value").
-                if (isinstance(_status, int)
-                        and not isinstance(_status, bool) and _status):
-                    _reason = "provider answered HTTP %d" % (_status,)
-                else:
-                    _reason = _K04BIND_REASON_FAILED
-            elif _state in _K04BIND_PROBE_STATES and _state not in (
-                    "VERIFIED", "PARTIAL"):
+                    _maybe_status = None
+                if (isinstance(_maybe_status, int)
+                        and not isinstance(_maybe_status, bool)
+                        and _maybe_status):
+                    _http_status = _maybe_status
+                    _cls = "http"
+                    _code = _PROVCK2_CODES["http"]
+                    _reason = "provider answered HTTP %d" % (_http_status,)
+            elif (_exc is not None and _PROVCK2_STORE_EXC is not None
+                    and isinstance(_exc, _PROVCK2_STORE_EXC)):
+                _cls = "store-read"
+                _code = _PROVCK2_CODES["store-read"]
+                _reason = _PROVCK2_STORE_REASON
+            elif isinstance(_exc, ((() if _PROVCK2_NET_EXC is None else _PROVCK2_NET_EXC),
+                                   TimeoutError, ConnectionError, OSError)):
+                _cls = "network"
+                _code = _PROVCK2_CODES["network"]
+                _reason = "provider check failed"
+            elif _exc is None:
                 _reason = "usage probe returned %s" % (_state or "UNKNOWN")
-            else:
-                _reason = _K04BIND_REASON_FAILED
+            _provck2_audit({
+                "event": "provck2-evidence",
+                "provider_id": pid,
+                "instance_id": _provck2_inst,
+                "class": _cls,
+                "code": _code,
+                **({"status": _http_status}
+                   if _http_status is not None else {}),
+                "store_attempts": _store_attempts,
+            })
             return (False, _k04bind_scrub(_reason))
         except Exception:
-            return (False, _K04BIND_REASON_FAILED)
+            try:
+                _provck2_audit({
+                    "event": "provck2-evidence",
+                    "provider_id": pid,
+                    "instance_id": _provck2_inst,
+                    "class": "unknown",
+                    "code": _PROVCK2_CODES["unknown"],
+                    "store_attempts": _store_attempts,
+                })
+            except Exception:
+                pass
+            return (False, "provider check failed")
 
     def _k04bind_rebind(force_clear: bool = False,
                         only_provider: str | None = None) -> None:
@@ -1659,7 +1811,7 @@ def create_app(settings: Any = None,
                                     content=_k04_jsonable(_payload))
         return _k04_endpoint
 
-    for _method, _path, _name, _fn in _k04_pr.ROUTES:
+    for _method, _path, _name, _fn in list(_k04_pr.ROUTES) + list(_k04_pr._LEGACY_ROUTES):
         app.add_api_route(
             _path,
             _k04_make_endpoint(
@@ -1820,6 +1972,15 @@ def create_app(settings: Any = None,
         """GET /portability/environment -> detected-environment page."""
         return _k06open9_portable.get_environment_page()
 
+    # --- K06 OC served worker path (MH-1/MH-3 + rows 189/253/254). ---
+    # Additions-only block: binds per-app K06 OC state on app.state and
+    # registers the /api/v1/k06/ handlers over the real worker_tools /
+    # services / script_import modules. No existing line above changes.
+    from agent_si.worker_tools import routes as _k06oc_routes
+
+    _k06oc_routes.bind_k06oc_state(app)
+    _k06oc_routes.register_k06oc_routes(app)
+
     # --- K09-REFRESH stale KB copy refresh (LIVE0-06 additions-only). ---
     # Per-app recorded versions + changelog over local KB dirs (no
     # network; the KB dir is never mutated). GET proposal is an open read
@@ -1832,7 +1993,10 @@ def create_app(settings: Any = None,
     import json as _k09r_json
     from pathlib import Path as _K09RPath
 
-    from src.agent_si.kb import registry as _k09r_registry
+    try:
+        from agent_si.kb import registry as _k09r_registry
+    except ImportError:
+        from src.agent_si.kb import registry as _k09r_registry
 
     _K09R_UNKNOWN = "UNKNOWN"
 
@@ -1973,6 +2137,209 @@ def create_app(settings: Any = None,
                 "recorded_version": _status["source_version"],
                 "source_version": _status["source_version"],
                 **_row}
+
+    # K12OPEN1 Beacon (rows R-350 + HC-3): idea/demo public-text rules
+    # plus submission secret/private scan; sibling-mount pattern only.
+    from agent_si.backend import k12open1_routes as _k12open1_routes
+
+    _k12open1_routes.register_k12open1_routes(app)
+
+    # K12OPEN2 rows (R-350 + HC-3): same pure logic, new /k12open2/ paths.
+    from agent_si.backend import k12open2_routes as _k12open2_routes
+
+    _k12open2_routes.register_k12open2_routes(app)
+
+    # K12OPEN3 Beacon (rows HC-2 + HC-3, TESTID k12open3-hc):
+    # contribution marks over the production ledger lookup plus
+    # submission finalize over the real secretscan; additions-only
+    # block with the same USER_WRITE guard shape (401 missing
+    # x-actor, 403 bad token; every refusal body {code, message}).
+    import datetime as _k12open3_datetime
+
+    from fastapi.responses import JSONResponse as _K12Open3JSONResponse
+
+    from agent_si.backend import secretscan as _k12open3_secretscan
+
+    _K12OPEN3_ACTOR_MISSING = "ACTOR_MISSING"
+    _K12OPEN3_FORBIDDEN = "FORBIDDEN"
+    _K12OPEN3_EMPTY_PACKAGE_ID = "EMPTY_PACKAGE_ID"
+    _K12OPEN3_DUPLICATE_CONTRIBUTION = "DUPLICATE_CONTRIBUTION"
+    _K12OPEN3_PACKAGE_NOT_ACCEPTED = "PACKAGE_NOT_ACCEPTED"
+    _K12OPEN3_EMPTY_SUBMISSION = "EMPTY_SUBMISSION"
+    _K12OPEN3_SECRET_SCAN_BLOCKED = "SECRET_SCAN_BLOCKED"
+
+    class _K12Open3Error(Exception):
+        """Refusal carrying an HTTP status plus {code, message}."""
+
+        def __init__(self, status, code, message):
+            super().__init__(message)
+            self.status = status
+            self.code = code
+            self.message = message
+
+    def contributions_mark(store, package_id, evidence_ref=None,
+                           recorded_at=None):
+        """Record one contribution mark in store; pure, no I/O.
+
+        A blank package_id raises EMPTY_PACKAGE_ID (400) and a
+        repeated package_id raises DUPLICATE_CONTRIBUTION (409);
+        recorded_at defaults to today's ISO date. Returns the
+        recorded contribution {package_id, evidence_ref,
+        recorded_at}.
+        """
+        if not (isinstance(package_id, str) and package_id.strip()):
+            raise _K12Open3Error(
+                400, _K12OPEN3_EMPTY_PACKAGE_ID,
+                "mark needs a non-empty package_id")
+        if package_id in store:
+            raise _K12Open3Error(
+                409, _K12OPEN3_DUPLICATE_CONTRIBUTION,
+                "contribution already marked for package %s"
+                % package_id)
+        if recorded_at is None:
+            recorded_at = _k12open3_datetime.date.today().isoformat()
+        record = {
+            "package_id": package_id,
+            "evidence_ref": evidence_ref,
+            "recorded_at": recorded_at,
+        }
+        store[package_id] = record
+        return record
+
+    def secret_scan_gate(files, notes):
+        """Scan submission files plus notes via the real secretscan.
+
+        Pure wrapper: an empty submission (no files and blank notes)
+        raises EMPTY_SUBMISSION (400); otherwise the secretscan
+        findings list is returned (empty when clean).
+        """
+        entries = files if isinstance(files, list) else []
+        has_files = len(entries) > 0
+        has_notes = isinstance(notes, str) and bool(notes.strip())
+        if not has_files and not has_notes:
+            raise _K12Open3Error(
+                400, _K12OPEN3_EMPTY_SUBMISSION,
+                "finalize needs files or notes")
+        return _k12open3_secretscan.scan_files(files, notes)
+
+    globals()["contributions_mark"] = contributions_mark
+    globals()["secret_scan_gate"] = secret_scan_gate
+
+    app.state.k12open3_contributions = {}
+
+    def _k12open3_refuse(status, code, message):
+        return _K12Open3JSONResponse(
+            status_code=status, content={"code": code, "message": message})
+
+    def _k12open3_guard(request):
+        """Frozen USER_WRITE guard shape; None when the write proceeds."""
+        actor = (request.headers.get("x-actor") or "").strip()
+        if not actor:
+            return _k12open3_refuse(
+                401, _K12OPEN3_ACTOR_MISSING, "missing x-actor header")
+        token = request.headers.get("x-ui-session-token")
+        check = getattr(app.state, "auth_hook", None)
+        allowed = False
+        if callable(check):
+            try:
+                allowed = bool(check(token, actor, USER_WRITE))
+            except Exception:
+                allowed = False
+        else:
+            expected = getattr(app.state, "ui_session_token", None)
+            allowed = expected is not None and token == expected
+        if not allowed:
+            return _k12open3_refuse(
+                403, _K12OPEN3_FORBIDDEN, "forbidden")
+        return None
+
+    async def _k12open3_json_body(request):
+        try:
+            body = await request.json()
+        except Exception:
+            return {}
+        return body if isinstance(body, dict) else {}
+
+    @app.post("/api/v1/k12open3/contributions/mark")
+    async def _k12open3_post_mark(request: Request):
+        refused = _k12open3_guard(request)
+        if refused is not None:
+            return refused
+        body = await _k12open3_json_body(request)
+        package_id = body.get("package_id")
+        if not (isinstance(package_id, str) and package_id.strip()):
+            return _k12open3_refuse(
+                400, _K12OPEN3_EMPTY_PACKAGE_ID,
+                "mark needs a non-empty package_id")
+        if _find_ledger_with(package_id, None) is None:
+            return _k12open3_refuse(
+                404, _K12OPEN3_PACKAGE_NOT_ACCEPTED,
+                "package %s is not accepted" % package_id)
+        try:
+            record = contributions_mark(
+                app.state.k12open3_contributions, package_id,
+                body.get("evidence_ref"), body.get("recorded_at"))
+        except _K12Open3Error as err:
+            return _k12open3_refuse(err.status, err.code, err.message)
+        return {"contribution": record}
+
+    @app.get("/api/v1/k12open3/contributions")
+    def _k12open3_get_contributions():
+        return {
+            "contributions": list(app.state.k12open3_contributions.values())
+        }
+
+    @app.post("/api/v1/k12open3/submission/finalize")
+    async def _k12open3_post_finalize(request: Request):
+        refused = _k12open3_guard(request)
+        if refused is not None:
+            return refused
+        body = await _k12open3_json_body(request)
+        raw_files = body.get("files")
+        files = raw_files if isinstance(raw_files, list) else []
+        notes = body.get("notes")
+        try:
+            findings = secret_scan_gate(files, notes)
+        except _K12Open3Error as err:
+            return _k12open3_refuse(err.status, err.code, err.message)
+        package_id = body.get("package_id")
+        if not (isinstance(package_id, str) and package_id.strip()):
+            return _k12open3_refuse(
+                400, _K12OPEN3_EMPTY_PACKAGE_ID,
+                "finalize needs a non-empty package_id")
+        if _find_ledger_with(package_id, None) is None:
+            return _k12open3_refuse(
+                404, _K12OPEN3_PACKAGE_NOT_ACCEPTED,
+                "package %s is not accepted" % package_id)
+        if findings:
+            return _K12Open3JSONResponse(
+                status_code=409,
+                content={
+                    "code": _K12OPEN3_SECRET_SCAN_BLOCKED,
+                    "message": "submission carries a possible secret",
+                    "findings": findings,
+                })
+        try:
+            record = contributions_mark(
+                app.state.k12open3_contributions, package_id,
+                body.get("evidence_ref"), body.get("recorded_at"))
+        except _K12Open3Error as err:
+            return _k12open3_refuse(err.status, err.code, err.message)
+        return {"ok": True, "contribution": record}
+    # NF7K11A R-353 + R-354 (partner research + Keychain seam): open reads
+    # behind the secret-store protocol; additions-only block, no earlier
+    # line changes. Reads need no token, per the frozen route guard.
+    from agent_si.toolguard import secrets as _nf7k11a_secrets
+
+    @app.get("/api/v1/partner/integration")
+    def nf7k11a_partner_integration() -> dict[str, Any]:
+        """GET /api/v1/partner/integration -> partner_integration_record."""
+        return _nf7k11a_secrets.partner_integration_record()
+
+    @app.get("/api/v1/keychain/seam")
+    def nf7k11a_keychain_seam() -> dict[str, Any]:
+        """GET /api/v1/keychain/seam -> keychain_secret_seam."""
+        return _nf7k11a_secrets.keychain_secret_seam()
 
     # --- K03 assurance lane served ops (additions-only). ---
     # Mounts the three assurance entries over the real lane modules:
@@ -2213,6 +2580,17 @@ def create_app(settings: Any = None,
         return {"testid": "k10open4-start",
                 **_k10o4_demo(app.state.data_dir)}
 
+    # K10OPEN4 start path (row M-P4-138): first start migrates
+    # settings plus keys into the data dir, keeping originals. Runs
+    # here on the production call path off create_app (never a
+    # test-only wrapper).
+    if _k10_data_dir is not None:
+        from agent_si.k10_start import migrate_first_start as _k10o4_mig
+
+        app.state.k10open4_migrated = _k10o4_mig(_k10_data_dir)
+    else:
+        app.state.k10open4_migrated = {}
+
     # K10OPEN4 start path (row M-P4-138, served report): per-file
     # report of the first-start settings plus keys migration.
     @app.get("/k10/start/migrate")
@@ -2221,5 +2599,159 @@ def create_app(settings: Any = None,
 
         return {"testid": "k10open4-start",
                 "migrated": _k10o4_mig2(app.state.data_dir)}
+    # K02OPEN14 served hierarchy/offload/step-budget (R-302/R-333/R-349).
+    # Additions-only: Director split with Manager integration, routine
+    # offload behind a per-project switch with recorded hand-overs, and
+    # a per-project agent/chat step budget. Writes keep the frozen
+    # USER_WRITE guard (401 missing x-actor, 403 bad token); handovers
+    # stay an open read.
+    from agent_si.backend.orchestration import hierarchy as _k14_hierarchy
+    from agent_si.backend.orchestration import offload as _k14_offload
+    from agent_si.backend.orchestration import steplimits as _k14_steplimits
+
+    def _k14_write_guard(request: Request) -> None:
+        """Refuse served K02OPEN14 writes without actor + live token."""
+        actor = (request.headers.get("x-actor") or "").strip()
+        if not actor:
+            raise HTTPException(
+                status_code=401, detail="missing x-actor header")
+        token = request.headers.get("x-ui-session-token")
+        check: AuthHook = app.state.auth_hook
+        try:
+            allowed = bool(check(token, actor, USER_WRITE))
+        except Exception:
+            allowed = False
+        if not allowed:
+            raise HTTPException(status_code=403, detail="forbidden")
+
+    async def _k14_body(request: Request) -> dict:
+        """Read one JSON object body; refuse missing/bad payloads."""
+        try:
+            data = await request.json()
+        except Exception:
+            raise HTTPException(
+                status_code=400,
+                detail="write needs a JSON body") from None
+        if not isinstance(data, dict):
+            raise HTTPException(
+                status_code=400,
+                detail="write needs a JSON object body") from None
+        return data
+
+    @app.post("/v1/split")
+    async def k14_split(request: Request) -> dict[str, Any]:
+        """Director split: one project into parts for tool agents."""
+        _k14_write_guard(request)
+        data = await _k14_body(request)
+        try:
+            return _k14_hierarchy.split(data)
+        except _k14_hierarchy.SplitRefused as err:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": _k14_hierarchy.SPLIT_BAD_REQUEST,
+                        "message": str(err)}) from None
+
+    @app.post("/v1/integrate")
+    async def k14_integrate(request: Request) -> dict[str, Any]:
+        """Manager integration: split parts into one result."""
+        _k14_write_guard(request)
+        data = await _k14_body(request)
+        try:
+            return _k14_hierarchy.integrate(
+                data.get("parts"), data.get("project_id"))
+        except _k14_hierarchy.IntegrateRefused as err:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": _k14_hierarchy.INTEGRATE_BAD_REQUEST,
+                        "message": str(err)}) from None
+
+    @app.put("/v1/offload-switch")
+    async def k14_offload_switch(request: Request) -> dict[str, Any]:
+        """Per-project routine-offload switch."""
+        _k14_write_guard(request)
+        data = await _k14_body(request)
+        try:
+            return _k14_offload.switch(
+                data.get("project_id"), data.get("enabled"))
+        except (ValueError, TypeError) as err:
+            raise HTTPException(
+                status_code=400, detail=str(err)) from None
+
+    @app.post("/v1/offload")
+    async def k14_offload(request: Request) -> dict[str, Any]:
+        """Hand one routine over; refused while the switch is off."""
+        _k14_write_guard(request)
+        data = await _k14_body(request)
+        try:
+            return _k14_offload.record_routine_offload(
+                data.get("project_id"), data.get("routine"))
+        except _k14_offload.OffloadDisabled as err:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": _k14_offload.OFFLOAD_DISABLED,
+                        "message": str(err)}) from None
+        except (ValueError, TypeError) as err:
+            raise HTTPException(
+                status_code=400, detail=str(err)) from None
+
+    @app.get("/v1/handovers")
+    def k14_handovers(project_id: str) -> dict[str, Any]:
+        """Recorded routine hand-overs for one project (open read)."""
+        return {"project_id": project_id,
+                "handovers": _k14_offload.handovers_for(project_id)}
+
+    @app.put("/v1/step-limits")
+    @app.post("/v1/step-limits")
+    async def k14_step_limits(request: Request) -> dict[str, Any]:
+        """Per-project max agent steps, separate for chat."""
+        _k14_write_guard(request)
+        data = await _k14_body(request)
+        try:
+            return _k14_steplimits.set_step_budget(
+                data.get("project_id"), data.get("max_agent_steps"),
+                data.get("max_chat_steps"))
+        except (ValueError, TypeError) as err:
+            raise HTTPException(
+                status_code=400, detail=str(err)) from None
+
+    @app.post("/v1/agent-steps")
+    async def k14_agent_steps(request: Request) -> dict[str, Any]:
+        """Take one agent step; 429 once the project budget is spent."""
+        _k14_write_guard(request)
+        data = await _k14_body(request)
+        try:
+            return _k14_steplimits.take_step(
+                data.get("project_id"), _k14_steplimits.AGENT_KIND)
+        except _k14_steplimits.StepLimitExceeded as err:
+            raise HTTPException(
+                status_code=429,
+                detail={"code": _k14_steplimits.STEP_LIMIT_EXCEEDED,
+                        "message": str(err)}) from None
+        except (KeyError, LookupError) as err:
+            raise HTTPException(
+                status_code=404, detail=str(err)) from None
+        except (ValueError, TypeError) as err:
+            raise HTTPException(
+                status_code=400, detail=str(err)) from None
+
+    @app.post("/v1/chat-steps")
+    async def k14_chat_steps(request: Request) -> dict[str, Any]:
+        """Take one chat step; 429 once the project budget is spent."""
+        _k14_write_guard(request)
+        data = await _k14_body(request)
+        try:
+            return _k14_steplimits.take_step(
+                data.get("project_id"), _k14_steplimits.CHAT_KIND)
+        except _k14_steplimits.StepLimitExceeded as err:
+            raise HTTPException(
+                status_code=429,
+                detail={"code": _k14_steplimits.STEP_LIMIT_EXCEEDED,
+                        "message": str(err)}) from None
+        except (KeyError, LookupError) as err:
+            raise HTTPException(
+                status_code=404, detail=str(err)) from None
+        except (ValueError, TypeError) as err:
+            raise HTTPException(
+                status_code=400, detail=str(err)) from None
 
     return app

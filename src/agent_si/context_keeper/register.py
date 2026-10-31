@@ -84,6 +84,59 @@ REF_STATES = ("PRESERVED", "CHANGED", "MISSING", "CONTRADICTED")
 #: Model that produced keeper rows (M-A provenance pin).
 MODEL_ID = "meta/muse-spark-1.3-contributor"
 
+#: Scope the agent_si development model binding applies to
+#: (B0B-UNCOVERED_UI_DELTA-33): the product development process only.
+#: It is provenance metadata (which model produced a row), never a
+#: production default, fallback member or auto-selected model.
+DEVELOPMENT_BINDING_SCOPE = "product-development-process"
+
+#: Explicit human choice: the only production use that may name the
+#: development binding (a PINNED profile the user picked on purpose).
+EXPLICIT_PINNED_USE = "explicit-pinned-choice"
+
+DEV_BINDING_SCOPE_VIOLATION = "DEV_BINDING_SCOPE_VIOLATION"
+
+
+class DevelopmentBindingScopeError(ValueError):
+    """The development binding is used outside its scope."""
+
+    code = DEV_BINDING_SCOPE_VIOLATION
+
+
+def development_binding():
+    """Return the (provider, model) development binding pair.
+
+    Parsed from MODEL_ID so the literal lives in exactly one module.
+    """
+    provider, _, model = MODEL_ID.partition("/")
+    return provider, MODEL_ID
+
+
+def is_development_binding(provider, model) -> bool:
+    """Return True when (provider, model) is the development binding."""
+    dev_provider, dev_model = development_binding()
+    return str(provider) == dev_provider and str(model) == dev_model
+
+
+def check_development_binding_use(*, provider, model, use: str):
+    """Enforce the development-binding scope (UI_DELTA-33).
+
+    The development binding applies only to the product development
+    process (provenance) or an explicit PINNED choice; silent production
+    adoption (auto-selection, role defaults, fallback chains,
+    production runs) raises DevelopmentBindingScopeError. Ordinary
+    models pass every use.
+    """
+    if not is_development_binding(provider, model):
+        return None
+    if use in (DEVELOPMENT_BINDING_SCOPE, EXPLICIT_PINNED_USE):
+        return None
+    raise DevelopmentBindingScopeError(
+        "development binding %s/%s applies only to %r "
+        "(or an explicit PINNED choice); got use %r "
+        "[DEV_BINDING_SCOPE_VIOLATION]"
+        % (provider, model, DEVELOPMENT_BINDING_SCOPE, use))
+
 #: Severities that block level start / continuation (K13 45A, SPEC 45A).
 def _blocking_severities():
     """Frozen blocking severities, resolved late (HIGH/CRITICAL)."""

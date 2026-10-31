@@ -405,23 +405,55 @@ def _is_healthy_signal(health_ref: object) -> bool:
     return "healthy" in lowered and "unhealthy" not in lowered
 
 
-def check_admission(
+#: Role levels the capability-tier gate serves (B0B-BP02-63): only a
+#: named role level admits, and only with capability-tier evidence plus
+#: a healthy signal plus an idle gateway. Any other level refuses.
+_CAPABILITY_TIER_ROLE_LEVELS = ("quick", "standard", "deep")
+
+#: Canonical role level evaluated by check_admission (B0B-BP02-63): the
+#: tier/health/gateway gates are level-independent for valid levels, so
+#: the production admission path evaluates them at the deepest level.
+_CANONICAL_ADMIT_ROLE_LEVEL = "deep"
+
+
+def capability_tier_admit(
+    role_level: str,
     capability_store_ref: str,
     health_ref: str,
     gateway_state_ref: str,
-    permission_scope: str,
 ) -> AdmissionVerdict:
-    """Admission from tier plus health plus gateway plus permission.
+    """Tier-plus-health-plus-gateway admission for one role level.
 
-    Tier (63) admits only routing-eligibility evidence, mirroring
-    check_eligibility so this gate is never weaker: UNKNOWN is never
-    admitted and a bare tier label never admits. Health (68) admits
-    only a healthy signal. Gateway (77) admits only an idle machine,
-    never forced. Permission (88) admits only the allowlisted scope.
-    The verdict records every ref supplied.
+    Row B0B-BP02-63: a local candidate is admitted per role level only
+    with capability-tier evidence plus a healthy signal plus an idle
+    gateway. UNKNOWN is never admitted and a bare tier label never
+    admits, mirroring check_eligibility so this gate is never weaker;
+    only routing-eligibility evidence (or verified static capability)
+    admits. The verdict records every ref supplied. check_admission
+    calls this gate on the production admission path, then applies
+    the permission gate.
     """
     _reject_role_config_ref(capability_store_ref, "capability store ref")
-    _reject_role_config_ref(permission_scope, "permission scope")
+    level_text = role_level.lower() if isinstance(role_level, str) else ""
+    admission_refs = (
+        role_level,
+        capability_store_ref,
+        health_ref,
+        gateway_state_ref,
+    )
+    admission_source = "capability-store/health/gateway"
+    if level_text not in _CAPABILITY_TIER_ROLE_LEVELS:
+        return AdmissionVerdict(
+            admitted=False,
+            reason=(
+                "UNKNOWN_ROLE_LEVEL_REFUSED: role level "
+                f"{role_level!r} names no servable role level; admission "
+                "needs one of 'quick', 'standard' or 'deep'"
+            ),
+            admission_refs=admission_refs,
+            gate_allowed=False,
+            admission_source=admission_source,
+        )
     store_text = capability_store_ref if isinstance(capability_store_ref, str) else ""
     lowered = store_text.lower()
     static_capability = _carries_static_capability(lowered)
@@ -435,13 +467,6 @@ def check_admission(
     gateway_text = gateway_state_ref if isinstance(gateway_state_ref, str) else ""
     gateway_lowered = gateway_text.lower()
     gateway_allowed = "idle" in gateway_lowered and "running" not in gateway_lowered
-    admission_refs = (
-        capability_store_ref,
-        health_ref,
-        gateway_state_ref,
-        permission_scope,
-    )
-    admission_source = "capability-store/health/gateway/permission"
     if tier is EvidenceTier.UNKNOWN and not static_signal:
         return AdmissionVerdict(
             admitted=False,
@@ -494,6 +519,69 @@ def check_admission(
             gate_allowed=gateway_allowed,
             admission_source=admission_source,
         )
+    if static_capability and tier is not EvidenceTier.MEASURED:
+        return AdmissionVerdict(
+            admitted=True,
+            reason=(
+                "admitted: branch-B verified static capability with healthy "
+                "signal and idle gateway; UNKNOWN is never admitted"
+            ),
+            admission_refs=admission_refs,
+            gate_allowed=gateway_allowed,
+            admission_source=admission_source,
+        )
+    return AdmissionVerdict(
+        admitted=True,
+        reason=(
+            f"admitted: routing-eligibility evidence ({tier.value} tier) "
+            "with healthy signal and idle gateway"
+        ),
+        admission_refs=admission_refs,
+        gate_allowed=gateway_allowed,
+        admission_source=admission_source,
+    )
+
+
+def check_admission(
+    capability_store_ref: str,
+    health_ref: str,
+    gateway_state_ref: str,
+    permission_scope: str,
+) -> AdmissionVerdict:
+    """Admission from tier plus health plus gateway plus permission.
+
+    Tier (63) admits only routing-eligibility evidence, mirroring
+    check_eligibility so this gate is never weaker: UNKNOWN is never
+    admitted and a bare tier label never admits. Health (68) admits
+    only a healthy signal. Gateway (77) admits only an idle machine,
+    never forced. Permission (88) admits only the allowlisted scope.
+    The verdict records every ref supplied. The tier/health/gateway
+    gates evaluate through capability_tier_admit on the production
+    admission path, so this gate is never weaker than the tier gate.
+    """
+    _reject_role_config_ref(capability_store_ref, "capability store ref")
+    _reject_role_config_ref(permission_scope, "permission scope")
+    admission_refs = (
+        capability_store_ref,
+        health_ref,
+        gateway_state_ref,
+        permission_scope,
+    )
+    admission_source = "capability-store/health/gateway/permission"
+    gate = capability_tier_admit(
+        _CANONICAL_ADMIT_ROLE_LEVEL,
+        capability_store_ref,
+        health_ref,
+        gateway_state_ref,
+    )
+    if not gate.admitted:
+        return AdmissionVerdict(
+            admitted=False,
+            reason=gate.reason,
+            admission_refs=admission_refs,
+            gate_allowed=gate.gate_allowed,
+            admission_source=admission_source,
+        )
     if not isinstance(permission_scope, str) or (
         permission_scope not in ADMISSION_ALLOWED_PERMISSION_SCOPES
     ):
@@ -505,10 +593,18 @@ def check_admission(
                 "contact; admission needs the servable scope"
             ),
             admission_refs=admission_refs,
-            gate_allowed=gateway_allowed,
+            gate_allowed=gate.gate_allowed,
             admission_source=admission_source,
         )
-    if static_capability and tier is not EvidenceTier.MEASURED:
+    store_text = capability_store_ref if isinstance(capability_store_ref, str) else ""
+    lowered = store_text.lower()
+    if "measured" in lowered:
+        tier = EvidenceTier.MEASURED
+    elif "proxy" in lowered:
+        tier = EvidenceTier.PROXY
+    else:
+        tier = EvidenceTier.UNKNOWN
+    if _carries_static_capability(lowered) and tier is not EvidenceTier.MEASURED:
         return AdmissionVerdict(
             admitted=True,
             reason=(
@@ -517,7 +613,7 @@ def check_admission(
                 "UNKNOWN is never admitted"
             ),
             admission_refs=admission_refs,
-            gate_allowed=gateway_allowed,
+            gate_allowed=gate.gate_allowed,
             admission_source=admission_source,
         )
     return AdmissionVerdict(
@@ -527,9 +623,71 @@ def check_admission(
             "with healthy signal, idle gateway and allowlisted permission"
         ),
         admission_refs=admission_refs,
-        gate_allowed=gateway_allowed,
+        gate_allowed=gate.gate_allowed,
         admission_source=admission_source,
     )
+
+
+#: --- Additive tool-agent registration (R-312; new names only). ---
+#: Local runtimes attach on the served local entry and register as tool
+#: agents only through the production admission path: check_admission
+#: must admit the runtime's evidence, else the runtime stays
+#: unregistered (a wrong permission scope refuses with
+#: ADMISSION_PERMISSION_REFUSED and registers nothing). Registrations
+#: are read-only history; entries are JSON-serializable.
+_TOOL_AGENTS: dict = {}
+
+_TOOL_AGENT_SEQ = itertools.count(1)
+
+
+@dataclass(frozen=True)
+class ToolAgentRegistration:
+    registered: bool
+    runtime_ref: str
+    reason: str
+
+
+def tool_agent_register(
+    runtime_ref: str,
+    capability_store_ref: str,
+    health_ref: str,
+    gateway_state_ref: str,
+    permission_scope: str,
+) -> ToolAgentRegistration:
+    """Register a local runtime as a tool agent (R-312).
+
+    The runtime registers and runs as a tool agent only when the
+    production admission path (check_admission) admits its capability
+    evidence with a healthy signal, an idle gateway and the allowlisted
+    permission scope; any refusal registers nothing and names its gate.
+    Every field must be a non-empty string where a ref belongs, and
+    role-config fields are refused where task-class or model refs belong.
+    """
+    if not isinstance(runtime_ref, str) or not runtime_ref:
+        raise ValueError(f"runtime_ref must be a non-empty string, got {runtime_ref!r}")
+    _reject_role_config_ref(capability_store_ref, "capability store ref")
+    _reject_role_config_ref(permission_scope, "permission scope")
+    verdict = check_admission(
+        capability_store_ref, health_ref, gateway_state_ref, permission_scope
+    )
+    if not verdict.admitted:
+        return ToolAgentRegistration(
+            registered=False,
+            runtime_ref=runtime_ref,
+            reason=verdict.reason,
+        )
+    agent_id = f"tool-agent-{next(_TOOL_AGENT_SEQ):04d}"
+    registration = ToolAgentRegistration(
+        registered=True,
+        runtime_ref=runtime_ref,
+        reason=(
+            f"registered: local runtime {runtime_ref!r} admitted as tool "
+            f"agent ({agent_id}) on evidence {verdict.admission_refs!r}; "
+            "UNKNOWN is never admitted"
+        ),
+    )
+    _TOOL_AGENTS[agent_id] = registration
+    return registration
 
 
 def record_verifier_decision(
@@ -604,6 +762,119 @@ def route_by_policy(score: object) -> str:
         if score >= threshold:
             return branch
     return ROUTING_POLICY_NO_DATA_BRANCH
+
+
+def recommend_split(summary: dict) -> dict:
+    """Benchmark-steered cloud-vs-local split (M-P4-129).
+
+    Pure: the verdict derives only from the passed summary dict; no IO,
+    no network, no shared mutable state. UNKNOWN evidence never steers
+    local: anything without usable measured evidence fails closed to
+    "cloud". Standard or Deep levels steer local when measured evidence
+    beats proxy.
+    """
+    if not isinstance(summary, dict):
+        raise TypeError(
+            "summary must be a dict, got %s" % type(summary).__name__
+        )
+
+    def _number(value: object) -> float | None:
+        """Usable numeric score, else None (bools and NaN count as missing)."""
+        if isinstance(value, bool):
+            return None
+        if not isinstance(value, (int, float)):
+            return None
+        as_float = float(value)
+        if as_float != as_float:
+            return None
+        return as_float
+
+    raw_level: object = None
+    for _key in ("level", "bench_level", "depth"):
+        if _key in summary:
+            raw_level = summary[_key]
+            break
+    unwraps = 0
+    while isinstance(raw_level, dict) and unwraps < 4:
+        raw_level = raw_level.get("level")
+        unwraps += 1
+    if not isinstance(raw_level, str):
+        enum_value = getattr(raw_level, "value", None)
+        if isinstance(enum_value, str):
+            raw_level = enum_value
+    level_text = raw_level.strip().lower() if isinstance(raw_level, str) else ""
+    order = ("quick", "standard", "deep")
+    depth = order.index(level_text) if level_text in order else 0
+    level_name = ("Quick", "Standard", "Deep")[depth]
+    measured: float | None = None
+    for _key in ("measured_score", "measured_share", "score", "measured"):
+        if _key in summary:
+            candidate = _number(summary[_key])
+            if candidate is not None:
+                measured = candidate
+                break
+    tier_raw: object = None
+    for _key in ("tier", "evidence_tier", "evidence"):
+        if _key in summary:
+            tier_raw = summary[_key]
+            break
+    if isinstance(tier_raw, str):
+        tier = tier_raw.strip().upper()
+        if tier not in ("MEASURED", "PROXY", "UNKNOWN"):
+            tier = "UNKNOWN"
+    else:
+        tier = None
+    proxy: float | None = None
+    for _key in ("proxy_score", "proxy_share", "proxy", "baseline_score"):
+        if _key in summary:
+            candidate = _number(summary[_key])
+            if candidate is not None:
+                proxy = candidate
+                break
+    baseline = proxy if proxy is not None else 0.0
+    if tier == "UNKNOWN" or (measured is None and tier != "MEASURED"):
+        return {
+            "split": "cloud",
+            "reason": (
+                "CLOUD: no measured evidence (tier %s, no usable "
+                "measured score); fail-closed to cloud"
+                % (tier if tier is not None else "missing",)
+            ),
+        }
+    if measured is not None and measured >= baseline and depth >= 1:
+        return {
+            "split": "local",
+            "reason": (
+                "LOCAL: %s level with measured %.6g >= proxy %.6g; "
+                "benchmark evidence steers local"
+                % (level_name, measured, baseline)
+            ),
+        }
+    if measured is None:
+        return {
+            "split": "cloud",
+            "reason": (
+                "CLOUD: tier MEASURED without a numeric measured score "
+                "at %s level; nothing measured to steer local"
+                % (level_name,)
+            ),
+        }
+    if depth < 1:
+        return {
+            "split": "cloud",
+            "reason": (
+                "CLOUD: %s level is shallower than Standard despite "
+                "measured %.6g vs proxy %.6g; shallow level stays cloud"
+                % (level_name, measured, baseline)
+            ),
+        }
+    return {
+        "split": "cloud",
+        "reason": (
+            "CLOUD: proxy %.6g beats measured %.6g at %s level; "
+            "cloud wins" % (baseline, measured, level_name)
+        ),
+    }
 
 
 #: Frozen function name to owning lane implementation (dotted path).

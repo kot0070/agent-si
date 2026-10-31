@@ -23,7 +23,7 @@ import type {
 } from "../api/iface";
 import { ApiError, apiErrorLocaleKey } from "../api/errors";
 import { useApiClient } from "../app/ApiClientProvider";
-import { formatDate, t, useLocale } from "../locale/index";
+import { formatDate, formatNumber, t, useLocale } from "../locale/index";
 import type { SupportedLocale } from "../locale/index";
 import { Card } from "../ui/Card";
 import { EmptyState } from "../ui/EmptyState";
@@ -33,6 +33,7 @@ import { placementKey, resolveStatusHuman } from "../agents/agentsApi";
 import { TASKS_CHANGED_EVENT, taskStatusLabel } from "../tasks/TaskComposer";
 import {
   PROJECT_VIEWS,
+  buildDerivedSplit,
   buildReportNarrative,
   computeAgeDays,
   CONTEXT_SOURCE,
@@ -940,6 +941,34 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
                   ledger,
                   budget,
                 }).map((line) => <span key={line}>{line}</span>)
+              )}
+            </div>
+            <div data-testid="project-report-derived-split">
+              <span>{t("projects.derived.label")}</span>
+              {tasksError !== null ? (
+                panelError(tasksError)
+              ) : ledgerError !== null ? (
+                panelError(ledgerError)
+              ) : budgetError !== null ? (
+                panelError(budgetError)
+              ) : ledger === null || budget === null ? (
+                <LoadingState loadingKey="ui.loading.more" />
+              ) : buildDerivedSplit({ ledger, budget }).length === 0 ? (
+                <EmptyState stateKey="ui.table.empty" actionKey={null} onAction={null} />
+              ) : (
+                buildDerivedSplit({ ledger, budget }).map((allocation) => (
+                  <div
+                    key={allocation.packageId}
+                    data-testid={`derived-split-${allocation.packageId}`}
+                  >
+                    <span>{t(allocation.labelKey)}</span>
+                    <span>{allocation.packageId}</span>
+                    <span>
+                      {formatNumber(allocation.derivedCost, locale)}{" "}
+                      {allocation.currency}
+                    </span>
+                  </div>
+                ))
               )}
             </div>
           </div>

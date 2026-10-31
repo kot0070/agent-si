@@ -33,6 +33,7 @@ import {
 } from "../locale/index";
 import type { SupportedLocale } from "../locale/index";
 import { SETTINGS_ROUTES, AcceptedRiskSwitch, RoleProfileEditor } from "../settings/index";
+import { OptimizationPolicySection } from "../settings/optimizationPolicy";
 import { ProvidersPage } from "../settings/ProvidersPage";
 import {
   LocalBenchDecisionList,
@@ -47,6 +48,8 @@ import { ErrorPanel } from "../ui/ErrorPanel";
 import { LoadingState } from "../ui/LoadingState";
 import { TopBar, TOPBAR_LOCALE_EVENT } from "../shell/TopBar";
 import { Sidebar } from "../shell/Sidebar";
+import { ThemeToggle } from "../shell/ThemeToggle";
+import { ContractDefaultsBar } from "../settings/ContractDefaultsBar";
 import { Inspector } from "../shell/Inspector";
 import { ClosingGuard } from "../shell/ClosingGuard";
 import type { ProjectViewName } from "../projects/ProjectView";
@@ -102,6 +105,12 @@ const TeamModelQuickFixView = lazy(() =>
 const AboutView = lazy(() =>
   import("./About").then((module) => ({ default: module.About })),
 );
+
+// R-372: the routed About confirms the shipped third-party notices;
+// the bare component keeps them opt-in so embeds stay minimal.
+function AboutRoute(): ReactElement {
+  return <AboutView showThirdParty />;
+}
 const FirstRunFlowView = lazy(() =>
   import("./firstrun/FirstRunFlow").then((module) => ({
     default: module.FirstRunFlow,
@@ -484,8 +493,13 @@ function SettingsSectionRoute(): ReactElement {
       {route.path === "project" && projectId !== null ? (
         <>
           <RoleProfileEditor projectId={projectId} role="manager" />
+          <ContractDefaultsBar projectId={projectId} role="manager" />
           <AcceptedRiskSwitch projectId={projectId} />
         </>
+      ) : route.path === "appearance" ? (
+        <span data-testid="settings-section-body">
+          <ThemeToggle />
+        </span>
       ) : route.path === "localAI" ? (
         <LocalAiStoredPanel />
       ) : route.path === "localbench" ? (
@@ -494,9 +508,13 @@ function SettingsSectionRoute(): ReactElement {
         </span>
       ) : route.path === "models" ||
         route.path === "routing" ||
-        route.path === "optimization" ||
         route.path === "capabilityDB" ? (
         <span data-testid="settings-section-body">
+          <ProvidersPage project_id={projectId ?? "local"} />
+        </span>
+      ) : route.path === "optimization" ? (
+        <span data-testid="settings-section-body">
+          <OptimizationPolicySection />
           <ProvidersPage project_id={projectId ?? "local"} />
         </span>
       ) : (
@@ -596,7 +614,7 @@ function AppShell(): ReactElement {
                 element={<SettingsSectionRoute />}
               />
               <Route path="/firstrun" element={<FirstRunRoute />} />
-              <Route path="/about" element={<AboutView />} />
+              <Route path="/about" element={<AboutRoute />} />
               <Route path="/migration" element={<MigrationRoute />} />
               <Route path="/how-it-works" element={<HowItWorksView />} />
               <Route

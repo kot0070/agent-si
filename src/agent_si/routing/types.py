@@ -58,7 +58,7 @@ ROLES = ("director", "manager", "worker", "auditor", "watcher")
 
 ROLE_MODES = ("PINNED", "pool", "AUTO")
 
-PROFILE_BINDINGS = ("DEFAULT", "HARD_LOCK")
+PROFILE_BINDINGS = ("DEFAULT", "HARD_LOCK", "TARGET_FLOW")
 
 ROUTES = ("CLOUD", "LOCAL", "SPLIT", "PARALLEL", "HYBRID", "BLOCKED")
 

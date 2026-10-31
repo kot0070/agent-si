@@ -8,12 +8,13 @@ cost settles them afterwards; failed gates compensate idempotently.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
 import threading
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, List
 
@@ -32,8 +33,63 @@ class BudgetBlockedError(BudgetError):
     """Raised when the hard limit blocks a billable reservation."""
 
 
+#: Stable machine codes for the served compensation boundary (K04OPEN3 M1).
+COMPENSATION_REF_REQUIRED = "COMPENSATION_REF_REQUIRED"
+BUDGET_RESERVATION_NOT_FOUND = "BUDGET_RESERVATION_NOT_FOUND"
+COMPENSATION_TERMINAL_REFUSED = "COMPENSATION_TERMINAL_REFUSED"
+
+#: Served measured-capable gate state (ARCH-726, NF4K04A): high-risk
+#: reasoning and final verification run only on MEASURED candidates.
+MEASURED_CAPABLE = "MEASURED"
+
+#: Stable machine codes for the served measured-capable boundary.
+HIGH_RISK_CANDIDATE_NOT_MEASURED_CAPABLE = \
+    "HIGH_RISK_CANDIDATE_NOT_MEASURED_CAPABLE"
+HIGH_RISK_TASK_RISK_REQUIRED = "HIGH_RISK_TASK_RISK_REQUIRED"
+
+
 class DuplicateSettlementError(BudgetError):
     """Raised when a settlement dedupe key is already settled."""
+
+    def __init__(self, message, existing=None):
+        super().__init__(message)
+        self.existing = existing
+
+
+COMPENSATION_REF_REQUIRED = "COMPENSATION_REF_REQUIRED"
+COMPENSATION_UNKNOWN_RESERVATION = "COMPENSATION_UNKNOWN_RESERVATION"
+COMPENSATION_ALREADY_SETTLED = "COMPENSATION_ALREADY_SETTLED"
+COMPENSATION_REF_CONFLICT = "COMPENSATION_REF_CONFLICT"
+
+
+class CompensationError(BudgetError):
+    """Base error for compensation failures (ARCH-441)."""
+
+    code = "COMPENSATION_FAILED"
+
+
+class CompensationRefRequiredError(CompensationError):
+    """Compensate called without a compensation_ref."""
+
+    code = COMPENSATION_REF_REQUIRED
+
+
+class CompensationUnknownReservationError(CompensationError):
+    """Compensate called for an unknown reservation id."""
+
+    code = COMPENSATION_UNKNOWN_RESERVATION
+
+
+class CompensationAlreadySettledError(CompensationError):
+    """Compensate called for an already SETTLED reservation."""
+
+    code = COMPENSATION_ALREADY_SETTLED
+
+
+class CompensationRefConflictError(CompensationError):
+    """A different compensation_ref already released this reservation."""
+
+    code = COMPENSATION_REF_CONFLICT
 
     def __init__(self, message, existing=None):
         super().__init__(message)
@@ -99,6 +155,7 @@ class BudgetReservation:
     status: str = "ACTIVE"
     provider_request_ref: str = ""
     provider_id: str = ""
+    compensation_ref: str = ""
 
     def to_dict(self):
         return {
@@ -112,11 +169,19 @@ class BudgetReservation:
             "status": self.status,
             "provider_request_ref": self.provider_request_ref,
             "provider_id": self.provider_id,
+            "compensation_ref": self.compensation_ref,
         }
 
     @classmethod
     def from_dict(cls, data):
-        return cls(**data)
+        row = dict(data)
+        row.setdefault("compensation_ref", "")
+        known = (
+            "reservation_id", "project_id", "task_id", "run_id",
+            "estimated_amount", "reserved_at", "expires_at", "status",
+            "provider_request_ref", "provider_id", "compensation_ref",
+        )
+        return cls(**{key: row[key] for key in known if key in row})
 
 
 @dataclass
@@ -194,6 +259,37 @@ class IncidentRecord:
 
 
 @dataclass
+class CompensationRecord:
+    """One idempotent failed-gate compensation (ARCH-441).
+
+    The compensation_ref is persisted in its own store (not on the
+    reservation row, whose frozen shape is untouched); repeating the
+    same ref returns the stored record, a different ref conflicts.
+    """
+
+    reservation_id: str
+    project_id: str
+    compensation_ref: str
+    reason: str
+    status: str = "RELEASED"
+    compensated_at: str = ""
+
+    def to_dict(self):
+        return {
+            "reservation_id": self.reservation_id,
+            "project_id": self.project_id,
+            "compensation_ref": self.compensation_ref,
+            "reason": self.reason,
+            "status": self.status,
+            "compensated_at": self.compensated_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data):
+        return cls(**data)
+
+
+@dataclass
 class ReserveResult:
     ok: bool
     reservation: BudgetReservation | None
@@ -244,6 +340,124 @@ def _frozen_reservation_id(project_id, task_id, run_id, estimated_amount,
     return "res-" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
+def _freshness_ok(freshness, requirement):
+    """True when a freshness label meets the policy requirement (order)."""
+    order = {"UNKNOWN": 0, "INCOMPATIBLE": 0, None: -1, "STALE": 1,
+             "CURRENT": 2}
+    need = order.get(requirement, 2)
+    return order.get(freshness, -1) >= need
+
+
+def is_measured_capable(evidence, *, sample_min=20, confidence_min=0.7,
+                        freshness_requirement="CURRENT"):
+    """ARCH-726 measured-capable gate over plain evidence mappings.
+
+    High-risk reasoning and final verification run only on measured
+    capable candidates: MEASURED fields_state with strict pass rate,
+    sample, confidence and freshness bars met. Unmeasured, cheap or
+    below-bar evidence is not capable.
+    """
+    if not isinstance(evidence, Mapping):
+        return False
+    if evidence.get("fields_state") != MEASURED_CAPABLE:
+        return False
+    if evidence.get("strict_pass_rate") is None:
+        return False
+    sample_count = evidence.get("sample_count")
+    if sample_count is None or sample_count < sample_min:
+        return False
+    confidence = evidence.get("confidence")
+    if confidence is None or confidence < confidence_min:
+        return False
+    return _freshness_ok(evidence.get("freshness"), freshness_requirement)
+
+
+#: Price-carrying fields a correction may change (ARCH-424,
+#: B0B-UNCOVERED_ARCH-424): the same family as the model_kb
+#: price_correction shape; any other field name is refused.
+PRICE_CORRECTION_FIELDS = frozenset((
+    "input_token_price", "output_token_price", "cached_token_price",
+    "reasoning_token_price", "request_price", "currency",
+    "effective_at", "source",
+))
+
+#: Canonical PricingSnapshot field order. Mirrors the frozen
+#: agent_si.routing.interface.PricingSnapshot shape field for field and
+#: is read duck-typed (mapping or attribute shape), so the frozen
+#: interface module is never imported here.
+PRICING_SNAPSHOT_FIELDS = (
+    "pricing_snapshot_id", "provider_id", "model_id", "currency",
+    "effective_at", "source", "input_token_price", "output_token_price",
+    "cached_token_price", "reasoning_token_price", "request_price",
+    "other_rules", "created_at", "hash",
+)
+
+#: Identity + price fields compared for the same-id refusal (timestamps,
+#: source and hash metadata never count as a price change).
+PRICING_IDENTITY_FIELDS = (
+    "provider_id", "model_id", "currency", "input_token_price",
+    "output_token_price", "cached_token_price", "reasoning_token_price",
+    "request_price",
+)
+
+
+def _snapshot_field(value, name, default=None):
+    if isinstance(value, Mapping):
+        return value.get(name, default)
+    return getattr(value, name, default)
+
+
+def _snapshot_dict(value):
+    return {name: _snapshot_field(value, name)
+            for name in PRICING_SNAPSHOT_FIELDS}
+
+
+def pricing_snapshot_immutable(old, *, pricing_snapshot_id, created_at,
+                               **fields):
+    """Mint a new immutable PricingSnapshot version (ARCH-424).
+
+    Quote kit/BUILD_PLAN.md:1643 B0B-UNCOVERED_ARCH-424: "Accept new
+    prices only as new immutable PricingSnapshot versions". Returns a
+    NEW snapshot carrying the corrected prices under a NEW version id;
+    `old` is never mutated. Reusing the old id, an empty id/created_at,
+    or an unknown price field raises ValueError. Production caller:
+    BudgetGate.correct_pricing_snapshot below (which also feeds the
+    served routing entry via BudgetGate.publish_pricing_snapshot).
+    """
+    if old is None:
+        raise ValueError(
+            "pricing_snapshot_immutable needs a base snapshot, got None")
+    old_id = _snapshot_field(old, "pricing_snapshot_id")
+    if not old_id or not str(old_id).strip():
+        raise ValueError(
+            "pricing_snapshot_immutable needs a base snapshot with a "
+            "pricing_snapshot_id")
+    if not pricing_snapshot_id or not str(pricing_snapshot_id).strip():
+        raise ValueError(
+            "pricing_snapshot_immutable needs a new pricing_snapshot_id")
+    if str(pricing_snapshot_id) == str(old_id):
+        raise ValueError(
+            "pricing_snapshot_immutable refused: same id %r with changed "
+            "prices; mint a new version id, never rewrite in place"
+            % (old_id,))
+    if not created_at or not str(created_at).strip():
+        raise ValueError(
+            "pricing_snapshot_immutable needs created_at")
+    unknown = sorted(set(fields) - set(PRICE_CORRECTION_FIELDS))
+    if unknown:
+        raise ValueError(
+            "pricing_snapshot_immutable refuses unknown pricing "
+            "field(s): %s" % ", ".join(unknown))
+    if isinstance(old, Mapping):
+        new = dict(old)
+        new["pricing_snapshot_id"] = pricing_snapshot_id
+        new["created_at"] = created_at
+        new.update(fields)
+        return new
+    return replace(old, pricing_snapshot_id=pricing_snapshot_id,
+                   created_at=created_at, **fields)
+
+
 class BudgetGate:
     """Atomic compare-and-reserve hard-budget gate with deterministic settlement."""
 
@@ -253,8 +467,11 @@ class BudgetGate:
         self._states = {}
         self._reservations = {}
         self._settlements = {}
+        self._compensations = {}
         self._incidents = []
         self._settlement_seq = 0
+        self._pricing_versions = []
+        self._pricing_by_id = {}
         if store_dir is not None:
             os.makedirs(store_dir, exist_ok=True)
             self._load()
@@ -288,6 +505,13 @@ class BudgetGate:
         except FileNotFoundError:
             pass
         try:
+            with open(self._path("compensations.json"), encoding="utf-8") as fh:
+                for row in json.load(fh):
+                    rec = CompensationRecord.from_dict(row)
+                    self._compensations[rec.reservation_id] = rec
+        except FileNotFoundError:
+            pass
+        try:
             with open(self._path("settlements.json"), encoding="utf-8") as fh:
                 for row in json.load(fh):
                     stl = BudgetSettlement.from_dict(row)
@@ -300,6 +524,14 @@ class BudgetGate:
                 if name.startswith("incident-") and name.endswith(".json"):
                     with open(self._path(name), encoding="utf-8") as fh:
                         self._incidents.append(IncidentRecord.from_dict(json.load(fh)))
+        try:
+            with open(self._path("pricing_snapshots.json"), encoding="utf-8") as fh:
+                for row in json.load(fh):
+                    if isinstance(row, Mapping) and row.get("pricing_snapshot_id"):
+                        self._pricing_by_id[row["pricing_snapshot_id"]] = dict(row)
+                        self._pricing_versions.append(dict(row))
+        except FileNotFoundError:
+            pass
 
     def _persist(self):
         self._write_json(
@@ -308,6 +540,9 @@ class BudgetGate:
             "reservations.json", [r.to_dict() for r in self._reservations.values()])
         self._write_json(
             "settlements.json", [s.to_dict() for s in self._settlements.values()])
+        self._write_json(
+            "compensations.json",
+            [c.to_dict() for c in self._compensations.values()])
 
     def _persist_incident(self, incident):
         self._write_json(
@@ -705,6 +940,60 @@ class BudgetGate:
             self._persist()
             return settlement
 
+    def compensate(self, reservation_id, reason, compensation_ref,
+                   now=""):
+        """Compensate a failed gate idempotently to RELEASED (ARCH-441).
+
+        The compensation_ref is persisted in its own store (the frozen
+        reservation shape is untouched). Repeating the call with the same
+        ref returns the stored record without touching the ledger twice;
+        a different ref for an already compensated reservation raises;
+        SETTLED reservations are never compensated.
+        """
+        if not compensation_ref or not str(compensation_ref).strip():
+            raise CompensationRefRequiredError(
+                "compensate needs a compensation_ref "
+                "[COMPENSATION_REF_REQUIRED]")
+        with self._lock:
+            reservation = self._reservations.get(reservation_id)
+            if reservation is None:
+                raise CompensationUnknownReservationError(
+                    "unknown reservation %r "
+                    "[COMPENSATION_UNKNOWN_RESERVATION]" % (reservation_id,))
+            if reservation.status == "SETTLED":
+                raise CompensationAlreadySettledError(
+                    "reservation %s is already SETTLED "
+                    "[COMPENSATION_ALREADY_SETTLED]" % (reservation_id,))
+            stored = self._compensations.get(reservation_id)
+            if stored is not None:
+                if stored.compensation_ref == compensation_ref:
+                    return stored
+                raise CompensationRefConflictError(
+                    "reservation %s already compensated under %r "
+                    "[COMPENSATION_REF_CONFLICT]"
+                    % (reservation_id, stored.compensation_ref),
+                    existing=stored.compensation_ref)
+            record = CompensationRecord(
+                reservation_id=reservation_id,
+                project_id=reservation.project_id,
+                compensation_ref=str(compensation_ref),
+                reason=str(reason or ""),
+                status="RELEASED",
+                compensated_at=now or _utcnow_z())
+            if reservation.status in ("ACTIVE", "CREATED"):
+                state = self._states[reservation.project_id]
+                reservation.status = "RELEASED"
+                state.reserved = str(
+                    _dec(state.reserved) - _dec(reservation.estimated_amount))
+            self._compensations[reservation_id] = record
+            self._persist()
+            return record
+
+    def get_compensation(self, reservation_id):
+        """Return the stored CompensationRecord, or None."""
+        with self._lock:
+            return self._compensations.get(reservation_id)
+
     def release(self, reservation_id, reason, now=""):
         with self._lock:
             reservation = self._reservations[reservation_id]
@@ -716,6 +1005,118 @@ class BudgetGate:
                 _dec(state.reserved) - _dec(reservation.estimated_amount))
             self._persist()
             return reservation
+
+    def compensate(self, reservation_id, *, compensation_ref, reason, now=""):
+        """Idempotent failed-gate compensation to terminal RELEASED.
+
+        Records str(compensation_ref) on a live reservation, restores
+        its estimate to the project reserve exactly once, and persists.
+        Terminal reservations (SETTLED/RELEASED/EXPIRED) and repeats
+        return untouched; unknown ids raise KeyError; an empty
+        compensation_ref raises ValueError.
+        """
+        if compensation_ref is None or str(compensation_ref) == "":
+            raise ValueError(
+                "compensate needs a non-empty compensation_ref")
+        with self._lock:
+            reservation = self._reservations[reservation_id]
+            if reservation.status in ("SETTLED", "RELEASED", "EXPIRED"):
+                return reservation
+            state = self._states[reservation.project_id]
+            reservation.status = "RELEASED"
+            reservation.compensation_ref = str(compensation_ref)
+            state.reserved = str(
+                _dec(state.reserved) - _dec(reservation.estimated_amount))
+            self._persist()
+            return reservation
+
+    # -- immutable pricing snapshots (ARCH-424) -----------------------------
+    def _persist_pricing(self):
+        if self._store_dir is None:
+            return
+        tmp = self._path("pricing_snapshots.json.tmp")
+        with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
+            json.dump([_snapshot_dict(s) for s in self._pricing_versions],
+                      fh, indent=2, default=str)
+            fh.write("\n")
+        os.replace(tmp, self._path("pricing_snapshots.json"))
+
+    def _publish_locked(self, snapshot):
+        """Store one snapshot version; lock already held."""
+        sid = _snapshot_field(snapshot, "pricing_snapshot_id")
+        existing = self._pricing_by_id.get(sid)
+        if existing is not None:
+            old = {k: _snapshot_field(existing, k)
+                   for k in PRICING_IDENTITY_FIELDS}
+            new = {k: _snapshot_field(snapshot, k)
+                   for k in PRICING_IDENTITY_FIELDS}
+            if old != new:
+                raise ValueError(
+                    "publish_pricing_snapshot refused: id %r exists with "
+                    "different prices; correct via "
+                    "correct_pricing_snapshot (new version), never "
+                    "rewrite in place" % (sid,))
+            return copy.deepcopy(existing)
+        stored = copy.deepcopy(snapshot)
+        self._pricing_by_id[sid] = stored
+        self._pricing_versions.append(stored)
+        self._persist_pricing()
+        return copy.deepcopy(stored)
+
+    def publish_pricing_snapshot(self, snapshot):
+        """Record one immutable PricingSnapshot version (ARCH-424).
+
+        Same id with identical prices is idempotent; same id with
+        different prices raises ValueError (in-place correction is
+        refused — mint a new version via correct_pricing_snapshot).
+        Stored and returned rows are copies, so later mutation of the
+        caller's object or of a retrieved row never touches the kept
+        version. Served routing entry feeds this through
+        agent_si.routing.router._record_winner_pricing.
+        """
+        sid = _snapshot_field(snapshot, "pricing_snapshot_id")
+        if not sid or not str(sid).strip():
+            raise ValueError(
+                "publish_pricing_snapshot needs a pricing_snapshot_id")
+        with self._lock:
+            return self._publish_locked(snapshot)
+
+    def correct_pricing_snapshot(self, base_id, *, pricing_snapshot_id,
+                                 created_at, **fields):
+        """Mint a corrected price as a NEW version (ARCH-424).
+
+        The base version object/row is never mutated; unknown base ids
+        raise KeyError; guard refusals (same id, empty id/created_at,
+        unknown fields) raise ValueError via pricing_snapshot_immutable.
+        """
+        with self._lock:
+            try:
+                base = self._pricing_by_id[base_id]
+            except KeyError:
+                raise KeyError(
+                    "no pricing snapshot on file for %r" % (base_id,)
+                ) from None
+            new = pricing_snapshot_immutable(
+                base, pricing_snapshot_id=pricing_snapshot_id,
+                created_at=created_at, **fields)
+            return self._publish_locked(new)
+
+    def get_pricing_snapshot(self, snapshot_id):
+        """Return a copy of one kept version; unknown ids raise KeyError."""
+        with self._lock:
+            return copy.deepcopy(self._pricing_by_id[snapshot_id])
+
+    def pricing_history(self, provider_id=None, model_id=None):
+        """Kept versions in publish order (copies), optionally filtered."""
+        with self._lock:
+            rows = list(self._pricing_versions)
+            if provider_id is not None:
+                rows = [r for r in rows
+                        if _snapshot_field(r, "provider_id") == provider_id]
+            if model_id is not None:
+                rows = [r for r in rows
+                        if _snapshot_field(r, "model_id") == model_id]
+            return [copy.deepcopy(r) for r in rows]
 
     # -- restart recovery ---------------------------------------------------
     def reconcile_on_restart(self, project_id: str) -> List[BudgetSettlement]:

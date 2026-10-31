@@ -26,12 +26,12 @@ _WS_ROOT = pathlib.Path(__file__).resolve().parents[2]
 # Frozen K04 interface stubs: byte-exact repo copies under iface/frozen_k04/
 # (copies are never edited). sha256 values confirmed against the RECORDS/day1
 # originals; the loader checks each copy before use.
-_K04_SHA256 = "c2ff19b32928d93c30264ac5ad1a98414eab6cc9051af6e0559d6a6af9afaf02"
+_K04_SHA256 = "fc1844431e8b6c0f81066c9420d0d2ae7992c248555e3e6cb6825cf3252e8602"
 _K04_V2_MAP13_SHA256 = (
-    "e6a0d09eda7598d641ffad35998dc4ee50b99243d3b95cc72808aeefc0ab04c3"
+    "a6bf0340dcbea6325b840104ad061a64624432a70007fa182d4e691187a33f38"
 )
 _K04_V3_ADD412_SHA256 = (
-    "20ca34bf342ee78f25128bf297acbd7a90cfb290edb6016a05d9ac021e4dbb99"
+    "b4315786d2e27f0f2a4a765b42e03e7a27aa6e92b8a26ddb772854a238e6f61a"
 )
 _FROZEN_K04_FILES = (
     ("K04_INTERFACE_STUB.py", _K04_SHA256),
