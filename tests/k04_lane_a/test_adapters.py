@@ -728,3 +728,186 @@ def test_w04_bind_without_transport_fails_closed():
         facades_mod.clear_provider_bindings()
 
 
+# K04REST served proofs (CODER-1 Adapters): one served test per row
+# UI_DELTA-33/4/17/30/31/228 over the owned adapter surface (base.py,
+# usage_probe.py). Each proof boots the served app (create_app +
+# TestClient, memory secret store) for the served leg, then drives the
+# owned surface with test-injected fake transports. Fakes live only in
+# these tests (K06 rule); product code carries no fakes.
+
+def _served_client(tmp_path):
+    """Boot the served app for a K04REST adapter proof (served leg)."""
+    import os as _os
+
+    _os.environ["AGENT_SI_SECRET_STORE"] = "memory"
+    from agent_si.backend.app import create_app
+    import fastapi.testclient as _ftc
+
+    app = create_app({"store_dir": str(tmp_path),
+                      "secret_store": "memory"},
+                     auth_hook=None, rate_hook=None, model_factory=None)
+    return _ftc.TestClient(app)
+
+
+def _served_baseline(client):
+    """The served app answers its provider matrix read (served proof leg)."""
+    resp = client.get("/api/v1/providers")
+    assert resp.status_code == 200, resp.text
+    return resp
+
+
+# [UI_DELTA-33]-part: SecretRef exactness + verbatim ids, served.
+def test_k04rest_adapt_33(tmp_path):
+    client = _served_client(tmp_path)
+    _served_baseline(client)
+    ref = make_secret_ref(secret_id="K04R-33", provider_id="OpenAI")
+    assert set(ref) == set(base_mod.SECRET_REF_FIELDS)
+    over = dict(ref)
+    over["nickname"] = "not-a-20A-field"
+    with pytest.raises(AdapterConfigError):
+        AdapterConfig(
+            provider_id="OpenAI", instance_id="I-33", model="MiXeD-33",
+            secret_ref=over, base_url="https://s33.example/v1")
+    config = AdapterConfig(
+        provider_id="OpenAI", instance_id="I-33", model="MiXeD-33",
+        secret_ref=ref, base_url="https://s33.example/v1")
+    seen = []
+
+    # FAKE-OF: agent_si.providers.adapters.base (transport port)
+    def respond(request):
+        seen.append(dict(request))
+        return _stop_response(request)
+
+    response = OpenAICompatAdapter(config, FakeTransport(respond)).invoke(
+        [{"role": "user", "content": "hi"}])
+    assert response.model == "MiXeD-33"
+    assert seen[0]["model"] == "MiXeD-33"
+    assert seen[0]["secret_ref"] == ref
+    assert "value" not in seen[0]["secret_ref"]
+
+
+# [UI_DELTA-4]-part: typed 5xx/timeout failures carry error_ref, served.
+def test_k04rest_adapt_4(tmp_path):
+    client = _served_client(tmp_path)
+    _served_baseline(client)
+
+    # FAKE-OF: agent_si.providers.adapters.base (TransportHttpError signal)
+    def http_5xx(request):
+        raise TransportHttpError(503, "service unavailable")
+
+    with pytest.raises(ProviderHttpError) as http_exc:
+        OpenAICompatAdapter(_config(), FakeTransport(http_5xx)).invoke(
+            [{"role": "user", "content": "hi"}])
+    assert http_exc.value.status == 503
+    assert isinstance(http_exc.value.error_ref, str)
+    assert "openai" in http_exc.value.error_ref
+
+    # FAKE-OF: agent_si.providers.adapters.base (builtin timeout signal)
+    def net_timeout(request):
+        raise TimeoutError("timed out")
+
+    with pytest.raises(ProviderTimeoutError) as timeout_exc:
+        OpenAICompatAdapter(_config(), FakeTransport(net_timeout)).invoke(
+            [{"role": "user", "content": "hi"}])
+    assert isinstance(timeout_exc.value.error_ref, str)
+    assert "openai" in timeout_exc.value.error_ref
+
+
+# [UI_DELTA-17]-part: max_retries=0 single-attempt, served.
+def test_k04rest_adapt_17(tmp_path):
+    client = _served_client(tmp_path)
+    _served_baseline(client)
+    assert AdapterConfig(
+        provider_id="openai", model="m",
+        secret_ref=_secret()).max_retries == 0
+    with pytest.raises(AdapterConfigError):
+        AdapterConfig(
+            provider_id="openai", model="m", secret_ref=_secret(),
+            max_retries=2)
+    calls = []
+
+    # FAKE-OF: agent_si.providers.adapters.base (TransportHttpError signal)
+    def http_5xx(request):
+        calls.append(dict(request))
+        raise TransportHttpError(503, "service unavailable")
+
+    adapter = OpenAICompatAdapter(_config(), FakeTransport(http_5xx))
+    assert adapter.config.max_retries == 0
+    with pytest.raises(ProviderHttpError):
+        adapter.invoke([{"role": "user", "content": "hi"}])
+    assert len(calls) == 1
+
+
+# [UI_DELTA-30]-part: full usage probe reports VERIFIED, served.
+def test_k04rest_adapt_30(tmp_path):
+    client = _served_client(tmp_path)
+    _served_baseline(client)
+    full = {"input_tokens": 10, "output_tokens": 5,
+            "cached_tokens": 2, "reasoning_tokens": 0}
+    capability = probe_mod.probe_adapter(
+        "openai", "test-instance",
+        _usage_transport(full),
+        stream_transport=_usage_transport(full),
+        evidence_ref="ev-30")
+    assert capability["state"] == "VERIFIED"
+    assert capability["input_tokens"] == 10
+    assert capability["output_tokens"] == 5
+    assert capability["cached_tokens"] == 2
+    assert capability["reasoning_tokens"] == 0
+    assert capability["raw_usage"] == full
+    assert capability["stream_usage"] == full
+    assert capability["evidence_ref"] == "ev-30"
+    assert capability["verified_at"]
+    assert set(capability) == set(probe_mod.USAGE_CAPABILITY_FIELDS)
+
+
+# [UI_DELTA-31]-part: partial usage reports PARTIAL + UNAVAILABLE, served.
+def test_k04rest_adapt_31(tmp_path):
+    client = _served_client(tmp_path)
+    _served_baseline(client)
+    capability = probe_mod.probe_usage(
+        "openai", "test-instance", _usage_transport({"input_tokens": 12}))
+    assert capability["state"] == "PARTIAL"
+    assert capability["input_tokens"] == 12
+    assert capability["output_tokens"] == UNAVAILABLE
+    assert capability["cached_tokens"] == UNAVAILABLE
+    assert capability["reasoning_tokens"] == UNAVAILABLE
+    stream = probe_mod.probe_stream_usage(
+        "openai", "test-instance", _usage_transport({"output_tokens": 5}))
+    assert stream["stream_state"] == "PARTIAL"
+    assert stream["stream_usage"]["output_tokens"] == 5
+    assert stream["stream_usage"]["input_tokens"] == UNAVAILABLE
+
+
+# [UI_DELTA-228]-part: streaming usage probed separately, served.
+def test_k04rest_adapt_228(tmp_path):
+    client = _served_client(tmp_path)
+    _served_baseline(client)
+    full = {"input_tokens": 10, "output_tokens": 5,
+            "cached_tokens": 0, "reasoning_tokens": 0}
+    usage_calls = []
+
+    # FAKE-OF: agent_si.providers.adapters.usage_probe (usage transport port)
+    def usage_reply(request):
+        usage_calls.append(dict(request))
+        return {"usage": dict(full), "raw": dict(full), "raw_safe": True}
+
+    stream_calls = []
+
+    # FAKE-OF: agent_si.providers.adapters.usage_probe (stream transport port)
+    def stream_reply(request):
+        stream_calls.append(dict(request))
+        return {"usage": dict(full), "raw": dict(full), "raw_safe": True}
+
+    combined = probe_mod.probe_adapter(
+        "openai", "test-instance", usage_reply,
+        stream_transport=stream_reply)
+    assert combined["state"] == "VERIFIED"
+    assert combined["stream_usage"] == full
+    assert len(usage_calls) == 1 and usage_calls[0]["stream"] is False
+    assert len(stream_calls) == 1 and stream_calls[0]["stream"] is True
+    unstreamed = probe_mod.probe_adapter(
+        "openai", "test-instance", usage_reply)
+    assert unstreamed["stream_usage"] == UNAVAILABLE
+
+

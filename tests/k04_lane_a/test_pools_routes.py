@@ -1107,3 +1107,26 @@ def test_f3_http_corrupt_stored_strategy_blocks_naming_it(tmp_path):
     assert payload["status"] == "BLOCKED"
     assert "unknown pool strategy 'ROUND_ROBIN'" in payload["reason"]
     assert len(ctx.store._load_table("decisions")) == 1
+# ------------------------------------------------- ARCH-681 cost via CostCalculator
+
+def test_a2use2_served_decide_cheapest_fitting_wins_no_leg_cost(tmp_path):
+    # ARCH-681: the served cost path runs via CostCalculator only — no
+    # direct cost arithmetic in pools/adapters legs. Served post_decide
+    # over two fitting candidates picks the cheaper one with a priced
+    # basis in the reason; legs.py carries no cost surface at all.
+    ctx = make_ctx(tmp_path)
+    status, payload = PR.post_decide(ctx, {}, {
+        "project_id": "p1", "task_id": "t1", "run_id": "r1", "role": "worker",
+        "task_class": "coding",
+        "candidates": [{"provider": "pa", "model": "pa/a-1"},
+                       {"provider": "pb", "model": "pb/b-1"}]})
+    assert status == 200, payload
+    assert payload["status"] == "ROUTED", payload
+    assert payload["selected_model"] == "pb/b-1", payload
+    assert "known prices" in payload["reason"], payload
+    leg_src = os.path.join(
+        _SRC, "agent_si", "providers", "adapters", "legs.py")
+    with open(leg_src, "r", encoding="utf-8") as fh:
+        text = fh.read()
+    assert "cost" not in text.lower(), \
+        "legs.py must not do cost arithmetic (cost via CostCalculator only)"

@@ -19,6 +19,7 @@ for _p in (_WS, _SRC):
         sys.path.insert(0, _p)
 
 import fastapi.testclient  # noqa: E402
+import pytest  # noqa: E402
 
 from agent_si.backend.app import create_app  # noqa: E402
 from agent_si.backend.orchestration import steplimits as _steplimits  # noqa: E402
@@ -216,3 +217,86 @@ def test_unknown_price_leaves_spent_and_unavailable_cost(tmp_path, monkeypatch):
             _store.bind_store_dir(prev_dir)
         except Exception:
             pass
+
+
+# Row proofs BP04-67 / 168 / 219 (adapters-owned fail-closed usage
+# ports; injected transports only, no network). Each probes through the
+# frozen facade entry it names; unbind/rebind must fail closed, never
+# answer from a stale port.
+from agent_si.providers.adapters import facades as _facades
+
+
+# FAKE-OF: agent_si.providers.adapters usage-probe port (injected bound
+# chat transport playing back a usage-carrying reply, no network)
+class _ProbeChat:
+    def __init__(self):
+        self.requests = []
+
+    def __call__(self, request):
+        self.requests.append(dict(request))
+        return {"usage": {"input_tokens": 10, "output_tokens": 5,
+                          "cached_tokens": 2, "reasoning_tokens": 1},
+                "raw": {"input_tokens": 10}, "raw_safe": True}
+
+
+def _bind_default_openai(transport):
+    _facades.clear_adapter_transports()
+    _facades.clear_provider_bindings()
+    _facades.bind_provider(
+        "openai", {"secret_id": "s-bp04", "provider_id": "openai"},
+        transport, "https://api.example/v1")
+
+
+def _clear_facades():
+    _facades.clear_adapter_transports()
+    _facades.clear_provider_bindings()
+
+
+def test_bp04_67_unbind_drops_default_probe_port():
+    """Row BP04-67 via facades.probe_usage: unbound provider fails closed."""
+    chat = _ProbeChat()
+    _bind_default_openai(chat)
+    try:
+        cap = _facades.probe_usage("openai/default", "openai", False)
+        assert cap["state"] == "VERIFIED", cap
+        assert cap["input_tokens"] == 10, cap
+        _facades.clear_provider_bindings()
+        with pytest.raises(ValueError):
+            _facades.probe_usage("openai/default", "openai", False)
+    finally:
+        _clear_facades()
+
+
+def test_bp04_168_unbind_drops_bare_probe_port():
+    """Row 168 via facades.probe_usage: bare id fails closed after unbind."""
+    chat = _ProbeChat()
+    _bind_default_openai(chat)
+    try:
+        bare = _facades.probe_usage("openai", "openai", False)
+        assert bare["state"] == "VERIFIED", bare
+        assert bare["input_tokens"] == 10, bare
+        _facades.clear_provider_bindings()
+        with pytest.raises(ValueError):
+            _facades.probe_usage("openai", "openai", False)
+    finally:
+        _clear_facades()
+
+
+def test_bp04_219_rebind_keeps_manual_probe_port():
+    """Row 219 via facades.probe_usage: rebind never drops a manual port."""
+    chat = _ProbeChat()
+    _bind_default_openai(chat)
+    _facades.clear_adapter_transports()
+    manual = _ProbeChat()
+    _facades.register_adapter_transports("openai", manual)
+    _facades.bind_provider(
+        "openai", {"secret_id": "s-bp04", "provider_id": "openai"},
+        None, "https://api.example/v1")
+    try:
+        cap = _facades.probe_usage("openai", "openai", False)
+        assert cap["state"] == "VERIFIED", cap
+        assert cap["input_tokens"] == 10, cap
+        assert len(manual.requests) == 1, manual.requests
+        assert chat.requests == [], chat.requests
+    finally:
+        _clear_facades()

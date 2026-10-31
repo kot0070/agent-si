@@ -67,8 +67,14 @@ def register_adapter_transports(adapter_id, usage_transport,
 
 
 def clear_adapter_transports() -> None:
-    """Forget every bound adapter transport (tests and teardown)."""
+    """Forget every bound adapter transport (tests and teardown).
+
+    Tracked default probe-port keys go too: the installed ports are
+    gone, so a later rebind must not mistake a manual registration
+    under one of those keys for a stale default.
+    """
     _TRANSPORTS.clear()
+    _DEFAULT_PROBE_PORT_KEYS.clear()
 
 
 def _default_probe_transport(provider_id, instance_id, chat_transport,
@@ -224,8 +230,16 @@ def bind_provider(provider_id, secret_ref, transport, base_url,
 
 
 def clear_provider_bindings() -> None:
-    """Forget every stored provider binding (tests and teardown)."""
+    """Forget every stored provider binding (tests and teardown).
+
+    Installed default probe ports go too: the provider is unbound,
+    so later probes fail closed instead of answering from a stale
+    transport.
+    """
     _BINDINGS.clear()
+    for _key in list(_DEFAULT_PROBE_PORT_KEYS):
+        _TRANSPORTS.pop(_key, None)
+    _DEFAULT_PROBE_PORT_KEYS.clear()
 
 
 def _bound_view(provider_id: str) -> dict:

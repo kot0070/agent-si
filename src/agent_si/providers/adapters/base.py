@@ -158,9 +158,18 @@ class AdapterConfig:
             raise AdapterConfigError(
                 "secret_ref must not carry raw secret material",
                 "%s/%s:config" % (self.provider_id, self.instance_id))
-        if not isinstance(self.max_retries, int) or self.max_retries < 0:
+        unknown = [key for key in self.secret_ref
+                   if key not in SECRET_REF_FIELDS]
+        if unknown:
             raise AdapterConfigError(
-                "max_retries must be an int >= 0",
+                "secret_ref carries unknown fields: %s" % ",".join(
+                    sorted(unknown)),
+                "%s/%s:config" % (self.provider_id, self.instance_id))
+        if not isinstance(self.max_retries, int) or self.max_retries != 0:
+            raise AdapterConfigError(
+                "provider clients use max_retries 0: one invocation is one "
+                "authoritative attempt; retries live in the runner; got %r"
+                % (self.max_retries,),
                 "%s/%s:config" % (self.provider_id, self.instance_id))
 
     def ref_base(self):
@@ -272,6 +281,10 @@ class ProviderAdapter:
                 "%s:http-%s" % (self.config.ref_base(), exc.status),
                 exc.status)
         except TransportTimeoutError as exc:
+            raise ProviderTimeoutError(
+                "provider request timed out: %s" % exc,
+                self.config.ref_base() + ":timeout")
+        except OSError as exc:
             raise ProviderTimeoutError(
                 "provider request timed out: %s" % exc,
                 self.config.ref_base() + ":timeout")

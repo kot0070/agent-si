@@ -4,9 +4,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, Dict, Tuple
 
+from agent_si.budget import gate as _budget_gate
+
 #: Stable machine codes for the budget error bodies (M-WIRE L0B-08/11).
 BUDGET_PROJECT_ID_REQUIRED = "BUDGET_PROJECT_ID_REQUIRED"
 BUDGET_NOT_CONFIGURED = "BUDGET_NOT_CONFIGURED"
+BUDGET_SESSION_TOKEN_REQUIRED = "BUDGET_SESSION_TOKEN_REQUIRED"
 COMPENSATION_RESERVATION_ID_REQUIRED = "COMPENSATION_RESERVATION_ID_REQUIRED"
 
 
@@ -75,8 +78,68 @@ def get_budget(ctx, query, body) -> Tuple[int, Dict[str, Any]]:
                  "budget": _state_payload(budget_state)}
 
 
+def post_compensations(ctx, query, body) -> tuple[int, dict[str, Any]]:
+    """Return (status, payload) for POST /api/v1/budget/compensations.
+
+    ARCH-441 served entry: failed-gate compensation to terminal
+    RELEASED with a persisted compensation_ref. Body carries
+    reservation_id, reason and compensation_ref. Repeat of the same
+    ref is idempotent; empty-ref, unknown-id and terminal
+    (settled/expired, or a different ref on a released row) answers
+    carry named error codes only. Drives the real BudgetGate on
+    ctx.budget_state through the frozen keyword shape
+    compensate(reservation_id, *, compensation_ref, reason).
+    """
+    _ = query
+    token = getattr(ctx, "session_token", None)
+    if isinstance(token, list):
+        token = token[0] if token else None
+    if not (isinstance(token, str) and token.strip()):
+        return 401, {"code": BUDGET_SESSION_TOKEN_REQUIRED,
+                     "message": "compensate refused: session token missing"}
+    params = body if isinstance(body, Mapping) else {}
+    reservation_id = params.get("reservation_id")
+    if not isinstance(reservation_id, str) or not reservation_id:
+        return 400, {"code": COMPENSATION_RESERVATION_ID_REQUIRED,
+                     "message": "reservation_id required"}
+    compensation_ref = params.get("compensation_ref")
+    reason = params.get("reason") or ""
+    gate = getattr(ctx, "budget_state", None)
+    if gate is None:
+        return 404, {"code": BUDGET_NOT_CONFIGURED,
+                     "message": "no compensating budget gate on file"}
+    compensate = getattr(gate, "compensate", None)
+    if not callable(compensate):
+        return 404, {"code": BUDGET_NOT_CONFIGURED,
+                     "message": "no compensating budget gate on file"}
+    if compensation_ref is None or str(compensation_ref) == "":
+        return 400, {"code": _budget_gate.COMPENSATION_REF_REQUIRED,
+                     "message": "compensate needs a non-empty "
+                                "compensation_ref"}
+    try:
+        current = gate.get_reservation(reservation_id)
+    except (KeyError, LookupError):
+        return 404, {"code": _budget_gate.BUDGET_RESERVATION_NOT_FOUND,
+                     "message": "no reservation on file for "
+                                f"{reservation_id!r}"}
+    if current.status in ("SETTLED", "EXPIRED") or (
+            current.status == "RELEASED"
+            and current.compensation_ref != str(compensation_ref)):
+        return 409, {"code": _budget_gate.COMPENSATION_TERMINAL_REFUSED,
+                     "message": f"reservation {reservation_id!r} is terminal "
+                                f"({current.status}); compensation refused"}
+    record = compensate(
+        reservation_id, compensation_ref=compensation_ref, reason=reason)
+    return 200, {"reservation_id": record.reservation_id,
+                 "status": record.status,
+                 "compensation_ref": record.compensation_ref,
+                 "project_id": record.project_id}
+
+
 BUDGET_ROUTES = (
     ("get", "/api/v1/budget", "get_budget", get_budget),
+    ("post", "/api/v1/budget/compensations", "post_compensations",
+     post_compensations),
 )
 
 
@@ -104,8 +167,8 @@ def post_compensate(ctx, query, body) -> Tuple[int, Dict[str, Any]]:
                      "message": "no compensating budget gate on file"}
     try:
         record = compensate(
-            reservation_id, body.get("reason", ""),
-            body.get("compensation_ref", ""))
+            reservation_id, compensation_ref=body.get("compensation_ref", ""),
+            reason=body.get("reason", ""))
     except CompensationUnknownReservationError as exc:
         return 404, {"code": exc.code, "message": str(exc)}
     except CompensationRefConflictError as exc:
