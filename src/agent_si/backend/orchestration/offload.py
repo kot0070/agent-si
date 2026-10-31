@@ -88,11 +88,11 @@ _SEQ = 0
 def _reset_state() -> None:
     """Clear module state (test helper; never a product path)."""
     global _SEQ
-    _SWITCHES.clear()
-    _TASK_PROJECT.clear()
+    _SWITCHES.clear(); _TASK_PROJECT.clear()
     _HANDOVERS.clear()
     _DECISIONS.clear()
-    _ACCEPT_ORDER.clear()
+    _ACCEPT_ORDER.clear(); _ROUTINE_SWITCH.clear()
+    _ROUTINE_HANDOVERS.clear()
     _SEQ = 0
 
 
@@ -264,3 +264,102 @@ def apply_offload_config_change(change: dict) -> ApplyOutcome:
     )
     _DECISIONS.append(row)
     return ApplyOutcome(applied=True, reason="applied", decision_ref=row.decision_id)
+
+
+#: Served routine-offload codes (R-333, K02OPEN14).
+OFFLOAD_DISABLED = "OFFLOAD_DISABLED"
+ROUTINE_OFFLOAD_BY = "manager"
+
+
+class OffloadDisabled(Exception):
+    """Refused routine hand-over; the served route maps this to a 409."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+@dataclass
+class RoutineHandover:
+    """One recorded routine hand-over for a project (R-333)."""
+
+    project_id: str
+    routine: str
+    at: str
+    by: str = ROUTINE_OFFLOAD_BY
+
+
+_ROUTINE_SWITCH: dict[str, bool] = {}
+_ROUTINE_HANDOVERS: list[RoutineHandover] = []
+
+
+def routine_offload_enabled(project_id: str) -> bool:
+    """Read the per-project routine switch; unknown projects stay off."""
+    if not isinstance(project_id, str) or not project_id:
+        return False
+    return _ROUTINE_SWITCH.get(project_id, False)
+
+
+def switch(project_id: object, enabled: object) -> dict[str, object]:
+    """Flip the per-project routine-offload switch (R-333).
+
+    Returns {"project_id", "routine_offload_enabled"}. Raises
+    ValueError on a missing project_id or a non-boolean switch.
+    """
+    if not isinstance(project_id, str) or not project_id:
+        raise ValueError("project_id must be a non-empty string")
+    if not isinstance(enabled, bool):
+        raise ValueError("enabled must be an explicit true or false")
+    _ROUTINE_SWITCH[project_id] = enabled
+    return {"project_id": project_id, "routine_offload_enabled": enabled}
+
+
+def set_routine_offload_enabled(
+    project_id: object, enabled: object
+) -> dict[str, object]:
+    """Alias of switch kept for the K02OPEN8 served proof (R-333).
+
+    Delegates verbatim to switch; the per-project routine-offload
+    switch stays the single canonical writer.
+    """
+    return switch(project_id, enabled)
+
+
+def record_routine_offload(
+    project_id: object, routine: object
+) -> dict[str, str]:
+    """Hand one routine over behind the switch and record it (R-333).
+
+    Returns {"project_id", "routine", "at", "by": "manager"}. Raises
+    OffloadDisabled while the project switch is off, ValueError on a
+    missing project_id or an empty routine.
+    """
+    if not isinstance(project_id, str) or not project_id:
+        raise ValueError("project_id must be a non-empty string")
+    if not isinstance(routine, str) or not routine.strip():
+        raise ValueError("routine must be a non-empty string")
+    if not routine_offload_enabled(project_id):
+        raise OffloadDisabled(
+            "routine offload is off for project %r" % (project_id,)
+        )
+    record = RoutineHandover(
+        project_id=project_id, routine=routine, at=_utc_now()
+    )
+    _ROUTINE_HANDOVERS.append(record)
+    return {
+        "project_id": record.project_id,
+        "routine": record.routine,
+        "at": record.at,
+        "by": record.by,
+    }
+
+
+def handovers_for(project_id: object) -> list[dict[str, str]]:
+    """Recorded routine hand-overs for one project, oldest first."""
+    if not isinstance(project_id, str) or not project_id:
+        raise ValueError("project_id must be a non-empty string")
+    return [
+        {"routine": item.routine, "at": item.at, "by": item.by}
+        for item in _ROUTINE_HANDOVERS
+        if item.project_id == project_id
+    ]

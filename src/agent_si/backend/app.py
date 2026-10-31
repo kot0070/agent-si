@@ -2543,5 +2543,159 @@ def create_app(settings: Any = None,
 
         return {"testid": "k10open4-start",
                 "migrated": _k10o4_mig2(app.state.data_dir)}
+    # K02OPEN14 served hierarchy/offload/step-budget (R-302/R-333/R-349).
+    # Additions-only: Director split with Manager integration, routine
+    # offload behind a per-project switch with recorded hand-overs, and
+    # a per-project agent/chat step budget. Writes keep the frozen
+    # USER_WRITE guard (401 missing x-actor, 403 bad token); handovers
+    # stay an open read.
+    from agent_si.backend.orchestration import hierarchy as _k14_hierarchy
+    from agent_si.backend.orchestration import offload as _k14_offload
+    from agent_si.backend.orchestration import steplimits as _k14_steplimits
+
+    def _k14_write_guard(request: Request) -> None:
+        """Refuse served K02OPEN14 writes without actor + live token."""
+        actor = (request.headers.get("x-actor") or "").strip()
+        if not actor:
+            raise HTTPException(
+                status_code=401, detail="missing x-actor header")
+        token = request.headers.get("x-ui-session-token")
+        check: AuthHook = app.state.auth_hook
+        try:
+            allowed = bool(check(token, actor, USER_WRITE))
+        except Exception:
+            allowed = False
+        if not allowed:
+            raise HTTPException(status_code=403, detail="forbidden")
+
+    async def _k14_body(request: Request) -> dict:
+        """Read one JSON object body; refuse missing/bad payloads."""
+        try:
+            data = await request.json()
+        except Exception:
+            raise HTTPException(
+                status_code=400,
+                detail="write needs a JSON body") from None
+        if not isinstance(data, dict):
+            raise HTTPException(
+                status_code=400,
+                detail="write needs a JSON object body") from None
+        return data
+
+    @app.post("/v1/split")
+    async def k14_split(request: Request) -> dict[str, Any]:
+        """Director split: one project into parts for tool agents."""
+        _k14_write_guard(request)
+        data = await _k14_body(request)
+        try:
+            return _k14_hierarchy.split(data)
+        except _k14_hierarchy.SplitRefused as err:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": _k14_hierarchy.SPLIT_BAD_REQUEST,
+                        "message": str(err)}) from None
+
+    @app.post("/v1/integrate")
+    async def k14_integrate(request: Request) -> dict[str, Any]:
+        """Manager integration: split parts into one result."""
+        _k14_write_guard(request)
+        data = await _k14_body(request)
+        try:
+            return _k14_hierarchy.integrate(
+                data.get("parts"), data.get("project_id"))
+        except _k14_hierarchy.IntegrateRefused as err:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": _k14_hierarchy.INTEGRATE_BAD_REQUEST,
+                        "message": str(err)}) from None
+
+    @app.put("/v1/offload-switch")
+    async def k14_offload_switch(request: Request) -> dict[str, Any]:
+        """Per-project routine-offload switch."""
+        _k14_write_guard(request)
+        data = await _k14_body(request)
+        try:
+            return _k14_offload.switch(
+                data.get("project_id"), data.get("enabled"))
+        except (ValueError, TypeError) as err:
+            raise HTTPException(
+                status_code=400, detail=str(err)) from None
+
+    @app.post("/v1/offload")
+    async def k14_offload(request: Request) -> dict[str, Any]:
+        """Hand one routine over; refused while the switch is off."""
+        _k14_write_guard(request)
+        data = await _k14_body(request)
+        try:
+            return _k14_offload.record_routine_offload(
+                data.get("project_id"), data.get("routine"))
+        except _k14_offload.OffloadDisabled as err:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": _k14_offload.OFFLOAD_DISABLED,
+                        "message": str(err)}) from None
+        except (ValueError, TypeError) as err:
+            raise HTTPException(
+                status_code=400, detail=str(err)) from None
+
+    @app.get("/v1/handovers")
+    def k14_handovers(project_id: str) -> dict[str, Any]:
+        """Recorded routine hand-overs for one project (open read)."""
+        return {"project_id": project_id,
+                "handovers": _k14_offload.handovers_for(project_id)}
+
+    @app.put("/v1/step-limits")
+    @app.post("/v1/step-limits")
+    async def k14_step_limits(request: Request) -> dict[str, Any]:
+        """Per-project max agent steps, separate for chat."""
+        _k14_write_guard(request)
+        data = await _k14_body(request)
+        try:
+            return _k14_steplimits.set_step_budget(
+                data.get("project_id"), data.get("max_agent_steps"),
+                data.get("max_chat_steps"))
+        except (ValueError, TypeError) as err:
+            raise HTTPException(
+                status_code=400, detail=str(err)) from None
+
+    @app.post("/v1/agent-steps")
+    async def k14_agent_steps(request: Request) -> dict[str, Any]:
+        """Take one agent step; 429 once the project budget is spent."""
+        _k14_write_guard(request)
+        data = await _k14_body(request)
+        try:
+            return _k14_steplimits.take_step(
+                data.get("project_id"), _k14_steplimits.AGENT_KIND)
+        except _k14_steplimits.StepLimitExceeded as err:
+            raise HTTPException(
+                status_code=429,
+                detail={"code": _k14_steplimits.STEP_LIMIT_EXCEEDED,
+                        "message": str(err)}) from None
+        except (KeyError, LookupError) as err:
+            raise HTTPException(
+                status_code=404, detail=str(err)) from None
+        except (ValueError, TypeError) as err:
+            raise HTTPException(
+                status_code=400, detail=str(err)) from None
+
+    @app.post("/v1/chat-steps")
+    async def k14_chat_steps(request: Request) -> dict[str, Any]:
+        """Take one chat step; 429 once the project budget is spent."""
+        _k14_write_guard(request)
+        data = await _k14_body(request)
+        try:
+            return _k14_steplimits.take_step(
+                data.get("project_id"), _k14_steplimits.CHAT_KIND)
+        except _k14_steplimits.StepLimitExceeded as err:
+            raise HTTPException(
+                status_code=429,
+                detail={"code": _k14_steplimits.STEP_LIMIT_EXCEEDED,
+                        "message": str(err)}) from None
+        except (KeyError, LookupError) as err:
+            raise HTTPException(
+                status_code=404, detail=str(err)) from None
+        except (ValueError, TypeError) as err:
+            raise HTTPException(
+                status_code=400, detail=str(err)) from None
 
     return app

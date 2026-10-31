@@ -74,8 +74,8 @@ _LAST_PROJECT: str | None = None
 def _reset_state() -> None:
     """Clear module state (test helper; never a product path)."""
     global _SEQ, _LAST_PROJECT
-    _PROJECT_LIMITS.clear()
-    _DECISIONS.clear()
+    _PROJECT_LIMITS.clear(); _DECISIONS.clear()
+    _AGENT_STEPS.clear(); _CHAT_STEPS.clear()
     _SEQ = 0
     _LAST_PROJECT = None
 
@@ -201,3 +201,96 @@ def apply_steplimit_config_change(change: dict) -> ApplyOutcome:
     )
     _DECISIONS.append(row)
     return ApplyOutcome(applied=True, reason="applied", decision_ref=row.decision_id)
+
+
+#: Served step-budget codes (R-349, K02OPEN14).
+AGENT_KIND = "agent"
+STEP_LIMIT_EXCEEDED = "STEP_LIMIT_EXCEEDED"
+STEP_BUDGET_NOT_SET = "STEP_BUDGET_NOT_SET"
+
+
+class StepLimitExceeded(Exception):
+    """Spent step budget; the served route maps this to a 429."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+_AGENT_STEPS: dict[str, int] = {}
+_CHAT_STEPS: dict[str, int] = {}
+
+
+def _check_budget_value(name: str, value: object) -> int:
+    """Validate one step-budget maximum inside the frozen cap range."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("%s must be an integer step count" % (name,))
+    if value < STEP_LIMIT_MIN or value > STEP_LIMIT_CAP:
+        raise ValueError(
+            "%s %d outside cap range %d..%d"
+            % (name, value, STEP_LIMIT_MIN, STEP_LIMIT_CAP)
+        )
+    return value
+
+
+def set_step_budget(
+    project_id: object, max_agent_steps: object, max_chat_steps: object
+) -> dict[str, object]:
+    """Set one project's max agent steps, separate for chat (R-349).
+
+    A fresh budget resets both spent counters. The limits share the
+    frozen _PROJECT_LIMITS table, so task/chat readers agree with the
+    served surface. Returns {"project_id", "max_agent_steps",
+    "max_chat_steps"}. Raises ValueError on bad input.
+    """
+    if not isinstance(project_id, str) or not project_id:
+        raise ValueError("project_id must be a non-empty string")
+    agent = _check_budget_value("max_agent_steps", max_agent_steps)
+    chat = _check_budget_value("max_chat_steps", max_chat_steps)
+    global _LAST_PROJECT
+    _PROJECT_LIMITS[project_id] = StepLimits(
+        task_max_steps=agent, chat_max_steps=chat
+    )
+    _LAST_PROJECT = project_id
+    _AGENT_STEPS[project_id] = 0
+    _CHAT_STEPS[project_id] = 0
+    return {
+        "project_id": project_id,
+        "max_agent_steps": agent,
+        "max_chat_steps": chat,
+    }
+
+
+def take_step(project_id: object, kind: object) -> dict[str, object]:
+    """Spend one step of one kind against the project budget (R-349).
+
+    kind is "agent" or "chat"; each kind has its own counter and its
+    own maximum. Returns {"project_id", "kind", "steps"}. Raises
+    StepLimitExceeded once the kind budget is spent, KeyError when the
+    project has no budget, UnknownLimitKindError on an unknown kind.
+    """
+    if not isinstance(project_id, str) or not project_id:
+        raise ValueError("project_id must be a non-empty string")
+    if kind not in (AGENT_KIND, CHAT_KIND):
+        raise UnknownLimitKindError(
+            "UNKNOWN_LIMIT_KIND: %r is not agent/chat" % (kind,)
+        )
+    limits = _PROJECT_LIMITS.get(project_id)
+    if limits is None:
+        raise KeyError(
+            "%s: no step budget set for project %r"
+            % (STEP_BUDGET_NOT_SET, project_id)
+        )
+    store = _AGENT_STEPS if kind == AGENT_KIND else _CHAT_STEPS
+    if kind == AGENT_KIND:
+        maximum = limits.task_max_steps
+    else:
+        maximum = limits.chat_max_steps
+    spent = store.get(project_id, 0) + 1
+    if spent > maximum:
+        raise StepLimitExceeded(
+            "project %r spent its %s budget (%d steps)"
+            % (project_id, kind, maximum)
+        )
+    store[project_id] = spent
+    return {"project_id": project_id, "kind": kind, "steps": spent}
