@@ -384,3 +384,27 @@ def pick_pool_strategy(role: str, project_id: str) -> str:
     if strategy in T.POOL_STRATEGIES:
         return strategy
     return strategy
+
+
+
+# --------------------------------------------------------------------------
+# Guided levels (plain-language pool strategy per role)
+
+def guided_strategy_levels(project_id: str, roles=None) -> List[Dict[str, str]]:
+    """Plain-language pool strategy for every level (role).
+
+    One row per role in T.ROLES (or the given roles subset): the frozen
+    strategy from the pick_pool_strategy facade (stored binding, AUTO
+    when none is stored) plus its plain-language STRATEGY_LABELS text.
+    The guided picker shows these labels; raw pool ids never surface.
+    """
+    rows = []
+    for role in (tuple(roles) if roles is not None else T.ROLES):
+        strategy = pick_pool_strategy(role, project_id)
+        rows.append({
+            "role": role,
+            "project_id": project_id,
+            "strategy": strategy,
+            "strategy_label": T.STRATEGY_LABELS.get(strategy, str(strategy)),
+        })
+    return rows
