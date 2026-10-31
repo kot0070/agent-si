@@ -2754,6 +2754,353 @@ def create_app(settings: Any = None,
             raise HTTPException(
                 status_code=400, detail=str(err)) from None
 
+    # K02REST-B split/gates seam (rows 93/94/100/118/96/M-P1-10).
+    # Additions-only, on the production call path off create_app: opt-in
+    # split into N disjoint parts (split.split_package plus
+    # split.validate_disjoint), a per-part gate plus fresh audit
+    # (gates.GateAuditLog), bounded per-Manager context, open-package plus
+    # gate cross-check at gate evaluation (delta.cross_check plus
+    # gates.evaluate_phase_gate), frozen manifest hash in part validation
+    # (manifest.build_manifest plus manifest.validate_part_ref), and
+    # Manager fan-out bounded by scheduler caps with the excess queued
+    # (overlap.validate_multi_manager_settings plus split.fanout plus
+    # split.capped_queue). Writes keep the frozen USER_WRITE guard
+    # (401 missing x-actor, 403 bad token); offload switch plus step
+    # budgets stay on the K02OPEN14 mounts above, unchanged.
+    from agent_si.backend.orchestration import delta as _k02restb_delta
+    from agent_si.backend.orchestration import gates as _k02restb_gates
+    from agent_si.backend.orchestration import manifest as _k02restb_manifest
+    from agent_si.backend.orchestration import overlap as _k02restb_overlap
+    from agent_si.backend.orchestration import split as _k02restb_split
+
+    _k02restb_log = _k02restb_gates.GateAuditLog()
+
+    def _k02restb_write_guard(request: Request) -> None:
+        """Refuse served K02REST-B writes without actor plus live token."""
+        actor = (request.headers.get("x-actor") or "").strip()
+        if not actor:
+            raise HTTPException(
+                status_code=401, detail="missing x-actor header")
+        token = request.headers.get("x-ui-session-token")
+        check: AuthHook = app.state.auth_hook
+        try:
+            allowed = bool(check(token, actor, USER_WRITE))
+        except Exception:
+            allowed = False
+        if not allowed:
+            raise HTTPException(status_code=403, detail="forbidden")
+
+    async def _k02restb_body(request: Request) -> dict:
+        """Read one JSON object body; refuse missing or bad payloads."""
+        try:
+            data = await request.json()
+        except Exception:
+            raise HTTPException(
+                status_code=400,
+                detail="write needs a JSON body") from None
+        if not isinstance(data, dict):
+            raise HTTPException(
+                status_code=400,
+                detail="write needs a JSON object body") from None
+        return data
+
+    def _k02restb_part_payload(part: Any, index: int) -> dict[str, Any]:
+        """Serve one split part with its gate plus audit refs."""
+        return {
+            "part_index": index,
+            "package_id": part.package_id,
+            "contract_hash": part.contract_hash,
+            "gate_verdict_ref": part.gate_verdict_ref,
+            "audit_verdict_ref": part.audit_verdict_ref,
+        }
+
+    def _k02restb_split_parts(data: dict) -> list[Any]:
+        """Run the opt-in split; shape faults refuse with 400/409."""
+        if data.get("opt_in") is not True:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "SPLIT_OPT_IN_REQUIRED",
+                        "message": "split is opt-in: opt_in must be true"})
+        try:
+            parts = _k02restb_split.split_package(
+                data.get("package_id"), data.get("goal"),
+                data.get("context_refs"), data.get("max_parts"))
+        except (ValueError, TypeError) as err:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "SPLIT_BAD_REQUEST",
+                        "message": str(err)}) from None
+        try:
+            _k02restb_split.validate_disjoint(parts)
+        except _k02restb_split.SCOPE_OVERLAP as err:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "SCOPE_OVERLAP",
+                        "message": str(err)}) from None
+        return parts
+
+    @app.post("/v1/split-gates/parts")
+    async def k02restb_parts(request: Request) -> dict[str, Any]:
+        """Opt-in split into N disjoint parts (row 93)."""
+        _k02restb_write_guard(request)
+        data = await _k02restb_body(request)
+        parts = _k02restb_split_parts(data)
+        return {
+            "package_id": data.get("package_id"),
+            "contract_hash": parts[0].contract_hash,
+            "count": len(parts),
+            "parts": [_k02restb_part_payload(part, index)
+                      for index, part in enumerate(parts)],
+        }
+
+    @app.post("/v1/split-gates/part-gate")
+    async def k02restb_part_gate(request: Request) -> dict[str, Any]:
+        """Serve one part's own gate verdict (row 94)."""
+        _k02restb_write_guard(request)
+        data = await _k02restb_body(request)
+        part_id = data.get("part_id")
+        if not isinstance(part_id, str) or not part_id.strip():
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "GATE_REFUSED",
+                        "message": "part_id must be a non-empty string"})
+        try:
+            record = _k02restb_log.serve_gate(part_id, data.get("verdict"))
+        except _k02restb_gates.GateRefused as err:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "GATE_REFUSED",
+                        "message": str(err)}) from None
+        return {"gate_id": record.gate_id, "part_id": record.part_id,
+                "verdict": record.verdict, "created_at": record.created_at}
+
+    @app.post("/v1/split-gates/part-audit")
+    async def k02restb_part_audit(request: Request) -> dict[str, Any]:
+        """Serve one part's fresh audit result (row 94)."""
+        _k02restb_write_guard(request)
+        data = await _k02restb_body(request)
+        part_id = data.get("part_id")
+        if not isinstance(part_id, str) or not part_id.strip():
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "AUDIT_REFUSED",
+                        "message": "part_id must be a non-empty string"})
+        producers = data.get("producer_session_refs")
+        if not isinstance(producers, list):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "AUDIT_REFUSED",
+                        "message": "producer_session_refs must be a list"})
+        integrity = data.get("context_integrity")
+        if not isinstance(integrity, bool):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "AUDIT_REFUSED",
+                        "message": "context_integrity must be true or false"})
+        try:
+            record = _k02restb_log.serve_audit(
+                part_id, data.get("result"),
+                data.get("auditor_session_ref"), producers, integrity)
+        except _k02restb_gates.AuditRefused as err:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "AUDIT_REFUSED",
+                        "message": str(err)}) from None
+        return {"audit_id": record.audit_id, "part_id": record.part_id,
+                "result": record.result,
+                "auditor_session_ref": record.auditor_session_ref,
+                "scope_id": record.scope_id, "audit_seq": record.audit_seq,
+                "created_at": record.created_at}
+
+    @app.post("/v1/split-gates/split-bounded")
+    async def k02restb_split_bounded(request: Request) -> dict[str, Any]:
+        """Split with bounded context per Manager (row 100)."""
+        _k02restb_write_guard(request)
+        data = await _k02restb_body(request)
+        bound = data.get("max_context_per_part")
+        if isinstance(bound, bool) or not isinstance(bound, int) or bound < 1:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "CONTEXT_BOUND_REQUIRED",
+                        "message": "max_context_per_part must be an int >= 1"})
+        parts = _k02restb_split_parts(data)
+        total = len(list(data.get("context_refs") or ()))
+        count = len(parts)
+        # Chunk sizes differ by at most 1, so the largest part holds
+        # exactly ceil(total / count) refs; over that the bound refuses.
+        if -(-total // count) > bound:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "CONTEXT_BOUND_EXCEEDED",
+                        "message": "context per part exceeds bound %d" % bound})
+        base, extra = divmod(total, count)
+        sizes = [base + (1 if index < extra else 0) for index in range(count)]
+        return {
+            "package_id": data.get("package_id"),
+            "contract_hash": parts[0].contract_hash,
+            "count": count,
+            "max_context_per_part": bound,
+            "context_per_part": sizes,
+            "parts": [_k02restb_part_payload(part, index)
+                      for index, part in enumerate(parts)],
+        }
+
+    @app.post("/v1/split-gates/phase-gate")
+    async def k02restb_phase_gate(request: Request) -> dict[str, Any]:
+        """Cross-check open packages plus gates, then evaluate (row 118)."""
+        _k02restb_write_guard(request)
+        data = await _k02restb_body(request)
+        package_ids = data.get("package_ids")
+        if (not isinstance(package_ids, list) or not package_ids
+                or any(not isinstance(item, str) or not item.strip()
+                       for item in package_ids)):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "GATE_REFUSED",
+                        "message": "package_ids must be a non-empty list"})
+        open_packages = data.get("open_packages", [])
+        gate_reports = data.get("gate_reports", [])
+        if not isinstance(open_packages, list) or not isinstance(gate_reports, list):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "GATE_REFUSED",
+                        "message": "open_packages plus gate_reports must be lists"})
+        conflicts = _k02restb_delta.cross_check(open_packages, gate_reports)
+        if conflicts:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "GATE_CROSS_CHECK_CONFLICTS",
+                        "conflicts": conflicts,
+                        "message": "open packages lack gate plus audit PASS"})
+        try:
+            verdict = _k02restb_gates.evaluate_phase_gate(package_ids)
+        except _k02restb_gates.MISSING_INTEGRATION_TASK as err:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "MISSING_INTEGRATION_TASK",
+                        "message": str(err)}) from None
+        except _k02restb_gates.GATE_NOT_PASSED as err:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "GATE_NOT_PASSED",
+                        "message": str(err)}) from None
+        return {**verdict, "conflicts": []}
+
+    @app.post("/v1/split-gates/manifests")
+    async def k02restb_manifests(request: Request) -> dict[str, Any]:
+        """Build the frozen interface manifest with its hash (row 96)."""
+        _k02restb_write_guard(request)
+        data = await _k02restb_body(request)
+        manifest_id = data.get("manifest_id")
+        version = data.get("version")
+        manifest_parts = data.get("parts")
+        if not isinstance(manifest_id, str) or not manifest_id.strip():
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "MANIFEST_REFUSED",
+                        "message": "manifest_id must be a non-empty string"})
+        if isinstance(version, bool) or not isinstance(version, int):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "MANIFEST_REFUSED",
+                        "message": "version must be an integer"})
+        if not isinstance(manifest_parts, list):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "MANIFEST_REFUSED",
+                        "message": "parts must be a list"})
+        try:
+            manifest = _k02restb_manifest.build_manifest(
+                manifest_id, version, manifest_parts)
+        except (ValueError, TypeError) as err:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "MANIFEST_REFUSED",
+                        "message": str(err)}) from None
+        return manifest
+
+    @app.post("/v1/split-gates/validate-part")
+    async def k02restb_validate_part(request: Request) -> dict[str, Any]:
+        """Validate one part ref against the frozen manifest hash (row 96)."""
+        _k02restb_write_guard(request)
+        data = await _k02restb_body(request)
+        ref = data.get("ref")
+        manifest = data.get("manifest")
+        if not isinstance(ref, dict) or not isinstance(manifest, dict):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "MANIFEST_REFUSED",
+                        "message": "ref plus manifest must be objects"})
+        return {"valid": bool(_k02restb_manifest.validate_part_ref(ref, manifest))}
+
+    @app.post("/v1/split-gates/fanout")
+    async def k02restb_fanout(request: Request) -> dict[str, Any]:
+        """Bound Manager fan-out by scheduler caps; excess queues (M-P1-10)."""
+        _k02restb_write_guard(request)
+        data = await _k02restb_body(request)
+        raw_parts = data.get("parts")
+        settings = data.get("settings")
+        if not isinstance(raw_parts, list) or not raw_parts:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "FANOUT_REFUSED",
+                        "message": "parts must be a non-empty list"})
+        if not isinstance(settings, dict):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "FANOUT_REFUSED",
+                        "message": "settings must be an object"})
+        ok, reason = _k02restb_overlap.validate_multi_manager_settings(settings)
+        if not ok:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "FANOUT_SETTINGS_REFUSED",
+                        "message": str(reason)})
+        try:
+            parts = [_k02restb_split.PartRef(
+                package_id=str(item["package_id"]),
+                contract_hash=str(item["contract_hash"]),
+                gate_verdict_ref=str(item["gate_verdict_ref"]),
+                audit_verdict_ref=str(item["audit_verdict_ref"]))
+                for item in raw_parts]
+        except (KeyError, TypeError, AttributeError) as err:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "FANOUT_REFUSED",
+                        "message": "parts must carry the frozen PartRef shape"}) from None
+        config = _k02restb_split.MultiManagerSettings(
+            multi_manager_mode=settings["multi_manager_mode"],
+            max_parallel_managers=settings["max_parallel_managers"],
+            overlap=settings["overlap"],
+            integration_policy=settings["integration_policy"],
+            model_pool_per_manager=dict(settings["model_pool_per_manager"]))
+        wall_time = data.get("wall_time_s", 1.0)
+        if (isinstance(wall_time, bool)
+                or not isinstance(wall_time, (int, float))
+                or float(wall_time) < 0):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "FANOUT_REFUSED",
+                        "message": "wall_time_s must be a non-negative number"})
+        try:
+            running, queued = _k02restb_split.fanout(parts, config)
+            slots = _k02restb_split.capped_queue(parts, config, float(wall_time))
+        except (ValueError, TypeError) as err:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "FANOUT_REFUSED",
+                        "message": str(err)}) from None
+        return {
+            "running": [_k02restb_part_payload(part, parts.index(part))
+                        for part in running],
+            "queued": [_k02restb_part_payload(part, parts.index(part))
+                       for part in queued],
+            "slots": [{"gate_verdict_ref": slot.part.gate_verdict_ref,
+                       "position": slot.position,
+                       "estimated_start_s": slot.estimated_start_s}
+                      for slot in slots],
+        }
+
 
     # K11REST served lane (R-329/R-330/R-331/R-352; additions-only block):
     # four rows over the lane modules (cards, retry ledger, offline
@@ -2813,5 +3160,6 @@ def create_app(settings: Any = None,
                 status_code=400,
                 detail={"code": "BAD_LAUNCH_PARTS",
                         "detail": str(_k11_launch_err)}) from None
+
 
     return app
