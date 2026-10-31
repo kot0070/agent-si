@@ -1,0 +1,91 @@
+{
+  "base_url": "http://127.0.0.1:52080/v1",
+  "http": {
+    "body_sent": {
+      "messages": [
+        {
+          "content": "M-P1-25 loopback probe",
+          "role": "user"
+        }
+      ],
+      "model": "recorded-loopback-model"
+    },
+    "method": "POST",
+    "path": "/v1/chat/completions",
+    "status": 200
+  },
+  "messages": [
+    {
+      "content": "M-P1-25 loopback probe",
+      "role": "user"
+    }
+  ],
+  "method": "real loopback HTTP round-trip through OpenAICompatAdapter.invoke; replay test uses no network",
+  "model": "recorded-loopback-model",
+  "provider_id": "lm_studio",
+  "recorded_at": "2026-10-31T11:21:08.372433+00:00",
+  "reply_received": {
+    "finish": "stop",
+    "output_text": "recorded loopback reply M-P1-25",
+    "raw": {
+      "id": "rec-loopback-1"
+    },
+    "raw_safe": true,
+    "usage": {
+      "completion_tokens": 5,
+      "completion_tokens_details": {
+        "reasoning_tokens": 2
+      },
+      "prompt_tokens": 7,
+      "prompt_tokens_details": {
+        "cached_tokens": 1
+      }
+    }
+  },
+  "request_sent": {
+    "attempt": 1,
+    "base_url": "http://127.0.0.1:52080/v1",
+    "instance_id": "default",
+    "messages": [
+      {
+        "content": "M-P1-25 loopback probe",
+        "role": "user"
+      }
+    ],
+    "model": "recorded-loopback-model",
+    "params": {},
+    "provider_id": "lm_studio",
+    "provider_instance": "default",
+    "secret_ref": {
+      "created_at": null,
+      "last_rotated_at": null,
+      "provider_id": "lm_studio",
+      "scope": "provider",
+      "secret_id": "c2-live-secret",
+      "source": "secret_store",
+      "type": "api_key"
+    },
+    "stream": false
+  },
+  "response_record": {
+    "error_ref": null,
+    "finish_reason": "stop",
+    "instance_id": "default",
+    "mock": false,
+    "model": "recorded-loopback-model",
+    "output_text": "recorded loopback reply M-P1-25",
+    "provider_id": "lm_studio",
+    "usage": {
+      "completion_tokens": 5,
+      "completion_tokens_details": {
+        "reasoning_tokens": 2
+      },
+      "prompt_tokens": 7,
+      "prompt_tokens_details": {
+        "cached_tokens": 1
+      }
+    }
+  },
+  "row": "M-P1-25",
+  "secret_note": "id-only SecretRef; no key material recorded"
+}
