@@ -914,6 +914,10 @@ def register_stage_routes(app):
                 merged.update(body)
             try:
                 entry = _resolve(dotted)
+                try:
+                    hints = typing.get_type_hints(entry)
+                except Exception:
+                    hints = {}
                 signature = inspect.signature(entry)
                 kwargs = {}
                 for name, param in signature.parameters.items():
@@ -922,9 +926,12 @@ def register_stage_routes(app):
                             inspect.Parameter.VAR_KEYWORD):
                         continue
                     if name in merged:
-                        annotation = (None if param.annotation is
-                                      inspect.Parameter.empty
-                                      else param.annotation)
+                        if name in hints:
+                            annotation = hints[name]
+                        elif param.annotation is inspect.Parameter.empty:
+                            annotation = None
+                        else:
+                            annotation = param.annotation
                         kwargs[name] = _coerce(annotation, merged[name])
                     elif param.default is inspect.Parameter.empty:
                         raise TypeError(

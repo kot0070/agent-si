@@ -3162,4 +3162,348 @@ def create_app(settings: Any = None,
                         "detail": str(_k11_launch_err)}) from None
 
 
+
+    # --- K03REST lane B rows (additions-only). ---
+    # Six open loopback test ops over the real lane entries (JSON in,
+    # JSON out; no provider calls): audit sourcing gate (BP07-18),
+    # registry gate (BP07-20), semantic/security checks (SDK-107),
+    # evidence-criterion fail-closed (ARCH-622), correction-budget
+    # re-audit (MVP_ACCEPT-117) and provider-dependency fail-closed
+    # (MVP_ACCEPT-224). Served wiring only; the assurance legs run
+    # for real through agent_si.assurance.
+    from agent_si.assurance import audit_coordinator as _k03rest_coordinator
+    from agent_si.assurance import audit_records as _k03rest_records
+    from agent_si.assurance import audit_registry as _k03rest_registry
+
+    class _K03restAudit(_k03rest_coordinator.AuditCoordinator):
+        """Concrete binding of the real audit entries; adds no behavior."""
+
+    class _K03restRegistry(_k03rest_registry.AuditorRegistry):
+        """Concrete binding of the real sourcing entries; adds no behavior."""
+
+    def _k03rest_candidates(value: Any) -> list:
+        """Body auditor candidates as real registry rows (400 on bad shape)."""
+        items = value if isinstance(value, list) else []
+        out = []
+        for position, raw in enumerate(items):
+            if not isinstance(raw, dict):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"auditor candidate {position} must be a JSON "
+                    "object",
+                )
+            provider_id = raw.get("provider_id")
+            model = raw.get("model")
+            if not isinstance(provider_id, str) or not provider_id.strip():
+                raise HTTPException(
+                    status_code=400,
+                    detail="auditor candidate needs a non-empty provider_id",
+                )
+            if not isinstance(model, str) or not model.strip():
+                raise HTTPException(
+                    status_code=400,
+                    detail="auditor candidate needs a non-empty model",
+                )
+            instance = raw.get("provider_instance")
+            cap = raw.get("capability_evidence_refs")
+            out.append(_k03rest_registry.AuditorCandidate(
+                provider_id=provider_id.strip(),
+                provider_instance=(
+                    instance if isinstance(instance, str) else None
+                ),
+                model=model.strip(),
+                capability_evidence_refs=tuple(
+                    str(item) for item in cap
+                ) if isinstance(cap, list) else (),
+                registered_at="",
+            ))
+        return out
+
+    @app.post("/api/v1/k03rest/sourcing_gate")
+    async def k03rest_sourcing_gate(request: Request) -> dict[str, Any]:
+        """POST /api/v1/k03rest/sourcing_gate -> BLOCKED or SOURCED."""
+        data = await _k03a_body(request)
+        registry = _K03restRegistry()
+        for candidate in _k03rest_candidates(
+                data.get("auditor_candidates")):
+            registry.register_candidate(candidate)
+        implementers = tuple(
+            str(v) for v in _k03a_tuples(data.get("implementer_model_ids")))
+        task_class = str(data.get("task_class") or "served-turn")
+        minimum_level = str(data.get("minimum_level") or "L2")
+        try:
+            selection = registry.select_auditor(
+                task_class.strip(), implementers, minimum_level.strip())
+        except _k03rest_registry.NoEligibleAuditorError as exc:
+            return {
+                "ok": False,
+                "disposition": "BLOCKED",
+                "code": exc.code,
+                "pass_prohibited": True,
+                "audit_id": None,
+                "auditor": None,
+            }
+        return {
+            "ok": True,
+            "disposition": "SOURCED",
+            "code": None,
+            "pass_prohibited": False,
+            "audit_id": None,
+            "auditor": {
+                "provider_id": selection.auditor.provider_id,
+                "model": selection.auditor.model,
+                "session_ref": selection.auditor.session_ref,
+            },
+        }
+
+    @app.post("/api/v1/k03rest/registry_gate")
+    async def k03rest_registry_gate(request: Request) -> dict[str, Any]:
+        """POST /api/v1/k03rest/registry_gate -> registry lookup verdict."""
+        data = await _k03a_body(request)
+        provider_id = str(data.get("provider_id") or "").strip()
+        model = str(data.get("model") or "").strip()
+        if not provider_id or not model:
+            raise HTTPException(
+                status_code=400,
+                detail="registry_gate needs provider_id plus model",
+            )
+        cap = data.get("capability_evidence_refs")
+        registry = _K03restRegistry()
+        registry.register_candidate(
+            _k03rest_registry.AuditorCandidate(
+                provider_id=provider_id,
+                provider_instance=None,
+                model=model,
+                capability_evidence_refs=tuple(
+                    str(item) for item in cap
+                ) if isinstance(cap, list) else (),
+                registered_at="",
+            )
+        )
+        eligible = registry.is_eligible(provider_id, model)
+        implementers = tuple(
+            str(v) for v in _k03a_tuples(data.get("implementer_model_ids")))
+        task_class = str(data.get("task_class") or "served-turn")
+        minimum_level = str(data.get("minimum_level") or "L2")
+        try:
+            registry.select_auditor(
+                task_class.strip(), implementers, minimum_level.strip())
+        except _k03rest_registry.NoEligibleAuditorError as exc:
+            scope = str(data.get("scope") or "").strip() or (
+                f"k03rest/registry/{provider_id}/{model}")
+            return {
+                "ok": False,
+                "eligible": eligible,
+                "code": exc.code,
+                "disposition": registry.sourcing_state(scope),
+                "pass_allowed": False,
+            }
+        return {
+            "ok": True,
+            "eligible": eligible,
+            "code": None,
+            "disposition": "SOURCED",
+            "pass_allowed": True,
+        }
+
+    @app.post("/api/v1/k03rest/semantic_security")
+    async def k03rest_semantic_security(request: Request) -> dict[str, Any]:
+        """POST /api/v1/k03rest/semantic_security -> SDK-107 verdict."""
+        data = await _k03a_body(request)
+        criterion_refs = tuple(
+            str(v) for v in _k03a_tuples(data.get("criterion_refs")))
+        evidence_refs = tuple(
+            str(v) for v in _k03a_tuples(data.get("evidence_refs")))
+        verdict = _K03restAudit().check_semantic_and_security(
+            criterion_refs, evidence_refs)
+        return {
+            "verdict": verdict,
+            "checked_criteria": len(criterion_refs),
+            "checked_evidence": len(evidence_refs),
+        }
+
+    @app.post("/api/v1/k03rest/evidence_criterion")
+    async def k03rest_evidence_criterion(request: Request) -> dict[str, Any]:
+        """POST /api/v1/k03rest/evidence_criterion -> ARCH-622 verdict."""
+        data = await _k03a_body(request)
+        criterion_id = str(data.get("criterion_id") or "").strip()
+        if not criterion_id:
+            raise HTTPException(
+                status_code=400,
+                detail="evidence_criterion needs a non-empty criterion_id",
+            )
+        evidence_refs = tuple(
+            str(v) for v in _k03a_tuples(data.get("evidence_refs")))
+        result = _K03restAudit().fail_criterion_on_missing_evidence(
+            criterion_id, evidence_refs)
+        return {
+            "criterion_id": criterion_id,
+            "result": result,
+            "silent_pass": False,
+        }
+
+    def _k03rest_audit_row(audit_id: str) -> dict[str, Any]:
+        """One served audit row from the real stored record (404 unknown)."""
+        stored = _k03rest_records._fetch_record(audit_id)
+        if stored is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"unknown audit_id {audit_id!r}",
+            )
+        return {
+            "audit_id": stored.audit_id,
+            "session_ref": stored.context_session_ref,
+            "result": getattr(
+                stored.result, "value", str(stored.result)),
+            "handling": getattr(
+                stored.handling_disposition, "value",
+                str(stored.handling_disposition)),
+        }
+
+    @app.post("/api/v1/k03rest/correction_budget")
+    async def k03rest_correction_budget(request: Request) -> dict[str, Any]:
+        """POST /api/v1/k03rest/correction_budget -> bounded re-audit."""
+        data = await _k03a_body(request)
+        project_id = str(data.get("project_id") or "").strip()
+        task_id = str(data.get("task_id") or "").strip()
+        run_id = str(data.get("run_id") or "").strip()
+        contract_hash = str(data.get("contract_hash") or "").strip()
+        if not project_id or not task_id or not run_id or not contract_hash:
+            raise HTTPException(
+                status_code=400,
+                detail="correction_budget needs project/task/run/contract ids",
+            )
+        try:
+            reaudits = int(data.get("reaudits") or 0)
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=400,
+                detail="correction_budget needs reaudits as an int",
+            ) from None
+        if reaudits < 0:
+            raise HTTPException(
+                status_code=400,
+                detail="correction_budget needs reaudits >= 0",
+            )
+        turn = _k03rest_coordinator.ServedTurn(
+            turn_ref=run_id,
+            project_id=project_id,
+            task_id=task_id,
+            run_id=run_id,
+            work_refs=tuple(
+                str(v) for v in _k03a_tuples(data.get("work_refs"))),
+            artifact_refs=tuple(
+                str(v) for v in _k03a_tuples(data.get("artifact_refs"))),
+            evidence_refs=tuple(
+                str(v) for v in _k03a_tuples(data.get("evidence_refs"))),
+            producer_session_refs=tuple(
+                str(v)
+                for v in _k03a_tuples(data.get("producer_session_refs"))),
+            contract_hash=contract_hash,
+        )
+        if not turn.work_refs and not turn.artifact_refs:
+            raise HTTPException(
+                status_code=400,
+                detail="correction_budget carries no work; empty work fails",
+            )
+        first = _K03restAudit()
+        prior_id = first.audit_with_fresh_auditor(turn)
+        rows = [_k03rest_audit_row(prior_id)]
+        last = first
+        for _ in range(reaudits):
+            fresh = _K03restAudit()
+            stored_prev = _k03rest_records._fetch_record(prior_id)
+            if stored_prev is None:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"lost audit row {prior_id!r}",
+                )
+            seed = fresh.__dict__.setdefault("_AUDITS", {})
+            seed[prior_id] = {
+                "scope_id": stored_prev.audit_scope_id,
+                "sequence": stored_prev.audit_sequence,
+                "run_id": stored_prev.run_id,
+                "contract_hash": stored_prev.contract_hash,
+            }
+            scopes = fresh.__dict__.setdefault("_SCOPE_COUNT", {})
+            scopes[stored_prev.audit_scope_id] = max(
+                scopes.get(stored_prev.audit_scope_id, 0),
+                stored_prev.audit_sequence,
+            )
+            prior_id = fresh.reaudit(prior_id, None)
+            rows.append(_k03rest_audit_row(prior_id))
+            last = fresh
+        scope_id = f"{project_id}/{task_id}/{contract_hash}"
+        budget = last.remaining_correction_budget(scope_id)
+        sessions = [row["session_ref"] for row in rows]
+        return {
+            "audits": rows,
+            "budget": {
+                "scope_id": budget.scope_id,
+                "used": budget.used,
+                "limit": budget.limit,
+            },
+            "fresh_sessions_distinct": (
+                len(set(sessions)) == len(sessions)),
+        }
+
+    @app.post("/api/v1/k03rest/provider_dependency")
+    async def k03rest_provider_dependency(request: Request) -> dict[str, Any]:
+        """POST /api/v1/k03rest/provider_dependency -> BLOCKED + options."""
+        data = await _k03a_body(request)
+        provider_id = str(data.get("provider_id") or "").strip()
+        model = str(data.get("model") or "").strip()
+        if not provider_id or not model:
+            raise HTTPException(
+                status_code=400,
+                detail="provider_dependency needs provider_id plus model",
+            )
+        scope = str(data.get("scope") or "").strip() or (
+            f"k03rest/provider/{provider_id}/{model}")
+        registry = _K03restRegistry()
+        registry.register_candidate(
+            _k03rest_registry.AuditorCandidate(
+                provider_id=provider_id,
+                provider_instance=None,
+                model=model,
+                capability_evidence_refs=(),
+                registered_at="",
+            )
+        )
+        implementers = tuple(
+            str(v) for v in _k03a_tuples(data.get("implementer_model_ids")))
+        task_class = str(data.get("task_class") or "served-turn")
+        minimum_level = str(data.get("minimum_level") or "L2")
+        try:
+            registry.select_auditor(
+                task_class.strip(), implementers, minimum_level.strip())
+        except _k03rest_registry.NoEligibleAuditorError as exc:
+            return {
+                "ok": False,
+                "provider_id": provider_id,
+                "model": model,
+                "eligible": registry.is_eligible(provider_id, model),
+                "code": exc.code,
+                "disposition": registry.sourcing_state(scope),
+                "pass_allowed": False,
+                "options": [
+                    "register capability evidence refs for provider "
+                    f"{provider_id!r} and re-run sourcing",
+                    "record a USER sourcing decision resolving scope "
+                    f"{scope!r} through resolve_sourcing",
+                    "leave the task parked: sourcing stays BLOCKED until "
+                    "the USER resolves it",
+                ],
+            }
+        return {
+            "ok": True,
+            "provider_id": provider_id,
+            "model": model,
+            "eligible": True,
+            "code": None,
+            "disposition": "SOURCED",
+            "pass_allowed": True,
+            "options": [],
+        }
+
     return app
