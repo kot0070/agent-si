@@ -23,11 +23,28 @@ from agent_si.backend.app import create_app  # noqa: E402
 from agent_si.backend.orchestration import offload as offload_mod  # noqa: E402
 from agent_si.backend.orchestration import steplimits as steplimits_mod  # noqa: E402
 
+try:
+    from agent_si import hierarchy_routes as _seam
+    _SEAM_ERROR = None
+except Exception as err:  # seam unserved: K02NEXT2 tests below fail RED
+    _seam = None
+    _SEAM_ERROR = err
+
 TEST_TOKEN = "k02open14-hierarchy-token"
 
 
 def make_client():
     app = create_app({"testing": True, "ui_session_token": TEST_TOKEN})
+    headers = {"x-actor": "manager-1", "x-ui-session-token": TEST_TOKEN}
+    return TestClient(app), headers
+
+
+def make_k02rest2_client():
+    if _seam is None:
+        raise AssertionError(
+            f"K02NEXT2 seam unserved: {_SEAM_ERROR!r}")
+    app = create_app({"testing": True, "ui_session_token": TEST_TOKEN})
+    _seam.register_k02rest2_routes(app)
     headers = {"x-actor": "manager-1", "x-ui-session-token": TEST_TOKEN}
     return TestClient(app), headers
 
@@ -179,3 +196,147 @@ def test_k02open14_hierarchy_row349_agent_step_limits():
         headers=headers,
     )
     assert unknown.status_code == 404
+
+
+def test_k02open14_hierarchy_row358_team_config_change_validated_first():
+    """R-358: every configuration change validated and recorded before
+    it applies; a refused change applies nothing and records no row."""
+    client, headers = make_k02rest2_client()
+    good = client.post(
+        "/v1/k02rest2/team-config-change",
+        json={
+            "statement": "raise agent cap for build",
+            "reason": "build needs more agents",
+            "authority": "director-1",
+            "patch": {"max_agents": 6},
+        },
+        headers=headers,
+    )
+    assert good.status_code == 200, good.text
+    body = good.json()
+    assert body["accepted"] is True
+    assert body["decision_ref"].startswith("team-config-")
+    assert body["reason"] == "applied"
+    bad = client.post(
+        "/v1/k02rest2/team-config-change",
+        json={
+            "statement": "merge auditor and worker",
+            "reason": "short crew for audit",
+            "authority": "director-1",
+            "patch": {"auditor": "agent-1", "worker": "agent-1"},
+        },
+        headers=headers,
+    )
+    assert bad.status_code == 200, bad.text
+    refused = bad.json()
+    assert refused["accepted"] is False
+    assert refused["decision_ref"] is None
+    assert "audit independence" in refused["reason"]
+    no_actor = client.post(
+        "/v1/k02rest2/team-config-change",
+        json={
+            "statement": "raise agent cap for build",
+            "reason": "build needs more agents",
+            "authority": "director-1",
+            "patch": {"max_agents": 6},
+        },
+    )
+    assert no_actor.status_code == 401
+
+
+def test_k02open14_hierarchy_row359_multi_manager_settings_validated():
+    """R-359: multi-manager settings validated; an invalid config is
+    blocked with its reason and applies nothing."""
+    client, headers = make_k02rest2_client()
+    settings = {
+        "multi_manager_mode": True,
+        "max_parallel_managers": 2,
+        "overlap": True,
+        "integration_policy": "manager-merge",
+        "model_pool_per_manager": {
+            "m1": "meta/muse-spark-1.3-contributor"
+        },
+    }
+    good = client.post(
+        "/v1/k02rest2/multi-manager-settings",
+        json={"settings": settings},
+        headers=headers,
+    )
+    assert good.status_code == 200, good.text
+    assert good.json() == {"ok": True, "reason": "ok"}
+    broken = dict(settings)
+    broken["max_parallel_managers"] = 0
+    bad = client.post(
+        "/v1/k02rest2/multi-manager-settings",
+        json={"settings": broken},
+        headers=headers,
+    )
+    assert bad.status_code == 200, bad.text
+    body = bad.json()
+    assert body["ok"] is False
+    assert "POLICY_CONFLICT" in body["reason"]
+    no_actor = client.post(
+        "/v1/k02rest2/multi-manager-settings",
+        json={"settings": settings},
+    )
+    assert no_actor.status_code == 401
+
+
+def test_k02open14_hierarchy_rowmp115_closed_part_ref_frozen():
+    """M-P1-15: the frozen closed-part ref shape served over HTTP."""
+    client, headers = make_k02rest2_client()
+    ref = {
+        "package_id": "k02next2-pkg-1",
+        "contract_hash": "hash-9",
+        "gate_verdict_ref": "gate-1",
+        "audit_verdict_ref": "audit-1",
+    }
+    resp = client.post(
+        "/v1/k02rest2/closed-part-ref",
+        json=ref,
+        headers=headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == ref
+    blank = client.post(
+        "/v1/k02rest2/closed-part-ref",
+        json=dict(ref, package_id="  "),
+        headers=headers,
+    )
+    assert blank.status_code == 400
+    no_actor = client.post(
+        "/v1/k02rest2/closed-part-ref",
+        json=ref,
+    )
+    assert no_actor.status_code == 401
+
+
+def test_k02open14_hierarchy_rowmp117_ledger_persist_load_roundtrip():
+    """M-P1-17: ledger rows persist then load back with package ids."""
+    client, headers = make_k02rest2_client()
+    rows = [
+        {"package_id": "k02next2-pkg-b", "agents": 2,
+         "peak_concurrency": 2, "wall_time_s": 1.5},
+        {"package_id": "k02next2-pkg-a", "agents": 1,
+         "peak_concurrency": 1, "wall_time_s": 0.5},
+    ]
+    resp = client.post(
+        "/v1/k02rest2/ledger-roundtrip",
+        json={"rows": rows},
+        headers=headers,
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["package_ids"] == ["k02next2-pkg-a", "k02next2-pkg-b"]
+    assert body["rows"] == 2
+    bad = client.post(
+        "/v1/k02rest2/ledger-roundtrip",
+        json={"rows": [{"package_id": "k02next2-pkg-c"}]},
+        headers=headers,
+    )
+    assert bad.status_code == 400
+    no_actor = client.post(
+        "/v1/k02rest2/ledger-roundtrip",
+        json={"rows": rows},
+    )
+    assert no_actor.status_code == 401

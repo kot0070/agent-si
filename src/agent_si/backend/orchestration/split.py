@@ -19,7 +19,7 @@ from hashlib import sha256
 from typing import Any, Mapping, Sequence  # noqa: UP035  # frozen-cite K02
 
 from .common import ensure_compact_english, hot_write_text, is_compact_english
-from .teamcard import TeamCard
+from .teamcard import TeamCard, worker_context
 
 MODEL_ID = "meta/muse-spark-1.3-contributor"
 
@@ -385,3 +385,39 @@ __all__ = [
     "split_package",
     "validate_disjoint",
 ]
+
+
+def serve_worker_inputs(data: Mapping[str, Any]) -> dict[str, Any]:
+    """Serve row M-D-D13: worker context isolated; listed inputs only.
+
+    Body {"worker_id", "authorized_refs", "requested_refs"}. Returns the
+    worker id, the isolated (empty) worker context, and the inputs kept:
+    requested refs that are shared refs (ARTIFACT_REF or SecretRef-only)
+    and listed in authorized_refs. Raises ValueError on a non-object
+    body, a blank worker_id, non-list ref lists, or a requested ref that
+    is not a shared ref (served HTTP 400); requested refs that are
+    shared but not authorized are dropped, never leaked.
+    """
+    if not isinstance(data, Mapping):
+        raise ValueError("worker inputs body must be an object")
+    worker_id = data.get("worker_id")
+    if not isinstance(worker_id, str) or not worker_id.strip():
+        raise ValueError("worker_id must be a non-empty string")
+    authorized = data.get("authorized_refs")
+    requested = data.get("requested_refs")
+    if not isinstance(authorized, list) or not isinstance(requested, list):
+        raise ValueError("authorized_refs and requested_refs must be lists")
+    for ref in authorized:
+        if not is_shared_ref(ref):
+            raise ValueError("authorized_refs must be shared refs only")
+    kept: list[Any] = []
+    for ref in requested:
+        if not is_shared_ref(ref):
+            raise ValueError("requested_refs must be shared refs only")
+        if ref in authorized and ref not in kept:
+            kept.append(ref)
+    return {
+        "worker_id": worker_id.strip(),
+        "context": worker_context(),
+        "inputs": kept,
+    }

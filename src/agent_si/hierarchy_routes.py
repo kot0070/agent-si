@@ -30,10 +30,35 @@ B-row handlers shape HTTP only and delegate every row decision to the
 named orchestration entry point: ValueError/TypeError refuse with
 HTTP 400, KeyError/LookupError with HTTP 404, and a still-missing
 entry point surfaces HTTP 503 ROW_UNSERVED until CODER-B lands.
+
+K02NEXT2 CODER-A rows (additions only, same USER_WRITE guard shape):
+
+- POST /v1/k02rest2/team-config-change (USER_WRITE guard) validates one
+  team config patch through the real teamcard.validate_team_config_change
+  and applies it only when valid through the real
+  teamcard.apply_team_config_change (row R-358: every configuration
+  change validated and recorded before it applies; a refused change
+  answers accepted False with its reason and records no row).
+- POST /v1/k02rest2/multi-manager-settings (USER_WRITE guard) validates
+  one multi-manager settings dict through the real
+  overlap.validate_multi_manager_settings (row R-359: an invalid config
+  is blocked with its POLICY_CONFLICT reason and applies nothing).
+- POST /v1/k02rest2/closed-part-ref (USER_WRITE guard) serves the frozen
+  parts.ClosedPartRef shape {package_id, contract_hash, gate_verdict_ref,
+  audit_verdict_ref} (row M-P1-15); blank fields refuse with HTTP 400.
+- POST /v1/k02rest2/ledger-roundtrip (USER_WRITE guard) records the given
+  rows on a fresh ledger, persists them with the real
+  ledger.persist_ledger to a portable temp file, loads them back with the
+  real ledger.load_ledger, and answers the sorted
+  PackageLedger.package_ids (row M-P1-17).
 """
 
 from __future__ import annotations
 
+import contextlib
+import os
+import tempfile
+from collections.abc import Mapping
 from typing import Any
 
 from fastapi import HTTPException, Request
@@ -42,6 +67,7 @@ from agent_si.backend.orchestration import delta as _delta
 from agent_si.backend.orchestration import gates as _gates
 from agent_si.backend.orchestration import graph as _graph
 from agent_si.backend.orchestration import ledger as _ledger
+from agent_si.backend.orchestration import overlap as _overlap
 from agent_si.backend.orchestration import parts as _parts
 from agent_si.backend.orchestration import teamcard as _teamcard
 
@@ -232,5 +258,123 @@ def register_k02rest2_routes(app: Any) -> Any:
                 status_code=400,
                 detail={"code": "ROW_REFUSED",
                         "message": str(err)}) from None
+
+    @app.post("/v1/k02rest2/team-config-change")
+    async def post_team_config_change(request: Request) -> dict[str, Any]:
+        _write_guard(request)
+        data = await _json_body(request)
+        statement = data.get("statement")
+        reason = data.get("reason")
+        authority = data.get("authority")
+        patch = data.get("patch")
+        for name, value in (("statement", statement), ("reason", reason),
+                            ("authority", authority)):
+            if not isinstance(value, str) or not value.strip():
+                raise HTTPException(
+                    status_code=400,
+                    detail={"code": "ROW_REFUSED",
+                            "message": f"{name} must be a non-empty string"})
+        if not isinstance(patch, dict):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "patch must be an object"})
+        store = _teamcard.TeamConfigStore()
+        ok, check_reason = _teamcard.validate_team_config_change(
+            dict(patch), store.config)
+        if not ok:
+            return {"accepted": False, "reason": check_reason,
+                    "decision_ref": None}
+        outcome = _teamcard.apply_team_config_change(
+            store, str(statement).strip(), str(reason).strip(),
+            str(authority).strip(), dict(patch))
+        row = outcome.row
+        return {"accepted": bool(outcome.accepted),
+                "reason": outcome.reason,
+                "decision_ref": row.decision_id if row is not None else None}
+
+    @app.post("/v1/k02rest2/multi-manager-settings")
+    async def post_multi_manager_settings(request: Request) -> dict[str, Any]:
+        _write_guard(request)
+        data = await _json_body(request)
+        settings = data.get("settings")
+        if not isinstance(settings, dict):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "settings must be an object"})
+        ok, reason = _overlap.validate_multi_manager_settings(settings)
+        return {"ok": bool(ok), "reason": str(reason)}
+
+    @app.post("/v1/k02rest2/closed-part-ref")
+    async def post_closed_part_ref(request: Request) -> dict[str, Any]:
+        _write_guard(request)
+        data = await _json_body(request)
+        fields: dict[str, str] = {}
+        for name in ("package_id", "contract_hash", "gate_verdict_ref",
+                     "audit_verdict_ref"):
+            value = data.get(name)
+            if not isinstance(value, str) or not value.strip():
+                raise HTTPException(
+                    status_code=400,
+                    detail={"code": "ROW_REFUSED",
+                            "message": f"{name} must be a non-empty string"})
+            fields[name] = value.strip()
+        ref = _parts.ClosedPartRef(**fields)
+        return {"package_id": ref.package_id,
+                "contract_hash": ref.contract_hash,
+                "gate_verdict_ref": ref.gate_verdict_ref,
+                "audit_verdict_ref": ref.audit_verdict_ref}
+
+    @app.post("/v1/k02rest2/ledger-roundtrip")
+    async def post_ledger_roundtrip(request: Request) -> dict[str, Any]:
+        _write_guard(request)
+        data = await _json_body(request)
+        rows = data.get("rows")
+        if not isinstance(rows, list) or not rows:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "rows must be a non-empty list"})
+        ledger = _ledger.PackageLedger()
+        for item in rows:
+            if not isinstance(item, Mapping):
+                raise HTTPException(
+                    status_code=400,
+                    detail={"code": "ROW_REFUSED",
+                            "message": "each row must be an object"})
+            try:
+                package_id = item["package_id"]
+                agents = item["agents"]
+                peak = item["peak_concurrency"]
+                wall = item["wall_time_s"]
+            except KeyError as err:
+                raise HTTPException(
+                    status_code=400,
+                    detail={"code": "ROW_REFUSED",
+                            "message": f"ledger row misses {err}"}) from None
+            if not isinstance(package_id, str) or not package_id.strip():
+                raise HTTPException(
+                    status_code=400,
+                    detail={"code": "ROW_REFUSED",
+                            "message": "package_id must be a non-empty string"})
+            try:
+                ledger.record_row(package_id.strip(), agents, peak, wall)
+            except (ValueError, TypeError) as err:
+                raise HTTPException(
+                    status_code=400,
+                    detail={"code": "ROW_REFUSED",
+                            "message": str(err)}) from None
+        handle, path = tempfile.mkstemp(prefix="k02next2-ledger-",
+                                        suffix=".json")
+        os.close(handle)
+        try:
+            _ledger.persist_ledger(path, ledger)
+            reloaded = _ledger.load_ledger(path)
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(path)
+        return {"package_ids": reloaded.package_ids(),
+                "rows": len(reloaded.package_ids())}
 
     return app

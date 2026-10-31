@@ -411,3 +411,29 @@ def serve_decomposition_facts(data: Mapping[str, Any]) -> dict[str, Any]:
             "limits": dict(card.limits),
         },
     }
+
+
+def serve_audit_model_choice(data: Mapping[str, Any]) -> dict[str, Any]:
+    """Serve row M-P1-33: stronger audit model only when needed; logged.
+
+    Body {"part_id", "risk"}; high risk selects the strong model while any
+    other risk keeps the standard model, and the choice is appended to
+    AUDIT_CHOICE_LOG. Raises ValueError on a non-object body, a blank
+    part_id, or a missing/non-string risk (served HTTP 400).
+    """
+    if not isinstance(data, Mapping):
+        raise ValueError("audit model body must be an object")
+    part_id = data.get("part_id")
+    if not isinstance(part_id, str) or not part_id.strip():
+        raise ValueError("part_id must be a non-empty string")
+    risk = data.get("risk")
+    if not isinstance(risk, str) or not risk:
+        raise ValueError("risk must be a non-empty string")
+    choice = select_audit_model(part_id.strip(), risk)
+    return {
+        "part_id": choice.part_id,
+        "strength": choice.strength,
+        "model": choice.model,
+        "reason": choice.reason,
+        "logged": len(AUDIT_CHOICE_LOG),
+    }

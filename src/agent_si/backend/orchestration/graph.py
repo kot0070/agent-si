@@ -608,3 +608,25 @@ def serve_team_sizing(data: Mapping[str, Any], actor: str) -> dict[str, Any]:
         "roles": list(sized.roles),
         "why": sized.why,
     }
+
+
+def serve_director_control(data: Mapping[str, Any]) -> dict[str, Any]:
+    """Serve row M-P1-42: control-plane-only Director; no live default.
+
+    Body {"director"}; accepts an explicit Director ref and returns it
+    with the control-plane map (every target names serving code) and
+    the live runtime (always None). Raises ValueError on a non-object
+    body or a non-string ref (served HTTP 400); raises
+    DirectorControlOnly for a missing, blank, or provisional ref.
+    """
+    if not isinstance(data, Mapping):
+        raise ValueError("director control body must be an object")
+    ref = data.get("director")
+    if not isinstance(ref, str):
+        raise ValueError("director must be a string ref")
+    accepted = require_explicit_director(ref)
+    return {
+        "director": accepted,
+        "control_plane": control_plane_map(),
+        "live_runtime": DIRECTOR_RUNTIME,
+    }
