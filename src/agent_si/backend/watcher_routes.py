@@ -21,6 +21,7 @@ from typing import Any, Callable, Dict, Optional
 from fastapi import APIRouter, HTTPException, Request
 
 from agent_si.backend import stop_all as _stop_home
+from agent_si.watcher import alerts as _alerts_home
 from agent_si.watcher import integrity as _integrity_home
 from agent_si.watcher import journal as _journal_home
 from agent_si.watcher import rules as _rules_home
@@ -85,6 +86,8 @@ _STATUS_BY_CODE: Dict[str, int] = {
     "JOURNAL_KIND_UNKNOWN": 404,
     "STOP_REASON_MISSING": 400,
     "GOVERNANCE_MISMATCH": 409,
+    "PAUSE_REASON_MISSING": 400,
+    "AUTOMATION_PAUSED": 409,
 }
 
 
@@ -128,6 +131,22 @@ def _stop_all(actor: str, project_id: str, grant_ref: str = "",
     return _stop_home.request_stop(actor, project_id, grant_ref)
 
 
+def _list_alerts(project_id: str, session_token: str = ""):
+    """Entry wrapper: alerts list tolerates the route kwarg."""
+    return _alerts_home.list_alerts(project_id)
+
+
+def _fire_timer(project_id: str, timer_id: str, session_token: str = ""):
+    """Entry wrapper: timer fire tolerates the route kwarg."""
+    return _rules_home.fire_timer(project_id, timer_id)
+
+
+def _pause_timer(project_id: str, timer_id: str, paused: bool,
+                 reason: str = "", session_token: str = ""):
+    """Entry wrapper: timer pause tolerates the route kwarg."""
+    return _rules_home.pause_timer(project_id, timer_id, paused, reason)
+
+
 def _call(entry_name: str, *args: Any, **kwargs: Any) -> Any:
     _check_drift()
     try:
@@ -137,6 +156,26 @@ def _call(entry_name: str, *args: Any, **kwargs: Any) -> Any:
     except Exception as err:
         # Lane errors travel as (code, detail) on either WatcherError
         # class (frozen contract or lane home); anything else is a bug.
+        code = getattr(err, "code", "")
+        if not code:
+            raise
+        _fail(code, getattr(err, "detail", "") or str(err))
+    return None
+
+
+def _serve_owned(func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """Serve one owned lane entry bound after the frozen five-entry table.
+
+    New R-324/R-335 bindings call their owning lane modules directly with
+    the same error mapping as _call; the frozen drift table (_HANDLED vs
+    ROUTE_ENTRY_POINTS) is untouched, so _check_drift keeps guarding the
+    declared routes.
+    """
+    try:
+        return _dump(func(*args, **kwargs))
+    except HTTPException:
+        raise
+    except Exception as err:
         code = getattr(err, "code", "")
         if not code:
             raise
@@ -263,5 +302,34 @@ async def route_post_stop_all(request: Request) -> Any:
         str(data.get("actor", "")),
         str(data.get("project_id", "")),
         grant_ref=str(data.get("grant_ref", "")),
+        session_token=token,
+    )
+
+
+@router.get("/api/v1/watcher/alerts")
+def route_get_alerts(project_id: str) -> Any:
+    """GET /api/v1/watcher/alerts -> list_alerts (open)."""
+    return {"alerts": _serve_owned(_list_alerts, project_id)}
+
+
+@router.post("/api/v1/watcher/timers/{id}/fire")
+async def route_post_timer_fire(id: str, request: Request) -> Any:
+    """POST /api/v1/watcher/timers/{id}/fire -> fire_timer (token)."""
+    data = await _body(request)
+    token = _guard_post(request, data)
+    return _serve_owned(
+        _fire_timer, str(data.get("project_id", "")), id,
+        session_token=token,
+    )
+
+
+@router.post("/api/v1/watcher/timers/{id}/pause")
+async def route_post_timer_pause(id: str, request: Request) -> Any:
+    """POST /api/v1/watcher/timers/{id}/pause -> pause_timer (token)."""
+    data = await _body(request)
+    token = _guard_post(request, data)
+    return _serve_owned(
+        _pause_timer, str(data.get("project_id", "")), id,
+        bool(data.get("paused", False)), str(data.get("reason", "")),
         session_token=token,
     )
