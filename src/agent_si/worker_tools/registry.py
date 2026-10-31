@@ -9,10 +9,14 @@ from __future__ import annotations
 
 import collections.abc
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from .types import ActionClass, Argv, AuthMapping, ToolResult
+
+if TYPE_CHECKING:  # read-only contract usage; never a runtime import here
+    from .dispatcher import EscalationCard
 
 ToolFunc = Callable[[Argv, ActionClass, AuthMapping], ToolResult]
 """Real tool implementation behind an entry point (argv-only, G1)."""
@@ -241,9 +245,43 @@ class ToolRegistry:
         argv: Argv,
         action_class: ActionClass,
         auth: AuthMapping,
+        *,
+        task_authorized: bool | None = None,
+        run_id: str | None = None,
+        retry_budget: int | None = None,
+        parked: EscalationCard
+        | collections.abc.Mapping[str, EscalationCard]
+        | None = None,
     ) -> ToolResult:
-        """Load the entry point for ``name`` and call it with ``argv``."""
+        """Load the entry point for ``name`` and call it with ``argv``.
+
+        Carries the same union kwargs as the guarded dispatcher: an
+        explicit ``task_authorized`` denial refuses first, then the
+        parked-run refusal (explicit ``parked`` card or table, else
+        the stored card for ``run_id``). ``retry_budget`` is accepted
+        for signature parity only; denial counting stays owned by the
+        guarded dispatcher so a run can never count twice.
+        """
+        from .dispatcher import (
+            EscalationParkedError,
+            _checked_task_authorized,
+            _resolve_parked_card,
+            _resolve_run_id,
+            get_escalation,
+        )
+        del retry_budget
         argv_list = _checked_argv(argv)
+        _checked_task_authorized(task_authorized)
+        auth_dict = dict(auth) if isinstance(auth, collections.abc.Mapping) else {}
+        resolved_run = _resolve_run_id(auth_dict, run_id)
+        if parked is not None:
+            explicit = _resolve_parked_card(parked, resolved_run)
+            if explicit is not None:
+                raise EscalationParkedError(explicit)
+        if resolved_run is not None:
+            stored = get_escalation(resolved_run)
+            if stored is not None:
+                raise EscalationParkedError(stored)
         _checked_auth(auth)
         func = self.load(name)
         return _shaped_result(func(argv_list, action_class, auth), argv_list, action_class)

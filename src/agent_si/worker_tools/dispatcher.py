@@ -121,6 +121,56 @@ def _resolve_run_id(
     return None
 
 
+def _checked_task_authorized(task_authorized: bool | None) -> None:
+    """Refuse when the explicit task-authorized signal denies.
+
+    ``None`` carries no signal and falls through to the toolguard
+    ladder; ``True`` passes; ``False`` refuses with
+    :exc:`PermissionError` before any parked or guard work. Any other
+    value refuses closed with :exc:`TypeError`.
+    """
+    if task_authorized is None or task_authorized is True:
+        return
+    if task_authorized is False:
+        raise PermissionError("task_authorized denied: task not authorized")
+    raise TypeError("task_authorized must be True, False or None")
+
+
+def _resolve_parked_card(
+    parked: EscalationCard | collections.abc.Mapping[str, EscalationCard],
+    run_id: str | None,
+) -> EscalationCard | None:
+    """Return the explicit parked card applying to ``run_id``.
+
+    ``parked`` is either a stored :class:`EscalationCard` for this run
+    or a read-only table of run id to card. A card naming another run
+    refuses with :exc:`ValueError`; a table with no card for
+    ``run_id`` (or no ``run_id`` at all) yields None so the stored
+    escalation lookup still applies. Anything else refuses with
+    :exc:`TypeError`.
+    """
+    if isinstance(parked, EscalationCard):
+        if run_id is not None and parked.run_id != run_id:
+            raise ValueError(
+                f"parked card run {parked.run_id!r} does not match run {run_id!r}"
+            )
+        return parked
+    if isinstance(parked, collections.abc.Mapping):
+        if run_id is None:
+            return None
+        card = parked.get(run_id)
+        if card is None:
+            return None
+        if not isinstance(card, EscalationCard):
+            raise TypeError(
+                "parked table must map run ids to EscalationCard"
+            )
+        return card
+    raise TypeError(
+        "parked must be an EscalationCard or a mapping of run ids to cards"
+    )
+
+
 def _note_denial(
     run_id: str,
     tool: str,
@@ -162,29 +212,39 @@ def guarded_dispatch(
     *,
     tool: str,
     registry: ToolRegistry | None = None,
+    task_authorized: bool | None = None,
     run_id: str | None = None,
     retry_budget: int | None = None,
+    parked: EscalationCard | collections.abc.Mapping[str, EscalationCard] | None = None,
 ) -> ToolResult:
     """Evaluate ``toolguard.evaluate`` then run the ``tool`` route.
 
     ``argv`` must be a list of words (G1); ``action_class`` is one of
-    R0-R3; ``auth`` carries identity, scopes and approvals. A parked
-    run raises :exc:`EscalationParkedError` with its stored card and
+    R0-R3; ``auth`` carries identity, scopes and approvals. Deny
+    order: an explicit ``task_authorized`` denial refuses first, then
+    the parked-run refusal (explicit ``parked`` card or table, else
+    the stored card for ``run_id``), then ``toolguard.evaluate``.
+    A parked run raises :exc:`EscalationParkedError` with its card and
     performs no further guard work. Denials count against the run's
     retry budget (``run_id`` kwarg or ``run_id`` auth claim,
     ``retry_budget`` overrides the default of 3); the denial that
     exhausts the budget parks the run as ESCALATED.
     """
     argv_list = _checked_argv(argv)
+    _checked_task_authorized(task_authorized)
     if isinstance(auth, collections.abc.Mapping):
         auth_dict = dict(auth)
     else:
         auth_dict = {}
     resolved_run = _resolve_run_id(auth_dict, run_id)
+    if parked is not None:
+        explicit = _resolve_parked_card(parked, resolved_run)
+        if explicit is not None:
+            raise EscalationParkedError(explicit)
     if resolved_run is not None:
-        parked = get_escalation(resolved_run)
-        if parked is not None:
-            raise EscalationParkedError(parked)
+        stored = get_escalation(resolved_run)
+        if stored is not None:
+            raise EscalationParkedError(stored)
     evaluate = _resolve_evaluate()
     verdict = evaluate(argv_list, action_class, auth_dict)
     if isinstance(verdict, dict) and verdict.get("decision") == "deny":
