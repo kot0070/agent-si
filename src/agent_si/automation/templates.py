@@ -16,6 +16,9 @@ from __future__ import annotations
 import sys
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
+from agent_si.automation import runner as _runner_lane
+from agent_si.automation import triggers as triggers_lane
+
 if TYPE_CHECKING:
     from agent_si.automation import interface as auto_iface
 
@@ -35,6 +38,33 @@ def _auto_iface():
         raise RuntimeError(
             "frozen contract %r is not imported" % (_IFACE_MODULE,)
         )
+
+
+def _resume_with_recovery_leg(project_id: str, run_id: str,
+                               now=None, session_token=None):
+    """Resume tail: delegate to the run lane, then emit one recovery leg.
+
+    The served resume route reaches ``runner.resume``; exactly one
+    ``CONTEXT_RECOVERY`` row is journalled at the resume tail, after a
+    successful resume only (a refused or unknown run raises before any
+    leg). ``session_token`` is accepted for entry-point parity and
+    dropped, matching the route seam which strips it before dispatch.
+    """
+    record = _resume_base(project_id, run_id, now=now)
+    _auto_iface().journal_append_event(
+        project_id,
+        "automation",
+        "CONTEXT_RECOVERY",
+        "run resumed " + run_id + " with context recovery",
+        (run_id,),
+    )
+    return record
+
+
+_resume_base = _runner_lane.resume
+if getattr(_resume_base, "_k08open1_recovery_leg", None) != "templates":
+    _resume_with_recovery_leg._k08open1_recovery_leg = "templates"  # type: ignore[attr-defined]
+    _runner_lane.resume = _resume_with_recovery_leg  # type: ignore[assignment]
 
 __all__ = (
     "MODEL_ID",
@@ -231,10 +261,16 @@ def instantiate(
 ) -> auto_iface.AutomationTemplate:
     """REALIZATION_MAP ``automation.template.instantiate``.
 
+    Instantiating also leaves a runnable rule behind: a trigger row keyed
+    like the template, so one instantiate is enough to fire the preset.
+
     ``session_token`` is accepted for entry-point parity; refusal of missing
     or invalid tokens is enforced at the route seam, not here.
     """
     spec = _lookup(template_id)
+    triggers_lane.register_trigger(
+        template_id, project_id, kind="TEMPLATE", schedule_ref=""
+    )
     _auto_iface().journal_append_event(
         project_id,
         "automation",
