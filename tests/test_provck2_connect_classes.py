@@ -40,6 +40,7 @@ BAIT_STORE = "PROVCK2-FAKE-BAIT-2002-not-a-real-key"
 BAIT_NET = "PROVCK2-FAKE-BAIT-3003-not-a-real-key"
 BAIT_HTTP = "PROVCK2-FAKE-BAIT-4004-not-a-real-key"
 BAIT_UNKNOWN = "PROVCK2-FAKE-BAIT-5005-not-a-real-key"
+BAIT_TRUNC = "PROVCK2-FAKE-BAIT-6006-not-a-real-key"
 
 CANNED_USAGE = {"input_tokens": 3, "output_tokens": 5,
                 "cached_tokens": 0, "reasoning_tokens": 0}
@@ -282,3 +283,70 @@ def test_unknown_statusless_class_and_no_leak(tmp_path, monkeypatch):
     audit_text = str(app.state.k04_ctx.audit_sink.records)
     _assert_no_leak(BAIT_UNKNOWN, audit_text, _connections_text(tmp_path),
                     json.dumps(rows), "weird local failure")
+
+
+def test_truncated_body_maps_to_network_class_and_no_leak(
+        tmp_path, monkeypatch):
+    """Garbled/truncated gateway body: transport failure, network class.
+
+    http.client read errors and undecodable bytes are plain Exceptions
+    (not OSError); the transport must map them to the network class with
+    the generic reason, never surfacing body bytes.
+    """
+    import http.client as _httpclient
+
+    class _TruncatedResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            raise _httpclient.IncompleteRead(
+                partial=b"\xff\xfe-garbled-%s" % BAIT_TRUNC.encode(),
+                expected=128)
+
+    monkeypatch.setattr(_urlreq, "urlopen",
+                        lambda request, timeout=None: _TruncatedResp())
+    client, app = _make_client(tmp_path)
+    _create_project(client)
+    key_ref = _save_key(client, BAIT_TRUNC)
+    conn = _connect(client, key_ref, "m-trunc")
+    assert conn.status_code == 200, conn.text
+    _assert_no_leak(BAIT_TRUNC, conn.text, "garbled", "unreadable")
+    rows = _rows(client)
+    assert rows["openai"]["health"] == "ERROR", rows
+    assert rows["openai"].get("error") == "provider check failed", rows
+    proof = _evidence(app)
+    assert len(proof) == 1, proof
+    assert proof[0]["class"] == "network", proof
+    assert proof[0]["code"] == "EVIDENCE_PROBE_NETWORK", proof
+    assert proof[0]["store_attempts"] == 1, proof
+    audit_text = str(app.state.k04_ctx.audit_sink.records)
+    _assert_no_leak(BAIT_TRUNC, audit_text, _connections_text(tmp_path),
+                    json.dumps(rows), "garbled")
+
+    class _BadBytesResp(_TruncatedResp):
+        def read(self):
+            return b"\xff\xfe-not-utf8-%s" % BAIT_TRUNC.encode()
+
+    monkeypatch.setattr(_urlreq, "urlopen",
+                        lambda request, timeout=None: _BadBytesResp())
+    part2 = tmp_path / "part2"
+    part2.mkdir(exist_ok=True)
+    client2, app2 = _make_client(part2)
+    _create_project(client2)
+    key_ref2 = _save_key(client2, BAIT_TRUNC)
+    conn2 = _connect(client2, key_ref2, "m-badbytes")
+    assert conn2.status_code == 200, conn2.text
+    rows2 = _rows(client2)
+    assert rows2["openai"].get("error") == "provider check failed", rows2
+    proof2 = [r for r in app2.state.k04_ctx.audit_sink.records
+              if isinstance(r, dict) and r.get("event") == "provck2-evidence"
+              and r.get("provider_id") == "openai"]
+    assert len(proof2) == 1, proof2
+    assert proof2[0]["class"] == "network", proof2
+    assert proof2[0]["code"] == "EVIDENCE_PROBE_NETWORK", proof2
+    _assert_no_leak(BAIT_TRUNC, str(app2.state.k04_ctx.audit_sink.records),
+                    json.dumps(rows2))
