@@ -202,3 +202,61 @@ def evidence_table() -> list[dict]:
             ),
         },
     ]
+
+
+def served_rows() -> list[dict]:
+    """Return the K10WAVE served map: one row per open K10 row.
+
+    Each row names the serving route plus the proving test. Pure recorded
+    data, stdlib only, no network, no providers, no I/O, deterministic.
+    """
+    return [
+        {
+            "row": "R-328",
+            "route": "POST /k10/start/demo",
+            "test": (
+                "tests/test_k10open4_start_path.py::"
+                "test_k10open4_start_demo_brought_to_green"
+            ),
+        },
+        {
+            "row": "166",
+            "route": "GET /k10/start/evidence",
+            "test": (
+                "tests/test_k10open4_start_path.py::"
+                "test_k10open4_start_evidence_keeps_screenshots"
+            ),
+        },
+        {
+            "row": "R-343",
+            "route": "tools/start.py --smoke fresh profile",
+            "test": (
+                "tests/test_k10st1_clean_boot.py::"
+                "test_rowR343_fresh_install_no_test_data"
+            ),
+        },
+        {
+            "row": "165",
+            "route": "tools/start.py --smoke hash plus smoke",
+            "test": (
+                "tests/test_k10st1_clean_boot.py::"
+                "test_row165_exe_from_script_hash_smoke"
+            ),
+        },
+        {
+            "row": "167",
+            "route": "tools/start.py --smoke clean profile",
+            "test": (
+                "tests/test_k10st1_clean_boot.py::"
+                "test_row167_installed_app_check_clean_profile"
+            ),
+        },
+        {
+            "row": "M-P3-89",
+            "route": "tools/start.py portable copy identical",
+            "test": (
+                "tests/test_k10st1_clean_boot.py::"
+                "test_rowMP389_portable_start_identical"
+            ),
+        },
+    ]
