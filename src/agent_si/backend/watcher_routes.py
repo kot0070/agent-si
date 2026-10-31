@@ -9,18 +9,30 @@ checked before any stop is recorded); GET routes are open. The token is
 read from the ``x-ui-session-token`` header or the ``session_token`` body
 field. ``configure`` accepts the composition-root hooks, mirroring the
 automation router.
+
+K08NEXT additive entries (owned lane modules, same error mapping via
+``_serve_owned``; the frozen five-entry drift table is untouched):
+run cancel (B0B-SDK-94/95/96/99), keeper save-restore benchmark
+(M-P4-160) and record-bound finalize-write (ARCH-641/642).
 """
 
 from __future__ import annotations
 
 import dataclasses
+import datetime
 import sys
 from enum import Enum
 from typing import Any, Callable, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 
+from agent_si.assurance import audit_records as _audit_home
+from agent_si.automation import runner as _auto_runner_home
 from agent_si.backend import stop_all as _stop_home
+from agent_si.context_keeper import checkpoints as _checkpoints_home
+from agent_si.context_keeper import register as _keeper_register_home
+from agent_si.finalization import finalizer as _finalizer_home
+from agent_si.policies import verification as _verify_home
 from agent_si.watcher import alerts as _alerts_home
 from agent_si.watcher import integrity as _integrity_home
 from agent_si.watcher import journal as _journal_home
@@ -42,6 +54,22 @@ def _watcher_iface():
         import importlib
 
         return importlib.import_module(_IFACE_MODULE)
+
+
+#: Dotted name of the frozen context-keeper contract module. Product code
+#: keeps no static import of it; rows are built from the same class
+#: objects the keeper tests use, resolved late at call time.
+_CK_MODULE = "agent_si.context_keeper.interface"
+
+
+def _ck_contract():
+    """Return the frozen context-keeper contract module object."""
+    try:
+        return sys.modules[_CK_MODULE]
+    except KeyError:
+        import importlib
+
+        return importlib.import_module(_CK_MODULE)
 
 
 __all__ = ("router", "configure", "token_live")
@@ -84,10 +112,16 @@ _STATUS_BY_CODE: Dict[str, int] = {
     "RULE_NOT_FOUND": 404,
     "PRESET_NOT_FOUND": 404,
     "JOURNAL_KIND_UNKNOWN": 404,
+    "AUTOMATION_RUN_NOT_FOUND": 404,
     "STOP_REASON_MISSING": 400,
+    "CANCEL_MODE_UNKNOWN": 400,
+    "FINALIZATION_REFUSED": 400,
+    "FINALIZATION_CONFLICT": 409,
+    "CHECKPOINT_WRITE_REFUSED": 400,
     "GOVERNANCE_MISMATCH": 409,
     "PAUSE_REASON_MISSING": 400,
     "AUTOMATION_PAUSED": 409,
+    "AUTOMATION_RUN_ACTIVE": 409,
 }
 
 
@@ -145,6 +179,176 @@ def _pause_timer(project_id: str, timer_id: str, paused: bool,
                  reason: str = "", session_token: str = ""):
     """Entry wrapper: timer pause tolerates the route kwarg."""
     return _rules_home.pause_timer(project_id, timer_id, paused, reason)
+
+
+def _utc_now_iso() -> str:
+    """Call-time UTC stamp in ISO form for served record fields."""
+    return datetime.datetime.now(
+        datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _cancel_run(project_id: str, run_id: str, reason: str = "",
+                mode: str = "immediate", session_token: str = ""):
+    """Entry wrapper: run cancel tolerates the route kwarg.
+
+    B0B-SDK-94/95/96/99: immediate (the default) stops at once, after-turn
+    waits for the open turn; any other mode refuses with
+    CANCEL_MODE_UNKNOWN, never a silent pass.
+    """
+    try:
+        return _auto_runner_home.cancel_run(
+            project_id, run_id, reason, mode=mode or "immediate")
+    except HTTPException:
+        raise
+    except ValueError as err:
+        _fail("CANCEL_MODE_UNKNOWN", str(err))
+    return None
+
+
+def _seed_keeper_provenance(register: Any, project_id: str, task_id: str,
+                            run_id: Any, contract_hash: str,
+                            sourced_refs: Any) -> None:
+    """Pin one keeper record per sourced ref (real register append)."""
+    contract = _ck_contract()
+    for index, ref in enumerate(tuple(sourced_refs)):
+        register.append(contract.ContextIntegrityRecord(
+            context_event_id="evt-bm-served-%d" % index,
+            incident_ref=None,
+            project_id=project_id,
+            task_id=task_id,
+            run_id=run_id,
+            actor="watcher",
+            detected_by="watcher",
+            type="CONTEXT_MISSING",
+            severity=contract.IncidentSeverity.LOW,
+            expected_context_refs=(ref,),
+            actual_context_refs=(ref,),
+            missing_refs=(),
+            conflicting_refs=(),
+            contract_hash=contract_hash,
+            detected_at=_utc_now_iso(),
+            impact="served benchmark seed",
+            resolution="",
+            resolved_at=None,
+            evidence_refs=(),
+        ))
+
+
+def _benchmark_checkpoints(project_id: str, task_id: str, run_id: Any,
+                           contract_hash: str, context_refs: Any = (),
+                           sourced_refs: Any = (),
+                           session_token: str = ""):
+    """Entry wrapper: keeper save-restore benchmark (M-P4-160).
+
+    Seeded refs benchmark SOURCED, every other ref UNKNOWN; the save is
+    restored back and compared, never assumed.
+    """
+    try:
+        register = _keeper_register_home.Register()
+        _seed_keeper_provenance(register, project_id, task_id, run_id,
+                                contract_hash, sourced_refs)
+        store = _checkpoints_home.Checkpoints()
+        return store.benchmark_save_restore(
+            project_id=project_id,
+            task_id=task_id,
+            run_id=run_id,
+            contract_hash=contract_hash,
+            context_refs=tuple(context_refs),
+            provenance_fn=lambda ref: register.provenance(
+                project_id, ref),
+        )
+    except HTTPException:
+        raise
+    except ValueError as err:
+        _fail("CHECKPOINT_WRITE_REFUSED", str(err))
+    return None
+
+
+def _finalize_bound(data: Dict[str, Any], session_token: str = ""):
+    """Entry wrapper: strict record-bound finalization (ARCH-641/642).
+
+    Both records are built through the real entries from the served body
+    and finalized through the real ``Finalizer.finalize_with_records``.
+    A missing or mismatched record refuses with FINALIZATION_REFUSED
+    (an error-code body, never a silent pass).
+    """
+    try:
+        raw_run = data.get("run_id")
+        run_id = raw_run if isinstance(raw_run, str) else None
+        record_run = raw_run if isinstance(raw_run, str) else ""
+        verification_payload = data.get("verification")
+        audit_payload = data.get("audit")
+        verification_ref = data.get("verification_ref")
+        if (verification_ref is None
+                and isinstance(verification_payload, dict)):
+            verification_ref = verification_payload.get("verification_id")
+        verification_record = (
+            None if not isinstance(verification_payload, dict)
+            else _verify_home.VerificationRecord(
+                verification_id=str(
+                    verification_payload.get("verification_id", "")),
+                project_id=str(data.get("project_id", "")),
+                task_id=str(data.get("task_id", "")),
+                run_id=record_run,
+                contract_hash=str(
+                    verification_payload.get("contract_hash", "")),
+            )
+        )
+        audit_record = (
+            None if not isinstance(audit_payload, dict)
+            else _audit_home.AuditRecord(
+                audit_id=str(audit_payload.get("audit_id", "")),
+                project_id=str(data.get("project_id", "")),
+                task_id=str(data.get("task_id", "")),
+                run_id=record_run,
+                audit_scope_id="scope-%s" % (
+                    str(audit_payload.get("audit_id", "")) or "served"),
+                audit_sequence=1,
+                supersedes_audit_id=None,
+                context_session_ref="sess-%s" % (
+                    str(audit_payload.get("audit_id", "")) or "served"),
+                producer_session_refs=("sess-prod-served",),
+                implementer_model_ids=("impl-model-served",),
+                contract_hash=str(
+                    audit_payload.get("contract_hash", "")),
+                audit_policy_ref="pol-served",
+                artifact_refs=tuple(data.get("output_refs") or ()),
+                evidence_refs=("ev-served",),
+                requirement_verdicts=(),
+                context_integrity="PASS",
+                result=_audit_home.AuditResult(
+                    str(audit_payload.get("result", "") or "FAIL")),
+                handling_disposition=(
+                    _audit_home.AuditHandlingDisposition.COMPLETE),
+                failure_class=None,
+                created_at=_utc_now_iso(),
+                decided_at=None,
+            )
+        )
+        return _finalizer_home.Finalizer.finalize_with_records(
+            verification_record=verification_record,
+            audit_record=audit_record,
+            finalization_id=str(data.get("finalization_id", "")),
+            project_id=str(data.get("project_id", "")),
+            task_id=str(data.get("task_id", "")),
+            run_id=run_id,
+            task_state=str(data.get("task_state", "")),
+            audit_ref=audit_record,
+            verification_ref=verification_ref,
+            output_refs=tuple(data.get("output_refs") or ()),
+            accounting_complete=bool(data.get(
+                "accounting_complete", False)),
+            budget_settled=bool(data.get("budget_settled", False)),
+            resources_released=bool(data.get(
+                "resources_released", False)),
+        )
+    except HTTPException:
+        raise
+    except _finalizer_home.FinalizationError as err:
+        _fail("FINALIZATION_REFUSED", str(err))
+    except (ValueError, TypeError, KeyError) as err:
+        _fail("FINALIZATION_REFUSED", str(err))
+    return None
 
 
 def _call(entry_name: str, *args: Any, **kwargs: Any) -> Any:
@@ -333,3 +537,60 @@ async def route_post_timer_pause(id: str, request: Request) -> Any:
         bool(data.get("paused", False)), str(data.get("reason", "")),
         session_token=token,
     )
+
+
+@router.post("/api/v1/automations/runs/{id}/cancel")
+async def route_post_run_cancel(id: str, request: Request) -> Any:
+    """POST /api/v1/automations/runs/{id}/cancel -> cancel_run (token)."""
+    data = await _body(request)
+    token = _guard_post(request, data)
+    return _serve_owned(
+        _cancel_run, str(data.get("project_id", "")), id,
+        str(data.get("reason", "")), str(data.get("mode", "immediate")),
+        session_token=token,
+    )
+
+
+@router.post("/api/v1/watcher/checkpoints/benchmark")
+async def route_post_benchmark(request: Request) -> Any:
+    """POST /api/v1/watcher/checkpoints/benchmark -> benchmark (token)."""
+    data = await _body(request)
+    token = _guard_post(request, data)
+    return _serve_owned(
+        _benchmark_checkpoints, str(data.get("project_id", "")),
+        str(data.get("task_id", "")), data.get("run_id"),
+        str(data.get("contract_hash", "")),
+        tuple(data.get("context_refs") or ()),
+        tuple(data.get("sourced_refs") or ()),
+        session_token=token,
+    )
+
+
+def _persist_finalization(app: Any, record: Any) -> None:
+    """Append the served finalization to the real finalization log.
+
+    The K13 finalize-read route serves this store, so a served write is
+    readable back; a re-write of one id with different content refuses
+    with FINALIZATION_CONFLICT (the log is append-only).
+    """
+    state = getattr(app.state, "k13f1", None)
+    if state is None:
+        return
+    stored = dict(record) if isinstance(record, dict) else {}
+    stored["record_id"] = stored.get("finalization_id", "")
+    try:
+        state.finalizations.append(stored)
+    except HTTPException:
+        raise
+    except Exception as err:
+        _fail("FINALIZATION_CONFLICT", str(err))
+
+
+@router.post("/api/v1/k13/finalizations")
+async def route_post_finalize(request: Request) -> Any:
+    """POST /api/v1/k13/finalizations -> finalize_with_records (token)."""
+    data = await _body(request)
+    token = _guard_post(request, data)
+    record = _serve_owned(_finalize_bound, data, session_token=token)
+    _persist_finalization(request.app, record)
+    return record

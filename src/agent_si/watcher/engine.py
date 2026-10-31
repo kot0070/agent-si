@@ -7,18 +7,24 @@ commits the chosen script plus params for a fired card and returns the
 fresh evaluation of that card. Due cards derive from the rule-card
 registry, never from hard-coded ids. :func:`resolve_action` picks the
 script plus params for one card from the card's own fields.
+Every resolved action is recorded and pausable; per-service usage is
+served from stored facts only; protected scripts are refused through
+the served guard before anything is committed.
 :func:`supervised_restart` records every supervised restart attempt in
 the journal; the watcher itself never stops agents.
 """
 
 from __future__ import annotations
 
+import importlib
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, List, Tuple
 
 from agent_si.automation import cleanup as _cleanup_home
 from agent_si.automation import service_status as _service_home
+from agent_si.watcher import guard as guard_home
 from agent_si.watcher import integrity as integrity_store
 from agent_si.watcher import journal as journal_store
 from agent_si.watcher import rules as rule_cards
@@ -29,13 +35,20 @@ __all__ = (
     "WatcherError",
     "EngineTick",
     "CardAction",
+    "ActionPauseState",
+    "ServiceUsageRow",
+    "ServiceUsage",
     "RestartReceipt",
     "ScriptResult",
     "DUE_CARDS",
     "STANDARD_SCRIPTS",
     "tick",
     "decide",
+    "escape_alert_block",
     "resolve_action",
+    "recorded_actions",
+    "pause_action",
+    "service_usage",
     "supervised_restart",
     "last_choice",
     "run_script",
@@ -62,6 +75,35 @@ class CardAction:
 
 
 @dataclass(frozen=True)
+class ActionPauseState:
+    """Action pause flag: a paused action refuses to resolve until resumed."""
+
+    card_id: str
+    project_id: str
+    paused: bool = False
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class ServiceUsageRow:
+    """Per-service usage served from stored dispatch facts only."""
+
+    service_id: str
+    in_use: bool = False
+    last_used: str = ""
+    last_agent: str = ""
+
+
+@dataclass(frozen=True)
+class ServiceUsage:
+    """Per-service usage for one project; empty when nothing is stored."""
+
+    project_id: str
+    services: Tuple[ServiceUsageRow, ...] = ()
+    next_step: str = ""
+
+
+@dataclass(frozen=True)
 class RestartReceipt:
     """Supervised restart attempt receipt plus its journal row ref."""
 
@@ -79,6 +121,18 @@ DUE_CARDS = tuple(rule_cards.RULES)
 #: Committed choices per project: card id, script, params.
 _CHOICES: Dict[str, Tuple[str, str, Tuple[str, ...]]] = {}
 
+#: Recorded actions per project, in resolve order.
+_RECORDED: Dict[str, List[CardAction]] = {}
+
+#: Pause flags per action: "project_id\0card_id" to the pause reason.
+#: A present entry means the action is paused; absent means live.
+_ACTION_PAUSED: Dict[str, str] = {}
+
+
+def _action_key(project_id: str, card_id: str) -> str:
+    """Storage key for one project's action pause flag."""
+    return "%s\0%s" % (str(project_id), str(card_id))
+
 
 def _utcnow() -> str:
     """Current UTC time rendered like the frozen timestamps."""
@@ -91,8 +145,10 @@ def _utcnow() -> str:
 
 
 def reset_state() -> None:
-    """Drop committed choices and service-watch baselines."""
+    """Drop committed choices, recorded actions, pauses, watch baselines."""
     _CHOICES.clear()
+    _RECORDED.clear()
+    _ACTION_PAUSED.clear()
     _SERVICE_BASELINE.clear()
 
 
@@ -111,21 +167,180 @@ def tick(project_id: str) -> EngineTick:
 
 def decide(project_id: str, card_id: str, script: str,
            params: Tuple[str, ...]) -> rule_cards.WatchDecision:
-    """Commit the chosen script plus params; return the fresh decision."""
-    decision = rule_cards.evaluate(project_id, card_id)
-    _CHOICES[str(project_id)] = (str(card_id), str(script), tuple(params))
+    """Commit the chosen script plus params; return the fresh decision.
+
+    The chosen script runs through the served guard first: a protected
+    path (climbing or foreign to the workspace root, or flagged by
+    stored escape facts) is refused before anything is evaluated or
+    committed, and the block is journaled as one GUARD_BLOCK row.
+    """
+    key = str(project_id)
+    name = str(script)
+    escape_alert_block(key, name, os.getcwd())
+    decision = rule_cards.evaluate(key, card_id)
+    _CHOICES[key] = (str(card_id), name, tuple(params))
     return decision
 
 
+def _absolute_outside(target: str, root: str) -> bool:
+    """True when an absolute candidate path lies outside the workspace root.
+
+    Relative candidates stay the served guard's own business (its climb
+    plus stored-fact checks); an absolute path is resolved plus normalised
+    against the root here, so a same-drive sibling or a foreign-drive path
+    can never reach commit on the production watcher call path.
+    """
+    text = str(target)
+    if not (
+        os.path.isabs(text)
+        or text.startswith("\\\\")
+        or text.startswith("/")
+        or (len(text) >= 2 and text[1] == ":")
+    ):
+        return False
+    base = os.path.normcase(os.path.normpath(os.path.abspath(str(root))))
+    cand = os.path.normcase(os.path.normpath(os.path.abspath(text)))
+    return not (cand == base or cand.startswith(base + os.sep))
+
+
+def escape_alert_block(project_id: str, path: str,
+                       workspace_root: str = "") -> guard_home.GuardDecision:
+    """Alert plus block for an escape detected from stored facts.
+
+    Runs the served guard over the candidate path on the production
+    watcher call path: an escape (climbing or foreign to the workspace
+    root, or flagged by stored TAMPER_ATTEMPT / GUARD_BLOCK facts) keeps
+    its GUARD_BLOCK alert row and the write is blocked with
+    GOVERNANCE_MISMATCH; an allowed path returns its guard decision
+    and writes nothing.
+    """
+    key = str(project_id)
+    target = str(path)
+    root = str(workspace_root) if workspace_root else os.getcwd()
+    if _absolute_outside(target, root):
+        journal_store.append_event(
+            key, "watcher", "GUARD_BLOCK",
+            "workspace escape blocked: %s" % target, (target,),
+        )
+        raise WatcherError(
+            "GOVERNANCE_MISMATCH",
+            "protected script refused: %s" % (target,),
+        )
+    guard = guard_home.check_escape(key, target, root)
+    if not guard.allowed:
+        raise WatcherError(
+            "GOVERNANCE_MISMATCH",
+            "protected script refused: %s" % (target,),
+        )
+    return guard
+
+
 def resolve_action(project_id: str, card_id: str) -> CardAction:
-    """Pick the script plus params for one card from its own fields."""
-    card = rule_cards.describe(card_id)
+    """Pick the script plus params for one card from its own fields.
+
+    Every resolution is recorded: one AUTOMATION_RUN journal row plus
+    the returned action in :func:`recorded_actions`. A paused action
+    refuses with AUTOMATION_PAUSED and records nothing until resumed.
+    """
+    key = str(project_id)
+    name = str(card_id)
+    card = rule_cards.describe(name)
+    reason = _ACTION_PAUSED.get(_action_key(key, name))
+    if reason is not None:
+        raise WatcherError(
+            "AUTOMATION_PAUSED",
+            "action %r paused: %s" % (name, reason),
+        )
     script = "scripts/%s_check.py" % card.area
     params = ("--model", card.model, "--hang-minutes", str(card.hang_minutes))
-    return CardAction(
-        card_id=str(card_id),
+    action = CardAction(
+        card_id=name,
         script=script,
         params=params,
+    )
+    journal_store.append_event(
+        key, "watcher", "AUTOMATION_RUN",
+        "action %s script %s params=%d" % (name, script, len(params)),
+        (name,),
+    )
+    _RECORDED.setdefault(key, []).append(action)
+    return action
+
+
+def recorded_actions(project_id: str) -> Tuple[CardAction, ...]:
+    """Serve the recorded actions for one project, in resolve order.
+
+    Empty when nothing was resolved yet; reads serve recorded actions
+    only and journal nothing.
+    """
+    return tuple(_RECORDED.get(str(project_id), ()))
+
+
+def pause_action(project_id: str, card_id: str, paused: bool,
+                 reason: str = "") -> ActionPauseState:
+    """Pause or resume one resolved action.
+
+    Pausing needs a non-empty reason (PAUSE_REASON_MISSING otherwise);
+    resuming clears the flag. Neither path journals: the refusal plus
+    the recorded resolutions stay the observable facts.
+    """
+    key = str(project_id)
+    name = str(card_id)
+    flag = bool(paused)
+    text = str(reason)
+    if flag:
+        if not text.strip():
+            raise WatcherError(
+                "PAUSE_REASON_MISSING",
+                "pausing action %r needs a reason" % (name,),
+            )
+        _ACTION_PAUSED[_action_key(key, name)] = text
+    else:
+        _ACTION_PAUSED.pop(_action_key(key, name), None)
+        text = ""
+    return ActionPauseState(
+        card_id=name,
+        project_id=key,
+        paused=flag,
+        reason=text,
+    )
+
+
+def service_usage(project_id: str) -> ServiceUsage:
+    """Serve per-service usage for one project from stored facts only.
+
+    Usage fields come from stored dispatch plus egress metadata, never
+    from probes, so no numbers are invented. A project with no stored
+    services serves an honest empty state carrying the next step.
+    """
+    key = str(project_id)
+    # Late bind so standalone callers (no backend import yet) still
+    # serve stored facts; a test double in sys.modules wins.
+    importlib.import_module("agent_si.automation.interface")
+    from agent_si.automation import service_watch as _watch_home
+    record = _watch_home.service_usage_record(key)
+    rows = [
+        ServiceUsageRow(
+            service_id=item.service_id,
+            in_use=item.in_use,
+            last_used=item.last_used,
+            last_agent=item.last_agent,
+        )
+        for item in record.services
+    ]
+    if rows:
+        return ServiceUsage(
+            project_id=key,
+            services=tuple(rows),
+            next_step="",
+        )
+    return ServiceUsage(
+        project_id=key,
+        services=(),
+        next_step=(
+            "no stored usage facts for %s: declare a service, "
+            "then record usage" % key
+        ),
     )
 
 
