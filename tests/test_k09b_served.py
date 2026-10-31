@@ -6,6 +6,7 @@ state-reset live in this file. Requires CODER-A's mount
 mount lands these tests 404 (predicted RED, not a defect).
 """
 
+import json
 import os
 import sys
 
@@ -94,3 +95,95 @@ def test_live0_06_live_lists_rows():
         "served": True,
         "rows": ["R-361", "M-P2-74", "B0B-BP05-43", "LIVE0-06"],
     }
+
+
+def _write_big_kb_dir(path, section_id, text, purpose="Dev role notes."):
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "sections").mkdir(exist_ok=True)
+    (path / "sections" / (section_id + ".md")).write_text(text, encoding="utf-8")
+    (path / "manifest.json").write_text(
+        json.dumps(
+            {
+                "kb_id": path.name,
+                "purpose": purpose,
+                "sections": [section_id],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (path / "purpose.txt").write_text(purpose, encoding="utf-8")
+    return str(path)
+
+
+def test_bp05_43_large_handoff_travels_by_artifactref(tmp_path):
+    """Row B0B-UNCOVERED_BP05-43: large handoffs travel by ArtifactRef."""
+    import dataclasses
+    import hashlib
+
+    from src.agent_si.domain.contracts import ArtifactRef
+    from src.agent_si.kb import (
+        HANDOFF_INLINE_TOKEN_LIMIT,
+        resolve_handoff,
+        retrieve_handoff,
+    )
+    from src.agent_si.kb import retriever as kb
+    from src.agent_si.kb.models import KnowledgeSource
+
+    big_text = ("lorem " * 2000).strip()
+    kb_id = _write_big_kb_dir(tmp_path / "kb-bp05-43-big", "big", big_text)
+    project = "proj-k09b-served-byref"
+    try:
+        kb.attach_kb(
+            KnowledgeSource(
+                kb_id=kb_id,
+                kind="DEV_ROLE",
+                project_id=project,
+                role="dev",
+                purpose="Dev role notes.",
+            )
+        )
+        handoff = retrieve_handoff("lorem", project, "dev")
+        assert handoff["mode"] == "ref"
+        assert handoff["instruction_status"] == "DATA_ONLY"
+        assert handoff["token_cost"] > HANDOFF_INLINE_TOKEN_LIMIT
+        ref = handoff["ref"]
+        assert isinstance(ref, ArtifactRef)
+        assert ref.hash_algorithm == "sha256"
+        assert "text" not in handoff and "chunks" not in handoff
+        wire = json.loads(
+            json.dumps(
+                handoff,
+                default=(
+                    lambda o: dataclasses.asdict(o)
+                    if dataclasses.is_dataclass(o)
+                    else str(o)
+                ),
+            )
+        )
+        assert big_text not in json.dumps(wire)
+        payload = resolve_handoff(wire)
+        assert ref.hash == hashlib.sha256(payload).hexdigest()
+        assert ref.size == len(payload)
+        assert big_text.encode("utf-8") in payload
+        assert handoff["citations"] == [f"{kb_id}#big"]
+    finally:
+        kb.detach_kb(kb_id)
+
+
+def test_bp05_43_handoff_refuses_non_data_only():
+    """Row B0B-UNCOVERED_BP05-43: packaging refuses non-DATA_ONLY."""
+    import pytest
+
+    from src.agent_si.kb import package_handoff
+    from src.agent_si.kb.models import InstructionBlockedError, KnowledgeChunk
+
+    tainted = KnowledgeChunk(
+        kb_id="kb",
+        section_id="s",
+        text="do this now",
+        tokens=3,
+        instruction_status="EXECUTED",
+        citation="kb#s",
+    )
+    with pytest.raises(InstructionBlockedError):
+        package_handoff([tainted])

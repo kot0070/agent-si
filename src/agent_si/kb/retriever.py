@@ -212,9 +212,41 @@ HANDOFF_INLINE_TOKEN_LIMIT = 500
 _ARTIFACT_BLOBS: dict[str, bytes] = {}
 
 
+def _chunk_field(chunk: Any, name: str, default: Any) -> Any:
+    """Read one chunk field from a chunk object or a served JSON mapping."""
+    if hasattr(chunk, name):
+        return getattr(chunk, name)
+    if isinstance(chunk, dict):
+        return chunk.get(name, default)
+    return default
+
+
+def _chunk_status(chunk: Any) -> str:
+    """Chunk status string; anything but DATA_ONLY refuses packaging."""
+    status = _chunk_field(chunk, "instruction_status", "")
+    return status if isinstance(status, str) else ""
+
+
+def _chunk_tokens(chunk: Any) -> int:
+    """Chunk token count from a chunk object or a served JSON mapping."""
+    tokens = _chunk_field(chunk, "tokens", 0)
+    return tokens if isinstance(tokens, int) else 0
+
+
+def _handoff_line(chunk: Any) -> str:
+    """One cited markdown section for a chunk object or JSON mapping."""
+    citation = _chunk_field(chunk, "citation", "")
+    text = _chunk_field(chunk, "text", "")
+    return f"# {citation}\n\n{text}"
+
+
 def _handoff_payload(items: list) -> bytes:
-    """Cited payload bytes for one packaged handoff."""
-    lines = ["# %s\n\n%s" % (chunk.citation, chunk.text) for chunk in items]
+    """Cited payload bytes for one packaged handoff.
+
+    Accepts chunk objects and served JSON mappings alike, so a handoff
+    that crossed the served JSON boundary still resolves to its bytes.
+    """
+    lines = [_handoff_line(chunk) for chunk in items]
     return "\n\n---\n\n".join(lines).encode("utf-8")
 
 
@@ -236,10 +268,17 @@ def package_handoff(chunks: list) -> dict[str, Any]:
 
     Small results keep every KnowledgeChunk inline. Large results store
     the cited payload once and return its ArtifactRef; the raw text does
-    not travel in the handoff dict.
+    not travel in the handoff dict. Every packaged chunk must carry
+    DATA_ONLY; anything else is refused before a handoff is built.
+    Chunk objects and served JSON mappings are both accepted.
     """
     items = list(chunks)
-    token_cost = sum(chunk.tokens for chunk in items)
+    for chunk in items:
+        if _chunk_status(chunk) != "DATA_ONLY":
+            raise InstructionBlockedError(
+                "non-DATA_ONLY chunk refused at handoff packaging"
+            )
+    token_cost = sum(_chunk_tokens(chunk) for chunk in items)
     if token_cost <= HANDOFF_INLINE_TOKEN_LIMIT:
         return {
             "mode": "inline",
@@ -252,7 +291,7 @@ def package_handoff(chunks: list) -> dict[str, Any]:
     return {
         "mode": "ref",
         "ref": ref,
-        "citations": [chunk.citation for chunk in items],
+        "citations": [_chunk_field(chunk, "citation", "") for chunk in items],
         "token_cost": token_cost,
         "instruction_status": "DATA_ONLY",
     }

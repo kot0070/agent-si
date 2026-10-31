@@ -14,20 +14,25 @@ from .models import (
     WholeKbReadRefused,
 )
 from .retriever import (
+    HANDOFF_INLINE_TOKEN_LIMIT,
     attach_kb,
     detach_kb,
     list_kbs,
     manifest_lookup,
+    package_handoff,
     read_section,
     record_hit,
     record_miss,
     record_web_fallback,
+    resolve_handoff,
     retrieve,
+    retrieve_handoff,
     savings_report,
     set_role_kb_enabled,
 )
 
 __all__ = [
+    "HANDOFF_INLINE_TOKEN_LIMIT",
     "InstructionBlockedError",
     "KnowledgeChunk",
     "KnowledgeSource",
@@ -38,11 +43,14 @@ __all__ = [
     "detach_kb",
     "list_kbs",
     "manifest_lookup",
+    "package_handoff",
     "read_section",
     "record_hit",
     "record_miss",
     "record_web_fallback",
+    "resolve_handoff",
     "retrieve",
+    "retrieve_handoff",
     "savings_report",
     "set_role_kb_enabled",
 ]
