@@ -2754,4 +2754,64 @@ def create_app(settings: Any = None,
             raise HTTPException(
                 status_code=400, detail=str(err)) from None
 
+
+    # K11REST served lane (R-329/R-330/R-331/R-352; additions-only block):
+    # four rows over the lane modules (cards, retry ledger, offline
+    # selftest, launch fan-out). Open entries, no token; the launch
+    # registry is the only state touched.
+    @app.get("/api/k11rest/health")
+    def k11rest_health() -> dict[str, Any]:
+        """GET /api/k11rest/health -> display-only provider cards."""
+        from agent_si.providers.registry import k11rest_cards as _k11_cards
+
+        return {"cards": _k11_cards.build_cards()}
+
+    @app.post("/api/k11rest/retry-sim")
+    async def k11rest_retry_sim(request: Request) -> Any:
+        """POST /api/k11rest/retry-sim -> visible retry ledger."""
+        from agent_si.routing import k11rest_retry as _k11_retry
+
+        try:
+            _k11_body = await request.json()
+        except Exception:
+            _k11_body = {}
+        if not isinstance(_k11_body, dict):
+            _k11_body = {}
+        try:
+            return _k11_retry.simulate_retry(_k11_body.get("code"))
+        except ValueError as _k11_err:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "BAD_RETRY_CODE",
+                        "detail": str(_k11_err)}) from None
+
+    @app.get("/api/k11rest/prompt-factory/selftest")
+    def k11rest_pf_selftest() -> dict[str, Any]:
+        """GET /api/k11rest/prompt-factory/selftest -> offline verdict."""
+        from agent_si.prompt_factory import selftest as _k11_pf
+
+        return _k11_pf.run_selftest()
+
+    @app.post("/api/k11rest/launch")
+    async def k11rest_launch(request: Request) -> Any:
+        """POST /api/k11rest/launch -> parallel fan-out behind gates."""
+        from agent_si.automation import templates as _k11_tpl
+
+        try:
+            _k11_launch_body = await request.json()
+        except Exception:
+            _k11_launch_body = {}
+        if not isinstance(_k11_launch_body, dict):
+            _k11_launch_body = {}
+        try:
+            return _k11_tpl.launch_fanout(
+                _k11_launch_body.get("parts"),
+                project_id=str(_k11_launch_body.get("project_id")
+                               or "k11rest"))
+        except ValueError as _k11_launch_err:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "BAD_LAUNCH_PARTS",
+                        "detail": str(_k11_launch_err)}) from None
+
     return app
