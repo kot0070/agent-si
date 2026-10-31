@@ -34,6 +34,29 @@ _EVIDENCE_DIR_NAME = "release-evidence"
 #: Screenshot names recorded by the end-to-end run.
 _SCREENSHOT_NAMES = ("shot-01-start.png", "shot-02-run.png", "shot-03-done.png")
 
+#: Env var carrying the product data dir. The single os.environ read
+#: call-site for it lives HERE so backend/app.py never names os.environ
+#: (K04WIRE1 rule).
+DATA_DIR_ENV_VAR = "AGENT_SI_DATA_DIR"
+
+
+def resolve_env_data_dir() -> str | None:
+    """Return the validated env data dir, ensuring it exists (K10ST1-B).
+
+    None when unset. Blank fails loud (never a silent fallback).
+    """
+    raw = os.environ.get(DATA_DIR_ENV_VAR)
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if not text:
+        raise ValueError(
+            "K10ST1-B: %s is set but empty: pass "
+            "a real dir, never a silent fallback" % DATA_DIR_ENV_VAR)
+    resolved = os.path.abspath(os.path.expanduser(text))
+    os.makedirs(resolved, exist_ok=True)
+    return resolved
+
 
 def _default_legacy_dir() -> str:
     """Return the previous per-user home (portable, never a machine path)."""

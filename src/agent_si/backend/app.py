@@ -105,31 +105,24 @@ def migrate_legacy_data(data_dir: str,
 def get_data_dir(settings: Any = None) -> str | None:
     """Resolve the consumer-layer product data dir (K10ST1-B).
 
-    Single AGENT_SI_DATA_DIR read call-site in this module. The env dir
+    The single environment read call-site lives in k10_start so this
+    module never touches process environment directly (K04WIRE1 rule). The env dir
     wins; a differing harness settings dir is rejected (ValueError); with
     no env dir the harness dir (if any) is returned for the legacy path,
     else None. An explicitly blank env value fails loud (never a silent
     fallback). Resolving from env also ensures the dir exists and runs
     the first-start legacy migration (originals kept).
     """
-    _raw = os.environ.get(DATA_DIR_ENV_VAR)
+    from agent_si.k10_start import resolve_env_data_dir
+    _resolved = resolve_env_data_dir()
     _harness = _harness_store_dir(settings)
-    if _raw is not None:
-        _text = str(_raw).strip()
-        if not _text:
+    if _resolved is not None:
+        if (_harness is not None
+                and os.path.abspath(_harness) != _resolved):
             raise ValueError(
-                f"K10ST1-B: {DATA_DIR_ENV_VAR} is set but empty: pass "
-                "a real dir, never a silent fallback")
-        _resolved = os.path.abspath(os.path.expanduser(_text))
-        if (
-            _harness is not None
-            and os.path.abspath(_harness) != _resolved
-        ):
-            raise ValueError(
-                f"K10ST1-B: harness settings data dir {_harness!r} "
-                f"rejected: the data dir comes from {DATA_DIR_ENV_VAR} "
-                "only")
-        os.makedirs(_resolved, exist_ok=True)
+                "K10ST1-B: harness settings data dir %r "
+                "rejected: the data dir comes from %s "
+                "only" % (_harness, "AGENT_SI_DATA_DIR"))
         migrate_legacy_data(_resolved)
         return _resolved
     return _harness
