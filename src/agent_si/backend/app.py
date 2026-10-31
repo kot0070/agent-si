@@ -9,7 +9,9 @@ AI-generated. Product code uses only parts.py + ledger.py.
 
 from __future__ import annotations
 
+import os
 import secrets
+import shutil
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -29,6 +31,108 @@ REPORT_ROW_NOT_FOUND = "REPORT_ROW_NOT_FOUND"
 
 AuthHook = Callable[[str | None, str, str], bool]
 RateHook = Callable[[str], bool]
+
+
+#: Env var carrying the product data dir (K10ST1-B consumer lane). The
+#: product start path supplies it via --data-dir argv/env; this module
+#: holds the single read call-site (get_data_dir). Harness settings are
+#: never consulted for the dir.
+DATA_DIR_ENV_VAR = "AGENT_SI_DATA_DIR"
+
+#: Harness settings keys that once carried a store dir. A differing
+#: harness-carried dir is rejected once the env dir is set.
+_HARNESS_STORE_KEYS = ("store_dir", "data_dir", "data_directory")
+
+#: First-start legacy pair migrated into the data dir (copy, never move).
+_MIGRATE_FILE_NAMES = ("settings.json", "credentials.json")
+
+#: Previous per-user home migrated on first start (portable; the same
+#: home already backs automation run-temp in agent_si.automation.cleanup).
+_LEGACY_HOME_DIRNAME = ".agent_si"
+
+
+def _harness_store_dir(settings: Any) -> str | None:
+    """Return a harness-carried store dir, if any (settings only)."""
+    for _key in _HARNESS_STORE_KEYS:
+        if isinstance(settings, Mapping):
+            _val = settings.get(_key)
+            if _val:
+                return str(_val)
+        elif settings is not None and hasattr(settings, _key):
+            _val = getattr(settings, _key)
+            if _val:
+                return str(_val)
+    return None
+
+
+def _default_legacy_dir() -> str:
+    """Previous per-user home (portable; never a machine path)."""
+    return os.path.join(os.path.expanduser("~"), _LEGACY_HOME_DIRNAME)
+
+
+def migrate_legacy_data(data_dir: str,
+                         legacy_dir: str | None = None) -> dict[str, str]:
+    """Copy the first-start settings+credentials pair into the data dir.
+
+    Copies settings.json + credentials.json from the legacy home (or an
+    explicit legacy_dir) into data_dir. Originals are kept (copy, never
+    move); a destination file that already exists is never overwritten,
+    so a repeat start is a no-op. Returns a per-file report.
+    """
+    _src = os.path.abspath(
+        legacy_dir if legacy_dir is not None else _default_legacy_dir())
+    _dst = os.path.abspath(data_dir)
+    _report: dict[str, str] = {}
+    if _src == _dst:
+        for _name in _MIGRATE_FILE_NAMES:
+            _report[_name] = "skipped-same-dir"
+        return _report
+    os.makedirs(_dst, exist_ok=True)
+    for _name in _MIGRATE_FILE_NAMES:
+        _from = os.path.join(_src, _name)
+        _to = os.path.join(_dst, _name)
+        if os.path.exists(_to):
+            _report[_name] = "skipped-present"
+            continue
+        if not os.path.isfile(_from):
+            _report[_name] = "skipped-absent"
+            continue
+        shutil.copy2(_from, _to)
+        _report[_name] = "copied"
+    return _report
+
+
+def get_data_dir(settings: Any = None) -> str | None:
+    """Resolve the consumer-layer product data dir (K10ST1-B).
+
+    Single AGENT_SI_DATA_DIR read call-site in this module. The env dir
+    wins; a differing harness settings dir is rejected (ValueError); with
+    no env dir the harness dir (if any) is returned for the legacy path,
+    else None. An explicitly blank env value fails loud (never a silent
+    fallback). Resolving from env also ensures the dir exists and runs
+    the first-start legacy migration (originals kept).
+    """
+    _raw = os.environ.get(DATA_DIR_ENV_VAR)
+    _harness = _harness_store_dir(settings)
+    if _raw is not None:
+        _text = str(_raw).strip()
+        if not _text:
+            raise ValueError(
+                f"K10ST1-B: {DATA_DIR_ENV_VAR} is set but empty: pass "
+                "a real dir, never a silent fallback")
+        _resolved = os.path.abspath(os.path.expanduser(_text))
+        if (
+            _harness is not None
+            and os.path.abspath(_harness) != _resolved
+        ):
+            raise ValueError(
+                f"K10ST1-B: harness settings data dir {_harness!r} "
+                f"rejected: the data dir comes from {DATA_DIR_ENV_VAR} "
+                "only")
+        os.makedirs(_resolved, exist_ok=True)
+        migrate_legacy_data(_resolved)
+        return _resolved
+    return _harness
 
 
 def _read_token(settings: Any) -> str | None:
@@ -240,6 +344,11 @@ def create_app(settings: Any = None,
     """
     _parts_store._store.clear()
 
+    # K10ST1-B (M-P4-134 / LIVE0-04): consumer-layer data dir behind
+    # the single get_data_dir call-site. First start migrates
+    # settings + credentials, keeping originals.
+    _k10_data_dir = get_data_dir(settings)
+
     configured = _read_token(settings)
     app_token = configured if configured else secrets.token_urlsafe(32)
 
@@ -248,6 +357,7 @@ def create_app(settings: Any = None,
     app.state.model_factory = model_factory
     ledgers: dict[str, PackageLedger] = {}
     app.state.ledgers = ledgers
+    app.state.data_dir = _k10_data_dir
 
     def default_auth_hook(token: str | None, actor: str, action: str) -> bool:
         if action != USER_WRITE:
@@ -749,7 +859,11 @@ def create_app(settings: Any = None,
                 return str(_val)
         return None
 
-    app.state.k02r3_store_dir = _k02r3_store_dir(settings)
+    app.state.k02r3_store_dir = (
+        _k10_data_dir
+        if _k10_data_dir is not None
+        else _k02r3_store_dir(settings)
+    )
     from agent_si.telemetry import run_store as _l0c06_telemetry_store
 
     app.state.telemetry_store_dir = app.state.k02r3_store_dir
@@ -866,7 +980,11 @@ def create_app(settings: Any = None,
             return _val
         return 5.0
 
-    _k04_dir = _k04_store_dir(settings)
+    _k04_dir = (
+        _k10_data_dir
+        if _k10_data_dir is not None
+        else _k04_store_dir(settings)
+    )
     _k04_config_error: Optional[str] = None
     if _k04_dir is None:
         _k04_config_error = (
@@ -2360,5 +2478,70 @@ def create_app(settings: Any = None,
             files_written=tuple(
                 str(v) for v in _k03a_tuples(data.get("files_written"))),
         )
+
+    # K10ST4 M-R-COMPET (MGR-B lane B: competitive audit; MGR-A mounts its
+    # own routes elsewhere in this file, untouched): recorded flow-by-flow
+    # audit with source plus snippet per claim (loopback TEST data only).
+    @app.get("/k10/compet/audit")
+    def k10_compet_audit() -> dict[str, Any]:
+        from agent_si.k10_compet import audit_flows as _k10_compet_flows
+
+        return {"testid": "k10st4-accept", "flows": _k10_compet_flows()}
+
+    # K10ST4 M-P4-162 (lane A: acceptance; MGR-B block above untouched):
+    # final acceptance over Docker plus services plus PowerShell (loopback).
+    @app.get("/k10/accept")
+    def k10_accept() -> dict[str, Any]:
+        from agent_si.k10_accept import get_acceptance_status as _k10_status
+
+        return {"testid": "k10st4-accept", **_k10_status()}
+
+    # K10ST4 M-P4-166 (lane A: combine on DEFAULT; MGR-B block above
+    # untouched): best plus KB plus benchmark plus Watcher (loopback).
+    @app.get("/k10/combine")
+    def k10_combine(package_id: str) -> dict[str, Any]:
+        from agent_si.k10_combine import combine_default as _k10_combine
+
+        return {"testid": "k10st4-accept", **_k10_combine(package_id)}
+
+    # K10OPEN4 start path (row 166): human-like end-to-end run record
+    # with release evidence including screenshots (loopback TEST only).
+    @app.get("/k10/start/evidence")
+    def k10open4_start_evidence() -> dict[str, Any]:
+        from agent_si.k10_start import (
+            record_release_evidence as _k10o4_evidence,
+        )
+
+        return {"testid": "k10open4-start",
+                **_k10o4_evidence(app.state.data_dir)}
+
+    # K10OPEN4 start path (row R-328): demo project brought to green
+    # inside the acceptance drive (loopback TEST data only).
+    @app.post("/k10/start/demo")
+    def k10open4_start_demo() -> dict[str, Any]:
+        from agent_si.k10_start import drive_demo_to_green as _k10o4_demo
+
+        return {"testid": "k10open4-start",
+                **_k10o4_demo(app.state.data_dir)}
+
+    # K10OPEN4 start path (row M-P4-138): first start migrates
+    # settings plus keys into the data dir, keeping originals. Runs
+    # here on the production call path off create_app (never a
+    # test-only wrapper).
+    if _k10_data_dir is not None:
+        from agent_si.k10_start import migrate_first_start as _k10o4_mig
+
+        app.state.k10open4_migrated = _k10o4_mig(_k10_data_dir)
+    else:
+        app.state.k10open4_migrated = {}
+
+    # K10OPEN4 start path (row M-P4-138, served report): per-file
+    # report of the first-start settings plus keys migration.
+    @app.get("/k10/start/migrate")
+    def k10open4_start_migrate() -> dict[str, Any]:
+        from agent_si.k10_start import migrate_first_start as _k10o4_mig2
+
+        return {"testid": "k10open4-start",
+                "migrated": _k10o4_mig2(app.state.data_dir)}
 
     return app
