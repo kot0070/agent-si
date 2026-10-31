@@ -9,9 +9,14 @@ from __future__ import annotations
 
 import collections.abc
 import os
-from typing import Callable, Protocol
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Protocol
 
 from .types import ActionClass, Argv, AuthMapping, ToolResult
+
+if TYPE_CHECKING:  # read-only contract usage; never a runtime import here
+    from .dispatcher import EscalationCard
 
 ToolFunc = Callable[[Argv, ActionClass, AuthMapping], ToolResult]
 """Real tool implementation behind an entry point (argv-only, G1)."""
@@ -21,10 +26,48 @@ class ToolNotFoundError(KeyError):
     """Raised when no entry point is registered under the requested name."""
 
 
-class ToolNotAuthorizedError(PermissionError):
-    """Raised when the tool is outside the task-authorized list (MH-3)."""
+TOOL_NOT_AUTHORIZED: str = "TOOL_NOT_AUTHORIZED"
+"""Named code for a deterministically rejected off-list tool call."""
 
-    code = "TOOL_NOT_AUTHORIZED"
+
+@dataclass(frozen=True)
+class GuardRecord:
+    """One deterministic off-list tool rejection on the real registry."""
+
+    tool_name: str
+    code: str
+    reason: str
+    seq: int
+
+
+class ToolNotAuthorizedError(ToolNotFoundError, PermissionError):
+    """Off-list tool call rejected with a named code plus guard record.
+
+    Subclasses :exc:`ToolNotFoundError` so unknown-name handling is
+    unchanged, and :exc:`PermissionError` so MH-3 task-list denials
+    keep the denial handling; ``code`` is always
+    ``TOOL_NOT_AUTHORIZED`` and ``record`` is the appended
+    :class:`GuardRecord` (None for a task-list denial raised before
+    any registry work). Nothing is executed and no route is
+    registered as a side effect.
+    """
+
+    code = TOOL_NOT_AUTHORIZED
+
+    def __init__(
+        self, tool_name: str, record: GuardRecord | None = None
+    ) -> None:
+        """Carry the tool name, the named code and the guard record."""
+        if record is not None:
+            message = "unknown tool: %r (auto-install is disabled)" % (
+                tool_name,
+            )
+        else:
+            message = str(tool_name)
+        super().__init__(message)
+        self.tool_name = tool_name
+        self.code = TOOL_NOT_AUTHORIZED
+        self.record = record
 
 
 class ToolEntryPoint(Protocol):
@@ -171,8 +214,10 @@ class ToolRegistry:
     """Registry of tool entry points keyed by route name."""
 
     def __init__(self) -> None:
-        """Create an empty registry."""
+        """Create an empty registry with an empty guard record log."""
         self._entries: dict[str, ToolEntryPoint] = {}
+        self.guard_records: list[GuardRecord] = []
+        self._guard_seq: int = 0
 
     def register(self, entry_point: ToolEntryPoint) -> None:
         """Register one entry point under its ``name``."""
@@ -185,14 +230,24 @@ class ToolRegistry:
     def load(self, name: str) -> ToolFunc:
         """Return the real implementation behind ``name``.
 
-        Raises :exc:`ToolNotFoundError` when ``name`` is not registered.
+        Raises :exc:`ToolNotAuthorizedError` (a :exc:`ToolNotFoundError`)
+        with a guard record when ``name`` is not registered: the
+        off-list call is rejected deterministically, never executed,
+        and never registered.
         """
         try:
             entry_point = self._entries[name]
         except KeyError:
-            raise ToolNotFoundError(
-                "unknown tool: %r (auto-install is disabled)" % (name,)
-            ) from None
+            self._guard_seq += 1
+            reason = "unknown tool: %r (auto-install is disabled)" % (name,)
+            record = GuardRecord(
+                tool_name=name,
+                code=TOOL_NOT_AUTHORIZED,
+                reason=reason,
+                seq=self._guard_seq,
+            )
+            self.guard_records.append(record)
+            raise ToolNotAuthorizedError(name, record) from None
         return entry_point.load()
 
     def dispatch(
@@ -201,9 +256,43 @@ class ToolRegistry:
         argv: Argv,
         action_class: ActionClass,
         auth: AuthMapping,
+        *,
+        task_authorized: bool | None = None,
+        run_id: str | None = None,
+        retry_budget: int | None = None,
+        parked: EscalationCard
+        | collections.abc.Mapping[str, EscalationCard]
+        | None = None,
     ) -> ToolResult:
-        """Load the entry point for ``name`` and call it with ``argv``."""
+        """Load the entry point for ``name`` and call it with ``argv``.
+
+        Carries the same union kwargs as the guarded dispatcher: an
+        explicit ``task_authorized`` denial refuses first, then the
+        parked-run refusal (explicit ``parked`` card or table, else
+        the stored card for ``run_id``). ``retry_budget`` is accepted
+        for signature parity only; denial counting stays owned by the
+        guarded dispatcher so a run can never count twice.
+        """
+        from .dispatcher import (
+            EscalationParkedError,
+            _checked_task_authorized,
+            _resolve_parked_card,
+            _resolve_run_id,
+            get_escalation,
+        )
+        del retry_budget
         argv_list = _checked_argv(argv)
+        _checked_task_authorized(task_authorized)
+        auth_dict = dict(auth) if isinstance(auth, collections.abc.Mapping) else {}
+        resolved_run = _resolve_run_id(auth_dict, run_id)
+        if parked is not None:
+            explicit = _resolve_parked_card(parked, resolved_run)
+            if explicit is not None:
+                raise EscalationParkedError(explicit)
+        if resolved_run is not None:
+            stored = get_escalation(resolved_run)
+            if stored is not None:
+                raise EscalationParkedError(stored)
         _checked_auth(auth)
         func = self.load(name)
         return _shaped_result(func(argv_list, action_class, auth), argv_list, action_class)

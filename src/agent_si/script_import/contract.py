@@ -66,3 +66,10 @@ class AddScriptResult(TypedDict):
     ok: bool
     script_id: str
     error_code: str
+
+
+class ImportResult(TypedDict):
+    ok: bool
+    script_id: str
+    error_code: str
+    approval: ApprovalRecord | None
