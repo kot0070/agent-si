@@ -832,6 +832,14 @@ def create_app(settings: Any = None,
     from agent_si.backend import k03next_rows as _k03next_rows
 
     _k03next_rows.register_k03next_routes(app)
+
+    # K03NEXT2 (additions-only): failure-class gate, named turn
+    # handlers, deliverable schemas, recovery confirm plus a second
+    # fail-closed auditor-sourcing gate over the real assurance
+    # entries. Open loopback test ops; no earlier line changes.
+    from agent_si.backend import k03next2_rows as _k03next2_rows
+
+    _k03next2_rows.register_k03next2_routes(app)
     # K02R3: project/task read + console write routes (M-ROUTES). Reads
     # need no token; writes enforce the frozen USER_WRITE guard
     # themselves. Never touch the K04 block below.
