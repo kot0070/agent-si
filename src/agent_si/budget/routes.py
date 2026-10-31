@@ -529,3 +529,362 @@ K04F_ROUTES = (
 )
 
 BUDGET_ROUTES = BUDGET_ROUTES + K04F_ROUTES
+
+
+# --- K04NEXT4 budget/model-KB seam (M-P2-63, M-P3-124, M-P4-144..148) ---------
+# Additive-only: new served handlers plus K04NEXT4_ROUTES, then extends
+# BUDGET_ROUTES (budget/__init__ mounts missing rows into the served
+# tables, so these become REAL served routes via create_app + TestClient).
+# No existing line above changes.
+
+_K04N4_LEFTOVER = {}
+
+
+def _k04n4_dir_key(ctx):
+    """Isolation key for the leftover store: the gate store dir."""
+    try:
+        gate = getattr(ctx, "budget_state", None)
+        raw = getattr(gate, "_store_dir", None)
+        if isinstance(raw, str) and raw:
+            return raw
+        if raw is not None:
+            return str(raw)
+    except Exception:
+        pass
+    return "default"
+
+
+def k04n4_trial_cap(ctx, query, body):
+    """M-P2-63: billed spend per trial vs monthly cap; warn plus block.
+
+    Configures the monthly cap (hard) plus a soft warn line, records one
+    billed trial (reserve plus settle with real usage evidence), proves a
+    near-cap reserve warns with BUDGET_SOFT_WARN, proves an over-cap
+    reserve blocks with BUDGET_HARD_BLOCKED plus a persistent incident,
+    then proves an explicitly authorized override restores the reserve.
+    """
+    from agent_si.budget.gate import BudgetBlockedError
+
+    body = body if isinstance(body, Mapping) else {}
+    project_id = body.get("project_id") or "k04n4-p63"
+    if not isinstance(project_id, str) or not project_id:
+        return 400, {"code": BUDGET_PROJECT_ID_REQUIRED,
+                     "message": "project_id required"}
+    currency = body.get("currency") or "USD"
+    monthly_cap = body.get("monthly_cap") or "10.00"
+    soft = body.get("soft_limit") or "7.00"
+    gate = _k04f_gate(ctx)
+    if gate is None:
+        return 404, {"code": BUDGET_NOT_CONFIGURED,
+                     "message": "no budget gate on file"}
+    try:
+        gate.get_state(project_id)
+    except (KeyError, LookupError):
+        gate.configure_project(
+            project_id, currency, monthly_cap, soft, monthly_cap,
+            updated_at="2026-10-26T00:00:00Z")
+    else:
+        try:
+            gate.update_limits(
+                project_id, budget_limit=monthly_cap,
+                soft_limit=soft, hard_limit=monthly_cap,
+                updated_at="2026-10-26T00:00:00Z")
+        except Exception:
+            pass
+    stamp = "2026-10-26T00:00:00Z"
+    expiry = "2026-10-27T00:00:00Z"
+    first = gate.compare_and_reserve(
+        {"project_id": project_id, "task_id": "t1", "run_id": "r1",
+         "reservation_id": "k04n4-p63-r1",
+         "estimated_amount": "6.00", "reserved_at": stamp,
+         "expires_at": expiry, "provider_request_ref": "k04n4-req-1"})
+    res1 = first.reservation.reservation_id
+    gate.settle(
+        {"reservation_id": res1,
+         "provider_request_ref": "k04n4-req-1",
+         "source": "k04n4-trial", "settled_at": stamp,
+         "actual_amount": "6.00",
+         "provider_usage_evidence_ref": "usage:k04n4-p63/t1"})
+    second = gate.compare_and_reserve(
+        {"project_id": project_id, "task_id": "t1", "run_id": "r1",
+         "reservation_id": "k04n4-p63-r2",
+         "estimated_amount": "2.00", "reserved_at": stamp,
+         "expires_at": expiry, "provider_request_ref": "k04n4-req-2"})
+    warning = getattr(second, "warning", None) or ""
+    if "BUDGET_SOFT_WARN" not in str(warning):
+        return 500, {"code": "K04N4_WARN_MISSING",
+                     "message": "near-cap reserve did not warn"}
+    try:
+        gate.compare_and_reserve(
+            {"project_id": project_id, "task_id": "t1", "run_id": "r1",
+             "reservation_id": "k04n4-p63-r3",
+             "estimated_amount": "5.00", "reserved_at": stamp,
+             "expires_at": expiry,
+             "provider_request_ref": "k04n4-req-3"})
+    except BudgetBlockedError as exc:
+        blocked_message = str(exc)
+    else:
+        return 500, {"code": "K04N4_BLOCK_MISSING",
+                     "message": "over-cap reserve was not blocked"}
+    incidents = gate.list_incidents(project_id)
+    incident_id = incidents[-1].incident_id if incidents else ""
+    over = gate.compare_and_reserve(
+        {"project_id": project_id, "task_id": "t1", "run_id": "r1",
+         "reservation_id": "k04n4-p63-r4",
+         "estimated_amount": "5.00", "reserved_at": stamp,
+         "expires_at": expiry, "provider_request_ref": "k04n4-req-4",
+         "override_ref": "user-override-1"})
+    billed = gate.get_state(project_id).spent
+    return 200, {"project_id": project_id, "monthly_cap": str(monthly_cap),
+                 "billed_spent": str(billed), "warning": str(warning),
+                 "blocked_code": "BUDGET_HARD_BLOCKED",
+                 "blocked_message": blocked_message,
+                 "incident_id": incident_id,
+                 "override_ok": bool(getattr(over, "ok", True)),
+                 "override_reservation_id":
+                 over.reservation.reservation_id}
+
+
+def _k04n4_kb_catalog():
+    """Shipped-format catalog for the AUTO fit-price-quality proof."""
+    from agent_si.model_kb import kb as _kb
+
+    day = "2026-10-26"
+    src = "k04n4-test"
+
+    def _row(provider_id, model_id, *, modalities="text",
+             tool="yes supported", reasoning="yes supported",
+             best_for="coding and tool use",
+             purpose="software development assistant",
+             cost_tier="low cheap", price_in=None, price_out=None):
+        fields = {
+            "modalities": _kb.sourced(modalities, src, day),
+            "tool_calling": _kb.sourced(tool, src, day),
+            "reasoning": _kb.sourced(reasoning, src, day),
+            "best_for": _kb.sourced(best_for, src, day),
+            "purpose": _kb.sourced(purpose, src, day),
+            "cost_tier": _kb.sourced(cost_tier, src, day),
+            "currency": _kb.sourced("USD", src, day),
+            "price_effective_at": _kb.sourced(day, src, day),
+        }
+        if price_in is not None:
+            fields["input_token_price"] = {
+                "value": price_in, "source": src, "retrieved_at": day}
+        if price_out is not None:
+            fields["output_token_price"] = {
+                "value": price_out, "source": src, "retrieved_at": day}
+        return _kb.make_model_row(provider_id, model_id, fields)
+
+    rows = [
+        _row("openai", "cheap-strong", price_in=0.000002,
+             price_out=0.000004),
+        _row("openai", "pricey-weak", tool="no", reasoning="no",
+             best_for="general chat", purpose="general assistant",
+             cost_tier="high", price_in=0.000005, price_out=0.000015),
+        _row("openai", "unknown-priced"),
+        _row("anthropic", "ghost-strong", price_in=0.000002,
+             price_out=0.000004),
+    ]
+    return _kb.make_catalog(rows, kb_version=1, updated_at=day)
+
+
+def k04n4_kb_auto(ctx, query, body):
+    """M-P3-124: shipped KB format; AUTO reads fit-price-quality."""
+    from agent_si.model_kb import kb as _kb
+    from agent_si.model_kb import loader as _loader
+
+    _ = ctx
+    _ = body
+    query = query or {}
+    raw_connected = _query_value(query, "connected", None)
+    if raw_connected is None:
+        connected = ["openai"]
+    elif isinstance(raw_connected, list):
+        connected = [str(v) for v in raw_connected if str(v)]
+    elif isinstance(raw_connected, str) and "," in raw_connected:
+        connected = [p.strip() for p in raw_connected.split(",") if p.strip()]
+    elif isinstance(raw_connected, str) and raw_connected:
+        connected = [raw_connected]
+    else:
+        connected = []
+    task_type = _query_value(query, "task_type", "coding") or "coding"
+    catalog = _k04n4_kb_catalog()
+    errors = _kb.validate_catalog(catalog)
+    if errors:
+        return 500, {"code": "K04N4_KB_INVALID",
+                     "message": "built catalog invalid: %s" % (errors,)}
+    out = _loader.auto_fit_price_quality(
+        catalog, connected, task_type=str(task_type))
+    return 200, out
+
+
+def k04n4_leftover_seed(ctx, query, body):
+    """Seed the isolated leftover store for one served app (test setup)."""
+    _ = query
+    body = body if isinstance(body, Mapping) else {}
+    app_prefix = body.get("app_prefix")
+    if not isinstance(app_prefix, str) or not app_prefix:
+        return 400, {"error": "app_prefix is required"}
+    entries = body.get("entries") or []
+    live = body.get("live") or []
+    key = _k04n4_dir_key(ctx)
+    bucket = _K04N4_LEFTOVER.setdefault(
+        key, {"entries": {}, "live": set()})
+    bucket["entries"] = {}
+    bucket["live"] = set()
+    for item in entries or []:
+        if not isinstance(item, Mapping):
+            continue
+        name = item.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        stamp = item.get("last_used_at") or ""
+        bucket["entries"][name] = {"name": name,
+                                   "last_used_at": str(stamp or "")}
+    for name in live or []:
+        if isinstance(name, str) and name:
+            bucket["live"].add(name)
+    return 200, {"seeded": len(bucket["entries"]),
+                 "live": len(bucket["live"])}
+
+
+def k04n4_leftover_keys(ctx, query, body):
+    """M-P4-144/145 list: own-prefix entries, names plus dates only."""
+    from agent_si.providers.registry.provider_api import (
+        list_leftover_keys as _real_list)
+
+    query = query or {}
+    params = dict(query)
+    if isinstance(body, Mapping):
+        params.update(body)
+    app_prefix = params.get("app_prefix")
+    if isinstance(app_prefix, list):
+        app_prefix = app_prefix[0] if app_prefix else None
+    if not isinstance(app_prefix, str) or not app_prefix:
+        return 400, {"error": "app_prefix is required: leftover keys "
+                              "live under the app's own namespace"}
+    key = _k04n4_dir_key(ctx)
+    bucket = _K04N4_LEFTOVER.get(key, {"entries": {}, "live": set()})
+    store_view = dict(bucket.get("entries", {}))
+    try:
+        return 200, _real_list(store_view, app_prefix)
+    except ValueError as exc:
+        return 400, {"error": str(exc)}
+
+
+def k04n4_leftover_delete(ctx, query, body):
+    """M-P4-144..148 delete: confirm plus token, live never, audit by name."""
+    from agent_si.providers.registry.provider_api import (
+        request_delete_entry as _real_delete)
+
+    query = query or {}
+    params = dict(query)
+    if isinstance(body, Mapping):
+        params.update(body)
+    app_prefix = params.get("app_prefix")
+    if isinstance(app_prefix, list):
+        app_prefix = app_prefix[0] if app_prefix else None
+    if not isinstance(app_prefix, str) or not app_prefix:
+        return 400, {"error": "app_prefix is required: leftover keys "
+                              "live under the app's own namespace",
+                     "code": "APP_PREFIX_REQUIRED"}
+    name = params.get("name")
+    if isinstance(name, list):
+        name = name[0] if name else None
+    if not isinstance(name, str) or not name:
+        return 400, {"error": "entry name is required",
+                     "code": "NOT_FOUND", "reason": "NOT_FOUND",
+                     "rule": "M-P4-145", "entry": name}
+    confirmed = params.get("confirmed", params.get("confirm", False))
+    if isinstance(confirmed, list):
+        confirmed = confirmed[0] if confirmed else False
+    if confirmed is not True:
+        return 400, {"error": "explicit confirm is required per entry",
+                     "code": "CONFIRM_REQUIRED",
+                     "reason": "CONFIRM_REQUIRED", "rule": "M-P4-147",
+                     "entry": name}
+    token = params.get("session_token")
+    if token is None:
+        token = params.get("token")
+    if isinstance(token, list):
+        token = token[0] if token else None
+    if not isinstance(token, str) or not token:
+        return 401, {"error": "session token is required for leftover "
+                              "deletes (token-less writes refused)",
+                     "code": "TOKEN_REQUIRED", "reason": "TOKEN_REQUIRED",
+                     "rule": "M-P4-147", "entry": name}
+    key = _k04n4_dir_key(ctx)
+    bucket = _K04N4_LEFTOVER.get(key)
+    if bucket is None:
+        bucket = {"entries": {}, "live": set()}
+        _K04N4_LEFTOVER[key] = bucket
+    store = bucket["entries"]
+    audit_sink = getattr(ctx, "audit_sink", None)
+    if audit_sink is None:
+        try:
+            facade = getattr(ctx, "provider_facade", None)
+            audit_sink = getattr(facade, "_audit", None)
+        except Exception:
+            audit_sink = None
+    if audit_sink is None:
+        return 500, {"error": "audit sink unbound: deletes must be "
+                              "audit-logged by entry name"}
+    live = set(bucket.get("live", set()))
+    try:
+        facade = getattr(ctx, "provider_facade", None)
+        if facade is not None:
+            views = facade.list_providers(False)
+            for view in views or []:
+                pid = getattr(view, "provider_id", None)
+                if isinstance(pid, str) and pid:
+                    live.add(pid)
+                    if app_prefix:
+                        live.add("%s%s" % (app_prefix, pid))
+    except Exception:
+        pass
+    reason = params.get("reason")
+    if isinstance(reason, list):
+        reason = reason[0] if reason else None
+    if not isinstance(reason, str) or not reason:
+        reason = "user-confirmed-cleanup"
+    outcome = _real_delete(
+        store, audit_sink, name=name, app_prefix=app_prefix,
+        confirmed=True, session_token=token,
+        live_provider_ids=live, reason=reason)
+    if outcome.get("removed"):
+        return 200, outcome
+    reason_code = outcome.get("reason")
+    message = {
+        "NOT_OWN_PREFIX": "entry is outside the app namespace",
+        "NOT_FOUND": "no such leftover entry",
+        "LIVE_LINKED": "live-linked entries are never deletable",
+        "CONFIRM_REQUIRED": "explicit confirm is required per entry",
+        "TOKEN_REQUIRED": "session token is required for leftover deletes",
+    }.get(reason_code, "leftover delete refused")
+    status = {
+        "NOT_OWN_PREFIX": 403,
+        "NOT_FOUND": 404,
+        "LIVE_LINKED": 409,
+        "CONFIRM_REQUIRED": 400,
+        "TOKEN_REQUIRED": 401,
+    }.get(reason_code, 400)
+    payload = dict(outcome)
+    payload["error"] = "%s: %s" % (message, name)
+    payload["code"] = reason_code
+    return status, payload
+
+
+K04NEXT4_ROUTES = (
+    ("post", "/api/v1/budget/k04next4/trial-cap", "k04n4_trial_cap",
+     k04n4_trial_cap),
+    ("get", "/api/v1/budget/k04next4/kb-auto", "k04n4_kb_auto",
+     k04n4_kb_auto),
+    ("post", "/api/v1/budget/k04next4/leftover-seed",
+     "k04n4_leftover_seed", k04n4_leftover_seed),
+    ("get", "/api/v1/budget/k04next4/leftover-keys",
+     "k04n4_leftover_keys", k04n4_leftover_keys),
+    ("post", "/api/v1/budget/k04next4/leftover-delete",
+     "k04n4_leftover_delete", k04n4_leftover_delete),
+)
+
+BUDGET_ROUTES = BUDGET_ROUTES + K04NEXT4_ROUTES

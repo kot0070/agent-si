@@ -431,3 +431,132 @@ def propose_update(draft: dict, updated_by_model: str) -> dict:
     proposal["validation_errors"] = updater.validate_proposal(
         catalog, proposal)
     return proposal
+
+
+# --- K04NEXT4 AUTO fit-price-quality (M-P3-124, additive) --------------------
+def _auto_price_for_rank(row, usage):
+    """Numeric price for one usage block, or None when UNKNOWN."""
+    block = dict(usage or {"input_tokens": 1000, "output_tokens": 500})
+    pairs = (("input_tokens", "input_token_price"),
+             ("output_tokens", "output_token_price"),
+             ("cached_tokens", "cached_token_price"),
+             ("reasoning_tokens", "reasoning_token_price"),
+             ("requests", "request_price"))
+    total = 0.0
+    seen = False
+    fields = row.get("fields", {}) if isinstance(row, dict) else {}
+    for tok, pname in pairs:
+        try:
+            price = fields.get(pname, {}).get("value", None)
+        except AttributeError:
+            continue
+        if isinstance(price, bool) or not isinstance(price, (int, float)):
+            continue
+        amount = block.get(tok, 0)
+        if isinstance(amount, bool) or not isinstance(amount, (int, float)):
+            continue
+        seen = True
+        total += float(price) * float(amount)
+    if not seen:
+        return None
+    return total
+
+
+def auto_fit_price_quality(catalog, connected_provider_ids, *,
+                           task_type="coding", usage=None):
+    """AUTO fit-price-quality rank over the shipped KB (M-P3-124).
+
+    Reads only connected providers (candidates_for_auto); modalities
+    that cannot prove text-only are rejected, never offered; KB price
+    UNKNOWN stays UNAVAILABLE, never zero, never picked. Ranks by
+    KB-only strength (tool_calling, reasoning, coding best_for/purpose
+    hits, cheaper cost_tier) then by numeric block price; full ties keep
+    catalog order, model_id never decides. Returns the shipped format id,
+    the pick, a reason naming task type plus fit plus price plus quality,
+    and the rejected plus excluded rows.
+    """
+    connected = list(connected_provider_ids or [])
+    auto = candidates_for_auto(catalog, connected)
+    block = dict(usage or {"input_tokens": 1000, "output_tokens": 500})
+    ranked = []
+    excluded = []
+    rejected = []
+    for cand in auto["candidates"]:
+        provider_id = cand.get("provider_id")
+        model_id = cand.get("model_id")
+        row = cand.get("row")
+        base = {"provider_id": provider_id, "model_id": model_id,
+                "kb_status": cand.get("kb_status"), "connected": True}
+        if row is None:
+            excluded.append(dict(
+                base, amount=None, pricing_snapshot_id=None,
+                reason="not in KB base (%s); never picked"
+                % (cand.get("kb_status"),)))
+            continue
+        if not _modalities_eligible(row):
+            rejected.append(dict(
+                base,
+                reason="modalities cannot prove text-only; never offered"))
+            continue
+        price = _auto_price_for_rank(row, block)
+        if price is None:
+            excluded.append(dict(
+                base, amount=None, pricing_snapshot_id=None,
+                reason="KB price UNKNOWN for this block (UNAVAILABLE, "
+                       "never zero); never picked"))
+            continue
+        tool, reason_flag, hits, neg_cost = _strength_key(row)
+        ranked.append(dict(
+            base, amount=price, pricing_snapshot_id=None,
+            tool_calling=tool, reasoning=reason_flag,
+            coding_hits=hits, cost_rank=-neg_cost,
+            order=len(ranked)))
+    for row in catalog.get("models", []):
+        if not isinstance(row, dict):
+            continue
+        if row.get("provider_id") in set(connected):
+            continue
+        rejected.append({
+            "provider_id": row.get("provider_id"),
+            "model_id": row.get("model_id"),
+            "kb_status": IN_BASE,
+            "connected": False,
+            "reason": "provider not connected; excluded, never read "
+                      "for choice"})
+    ranked.sort(key=lambda r: (-r["tool_calling"], -r["reasoning"],
+                               -r["coding_hits"], r["cost_rank"],
+                               r["amount"], r["order"]))
+    for r in ranked:
+        del r["order"]
+    if ranked:
+        pick = dict(ranked[0])
+        reason = (
+            "AUTO %s: fit-price-quality pick %s/%s (fit %d coding hits, "
+            "tool %s, reasoning %s; price %s USD for one block; quality "
+            "tool %s reasoning %s; %d priced of %d candidates; "
+            "rejected %d, unconnected %d)"
+            % (task_type, pick["provider_id"], pick["model_id"],
+               pick["coding_hits"],
+               "yes" if pick["tool_calling"] else "no",
+               "yes" if pick["reasoning"] else "no",
+               pick["amount"],
+               "yes" if pick["tool_calling"] else "no",
+               "yes" if pick["reasoning"] else "no",
+               len(ranked),
+               len(auto["candidates"]),
+               len(rejected),
+               len(auto.get("excluded_unconnected", []))))
+    else:
+        pick = None
+        reason = (
+            "AUTO %s: BLOCKED no priced fit-price-quality candidate for "
+            "this block (unknown cost is never a pick, never zero; %d "
+            "rejected, %d excluded)"
+            % (task_type, len(rejected), len(excluded)))
+    return {"format": kb.KB_FORMAT_ID, "task_type": task_type,
+            "candidates": auto["candidates"],
+            "ranked": ranked, "excluded": excluded,
+            "rejected": rejected + list(excluded),
+            "excluded_unconnected": sorted(auto.get(
+                "excluded_unconnected", [])),
+            "pick": pick, "reason": reason}
