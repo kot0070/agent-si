@@ -317,6 +317,7 @@ class BudgetReservation:
     status: str = "ACTIVE"
     provider_request_ref: str = ""
     provider_id: str = ""
+    compensation_ref: str = ""
 
 
 @dataclass
