@@ -1,7 +1,7 @@
 """K03NEXT2 served rows (B0B-UNCOVERED_ARCH-740/741/745/746,
 B0B-UNCOVERED_MVP_ACCEPT-33/111, B0B-SDK-104/109).
 
-Served wiring only: register_k03next2_routes(app) adds five POST routes
+Served wiring only: register_k03next2_routes(app) adds six POST routes
 to the seam app (same addition-only pattern as the k03next lane mount).
 Every handler drives the real assurance entries and nothing else:
 AuditorRegistry select/is_eligible/register/resolve_sourcing/
@@ -27,13 +27,16 @@ from typing import Any
 from fastapi import HTTPException, Request
 
 from agent_si.assurance import audit_coordinator as _chain_coordinator
+from agent_si.assurance import audit_records as _chain_records
 from agent_si.assurance import audit_registry as _chain_registry
+from agent_si.assurance.verification import checker as _verify_checker
 
 _GATE_ROUTE = "/api/v1/k03next2/sourcing_gate"
 _CLASSIFY_ROUTE = "/api/v1/k03next2/classify_failure"
 _HANDLERS_ROUTE = "/api/v1/k03next2/turn_handlers"
 _SCHEMA_ROUTE = "/api/v1/k03next2/deliverable_schema"
 _RECOVERY_ROUTE = "/api/v1/k03next2/recovery_confirm"
+_READONLY_ROUTE = "/api/v1/k03next2/verifier_readonly"
 _DEFAULT_TASK_CLASS = "served-turn"
 _DEFAULT_MINIMUM_LEVEL = "L2"
 _DEFAULT_SCOPE = "k03next2/sourcing/default"
@@ -360,6 +363,192 @@ def register_k03next2_routes(app: Any) -> Any:
             "hash": schema.hash,
             "created_at": schema.created_at,
         }
+
+    register_mh4_readonly_route(app)
+    _register_recovery_route(app)
+    return app
+
+
+def _tree_snapshot(base: str) -> tuple[list, str]:
+    """Snapshot a project tree: canonical listing plus its sha256 digest."""
+    import hashlib as _snapshot_hashlib
+    import os as _snapshot_os
+
+    rows: list = []
+    for root, dirs, files in _snapshot_os.walk(base):
+        dirs.sort()
+        for name in sorted(files):
+            full = _snapshot_os.path.join(root, name)
+            rel = _snapshot_os.path.relpath(full, base)
+            try:
+                with open(full, "rb") as handle:
+                    digest = _snapshot_hashlib.sha256(
+                        handle.read()).hexdigest()
+                stat = _snapshot_os.stat(full)
+                rows.append((rel, stat.st_size, stat.st_mtime_ns, digest))
+            except OSError:
+                rows.append((rel, -1, -1, "unreadable"))
+    canon = "\n".join("%s|%d|%d|%s" % item for item in rows)
+    return rows, _snapshot_hashlib.sha256(
+        canon.encode("utf-8")).hexdigest()
+
+
+def _ref_list(body: dict[str, Any], name: str) -> tuple[str, ...]:
+    """One body field as a tuple of strings (missing reads as empty)."""
+    return tuple(str(item) for item in _need_list(body, name))
+
+
+def _readonly_guard(write_set: tuple[str, ...]) -> None:
+    """Reject any verifier write attempt with the named MH-4 refusal."""
+    if write_set:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "VERIFIER_WRITE_REJECTED",
+                "detail": "verifier/auditor runs read-only: "
+                "write attempt rejected",
+                "write_set": list(write_set),
+            },
+        )
+
+
+def _readonly_audit(
+    coordinator: _Coordinator,
+    *,
+    project_id: str,
+    task_id: str,
+    run_id: str,
+    contract_hash: str,
+    turn_ref: str,
+    work_refs: tuple[str, ...],
+    artifact_refs: tuple[str, ...],
+    evidence_refs: tuple[str, ...],
+    producer_refs: tuple[str, ...],
+) -> tuple[str, str, bool]:
+    """Mint one audit through the real entry; prove disjoint sessions."""
+    served = _chain_coordinator.ServedTurn(
+        turn_ref=turn_ref,
+        project_id=project_id,
+        task_id=task_id,
+        run_id=run_id,
+        work_refs=work_refs,
+        artifact_refs=artifact_refs,
+        evidence_refs=evidence_refs,
+        producer_session_refs=producer_refs,
+        contract_hash=contract_hash,
+    )
+    audit_id = coordinator.audit_served_turn(served)
+    stored = _chain_records._fetch_record(audit_id)
+    auditor_session = (
+        str(stored.context_session_ref) if stored is not None else ""
+    )
+    return audit_id, auditor_session, auditor_session not in set(
+        producer_refs)
+
+
+def register_mh4_readonly_route(app: Any) -> Any:
+    """Mount the MH-4 read-only verifier/auditor proof route.
+
+    Served wiring only: POST /api/v1/k03next2/verifier_readonly drives
+    the real verification checker entry (verify_run, which only reads
+    the project dir), the real R-304 file-contract entry (judging the
+    verifier write set, which must be empty) and the real audit entry
+    (audit_served_turn plus the stored record proving the producer
+    session set and the auditor context session are disjoint). Any
+    presented verifier write attempt is refused before anything runs.
+    Called by register_k03next2_routes.
+    """
+
+    @app.post(_READONLY_ROUTE)
+    async def k03next2_verifier_readonly(
+            request: Request) -> dict[str, Any]:
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
+        if not isinstance(body, dict):
+            raise HTTPException(
+                status_code=400,
+                detail="k03next2 verifier_readonly needs a JSON "
+                "object body",
+            )
+        project_id = _need_text(body.get("project_id"), "project_id")
+        task_id = _need_text(body.get("task_id"), "task_id")
+        run_id = _need_text(body.get("run_id"), "run_ref")
+        contract_hash = _need_text(
+            body.get("contract_hash"), "contract_hash")
+        project_dir = _need_text(body.get("project_dir"), "project_dir")
+        _readonly_guard(tuple(_ref_list(body, "attempted_writes")))
+        tool_rows = tuple(_need_list(body, "tool_rows"))
+        criteria = tuple(_need_list(body, "criteria"))
+        files_read = _ref_list(body, "files_read")
+        producer_refs = _ref_list(body, "producer_session_refs")
+        work_refs = _ref_list(body, "work_refs")
+        artifact_refs = _ref_list(body, "artifact_refs")
+        evidence_refs = _ref_list(body, "evidence_refs")
+        if not work_refs and not artifact_refs:
+            raise HTTPException(
+                status_code=400,
+                detail="k03next2 verifier_readonly needs work_refs "
+                "or artifact_refs",
+            )
+        turn_ref = body.get("turn_ref")
+        turn_ref = turn_ref.strip() if isinstance(
+            turn_ref, str) and turn_ref.strip() else (
+                "turn-mh4-%s" % run_id)
+        before_rows, before_hash = _tree_snapshot(project_dir)
+        record = _verify_checker.verify_run(
+            project_dir=project_dir,
+            tool_rows=tool_rows,
+            criteria=criteria,
+            project_id=project_id,
+            task_id=task_id,
+            run_id=run_id,
+            contract_hash=contract_hash,
+        )
+        _after_rows, after_hash = _tree_snapshot(project_dir)
+        from agent_si.backend.app import runner_contract_verdict as _contract_entry
+        contract = _contract_entry(
+            project_dir=project_dir,
+            tool_rows=tool_rows,
+            files_read=list(files_read),
+            files_written=(),
+        )
+        audit_id, auditor_session, disjoint = _readonly_audit(
+            _Coordinator(),
+            project_id=project_id,
+            task_id=task_id,
+            run_id=run_id,
+            contract_hash=contract_hash,
+            turn_ref=turn_ref,
+            work_refs=work_refs,
+            artifact_refs=artifact_refs,
+            evidence_refs=evidence_refs,
+            producer_refs=producer_refs,
+        )
+        return {
+            "verification_result": record.result.value,
+            "verification_id": record.verification_id,
+            "tree_hash_before": before_hash,
+            "tree_hash_after": after_hash,
+            "tree_files": len(before_rows),
+            "read_only": before_hash == after_hash,
+            "contract_verdict": contract["verdict"],
+            "checked_read": contract["checked_read"],
+            "checked_written": contract["checked_written"],
+            "write_set": [],
+            "audit_id": audit_id,
+            "auditor_session_ref": auditor_session,
+            "producer_session_refs": list(producer_refs),
+            "producer_auditor_disjoint": disjoint,
+            "run_id": run_id,
+        }
+
+    return app
+
+
+def _register_recovery_route(app: Any) -> Any:
+    """Bind the recovery-confirm route; called by the lane register."""
 
     @app.post(_RECOVERY_ROUTE)
     async def k03next2_recovery_confirm(
