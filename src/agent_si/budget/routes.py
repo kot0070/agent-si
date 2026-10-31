@@ -13,6 +13,31 @@ BUDGET_SESSION_TOKEN_REQUIRED = "BUDGET_SESSION_TOKEN_REQUIRED"
 COMPENSATION_RESERVATION_ID_REQUIRED = "COMPENSATION_RESERVATION_ID_REQUIRED"
 
 
+def _soft_warn(budget):
+    """Soft-cap warn text for a served budget payload, or None.
+
+    M-P2-63: billed spend settles into the monthly cap; the served page
+    warns as soon as spent plus reserved crosses the soft cap, in the
+    same words as the reserve path ([BUDGET_SOFT_WARN]).
+    """
+    from decimal import Decimal, InvalidOperation
+
+    try:
+        spent = Decimal(str(budget.get("spent", "0")))
+        reserved = Decimal(str(budget.get("reserved", "0")))
+        soft = Decimal(str(budget.get("soft_limit")))
+        currency = budget.get("currency", "")
+    except (InvalidOperation, ValueError, TypeError, AttributeError):
+        return None
+    if spent + reserved > soft:
+        return (
+            "soft budget limit reached [BUDGET_SOFT_WARN]: "
+            "committed %s of soft %s %s"
+            % (spent + reserved, budget.get("soft_limit"), currency)
+        )
+    return None
+
+
 def _query_value(query, name, default=None):
     value = (query or {}).get(name, default)
     if isinstance(value, list):
@@ -31,6 +56,10 @@ def _state_payload(state):
     remaining = getattr(state, "remaining_derived", None)
     if remaining is not None and "remaining_derived" not in payload:
         payload["remaining_derived"] = remaining
+    warn = _soft_warn(payload)
+    payload["warned"] = warn is not None
+    if warn is not None:
+        payload["warning"] = warn
     return payload
 
 
