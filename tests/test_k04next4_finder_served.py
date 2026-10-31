@@ -255,3 +255,16 @@ def test_finder_rows_bound_in_served_tables():
               if str(path) == _FINDER}
     assert ("get", _FINDER, "leftover_keys") in legacy, legacy
     assert ("delete", _FINDER, "leftover_keys_delete") in legacy, legacy
+
+
+def test_m_p4_145_finder_mapping_payload_last_used_at_served(tmp_path):
+    """Row M-P4-145 (served mapping half): a served memory store entry
+    seeded with a mapping payload projects last_used_at on the finder."""
+    client = _client(tmp_path)
+    ctx = client.app.state.k04_ctx
+    ctx.credential_store.seed(
+        "app:next4-map", {"last_used_at": "2026-10-26"})
+    listed = client.get(_FINDER, params={"app_prefix": "app:"})
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["entries"] == [
+        {"name": "app:next4-map", "last_used_at": "2026-10-26"}], listed.text

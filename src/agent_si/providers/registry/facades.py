@@ -107,6 +107,12 @@ class _MemoryCredentialStore:
         return self.get_secret(secret_id)
 
     def __getitem__(self, secret_id: str) -> dict:
+        try:
+            value = self._entries[secret_id]
+        except KeyError:
+            raise KeyError(secret_id) from None
+        if isinstance(value, dict):
+            return dict(value)
         return {"value": self.get_secret(secret_id)}
 
     def __contains__(self, secret_id: object) -> bool:
