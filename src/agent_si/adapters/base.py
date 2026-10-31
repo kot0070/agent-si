@@ -112,6 +112,7 @@ class GenericAdapter:
     """OpenAI-compatible adapter: explicit ids plus injected transport."""
 
     openai_compat = True
+    max_retries = 0
 
     def __init__(self, provider_id, model, secret_ref, transport, *,
                  instance_id="default",
@@ -162,6 +163,7 @@ class FunctionBackedAdapter:
     """Non-compatible adapter: explicit ids plus an injected backend call."""
 
     openai_compat = False
+    max_retries = 0
 
     def __init__(self, provider_id, model, secret_ref, backend_call, *,
                  instance_id="default", route_params=None):
@@ -203,3 +205,37 @@ class FunctionBackedAdapter:
                 "chat_path": "",
                 "base_url": "",
                 "route_params": dict(self.route_params)}
+
+
+# K04I2 additions (additive only): single-attempt marker plus FAILED
+# attempt recorders for provider 5xx/timeout and max-turns trips. Every
+# invocation is one authoritative attempt (no hidden retries); a
+# provider-side failure is recorded as FAILED with an error_ref carrier,
+# and a max-turns trip carries its explicit cause. No network here.
+ADAPTER_MAX_RETRIES = 0
+
+
+def _attempt_ref(provider_id, instance_id, kind):
+    return "%s/%s:%s" % (provider_id, instance_id, kind)
+
+
+def record_failed_attempt(provider_id, instance_id, kind, detail,
+                          error_ref=None):
+    """Record a provider 5xx/timeout as one FAILED attempt with carrier."""
+    ref = error_ref or _attempt_ref(provider_id, instance_id, kind)
+    return {"status": "FAILED", "provider_id": provider_id,
+            "instance_id": instance_id, "kind": kind, "detail": detail,
+            "error_ref": ref, "carrier": ref, "attempts_made": 1}
+
+
+def record_max_turns_trip(provider_id, instance_id, model, max_turns,
+                          attempts_made):
+    """Record a max-turns trip as one FAILED attempt with explicit cause."""
+    reason = ("max-turns budget of %d exhausted without a final response"
+              % (max_turns,))
+    ref = "%s/%s:max-turns-%d" % (provider_id, instance_id, max_turns)
+    return {"status": "FAILED", "provider_id": provider_id,
+            "instance_id": instance_id, "model": model,
+            "reason": reason, "cause": reason,
+            "error_ref": ref, "carrier": ref,
+            "attempts_made": attempts_made}
