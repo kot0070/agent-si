@@ -883,3 +883,177 @@ def register_hierarchy_routes(app: Any) -> Any:
                 "surfaced": outcome.reason}
 
     return app
+
+
+# K02NEXT7 adds 4 routes (additive-only; every path, handler name and
+# orchestration signature above stays unchanged):
+#
+# - GET /hierarchy/k02next7/sdk-transport?provider= (UI_DELTA-36 +
+#   ARCH-57): the SDK transport for one provider through the single
+#   generic entry sdk_adapter.transport_for_provider; non-OpenAI
+#   providers answer "chat_completions" with the generic
+#   OpenAI-compatible Chat Completions adapter descriptor, OpenAI
+#   answers "sdk_default"; the served contract never names a
+#   Responses API.
+# - GET /hierarchy/k02next7/sdk-surface (SDK-132): the verified SDK
+#   surface through sdk_adapter.verified_sdk_surface; exactly the
+#   module __all__ names that resolve, plus the real guarded SDK
+#   availability flag.
+# - POST /hierarchy/k02next7/run-config (BP03-4): binds one
+#   RoutingDecision to a RunConfig through the real adapter entry;
+#   the client stays max_retries=0 (any other value refuses
+#   SDK_CLIENT_MAX_RETRIES_NONZERO) and runner retries come only
+#   from the bound RunConfig.
+# - POST /hierarchy/k02next7/target-flow (BP06-81): loads one
+#   project-to-role target flow through the real
+#   roles.load_target_flow and resolves every role; a missing role
+#   refuses with NO_TARGET_FLOW_DEFAULT, never a default.
+
+
+def register_k02next7_routes(app: Any) -> Any:
+    """Mount the K02NEXT7 served-proof routes; returns the app."""
+    from agent_si.routing import roles as _n7_roles
+    from agent_si.routing import types as _n7_types
+    from agent_si.sdk_adapter import sdk_adapter as _n7_sdk
+
+    @app.get("/hierarchy/k02next7/sdk-transport")
+    def get_k02next7_sdk_transport(provider: str = "") -> dict[str, Any]:
+        """UI_DELTA-36 + ARCH-57: SDK transport for one provider."""
+        from agent_si.providers.adapters import (
+            openai_compat as _n7_compat,
+        )
+
+        name = (provider or "").strip()
+        if not name:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "provider must be a non-empty string"})
+        transport = _n7_sdk.transport_for_provider(name)
+        body: dict[str, Any] = {
+            "provider": name,
+            "transport": transport,
+            "entry": "transport_for_provider",
+        }
+        if transport == _n7_sdk.CHAT_COMPLETIONS_TRANSPORT:
+            body["adapter_kind"] = (
+                _n7_compat.OpenAICompatAdapter.adapter_kind)
+            body["openai_compat"] = bool(
+                _n7_compat.OpenAICompatAdapter.openai_compat)
+            body["chat_path"] = _n7_compat.CHAT_COMPLETIONS_PATH
+        return body
+
+    @app.get("/hierarchy/k02next7/sdk-surface")
+    def get_k02next7_sdk_surface() -> dict[str, Any]:
+        """SDK-132: verified SDK surface architecture may conclude on."""
+        return dict(_n7_sdk.verified_sdk_surface(),
+                    entry="verified_sdk_surface")
+
+    @app.post("/hierarchy/k02next7/run-config")
+    async def post_k02next7_run_config(request: Request) -> dict[str, Any]:
+        """BP03-4: client max_retries=0; runner retries via RunConfig."""
+        _write_guard(request)
+        data = await _json_body(request)
+        decision = data.get("decision")
+        if not isinstance(decision, dict):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "decision must be an object"})
+        fields: dict[str, str] = {}
+        for name in ("decision_id", "project_id", "task_id", "run_id",
+                     "selected_provider", "selected_model"):
+            value = decision.get(name)
+            if not isinstance(value, str) or not value.strip():
+                raise HTTPException(
+                    status_code=400,
+                    detail={"code": "ROW_REFUSED",
+                            "message": f"{name} must be a non-empty string"})
+            fields[name] = value.strip()
+        budget = data.get("executor_attempt_max")
+        if (isinstance(budget, bool) or not isinstance(budget, int)
+                or budget < 0):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "executor_attempt_max must be an "
+                                   "int >= 0"})
+        client_retries = data.get("client_max_retries", 0)
+        if isinstance(client_retries, bool) or \
+                not isinstance(client_retries, int):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "client_max_retries must be an int"})
+        try:
+            binding = _n7_sdk.RoutingDecisionBinding(
+                decision_id=fields["decision_id"],
+                project_id=fields["project_id"],
+                task_id=fields["task_id"],
+                run_id=fields["run_id"],
+                routing_snapshot_id=str(
+                    decision.get("routing_snapshot_id") or ""),
+                selected_provider=fields["selected_provider"],
+                selected_model=fields["selected_model"],
+                route=str(decision.get("route") or ""),
+                strategy=str(decision.get("strategy") or ""),
+                reason=str(decision.get("reason") or ""))
+            adapter = _n7_sdk.OpenAIAgentsSDKAdapter(
+                client_config=_n7_sdk.SdkClientConfig(
+                    max_retries=client_retries))
+        except _n7_sdk.SdkClientConfigError as err:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": getattr(
+                    err, "code",
+                    _n7_sdk.SDK_CLIENT_MAX_RETRIES_NONZERO),
+                    "message": str(err)}) from None
+        run_config = adapter.build_run_config(
+            binding, executor_attempt_max=budget)
+        return {"decision_id": binding.decision_id,
+                "client_max_retries": adapter.client_config.max_retries,
+                "max_runner_retries": run_config.max_runner_retries,
+                "transport": _n7_sdk.transport_for_provider(
+                    binding.selected_provider),
+                "route": binding.route,
+                "strategy": binding.strategy}
+
+    @app.post("/hierarchy/k02next7/target-flow")
+    async def post_k02next7_target_flow(request: Request) -> dict[str, Any]:
+        """BP06-81: project work reaches roles via the target flow."""
+        _write_guard(request)
+        data = await _json_body(request)
+        project_id = data.get("project_id")
+        if not isinstance(project_id, str) or not project_id.strip():
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "project_id must be a non-empty string"})
+        config = data.get("target_flow")
+        if not isinstance(config, dict):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "target_flow must be an object"})
+        clean_project = project_id.strip()
+        table = _n7_roles.RoleTable()
+        try:
+            loaded = _n7_roles.load_target_flow(
+                table, config, project_id=clean_project)
+        except _n7_roles.TargetFlowMissingError as err:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": getattr(
+                    err, "code", _n7_roles.NO_TARGET_FLOW_DEFAULT),
+                    "message": str(err)}) from None
+        roles: dict[str, dict[str, Any]] = {}
+        for role in _n7_types.ROLES:
+            resolved = table.resolve(clean_project, role)
+            roles[role] = {"provider": resolved.provider,
+                           "model": resolved.model,
+                           "status": resolved.status,
+                           "reason": resolved.reason}
+        return {"project_id": clean_project, "roles": roles,
+                "loaded": loaded}
+
+    return app
