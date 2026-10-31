@@ -1,11 +1,24 @@
-"""K04MR07B: served spend for the priced meta contributor row.
+"""K04MR07B: served spend for the priced meta contributor row via the updater.
 
 Through the REAL app (create_app + store dir + secret_store memory +
 HTTP TestClient) with a fake ONLY at urllib urlopen. The priced row
-comes from the product seed/bind path
-(agent_si.model_kb.meta_prices.priced_catalog + kb.bind_catalog):
-provider meta / model muse-spark-1.3-contributor, 0.1/0.2 USD sourced at
-https://dev.meta.ai/docs/pricing-rate-limits (retrieved 2026-10-11).
+arrives as a NORMAL KB record through the product updater route
+(fetch_source plus propose_update plus apply_proposal with explicit
+user confirmation, then kb.bind_catalog): the base holds an honest
+all-UNKNOWN meta row, the fetched JSON carries ONLY the owner MODEL_KB
+facts below, UNKNOWN stays UNKNOWN.
+
+Owner facts (DIRECTOR/INBOX/MODEL_KB/sections/meta.md:84-112):
+- "Model ID: muse-spark-1.3-contributor
+  (https://dev.meta.ai/docs/models, retrieved 2026-10-11)."
+- "Price input per 1M tokens: 0.1
+  (https://dev.meta.ai/docs/pricing-rate-limits, retrieved 2026-10-11)."
+- "Price output per 1M tokens: 0.2
+  (https://dev.meta.ai/docs/pricing-rate-limits, retrieved 2026-10-11)."
+- "Price currency: USD
+  (https://dev.meta.ai/docs/pricing-rate-limits, retrieved 2026-10-11)."
+- "Price date: UNKNOWN (checked
+  https://dev.meta.ai/docs/pricing-rate-limits, retrieved 2026-10-11)."
 Usage {input_tokens:4, output_tokens:6} must charge exactly
 4*0.1 + 6*0.2 = 1.6 and leave a MEASURED cost row.
 """
@@ -23,10 +36,11 @@ for _p in (_WS, _SRC):
 
 import fastapi.testclient  # noqa: E402
 
+from agent_si.backend import modelkb as _modelkb  # noqa: E402
 from agent_si.backend.app import create_app  # noqa: E402
 from agent_si.backend.orchestration import steplimits as _steplimits  # noqa: E402
 from agent_si.model_kb import kb as _kb  # noqa: E402
-from agent_si.model_kb import meta_prices as _meta  # noqa: E402
+from agent_si.model_kb import updater as _updater  # noqa: E402
 from agent_si.routing import types as _T  # noqa: E402
 
 APP_TOKEN = "k04mr07b-app-token"
@@ -36,7 +50,10 @@ HEADERS = {"x-actor": "ui-probe", "x-ui-session-token": APP_TOKEN}
 CANNED_TEXT = "k04mr07b canned reply"
 CANNED_USAGE = {"input_tokens": 4, "output_tokens": 6}
 
+META_PROVIDER = "meta"
 META_MODEL = "muse-spark-1.3-contributor"
+META_SOURCE_URL = "https://dev.meta.ai/docs/pricing-rate-limits"
+META_RETRIEVED_AT = "2026-10-11"
 EXPECTED_DELTA = Decimal("1.600000")
 
 
@@ -76,6 +93,42 @@ def _make_client(tmp_path):
     _steplimits._reset_state()
     app = create_app(_settings(tmp_path))
     return fastapi.testclient.TestClient(app, raise_server_exceptions=False), app
+
+
+def _bind_priced_meta_via_updater(seed):
+    """Bind the meta row priced ONLY through the updater propose/apply route.
+
+    Base: the seed rows plus one honest all-UNKNOWN meta row. Fetched
+    document: the four priced fields from meta.md:96-99, nothing else.
+    Returns the bound priced catalog.
+    """
+    kept = [row for row in seed.get("models", [])
+            if not (isinstance(row, dict)
+                    and row.get("provider_id") == META_PROVIDER
+                    and row.get("model_id") == META_MODEL)]
+    base = _kb.make_catalog(
+        [_kb.make_model_row(META_PROVIDER, META_MODEL)] + kept,
+        kb_version=int(seed.get("version", {}).get("kb_version", 1)),
+        updated_at=seed.get("version", {}).get("updated_at", _kb.UNKNOWN),
+        change_log=list(seed.get("version", {}).get("change_log", [])),
+        sources=tuple(seed.get("manifest", {}).get("sources", ())))
+    fetched_doc = {"models": [{
+        "provider_id": META_PROVIDER,
+        "model_id": META_MODEL,
+        "fields": {"currency": "USD",
+                   "input_token_price": 0.1,
+                   "output_token_price": 0.2}}]}
+    fetched_text = _updater.fetch_source(
+        META_SOURCE_URL, lambda url: json.dumps(fetched_doc))
+    assert fetched_text is not None
+    proposal = _updater.propose_update(
+        base, META_SOURCE_URL, fetched_text, META_RETRIEVED_AT)
+    errors = _updater.validate_proposal(base, proposal)
+    assert errors == [], errors
+    assert len(proposal["changes"]) == 3, proposal
+    result = _updater.apply_proposal(base, proposal, user_confirmed=True)
+    assert result["applied"] is True
+    return _kb.bind_catalog(result["catalog"])
 
 
 def _create_project(client):
@@ -135,6 +188,26 @@ def _cost_rows(app):
             if r.get("metric_name") == "cost"]
 
 
+def test_meta_model_card_served_shows_price(tmp_path):
+    """GET KB model card (real get_models over the bound catalog) shows it."""
+    seed = _kb.bound_catalog()
+    _bind_priced_meta_via_updater(seed)
+    try:
+        cards = _modelkb.get_models([META_PROVIDER], META_MODEL)
+        assert len(cards) == 1, cards
+        fields = cards[0]["fields"]
+        assert fields["input_token_price"]["value"] == 0.1, fields
+        assert fields["output_token_price"]["value"] == 0.2, fields
+        assert fields["currency"]["value"] == "USD", fields
+        for name in ("input_token_price", "output_token_price",
+                     "currency"):
+            assert fields[name]["source"] == META_SOURCE_URL, fields
+            assert fields[name]["retrieved_at"] == META_RETRIEVED_AT, fields
+        assert fields["price_effective_at"]["value"] == "UNKNOWN", fields
+    finally:
+        _kb.bind_catalog(seed)
+
+
 def test_meta_priced_row_charges_spent_and_measured_cost(tmp_path, monkeypatch):
     _patch_urlopen(monkeypatch)
     from agent_si.runtime import manager as _mgr
@@ -143,19 +216,18 @@ def test_meta_priced_row_charges_spent_and_measured_cost(tmp_path, monkeypatch):
     seed = _kb.bound_catalog()
     prev_gate = getattr(_mgr, "_BUDGET_GATE", None)
     prev_dir = _store.bound_store_dir()
-    catalog = _meta.priced_catalog(seed)
-    rows = [r for r in catalog.get("models", [])
-            if r.get("provider_id") == "meta"
-            and r.get("model_id") == META_MODEL]
-    assert len(rows) == 1, catalog.get("models", [])
-    fields = rows[0]["fields"]
-    assert fields["input_token_price"]["value"] == 0.1, fields
-    assert fields["output_token_price"]["value"] == 0.2, fields
-    assert fields["input_token_price"]["source"] == _meta.META_SOURCE_URL
-    assert fields["input_token_price"]["retrieved_at"] == "2026-10-11"
-    assert fields["currency"]["value"] == "USD"
-    _kb.bind_catalog(catalog)
+    _bind_priced_meta_via_updater(seed)
     try:
+        rows = [r for r in _kb.bound_catalog().get("models", [])
+                if r.get("provider_id") == META_PROVIDER
+                and r.get("model_id") == META_MODEL]
+        assert len(rows) == 1, _kb.bound_catalog().get("models", [])
+        fields = rows[0]["fields"]
+        assert fields["input_token_price"]["value"] == 0.1, fields
+        assert fields["output_token_price"]["value"] == 0.2, fields
+        assert fields["input_token_price"]["source"] == META_SOURCE_URL
+        assert fields["input_token_price"]["retrieved_at"] == META_RETRIEVED_AT
+        assert fields["currency"]["value"] == "USD"
         client, app = _make_client(tmp_path)
         pid = _create_project(client)
         _seed_worker(app, pid)

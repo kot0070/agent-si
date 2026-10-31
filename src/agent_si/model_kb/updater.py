@@ -27,6 +27,7 @@ KB_SOURCE_ALLOWLIST = (
     "https://docs.x.ai",
     "https://ollama.com/docs",
     "https://lmstudio.ai/docs",
+    "https://dev.meta.ai/docs",
 )
 
 
