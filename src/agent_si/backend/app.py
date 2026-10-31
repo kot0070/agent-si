@@ -840,6 +840,15 @@ def create_app(settings: Any = None,
     from agent_si.backend import k03next2_rows as _k03next2_rows
 
     _k03next2_rows.register_k03next2_routes(app)
+    # K03WIRE (additions-only): the 13 unwired K03 rows over their
+    # frozen routes through the real assurance/test-stage entries.
+    # Open reads; POSTs keep the USER_WRITE guard. No earlier line
+    # changes.
+    from agent_si.backend.assurance import k03wire as _k03wire_assurance
+    from agent_si.backend.test_runners import k03wire as _k03wire_teststage
+
+    _k03wire_assurance.register_k03wire_assurance_routes(app)
+    _k03wire_teststage.register_k03wire_teststage_routes(app)
     # K02R3: project/task read + console write routes (M-ROUTES). Reads
     # need no token; writes enforce the frozen USER_WRITE guard
     # themselves. Never touch the K04 block below.
