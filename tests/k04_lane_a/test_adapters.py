@@ -911,3 +911,221 @@ def test_k04rest_adapt_228(tmp_path):
     assert unstreamed["stream_usage"] == UNAVAILABLE
 
 
+# K04NEXT M2 CODER-1 Adapters: served proofs for rows 42, 43, R-305, R-306,
+# R-307 over the owned adapter surface. Each boots the served app (served
+# leg) then drives the owned surface with test-injected fakes only (K06
+# rule); product carries no fakes.
+
+# [row-42]-part: no baked-in vendor default; fresh install blocks w/ reason.
+def test_row42_fresh_install_no_default_vendor_blocks_with_reason(tmp_path):
+    client = _served_client(tmp_path)
+    resp = client.get("/api/v1/providers")
+    assert resp.status_code == 200, resp.text
+    rows = resp.json().get("providers", [])
+    assert rows == []
+    models = client.get("/api/v1/providers/openai/models")
+    assert models.status_code == 404, models.text
+    assert "unknown provider" in models.json()["error"]
+    facades_mod.clear_adapter_transports()
+    facades_mod.clear_provider_bindings()
+    try:
+        with pytest.raises(ValueError, match="unbound provider"):
+            facades_mod.resolve_model("openai", "Fresh-Model-1")
+        with pytest.raises(ValueError, match="unbound provider"):
+            facades_mod.check_provider_health("openai", "Fresh-Model-1")
+        empty_secret = dict(_secret("openai"))
+        empty_secret["secret_id"] = ""
+        with pytest.raises(AdapterConfigError):
+            AdapterConfig(
+                provider_id="openai", model="m", secret_ref=empty_secret,
+                base_url="https://row42.example/v1")
+        with pytest.raises(AdapterConfigError):
+            AdapterConfig(
+                provider_id="openai", model="m",
+                secret_ref=_secret("openai"),
+                base_url="https://row42.example/v1", instance_id="")
+    finally:
+        facades_mod.clear_adapter_transports()
+        facades_mod.clear_provider_bindings()
+
+
+# [row-43]-part: pinned config frozen; swaps only via the recorded path.
+def test_row43_pinned_swap_only_through_recorded_path(tmp_path):
+    import dataclasses
+
+    client = _served_client(tmp_path)
+    _served_baseline(client)
+    config = _config()
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        config.model = "Swapped-Model-9"
+    transport = FakeTransport(_stop_response)
+    adapter = OpenAICompatAdapter(config, transport)
+    response = adapter.invoke([{"role": "user", "content": "hi"}],
+                              params={"model": "Override-Model-2"})
+    assert response.model == "Override-Model-2"
+    assert response.to_record()["model"] == "Override-Model-2"
+    assert transport.requests[0]["model"] == "Override-Model-2"
+    assert config.model == "Exact-Model_Id-7"
+    facades_mod.clear_adapter_transports()
+    facades_mod.clear_provider_bindings()
+    try:
+        first = facades_mod.bind_provider(
+            "openai", {"secret_id": "s-43", "provider_id": "openai"},
+            transport, "https://one.example/v1")
+        assert first["evidence_ref"] == "binding:openai/default"
+        assert first["bound_at"]
+        second = facades_mod.bind_provider(
+            "openai", {"secret_id": "s-43", "provider_id": "openai"},
+            transport, "https://two.example/v1")
+        assert second["evidence_ref"] == "binding:openai/default"
+        assert second["bound_at"]
+        resolved = facades_mod.resolve_model("openai", "Pinned-43")
+        assert resolved["provider_id"] == "openai"
+        assert resolved["model_id"] == "Pinned-43"
+        assert resolved["fields"]["endpoint"] == "https://two.example/v1"
+        assert resolved["fields"]["evidence_ref"] == "binding:openai/default"
+        assert "value" not in resolved["fields"]
+    finally:
+        facades_mod.clear_adapter_transports()
+        facades_mod.clear_provider_bindings()
+
+
+# [R-305]-part: exact assigned model id; visible allow-list; labels exact.
+def test_r305_exact_model_visible_allowlist_exact_labels(tmp_path):
+    client = _served_client(tmp_path)
+    _served_baseline(client)
+    with pytest.raises(AdapterConfigError) as excinfo:
+        leg_descriptor("OPENAI")
+    message = str(excinfo.value)
+    for allowed in ("openai", "anthropic", "ollama", "lm_studio"):
+        assert allowed in message
+    facades_mod.clear_adapter_transports()
+    facades_mod.clear_provider_bindings()
+    try:
+        facades_mod.bind_provider(
+            "openai", {"secret_id": "s-305", "provider_id": "openai"},
+            _RecordingChatTransport(_FULL_CHAT_USAGE),
+            "https://api.example/v1")
+        resolved = facades_mod.resolve_model("openai", "MiXeD-305_Model")
+        assert resolved["provider_id"] == "openai"
+        assert resolved["model_id"] == "MiXeD-305_Model"
+        assert resolved["fields"]["instance_id"] == "default"
+        capability = facades_mod.probe_usage("openai/default", "openai",
+                                             False)
+        assert capability["provider_id"] == "openai"
+        assert capability["instance_id"] == "default"
+        assert capability["state"] == "VERIFIED"
+        assert capability["input_tokens"] == 10
+        with pytest.raises(ValueError, match="not bound to provider"):
+            facades_mod.probe_usage("openai/default", "anthropic", False)
+    finally:
+        facades_mod.clear_adapter_transports()
+        facades_mod.clear_provider_bindings()
+
+
+# [R-306]-part: mixed-provider hierarchy acceptance mini-drive.
+def test_r306_mixed_provider_hierarchy_minidrive(tmp_path):
+    import dataclasses
+
+    client = _served_client(tmp_path)
+    _served_baseline(client)
+    facades_mod.clear_adapter_transports()
+    facades_mod.clear_provider_bindings()
+    try:
+        plan = (("openai", True), ("anthropic", False), ("ollama", True))
+        records = []
+        for provider_id, compat in plan:
+            secret = _secret(provider_id)
+            assert secret["secret_id"]
+            kwargs = {}
+            base_url = "https://r306.example/v1"
+            if provider_id == "ollama":
+                base_url = None
+            if compat:
+                kwargs["transport"] = FakeTransport(_stop_response)
+            else:
+                kwargs["litellm_call"] = FakeTransport(_stop_response)
+            adapter = build_leg(provider_id, model="R306-%s" % provider_id,
+                                secret_ref=secret, base_url=base_url,
+                                **kwargs)
+            with pytest.raises(dataclasses.FrozenInstanceError):
+                adapter.config.model = "Swapped"
+            response = adapter.invoke([{"role": "user", "content": "hi"}])
+            record = response.to_record()
+            assert record["provider_id"] == provider_id
+            assert record["model"] == "R306-%s" % provider_id
+            assert record["mock"] is False
+            records.append(record)
+        mock_adapter = MockProviderAdapter(
+            AdapterConfig(provider_id="mock", instance_id="r306",
+                          model="R306-mock", secret_ref=_secret("mock")))
+        assert mock_adapter.serves(key_supplied=False) is True
+        assert mock_adapter.serves(key_supplied=True) is False
+        mock_record = mock_adapter.invoke(
+            [{"role": "user", "content": "hi"}]).to_record()
+        assert mock_record["provider_id"] == "mock"
+        assert mock_record["mock"] is True
+        records.append(mock_record)
+        assert [item["provider_id"] for item in records] == [
+            "openai", "anthropic", "ollama", "mock"]
+        assert [item["model"] for item in records] == [
+            "R306-openai", "R306-anthropic", "R306-ollama", "R306-mock"]
+        for provider_id in ("openai", "anthropic", "ollama"):
+            facades_mod.bind_provider(
+                provider_id,
+                {"secret_id": "s-306", "provider_id": provider_id},
+                FakeTransport(_stop_response),
+                "https://r306.example/v1")
+        resolved = facades_mod.resolve_model("ollama", "R306-ollama")
+        assert resolved["model_id"] == "R306-ollama"
+        assert resolved["fields"]["instance_id"] == "default"
+        assert resolved["fields"]["secret_id"] == "s-306"
+        health = facades_mod.check_provider_health("openai", "R306-openai")
+        assert health["model_id"] == "R306-openai"
+        assert health["usage"]["state"] == "PARTIAL"
+        with pytest.raises(ValueError):
+            facades_mod.check_provider_health("anthropic", "R306-anthropic")
+    finally:
+        facades_mod.clear_adapter_transports()
+        facades_mod.clear_provider_bindings()
+
+
+# [R-307]-part: providers verified on distinct levels, never conflated.
+def test_r307_providers_verified_on_distinct_levels(tmp_path):
+    client = _served_client(tmp_path)
+    _served_baseline(client)
+    facades_mod.clear_adapter_transports()
+    facades_mod.clear_provider_bindings()
+    try:
+        full = {"input_tokens": 10, "output_tokens": 5,
+                "cached_tokens": 2, "reasoning_tokens": 0}
+        facades_mod.bind_provider(
+            "openai", {"secret_id": "s-307", "provider_id": "openai"},
+            _RecordingChatTransport(full), "https://api.example/v1")
+        verified = facades_mod.probe_usage("openai/default", "openai",
+                                           False)
+        assert verified["provider_id"] == "openai"
+        assert verified["instance_id"] == "default"
+        assert verified["state"] == "VERIFIED"
+        assert verified["input_tokens"] == 10
+        assert verified["stream_usage"] == UNAVAILABLE
+        with pytest.raises(ValueError, match="not bound to provider"):
+            facades_mod.probe_usage("openai/default", "groq", False)
+
+        # FAKE-OF: agent_si.providers.adapters.facades (unsupported port)
+        def unsupported(request):
+            raise TransportUnsupportedError("no usage")
+
+        facades_mod.register_adapter_transports(
+            "groq", FakeTransport(unsupported))
+        groq = facades_mod.probe_usage("groq", "groq", False)
+        assert groq["provider_id"] == "groq"
+        assert groq["state"] == "UNSUPPORTED"
+        assert groq["input_tokens"] == UNAVAILABLE
+        with pytest.raises(ValueError):
+            facades_mod.probe_usage("no-such-adapter", "groq", False)
+    finally:
+        facades_mod.clear_adapter_transports()
+        facades_mod.clear_provider_bindings()
+
+

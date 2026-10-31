@@ -119,7 +119,7 @@ class TransportUnsupportedError(Exception):
     """Transport-level signal: this capability is not supported."""
 
 
-@dataclass
+@dataclass(frozen=True)
 class AdapterConfig:
     """Transport configuration: base_url + model + SecretRef.
 
@@ -140,6 +140,10 @@ class AdapterConfig:
             raise AdapterConfigError(
                 "provider_id must be a non-empty string",
                 "config:provider-id")
+        if not isinstance(self.instance_id, str) or not self.instance_id:
+            raise AdapterConfigError(
+                "instance_id must be a non-empty string",
+                "%s/config" % self.provider_id)
         if not isinstance(self.model, str) or not self.model:
             raise AdapterConfigError(
                 "model must be a non-empty string",
@@ -153,6 +157,13 @@ class AdapterConfig:
         if missing:
             raise AdapterConfigError(
                 "secret_ref is missing fields: %s" % ",".join(missing),
+                "%s/%s:config" % (self.provider_id, self.instance_id))
+        empty = [key for key in REQUIRED_SECRET_REF_FIELDS
+                 if not self.secret_ref.get(key)]
+        if empty:
+            raise AdapterConfigError(
+                "secret_ref has empty values for fields: %s" % ",".join(
+                    sorted(empty)),
                 "%s/%s:config" % (self.provider_id, self.instance_id))
         if "value" in self.secret_ref:
             raise AdapterConfigError(

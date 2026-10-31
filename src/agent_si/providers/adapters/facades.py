@@ -153,8 +153,9 @@ def probe_usage(adapter_id: str, provider_id: str,
 
     Non-streaming usage is always probed; ``streaming=True`` additionally
     probes the stream channel through the bound stream transport. Unknown
-    adapter ids, or ``streaming=True`` without a bound stream transport,
-    raise ValueError (fail closed).
+    adapter ids, ``streaming=True`` without a bound stream transport, or a
+    provider label that does not match the adapter id raise ValueError
+    (fail closed: probe labels stay exact, never borrowed).
     """
     if not isinstance(adapter_id, str) or not adapter_id:
         raise ValueError("adapter_id must be a non-empty string")
@@ -169,9 +170,16 @@ def probe_usage(adapter_id: str, provider_id: str,
             "streaming probe needs a stream transport for %r" % (adapter_id,)
         )
     if "/" in adapter_id:
+        bound_provider = adapter_id.split("/", 1)[0]
         instance_id = adapter_id.rsplit("/", 1)[-1] or "default"
     else:
+        bound_provider = adapter_id
         instance_id = "default"
+    if bound_provider != provider_id:
+        raise ValueError(
+            "adapter %r is not bound to provider %r "
+            "(probe labels stay exact; bind it server-side first)"
+            % (adapter_id, provider_id))
     return _usage_probe.probe_adapter(
         provider_id,
         instance_id,
