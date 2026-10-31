@@ -1811,7 +1811,7 @@ def create_app(settings: Any = None,
                                     content=_k04_jsonable(_payload))
         return _k04_endpoint
 
-    for _method, _path, _name, _fn in _k04_pr.ROUTES:
+    for _method, _path, _name, _fn in list(_k04_pr.ROUTES) + list(_k04_pr._LEGACY_ROUTES):
         app.add_api_route(
             _path,
             _k04_make_endpoint(
