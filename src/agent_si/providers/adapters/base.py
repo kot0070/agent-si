@@ -41,6 +41,16 @@ REQUIRED_SECRET_REF_FIELDS = (
     "source",
 )
 
+#: Identity fields of a SecretRef that must carry non-empty values: the
+#: pointer itself. Metadata fields (scope, source) default to "" in the
+#: served SecretRef shape, so an empty metadata value is a valid ref,
+#: never a misconfiguration or raw key material.
+NONEMPTY_SECRET_REF_FIELDS = (
+    "secret_id",
+    "provider_id",
+    "type",
+)
+
 #: Provider capability surface an adapter exposes for the router (SPEC 34).
 CAPABILITY_KEYS = (
     "supports_streaming",
@@ -158,7 +168,7 @@ class AdapterConfig:
             raise AdapterConfigError(
                 "secret_ref is missing fields: %s" % ",".join(missing),
                 "%s/%s:config" % (self.provider_id, self.instance_id))
-        empty = [key for key in REQUIRED_SECRET_REF_FIELDS
+        empty = [key for key in NONEMPTY_SECRET_REF_FIELDS
                  if not self.secret_ref.get(key)]
         if empty:
             raise AdapterConfigError(
