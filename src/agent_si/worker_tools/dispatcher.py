@@ -3,6 +3,10 @@
 Behaviour of the real implementation:
 - G1 argv-only guard: ``argv`` is a list of words; a shell string is
   rejected with :exc:`TypeError` before anything else runs.
+- MH-3 task-authorized list: when ``task_authorized`` is given as a
+  sequence, a tool outside it is deterministically rejected with
+  :exc:`ToolNotAuthorizedError` (code TOOL_NOT_AUTHORIZED) plus a guard
+  record; nothing executes and no side effect happens.
 - every call goes through ``toolguard.evaluate`` (read-only G2/G5 usage;
   resolved lazily so this lane never owns ``toolguard``).
 - installer auto-install stays disabled: unknown tools raise
@@ -20,7 +24,13 @@ import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from .registry import ToolRegistry, _checked_argv, _checked_auth, _shaped_result
+from .registry import (
+    ToolNotAuthorizedError,
+    ToolRegistry,
+    _checked_argv,
+    _checked_auth,
+    _shaped_result,
+)
 from .types import ActionClass, Argv, AuthMapping, ToolResult
 
 if TYPE_CHECKING:  # read-only contract usage; never a runtime import here
@@ -212,7 +222,8 @@ def guarded_dispatch(
     *,
     tool: str,
     registry: ToolRegistry | None = None,
-    task_authorized: bool | None = None,
+    task_authorized: bool | collections.abc.Sequence[str] | None = None,
+    guard_store: list | None = None,
     run_id: str | None = None,
     retry_budget: int | None = None,
     parked: EscalationCard | collections.abc.Mapping[str, EscalationCard] | None = None,
@@ -221,9 +232,12 @@ def guarded_dispatch(
 
     ``argv`` must be a list of words (G1); ``action_class`` is one of
     R0-R3; ``auth`` carries identity, scopes and approvals. Deny
-    order: an explicit ``task_authorized`` denial refuses first, then
-    the parked-run refusal (explicit ``parked`` card or table, else
-    the stored card for ``run_id``), then ``toolguard.evaluate``.
+    order: an explicit ``task_authorized`` denial refuses first (a
+    ``False`` signal, or a sequence not listing ``tool``, which raises
+    :exc:`ToolNotAuthorizedError` and files to ``guard_store`` when
+    given), then the parked-run refusal (explicit ``parked`` card or
+    table, else the stored card for ``run_id``), then
+    ``toolguard.evaluate``.
     A parked run raises :exc:`EscalationParkedError` with its card and
     performs no further guard work. Denials count against the run's
     retry budget (``run_id`` kwarg or ``run_id`` auth claim,
@@ -231,7 +245,25 @@ def guarded_dispatch(
     exhausts the budget parks the run as ESCALATED.
     """
     argv_list = _checked_argv(argv)
-    _checked_task_authorized(task_authorized)
+    if task_authorized is None or task_authorized is True:
+        pass
+    elif task_authorized is False:
+        raise PermissionError("task_authorized denied: task not authorized")
+    elif tool not in list(task_authorized):
+        reason = "tool %r is outside the task-authorized list" % (tool,)
+        if guard_store is not None:
+            from .guard_records import TOOL_NOT_AUTHORIZED
+            from .guard_records import record_guard_decision as _record
+
+            _record(
+                guard_store,
+                tool=tool,
+                decision="deny",
+                reason=reason,
+                evidence_ref="toolguard:deny:task-list:%s" % (tool[:40],),
+                error_code=TOOL_NOT_AUTHORIZED,
+            )
+        raise ToolNotAuthorizedError("TOOL_NOT_AUTHORIZED: %s" % (reason,))
     if isinstance(auth, collections.abc.Mapping):
         auth_dict = dict(auth)
     else:

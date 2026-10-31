@@ -9,7 +9,9 @@ AI-generated. Product code uses only parts.py + ledger.py.
 
 from __future__ import annotations
 
+import os
 import secrets
+import shutil
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -29,6 +31,108 @@ REPORT_ROW_NOT_FOUND = "REPORT_ROW_NOT_FOUND"
 
 AuthHook = Callable[[str | None, str, str], bool]
 RateHook = Callable[[str], bool]
+
+
+#: Env var carrying the product data dir (K10ST1-B consumer lane). The
+#: product start path supplies it via --data-dir argv/env; this module
+#: holds the single read call-site (get_data_dir). Harness settings are
+#: never consulted for the dir.
+DATA_DIR_ENV_VAR = "AGENT_SI_DATA_DIR"
+
+#: Harness settings keys that once carried a store dir. A differing
+#: harness-carried dir is rejected once the env dir is set.
+_HARNESS_STORE_KEYS = ("store_dir", "data_dir", "data_directory")
+
+#: First-start legacy pair migrated into the data dir (copy, never move).
+_MIGRATE_FILE_NAMES = ("settings.json", "credentials.json")
+
+#: Previous per-user home migrated on first start (portable; the same
+#: home already backs automation run-temp in agent_si.automation.cleanup).
+_LEGACY_HOME_DIRNAME = ".agent_si"
+
+
+def _harness_store_dir(settings: Any) -> str | None:
+    """Return a harness-carried store dir, if any (settings only)."""
+    for _key in _HARNESS_STORE_KEYS:
+        if isinstance(settings, Mapping):
+            _val = settings.get(_key)
+            if _val:
+                return str(_val)
+        elif settings is not None and hasattr(settings, _key):
+            _val = getattr(settings, _key)
+            if _val:
+                return str(_val)
+    return None
+
+
+def _default_legacy_dir() -> str:
+    """Previous per-user home (portable; never a machine path)."""
+    return os.path.join(os.path.expanduser("~"), _LEGACY_HOME_DIRNAME)
+
+
+def migrate_legacy_data(data_dir: str,
+                         legacy_dir: str | None = None) -> dict[str, str]:
+    """Copy the first-start settings+credentials pair into the data dir.
+
+    Copies settings.json + credentials.json from the legacy home (or an
+    explicit legacy_dir) into data_dir. Originals are kept (copy, never
+    move); a destination file that already exists is never overwritten,
+    so a repeat start is a no-op. Returns a per-file report.
+    """
+    _src = os.path.abspath(
+        legacy_dir if legacy_dir is not None else _default_legacy_dir())
+    _dst = os.path.abspath(data_dir)
+    _report: dict[str, str] = {}
+    if _src == _dst:
+        for _name in _MIGRATE_FILE_NAMES:
+            _report[_name] = "skipped-same-dir"
+        return _report
+    os.makedirs(_dst, exist_ok=True)
+    for _name in _MIGRATE_FILE_NAMES:
+        _from = os.path.join(_src, _name)
+        _to = os.path.join(_dst, _name)
+        if os.path.exists(_to):
+            _report[_name] = "skipped-present"
+            continue
+        if not os.path.isfile(_from):
+            _report[_name] = "skipped-absent"
+            continue
+        shutil.copy2(_from, _to)
+        _report[_name] = "copied"
+    return _report
+
+
+def get_data_dir(settings: Any = None) -> str | None:
+    """Resolve the consumer-layer product data dir (K10ST1-B).
+
+    Single AGENT_SI_DATA_DIR read call-site in this module. The env dir
+    wins; a differing harness settings dir is rejected (ValueError); with
+    no env dir the harness dir (if any) is returned for the legacy path,
+    else None. An explicitly blank env value fails loud (never a silent
+    fallback). Resolving from env also ensures the dir exists and runs
+    the first-start legacy migration (originals kept).
+    """
+    _raw = os.environ.get(DATA_DIR_ENV_VAR)
+    _harness = _harness_store_dir(settings)
+    if _raw is not None:
+        _text = str(_raw).strip()
+        if not _text:
+            raise ValueError(
+                f"K10ST1-B: {DATA_DIR_ENV_VAR} is set but empty: pass "
+                "a real dir, never a silent fallback")
+        _resolved = os.path.abspath(os.path.expanduser(_text))
+        if (
+            _harness is not None
+            and os.path.abspath(_harness) != _resolved
+        ):
+            raise ValueError(
+                f"K10ST1-B: harness settings data dir {_harness!r} "
+                f"rejected: the data dir comes from {DATA_DIR_ENV_VAR} "
+                "only")
+        os.makedirs(_resolved, exist_ok=True)
+        migrate_legacy_data(_resolved)
+        return _resolved
+    return _harness
 
 
 def _read_token(settings: Any) -> str | None:
@@ -81,6 +185,152 @@ def _ledger_row_payload(package_id: str, agents: int, peak_concurrency: int,
     }
 
 
+def fresh_assurance(turn: Any,
+                    reaudit_of: Any = None,
+                    pair_reuse_ref: Any = None) -> str:
+    """Mint a new audit id through a fresh auditor instance (ROWS 9-13).
+
+    Kit BUILD_PLAN rows 9-13 (BUILD_PLAN.md:1300) plus PRODUCT_SPEC
+    R210: every audit and every re-audit uses a NEW auditor agent with
+    fresh context. Each call builds a new coordinator instance, so per
+    audit and per re-audit the auditor is fresh; ids still come from
+    the real global audit sequence through the real audit entries,
+    never a FakeAuditor. With reaudit_of the prior row is loaded from
+    the real shared record store and the re-audit runs through the
+    real reaudit entry on the fresh instance. Empty work fails.
+    """
+    from agent_si.assurance import audit_coordinator as _ac
+    from agent_si.assurance import audit_records as _ar
+
+    class _FreshAuditor(_ac.AuditCoordinator):
+        """Fresh auditor instance per call; adds no behavior."""
+
+    auditor = _FreshAuditor()
+    if reaudit_of is None:
+        if isinstance(turn, _ac.ServedTurn):
+            served = turn
+        else:
+            fields = turn if isinstance(turn, Mapping) else {}
+            served = _ac.ServedTurn(
+                turn_ref=str(fields.get("turn_ref") or ""),
+                project_id=str(fields.get("project_id") or ""),
+                task_id=str(fields.get("task_id") or ""),
+                run_id=str(fields.get("run_id") or ""),
+                work_refs=tuple(str(v) for v in (
+                    fields.get("work_refs") or ())),
+                artifact_refs=tuple(str(v) for v in (
+                    fields.get("artifact_refs") or ())),
+                evidence_refs=tuple(str(v) for v in (
+                    fields.get("evidence_refs") or ())),
+                producer_session_refs=tuple(str(v) for v in (
+                    fields.get("producer_session_refs") or ())),
+                contract_hash=str(fields.get("contract_hash") or ""),
+            )
+        if not served.work_refs and not served.artifact_refs:
+            raise _ac.EmptyWorkError("served turn carries no work")
+        return auditor.audit_with_fresh_auditor(served)
+    prior_id = str(reaudit_of)
+    prior = _ar._fetch_record(prior_id)
+    if prior is None:
+        raise ValueError("unknown audit_id: %s" % (prior_id,))
+    seed = auditor.__dict__.setdefault("_AUDITS", {})
+    seed[prior_id] = {
+        "scope_id": prior.audit_scope_id,
+        "sequence": prior.audit_sequence,
+        "run_id": prior.run_id,
+        "contract_hash": prior.contract_hash,
+    }
+    scopes = auditor.__dict__.setdefault("_SCOPE_COUNT", {})
+    scopes[prior.audit_scope_id] = max(
+        scopes.get(prior.audit_scope_id, 0), prior.audit_sequence)
+    return auditor.reaudit(prior_id, pair_reuse_ref)
+
+
+def _ref_list(value: Any) -> list:
+    """One body field as a list of strings (missing gives empty)."""
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value]
+    return [str(value)]
+
+
+def runner_contract_verdict(*, project_dir: Any,
+                            tool_rows: Any = (),
+                            files_read: Any = (),
+                            files_written: Any = ()) -> dict:
+    """Judge the real files read and written (R-304).
+
+    Kit BUILD_PLAN row R-304 (BUILD_PLAN.md:1353): the auditor judges
+    the real files read and written. Every listed ref needs both a
+    matching ok tool row and a real file contained in project_dir
+    (the shared checker's rules, through the real checker module);
+    a row alone never suffices. An unreadable project_dir or an
+    empty contract fails closed. Uses only portable stdlib path
+    APIs; no machine paths.
+    """
+    import os as _verdict_os
+
+    from agent_si.assurance.verification import checker as _checker
+
+    if isinstance(tool_rows, (list, tuple)):
+        rows = tuple(tool_rows)
+    elif tool_rows is None:
+        rows = ()
+    else:
+        rows = (tool_rows,)
+    read_refs = _ref_list(files_read)
+    written_refs = _ref_list(files_written)
+    try:
+        base_text = str(project_dir or "")
+    except Exception:
+        base_text = ""
+    dir_ok = bool(base_text)
+    if dir_ok:
+        try:
+            dir_ok = _verdict_os.path.isdir(base_text)
+            if dir_ok:
+                with _verdict_os.scandir(base_text):
+                    pass
+        except (OSError, ValueError):
+            dir_ok = False
+    if not dir_ok:
+        return {
+            "verdict": "FAIL",
+            "reason": "project_dir unreadable",
+            "checked_read": len(read_refs),
+            "checked_written": len(written_refs),
+            "missing": read_refs + written_refs,
+        }
+    if not read_refs and not written_refs and not rows:
+        return {
+            "verdict": "FAIL",
+            "reason": "empty contract: no files and no tool rows",
+            "checked_read": 0,
+            "checked_written": 0,
+            "missing": [],
+        }
+    missing = [
+        ref for ref in read_refs + written_refs
+        if not (_checker._row_resolves(rows, ref)
+                and _checker._file_resolves(base_text, ref))
+    ]
+    if missing:
+        return {
+            "verdict": "FAIL",
+            "reason": "refs need an ok tool row plus a real file",
+            "checked_read": len(read_refs),
+            "checked_written": len(written_refs),
+            "missing": missing,
+        }
+    return {
+        "verdict": "PASS",
+        "reason": "each ref has an ok tool row plus a real file",
+        "checked_read": len(read_refs),
+        "checked_written": len(written_refs),
+        "missing": [],
+    }
+
 def create_app(settings: Any = None,
                auth_hook: AuthHook | None = None,
                rate_hook: RateHook | None = None,
@@ -93,6 +343,11 @@ def create_app(settings: Any = None,
     """
     _parts_store._store.clear()
 
+# K10ST1-B (M-P4-134 / LIVE0-04): consumer-layer data dir behind
+    # the single get_data_dir call-site. First start migrates
+    # settings + credentials, keeping originals.
+    _k10_data_dir = get_data_dir(settings)
+
     configured = _read_token(settings)
     app_token = configured if configured else secrets.token_urlsafe(32)
 
@@ -101,6 +356,7 @@ def create_app(settings: Any = None,
     app.state.model_factory = model_factory
     ledgers: dict[str, PackageLedger] = {}
     app.state.ledgers = ledgers
+    app.state.data_dir = _k10_data_dir
 
     def default_auth_hook(token: str | None, actor: str, action: str) -> bool:
         if action != USER_WRITE:
@@ -595,7 +851,11 @@ def create_app(settings: Any = None,
                 return str(_val)
         return None
 
-    app.state.k02r3_store_dir = _k02r3_store_dir(settings)
+    app.state.k02r3_store_dir = (
+        _k10_data_dir
+        if _k10_data_dir is not None
+        else _k02r3_store_dir(settings)
+    )
     from agent_si.telemetry import run_store as _l0c06_telemetry_store
 
     app.state.telemetry_store_dir = app.state.k02r3_store_dir
@@ -702,7 +962,11 @@ def create_app(settings: Any = None,
             return _val
         return 5.0
 
-    _k04_dir = _k04_store_dir(settings)
+    _k04_dir = (
+        _k10_data_dir
+        if _k10_data_dir is not None
+        else _k04_store_dir(settings)
+    )
     _k04_config_error: Optional[str] = None
     if _k04_dir is None:
         _k04_config_error = (
@@ -1708,5 +1972,253 @@ def create_app(settings: Any = None,
                 "recorded_version": _status["source_version"],
                 "source_version": _status["source_version"],
                 **_row}
+
+    # --- K03 assurance lane served ops (additions-only). ---
+    # Mounts the three assurance entries over the real lane modules:
+    # audit_served_turn, run_assurance (verify, then audit, then
+    # finalize through the real coordinator) and close_stage. These
+    # are open loopback test ops: JSON body in, JSON out. No provider
+    # calls happen here; the assurance legs run for real through
+    # agent_si.assurance, and empty work fails with 400.
+    from agent_si.assurance import audit_coordinator as _k03a_coordinator
+    from agent_si.assurance import audit_records as _k03a_records
+    from agent_si.assurance import coordinator as _k03a_assurance
+
+    class _K03aAudit(_k03a_coordinator.AuditCoordinator):
+        """Concrete binding of the real audit entries; adds no behavior."""
+
+    def _k03a_tuples(value: Any) -> tuple:
+        """Body list field as a tuple (missing gives empty)."""
+        if value is None:
+            return ()
+        if isinstance(value, (list, tuple)):
+            return tuple(value)
+        return (value,)
+
+    async def _k03a_body(request: Request) -> dict:
+        """Read a JSON object body, tolerating missing/bad payloads."""
+        try:
+            data = await request.json()
+        except Exception:
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _k03a_fail(exc: Exception) -> None:
+        """Map an assurance refusal to its HTTP refusal (always raises)."""
+        if isinstance(exc, HTTPException):
+            raise exc
+        if isinstance(exc, _k03a_coordinator.EmptyWorkError):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": exc.code, "detail": str(exc)})
+        if isinstance(exc, _k03a_assurance.AssuranceRefused):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": exc.code, "detail": str(exc)})
+        if isinstance(exc, (ValueError, TypeError, KeyError)):
+            code = getattr(exc, "code", None) or type(exc).__name__
+            raise HTTPException(
+                status_code=400,
+                detail={"code": code, "detail": str(exc)})
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    @app.post("/api/v1/assurance/audit_served_turn")
+    async def k03a_audit_served_turn(request: Request) -> dict[str, Any]:
+        """POST /api/v1/assurance/audit_served_turn -> audit one turn."""
+        data = await _k03a_body(request)
+        turn = _k03a_coordinator.ServedTurn(
+            turn_ref=str(data.get("turn_ref") or data.get("run_id")
+                         or ""),
+            project_id=str(data.get("project_id") or ""),
+            task_id=str(data.get("task_id") or ""),
+            run_id=str(data.get("run_id") or ""),
+            work_refs=tuple(
+                str(v) for v in _k03a_tuples(data.get("work_refs"))),
+            artifact_refs=tuple(
+                str(v) for v in _k03a_tuples(data.get("artifact_refs"))),
+            evidence_refs=tuple(
+                str(v) for v in _k03a_tuples(data.get("evidence_refs"))),
+            producer_session_refs=tuple(
+                str(v)
+                for v in _k03a_tuples(data.get("producer_session_refs"))),
+            contract_hash=str(data.get("contract_hash") or ""),
+        )
+        try:
+            audit_id = _K03aAudit().audit_served_turn(turn)
+        except Exception as exc:
+            _k03a_fail(exc)
+            raise
+        return {"audit_id": audit_id}
+
+    @app.post("/api/v1/assurance/run_assurance")
+    async def k03a_run_assurance(request: Request) -> dict[str, Any]:
+        """POST /api/v1/assurance/run_assurance -> verify/audit/finalize."""
+        data = await _k03a_body(request)
+        try:
+            outcome = _k03a_coordinator.run_assurance(
+                project_id=str(data.get("project_id") or ""),
+                task_id=str(data.get("task_id") or ""),
+                run_id=str(data.get("run_id") or ""),
+                contract_hash=str(data.get("contract_hash") or ""),
+                artifact_refs=tuple(
+                    _k03a_tuples(data.get("artifact_refs"))),
+                evidence_refs=tuple(
+                    _k03a_tuples(data.get("evidence_refs"))),
+                work_refs=tuple(_k03a_tuples(data.get("work_refs"))),
+                producer_session_refs=tuple(
+                    _k03a_tuples(data.get("producer_session_refs"))),
+                tool_rows=tuple(_k03a_tuples(data.get("tool_rows"))),
+                project_dir=str(data.get("project_dir") or ""),
+                task_state=data.get("task_state"),
+                output_refs=tuple(_k03a_tuples(data.get("output_refs"))),
+                metric_refs=tuple(_k03a_tuples(data.get("metric_refs"))),
+                accounting_complete=bool(
+                    data.get("accounting_complete", False)),
+                budget_settled=bool(data.get("budget_settled", False)),
+                resources_released=bool(
+                    data.get("resources_released", False)),
+            )
+        except Exception as exc:
+            _k03a_fail(exc)
+            raise
+        return {
+            "ok": outcome.ok,
+            "phase": outcome.phase,
+            "verification_id": outcome.verification_id,
+            "audit_id": outcome.audit_id,
+            "finalization_id": outcome.finalization_id,
+            "status_trail": list(outcome.status_trail),
+            "records": [
+                {"leg": step.leg, "status": step.status,
+                 "note": step.note}
+                for step in outcome.records
+            ],
+        }
+
+    @app.post("/api/v1/assurance/close_stage")
+    async def k03a_close_stage(request: Request) -> dict[str, Any]:
+        """POST /api/v1/assurance/close_stage -> close with a row id."""
+        data = await _k03a_body(request)
+        try:
+            row_id = _K03aAudit().close_stage(
+                str(data.get("task_id") or ""),
+                str(data.get("scope_id") or ""),
+                str(data.get("audit_id") or ""),
+            )
+        except Exception as exc:
+            _k03a_fail(exc)
+            raise
+        stored = _k03a_records._fetch_record(row_id)
+        return {
+            "row_id": row_id,
+            "audit_id": row_id,
+            "queryable": stored is not None,
+        }
+
+    # --- DRF3K03A assurance: fresh audit + runner contract
+    # (additions-only). ROWS 9-13 served through fresh_assurance (a new
+    # auditor instance per call, per audit and per re-audit); R-304
+    # served through runner_contract_verdict (the real files read and
+    # written judged on the production call path, never a
+    # FakeAuditor).
+    @app.post("/api/v1/assurance/fresh_assurance")
+    async def k03a_fresh_assurance(request: Request) -> dict[str, Any]:
+        """POST /api/v1/assurance/fresh_assurance -> audit, fresh auditor.
+        """
+        data = await _k03a_body(request)
+        turn = _k03a_coordinator.ServedTurn(
+            turn_ref=str(data.get("turn_ref") or data.get("run_id")
+                         or ""),
+            project_id=str(data.get("project_id") or ""),
+            task_id=str(data.get("task_id") or ""),
+            run_id=str(data.get("run_id") or ""),
+            work_refs=tuple(
+                str(v) for v in _k03a_tuples(data.get("work_refs"))),
+            artifact_refs=tuple(
+                str(v) for v in _k03a_tuples(data.get("artifact_refs"))),
+            evidence_refs=tuple(
+                str(v) for v in _k03a_tuples(data.get("evidence_refs"))),
+            producer_session_refs=tuple(
+                str(v)
+                for v in _k03a_tuples(data.get("producer_session_refs"))),
+            contract_hash=str(data.get("contract_hash") or ""),
+        )
+        try:
+            audit_id = fresh_assurance(
+                turn,
+                reaudit_of=data.get("reaudit_of"),
+                pair_reuse_ref=data.get("pair_reuse_ref"),
+            )
+        except Exception as exc:
+            _k03a_fail(exc)
+            raise
+        return {"audit_id": audit_id}
+
+    @app.post("/api/v1/assurance/runner_contract")
+    async def k03a_runner_contract(request: Request) -> dict[str, Any]:
+        """POST /api/v1/assurance/runner_contract -> judge real files."""
+        data = await _k03a_body(request)
+        return runner_contract_verdict(
+            project_dir=str(data.get("project_dir") or ""),
+            tool_rows=tuple(_k03a_tuples(data.get("tool_rows"))),
+            files_read=tuple(
+                str(v) for v in _k03a_tuples(data.get("files_read"))),
+            files_written=tuple(
+                str(v) for v in _k03a_tuples(data.get("files_written"))),
+        )
+
+    # K10ST4 M-R-COMPET (MGR-B lane B: competitive audit; MGR-A mounts its
+    # own routes elsewhere in this file, untouched): recorded flow-by-flow
+    # audit with source plus snippet per claim (loopback TEST data only).
+    @app.get("/k10/compet/audit")
+    def k10_compet_audit() -> dict[str, Any]:
+        from agent_si.k10_compet import audit_flows as _k10_compet_flows
+
+        return {"testid": "k10st4-accept", "flows": _k10_compet_flows()}
+
+    # K10ST4 M-P4-162 (lane A: acceptance; MGR-B block above untouched):
+    # final acceptance over Docker plus services plus PowerShell (loopback).
+    @app.get("/k10/accept")
+    def k10_accept() -> dict[str, Any]:
+        from agent_si.k10_accept import get_acceptance_status as _k10_status
+
+        return {"testid": "k10st4-accept", **_k10_status()}
+
+    # K10ST4 M-P4-166 (lane A: combine on DEFAULT; MGR-B block above
+    # untouched): best plus KB plus benchmark plus Watcher (loopback).
+    @app.get("/k10/combine")
+    def k10_combine(package_id: str) -> dict[str, Any]:
+        from agent_si.k10_combine import combine_default as _k10_combine
+
+        return {"testid": "k10st4-accept", **_k10_combine(package_id)}
+
+    # K10OPEN4 start path (row 166): human-like end-to-end run record
+    # with release evidence including screenshots (loopback TEST only).
+    @app.get("/k10/start/evidence")
+    def k10open4_start_evidence() -> dict[str, Any]:
+        from agent_si.k10_start import (
+            record_release_evidence as _k10o4_evidence,
+        )
+
+        return {"testid": "k10open4-start",
+                **_k10o4_evidence(app.state.data_dir)}
+
+    # K10OPEN4 start path (row R-328): demo project brought to green
+    # inside the acceptance drive (loopback TEST data only).
+    @app.post("/k10/start/demo")
+    def k10open4_start_demo() -> dict[str, Any]:
+        from agent_si.k10_start import drive_demo_to_green as _k10o4_demo
+
+        return {"testid": "k10open4-start",
+                **_k10o4_demo(app.state.data_dir)}
+
+    # K10OPEN4 start path (row M-P4-138, served report): per-file
+    # report of the first-start settings plus keys migration.
+    @app.get("/k10/start/migrate")
+    def k10open4_start_migrate() -> dict[str, Any]:
+        from agent_si.k10_start import migrate_first_start as _k10o4_mig2
+
+        return {"testid": "k10open4-start",
+                "migrated": _k10o4_mig2(app.state.data_dir)}
 
     return app

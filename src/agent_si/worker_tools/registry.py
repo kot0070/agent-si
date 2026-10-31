@@ -40,20 +40,31 @@ class GuardRecord:
     seq: int
 
 
-class ToolNotAuthorizedError(ToolNotFoundError):
+class ToolNotAuthorizedError(ToolNotFoundError, PermissionError):
     """Off-list tool call rejected with a named code plus guard record.
 
     Subclasses :exc:`ToolNotFoundError` so unknown-name handling is
-    unchanged; ``code`` is always ``TOOL_NOT_AUTHORIZED`` and
-    ``record`` is the appended :class:`GuardRecord`. Nothing is
-    executed and no route is registered as a side effect.
+    unchanged, and :exc:`PermissionError` so MH-3 task-list denials
+    keep the denial handling; ``code`` is always
+    ``TOOL_NOT_AUTHORIZED`` and ``record`` is the appended
+    :class:`GuardRecord` (None for a task-list denial raised before
+    any registry work). Nothing is executed and no route is
+    registered as a side effect.
     """
 
-    def __init__(self, tool_name: str, record: GuardRecord) -> None:
+    code = TOOL_NOT_AUTHORIZED
+
+    def __init__(
+        self, tool_name: str, record: GuardRecord | None = None
+    ) -> None:
         """Carry the tool name, the named code and the guard record."""
-        super().__init__(
-            "unknown tool: %r (auto-install is disabled)" % (tool_name,)
-        )
+        if record is not None:
+            message = "unknown tool: %r (auto-install is disabled)" % (
+                tool_name,
+            )
+        else:
+            message = str(tool_name)
+        super().__init__(message)
         self.tool_name = tool_name
         self.code = TOOL_NOT_AUTHORIZED
         self.record = record
