@@ -11,13 +11,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from fastapi.testclient import TestClient  # noqa: E402
+from fastapi.testclient import TestClient
 
-from agent_si.backend.app import create_app  # noqa: E402
-from agent_si.worker_tools import ToolRegistry, guarded_dispatch  # noqa: E402
-from agent_si.worker_tools.escalation import ESCALATED  # noqa: E402
-from agent_si.worker_tools.guard_records import TOOL_NOT_AUTHORIZED  # noqa: E402
-from agent_si.worker_tools.registry import (  # noqa: E402
+from agent_si.backend.app import create_app
+from agent_si.worker_tools import ToolRegistry, guarded_dispatch
+from agent_si.worker_tools.escalation import ESCALATED
+from agent_si.worker_tools.guard_records import TOOL_NOT_AUTHORIZED
+from agent_si.worker_tools.registry import (
     ToolNotAuthorizedError,
     ToolNotFoundError,
 )
@@ -54,7 +54,7 @@ def test_mh1_exhaustion_parks_escalated_with_card():
             json={
                 "run_id": "run-1",
                 "ok": False,
-                "evidence_ref": "ev-%d" % (attempt,),
+                "evidence_ref": f"ev-{attempt}",
                 "budget": 2,
             },
             headers=_auth(),
@@ -79,7 +79,7 @@ def test_mh1_card_visible_in_run_view_and_chat():
             json={
                 "run_id": "run-2",
                 "ok": False,
-                "evidence_ref": "ev-%d" % (attempt,),
+                "evidence_ref": f"ev-{attempt}",
                 "budget": 1,
             },
             headers=_auth(),
@@ -232,3 +232,164 @@ def test_mh3_unit_no_list_keeps_old_unknown_tool_error():
     else:
         raise AssertionError("unknown tool was not refused")
     assert ToolNotFoundError is _NF
+
+
+# --- M-D-D8: tools only via registry plus guarded dispatcher ---
+
+
+def test_d8_explicit_task_deny_refuses_first_served():
+    client = _client()
+    resp = client.post(
+        "/api/v1/k06/tools/dispatch",
+        json={
+            "tool": "status",
+            "argv": ["status"],
+            "action_class": "R0",
+            "auth": _auth_r0(),
+            "task_authorized": False,
+        },
+        headers=_auth(),
+    )
+    assert resp.status_code == 403, resp.text
+    assert resp.json()["code"] == "TOOLGUARD_DENIED"
+
+
+def test_d8_unknown_tool_refused_never_executes():
+    registry = ToolRegistry()
+    try:
+        registry.load("no-such-tool")
+    except ToolNotAuthorizedError as exc:
+        assert exc.code == TOOL_NOT_AUTHORIZED
+    else:
+        raise AssertionError("unknown tool was executed or allowed")
+    assert len(registry.guard_records) == 1
+    assert registry.guard_records[0].code == TOOL_NOT_AUTHORIZED
+    store: list = []
+    try:
+        guarded_dispatch(
+            ["no-such-tool"], "R0", _auth_r0(),
+            tool="no-such-tool", registry=registry,
+            task_authorized=["no-such-tool"], guard_store=store,
+        )
+    except ToolNotAuthorizedError as exc:
+        assert exc.code == TOOL_NOT_AUTHORIZED
+    else:
+        raise AssertionError("unknown tool was executed or allowed")
+
+
+# --- M-D-D36: action execution persisted; repeat verified before repeat ---
+
+
+def test_d36_repeat_runs_verified_then_persisted_served():
+    client = _client()
+    for _ in range(2):
+        resp = client.post(
+            "/api/v1/k06/services/acceptance",
+            json={
+                "service": "status",
+                "argv": ["status"],
+                "action_class": "R0",
+                "auth": _auth_r0(),
+            },
+            headers=_auth(),
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["ok"] is True
+    listed = client.get("/api/v1/k06/services/acceptance")
+    assert listed.status_code == 200, listed.text
+    runs = listed.json()["runs"]
+    assert [r["run_id"] for r in runs] == ["acceptance-1", "acceptance-2"]
+    assert all(r["evidence_refs"] for r in runs)
+
+
+# --- M-D-D51: fail-closed with a persisted evaluation, no deadlock ---
+
+
+def test_d51_parked_attempts_fail_closed_with_escape_served():
+    client = _client()
+    for attempt in range(2):
+        client.post(
+            "/api/v1/k06/runs/attempt",
+            json={"run_id": "run-d51", "ok": False,
+                  "evidence_ref": f"ev-{attempt}", "budget": 1},
+            headers=_auth(),
+        )
+    assert client.get("/api/v1/k06/runs/run-d51").json()["state"] == ESCALATED
+    late = client.post(
+        "/api/v1/k06/runs/attempt",
+        json={"run_id": "run-d51", "ok": False,
+              "evidence_ref": "ev-late", "budget": 1},
+        headers=_auth(),
+    )
+    assert late.status_code == 200, late.text
+    assert late.json()["state"] == ESCALATED
+    assert late.json()["card"]["actions"] == ["resume", "discard"]
+    resumed = client.post("/api/v1/k06/runs/run-d51/resume", headers=_auth())
+    assert resumed.status_code == 200, resumed.text
+    assert resumed.json()["state"] == "RUNNING"
+    for attempt in range(2):
+        client.post(
+            "/api/v1/k06/runs/attempt",
+            json={"run_id": "run-d51", "ok": False,
+                  "evidence_ref": f"ev2-{attempt}", "budget": 1},
+            headers=_auth(),
+        )
+    discarded = client.post("/api/v1/k06/runs/run-d51/discard",
+                            headers=_auth())
+    assert discarded.status_code == 200, discarded.text
+    assert discarded.json()["state"] == "DISCARDED"
+
+
+def test_d51_channel_evaluation_persisted_before_socket_use():
+    import importlib.util
+    import json
+    import socket
+    import tempfile
+    from pathlib import Path
+
+    services_dir = (
+        Path(__file__).resolve().parent.parent
+        / "src" / "agent_si" / "services"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "d51_served_socket", str(services_dir / "channel_socket.py"))
+    assert spec is not None and spec.loader is not None
+    channel_socket = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(channel_socket)
+
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe.bind(("127.0.0.1", 0))
+    closed_port = probe.getsockname()[1]
+    probe.close()
+
+    fd, store = tempfile.mkstemp(prefix="d51-served-", suffix=".jsonl")
+    import os as _os
+
+    _os.close(fd)
+    Path(store).unlink()
+    try:
+        result = channel_socket.open_channel(
+            {"host": "127.0.0.1", "port": closed_port},
+            store_path=store,
+            timeout=2.0,
+        )
+        assert result["decision"] == "deny"
+        rows = [
+            json.loads(line)
+            for line in Path(store).read_text(
+                encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        assert len(rows) == 1
+        assert rows[0]["decision"] == "allow"
+        assert rows[0]["pinned_ip"] == "127.0.0.1"
+        assert rows[0]["port"] == closed_port
+    finally:
+        if Path(store).exists():
+            Path(store).unlink()
+    denied = channel_socket.open_channel(
+        {"host": "127.0.0.1", "port": closed_port},
+        store_path=str(Path(tempfile.gettempdir())),
+        timeout=2.0,
+    )
+    assert denied["decision"] == "deny"
