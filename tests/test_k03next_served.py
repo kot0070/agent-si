@@ -578,3 +578,372 @@ def test_row_mp1_41_stage_close_leaves_queryable_row(client, dirs):
     assert queried["close_row_id"] == close_row_id
     assert queried["verdict"] == data["verdict"]
     assert queried["phase"] == "CLOSED"
+
+
+# K03NEXT rows B0B-BP07-18/20, B0B-SDK-107, B0B-BP07-53/54,
+# B0B-UNCOVERED_ARCH-652/653/654 through the lane-owned k03next seam
+# routes (create_app with TestClient loopback).
+#
+# Every row drives its owning served route plus its owning seam entry;
+# no network, no doubles. Unique ids (k03next-b0b-*) keep the global
+# registry/records stores isolated from every other test file. RED LIST
+# starts at 0 items: any route that answers 404 here becomes a defect
+# line plus a fix in this lane (the first run below is that RED: the
+# k03next routes do not exist yet).
+
+
+def _k03next_gate(client, scope, candidates=None, implementers=None,
+                  user_authority="USER", with_resolution=True, run_id=None):
+    """POST one sourcing-gate probe; resolution defaults to a USER one."""
+    body = {
+        "scope": scope,
+        "implementer_model_ids": (
+            [CONTRIBUTOR_MODEL] if implementers is None else implementers
+        ),
+        "task_class": "served-turn",
+        "minimum_level": "L2",
+        "auditor_candidates": [] if candidates is None else candidates,
+    }
+    if run_id is not None:
+        body["run_id"] = run_id
+    if with_resolution:
+        body["user_resolution"] = {
+            "decision_id": "dec-k03next-b0b-%s" % scope,
+            "scope": scope,
+            "statement": "use the sourced auditor for scope %s" % scope,
+            "reason": "only USER resolves parked sourcing",
+            "authority": user_authority,
+            "decided_by": ACTOR,
+            "visible_to_user": True,
+            "user_resolution_ref": "resolve-k03next-b0b-%s" % scope,
+        }
+    return client.post("/api/v1/k03next/sourcing_gate", json=body)
+
+
+def _k03next_candidate(provider, model=AUDITOR_MODEL, evidence=()):
+    """One auditor candidate payload with the given capability refs."""
+    return {
+        "provider_id": provider,
+        "model": model,
+        "capability_evidence_refs": list(evidence),
+    }
+
+
+def test_k03next_b0b_bp07_18(client):
+    """B0B-BP07-18: BLOCKED until sourcing succeeds; PASS prohibited."""
+    tag = _tag()
+    scope = "scope-k03next-b0b-18-%s" % tag
+
+    resp = _k03next_gate(client, scope)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["ok"] is False
+    assert data["disposition"] == "BLOCKED"
+    assert data["code"] == "NO_ELIGIBLE_AUDITOR"
+    assert data["pass_prohibited"] is True
+    assert data["audit_id"] is None
+    assert data["auditor"] is None
+
+    good = _k03next_gate(
+        client, scope,
+        candidates=[_k03next_candidate(
+            "provider-k03next-b0b-18-%s" % tag,
+            evidence=["cap-ev-k03next-b0b-18-%s" % tag])],
+    )
+    assert good.status_code == 200, good.text
+    sourced = good.json()
+    assert sourced["ok"] is True
+    assert sourced["disposition"] == "SOURCED"
+    assert sourced["code"] is None
+    assert sourced["pass_prohibited"] is False
+    assert sourced["auditor"]["model"] == AUDITOR_MODEL
+    assert sourced["auditor"]["model"] not in [CONTRIBUTOR_MODEL]
+    assert sourced["auditor"]["session_ref"].startswith("auditor-session-")
+
+    bad = client.post(
+        "/api/v1/k03next/sourcing_gate",
+        json={"scope": scope, "auditor_candidates": ["not-an-object"]},
+    )
+    assert bad.status_code == 400, bad.text
+
+
+def test_k03next_b0b_bp07_20(client):
+    """B0B-BP07-20: the registry answers NO_ELIGIBLE_AUDITOR at the gate."""
+    from agent_si.assurance import audit_registry  # noqa: E402
+
+    tag = _tag()
+    scope = "scope-k03next-b0b-20-%s" % tag
+    provider = "provider-k03next-b0b-20-%s" % tag
+
+    resp = _k03next_gate(
+        client, scope,
+        candidates=[_k03next_candidate(provider)],
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["ok"] is False
+    assert data["disposition"] == "BLOCKED"
+    assert data["code"] == "NO_ELIGIBLE_AUDITOR"
+    assert data["pass_prohibited"] is True
+    assert data["audit_id"] is None
+    assert data["auditor"] is None
+    assert data["eligibility"] == [{
+        "provider_id": provider, "model": AUDITOR_MODEL, "eligible": False,
+    }]
+
+    class _Registry(audit_registry.AuditorRegistry):
+        """Concrete binding of the real sourcing entries; adds nothing."""
+
+    registry = _Registry()
+    try:
+        registry.select_auditor("served-turn", (CONTRIBUTOR_MODEL,), "L2")
+    except Exception as exc:
+        assert getattr(exc, "code", "") == "NO_ELIGIBLE_AUDITOR"
+    else:
+        raise AssertionError("select_auditor sourced with zero candidates")
+
+
+def test_k03next_b0b_sdk_107(client):
+    """B0B-SDK-107: semantic/security criteria checked beyond schema."""
+    from agent_si.assurance import audit_coordinator  # noqa: E402
+
+    tag = _tag()
+    crit = "crit-k03next-b0b-107-%s" % tag
+    ev = "ev-k03next-b0b-107-%s" % tag
+
+    resp = client.post(
+        "/api/v1/k03next/semantic_security",
+        json={"criterion_refs": [crit], "evidence_refs": [ev]},
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["verdict"] == "PASS"
+    assert data["checked_criteria"] == 1
+    assert data["checked_evidence"] == 1
+
+    shapely_but_empty = client.post(
+        "/api/v1/k03next/semantic_security",
+        json={"criterion_refs": [crit], "evidence_refs": []},
+    )
+    assert shapely_but_empty.status_code == 200, shapely_but_empty.text
+    assert shapely_but_empty.json()["verdict"] == "FAIL"
+
+    no_criteria = client.post(
+        "/api/v1/k03next/semantic_security",
+        json={"criterion_refs": [], "evidence_refs": [ev]},
+    )
+    assert no_criteria.status_code == 200, no_criteria.text
+    assert no_criteria.json()["verdict"] == "FAIL"
+
+    bad = client.post(
+        "/api/v1/k03next/semantic_security",
+        json={"criterion_refs": "not-a-list", "evidence_refs": []},
+    )
+    assert bad.status_code == 400, bad.text
+
+    class _Coordinator(audit_coordinator.AuditCoordinator):
+        """Concrete binding of the real check entries; adds nothing."""
+
+    seam = _Coordinator()
+    assert seam.check_semantic_and_security((crit,), (ev,)) == "PASS"
+    assert seam.check_semantic_and_security((crit,), ()) == "FAIL"
+    assert seam.check_semantic_and_security((), (ev,)) == "FAIL"
+
+def test_k03next_b0b_bp07_53(client):
+    """B0B-BP07-53: sourcing gated on an explicit USER decision."""
+    tag = _tag()
+    scope = "scope-k03next-b0b-53-%s" % tag
+    candidates = [_k03next_candidate(
+        "provider-k03next-b0b-53-%s" % tag,
+        evidence=["cap-ev-k03next-b0b-53-%s" % tag])]
+
+    parked = _k03next_gate(client, scope, candidates=candidates,
+                           with_resolution=False)
+    assert parked.status_code == 200, parked.text
+    assert parked.json()["disposition"] == "BLOCKED"
+    assert parked.json()["pass_prohibited"] is True
+    assert parked.json()["auditor"] is None
+
+    non_user = _k03next_gate(client, scope, candidates=candidates,
+                             user_authority="MANAGER")
+    assert non_user.status_code == 200, non_user.text
+    assert non_user.json()["disposition"] == "BLOCKED"
+    assert non_user.json()["code"] == "SOURCING_UNRESOLVED"
+    assert non_user.json()["auditor"] is None
+
+    resolved = _k03next_gate(client, scope, candidates=candidates)
+    assert resolved.status_code == 200, resolved.text
+    data = resolved.json()
+    assert data["disposition"] == "SOURCED"
+    assert data["sourcing_state"] == "RESOLVED"
+    assert data["auditor"]["model"] == AUDITOR_MODEL
+
+
+def test_k03next_b0b_bp07_54(client):
+    """B0B-BP07-54: fail-closed BLOCKED until the USER resolves sourcing."""
+    tag = _tag()
+    scope = "scope-k03next-b0b-54-%s" % tag
+    run_id = "run-k03next-b0b-54-%s" % tag
+    candidates = [_k03next_candidate(
+        "provider-k03next-b0b-54-%s" % tag,
+        evidence=["cap-ev-k03next-b0b-54-%s" % tag])]
+
+    resp = _k03next_gate(client, scope, candidates=candidates,
+                         with_resolution=False, run_id=run_id)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["ok"] is False
+    assert data["disposition"] == "BLOCKED"
+    assert data["code"] == "SOURCING_UNRESOLVED"
+    assert data["pass_prohibited"] is True
+    assert data["audit_id"] is None
+    assert data["auditor"] is None
+    assert data["options"], "BLOCKED sourcing must document how to resolve"
+    assert any("USER" in option for option in data["options"])
+    assert audit_records._records_for_run(run_id) == ()
+
+    resolved = _k03next_gate(client, scope, candidates=candidates,
+                             run_id=run_id)
+    assert resolved.status_code == 200, resolved.text
+    assert resolved.json()["disposition"] == "SOURCED"
+    assert resolved.json()["audit_id"] is None
+
+
+def test_k03next_b0b_uncovered_arch_652(client):
+    """ARCH-652: missing capability evidence keeps the candidate out."""
+    from agent_si.assurance import audit_registry  # noqa: E402
+
+    tag = _tag()
+    scope = "scope-k03next-b0b-652-%s" % tag
+    provider = "provider-k03next-b0b-652-%s" % tag
+
+    resp = _k03next_gate(
+        client, scope, candidates=[_k03next_candidate(provider)])
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["disposition"] == "BLOCKED"
+    assert data["code"] == "NO_ELIGIBLE_AUDITOR"
+    assert data["eligibility"] == [{
+        "provider_id": provider, "model": AUDITOR_MODEL, "eligible": False,
+    }]
+
+    class _Registry(audit_registry.AuditorRegistry):
+        """Concrete binding of the real sourcing entries; adds nothing."""
+
+    registry = _Registry()
+    registry.register_candidate(audit_registry.AuditorCandidate(
+        provider_id=provider, provider_instance=None, model=AUDITOR_MODEL,
+        capability_evidence_refs=(), registered_at=""))
+    assert registry.is_eligible(provider, AUDITOR_MODEL) is False
+    registry.note_capability_evidence(
+        provider, AUDITOR_MODEL, "cap-ev-k03next-b0b-652-%s" % tag)
+    assert registry.is_eligible(provider, AUDITOR_MODEL) is True
+
+    evidenced = _k03next_gate(
+        client, scope,
+        candidates=[_k03next_candidate(
+            provider, evidence=["cap-ev-k03next-b0b-652-%s" % tag])],
+    )
+    assert evidenced.status_code == 200, evidenced.text
+    assert evidenced.json()["disposition"] == "SOURCED"
+    assert evidenced.json()["eligibility"] == [{
+        "provider_id": provider, "model": AUDITOR_MODEL, "eligible": True,
+    }]
+
+
+def test_k03next_b0b_uncovered_arch_653(client):
+    """ARCH-653: no eligible auditor forces BLOCKED, never self-audit."""
+    tag = _tag()
+    scope = "scope-k03next-b0b-653-%s" % tag
+    run_id = "run-k03next-b0b-653-%s" % tag
+
+    resp = _k03next_gate(client, scope, run_id=run_id)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["ok"] is False
+    assert data["disposition"] == "BLOCKED"
+    assert data["code"] == "NO_ELIGIBLE_AUDITOR"
+    assert data["pass_prohibited"] is True
+    assert data["audit_id"] is None
+    assert data["auditor"] is None
+    assert audit_records._records_for_run(run_id) == ()
+
+    auditor_class = _k03next_gate(
+        client, scope,
+        candidates=[_k03next_candidate(
+            "provider-k03next-b0b-653-%s" % tag,
+            evidence=["cap-ev-k03next-b0b-653-%s" % tag])],
+    )
+    assert auditor_class.status_code == 200, auditor_class.text
+    assert auditor_class.json()["disposition"] == "SOURCED"
+
+    from agent_si.assurance import audit_registry  # noqa: E402
+
+    class _Registry(audit_registry.AuditorRegistry):
+        """Concrete binding of the real sourcing entries; adds nothing."""
+
+    with_auditor_class = client.post(
+        "/api/v1/k03next/sourcing_gate",
+        json={"scope": scope,
+              "implementer_model_ids": [CONTRIBUTOR_MODEL],
+              "task_class": "auditor", "minimum_level": "L2",
+              "auditor_candidates": [_k03next_candidate(
+                  "provider-k03next-b0b-653b-%s" % tag,
+                  evidence=["cap-ev-k03next-b0b-653b-%s" % tag])],
+              "user_resolution": {
+                  "decision_id": "dec-k03next-b0b-653b-%s" % tag,
+                  "scope": scope,
+                  "statement": "auditor task class must fail closed",
+                  "reason": "auditor-task-class sourcing never self-sources",
+                  "authority": "USER",
+                  "decided_by": ACTOR,
+                  "visible_to_user": True,
+                  "user_resolution_ref": "resolve-k03next-b0b-653b-%s" % tag,
+              }},
+    )
+    assert with_auditor_class.status_code == 200, with_auditor_class.text
+    assert with_auditor_class.json()["disposition"] == "BLOCKED"
+    assert with_auditor_class.json()["auditor"] is None
+
+
+def test_k03next_b0b_uncovered_arch_654(client):
+    """ARCH-654: L2 holds only while the auditor id leaves the set."""
+    from agent_si.assurance import audit_registry  # noqa: E402
+
+    tag = _tag()
+    scope = "scope-k03next-b0b-654-%s" % tag
+
+    resp = _k03next_gate(
+        client, scope,
+        candidates=[_k03next_candidate(
+            "provider-k03next-b0b-654-%s" % tag,
+            evidence=["cap-ev-k03next-b0b-654-%s" % tag])],
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["disposition"] == "SOURCED"
+    assert data["independence_level"] == "L2"
+    assert data["separate_model"] is True
+    assert data["auditor"]["model"] == AUDITOR_MODEL
+    assert data["auditor"]["model"] not in [CONTRIBUTOR_MODEL]
+
+    contributor_only = _k03next_gate(
+        client, "scope-k03next-b0b-654b-%s" % tag,
+        candidates=[_k03next_candidate(
+            "provider-k03next-b0b-654b-%s" % tag,
+            model=CONTRIBUTOR_MODEL,
+            evidence=["cap-ev-k03next-b0b-654b-%s" % tag])],
+    )
+    assert contributor_only.status_code == 200, contributor_only.text
+    assert contributor_only.json()["disposition"] == "BLOCKED"
+    assert contributor_only.json()["code"] == "NO_ELIGIBLE_AUDITOR"
+    assert contributor_only.json()["separate_model"] is False
+
+    class _Registry(audit_registry.AuditorRegistry):
+        """Concrete binding of the real sourcing entries; adds nothing."""
+
+    registry = _Registry()
+    assert registry.check_separate_model(
+        AUDITOR_MODEL, (CONTRIBUTOR_MODEL,)) is True
+    assert registry.check_separate_model(
+        CONTRIBUTOR_MODEL, (CONTRIBUTOR_MODEL,)) is False
