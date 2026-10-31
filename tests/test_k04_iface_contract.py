@@ -1277,3 +1277,36 @@ def test_chat_model_served_put_reaches_put_chat_model(tmp_path):
                            "model_id": "openai/model-1"}
     assert PR.get_chat_record(app.state.k04_ctx, "p1") == {
         "project_id": "p1", "model_id": "openai/model-1"}
+
+
+def test_iface_compensation_ref_frozen_field(tmp_path):
+    # Frozen BudgetReservation.compensation_ref stub shape plus the real
+    # served compensate path (ARCH-441): stub field exists with frozen
+    # default "", the real gate takes it keyword-only, and a compensated
+    # reservation carries the ref through the served create_app.
+    byname = {f.name: f for f in dc_fields(IF.BudgetReservation)}
+    assert "compensation_ref" in byname
+    assert byname["compensation_ref"].default == ""
+    sig = inspect.signature(BG.BudgetGate.compensate)
+    assert sig.parameters["compensation_ref"].kind is \
+        inspect.Parameter.KEYWORD_ONLY
+    client = _served_entry("POST", "/api/v1/budget/compensations", tmp_path)
+    gate = client.app.state.k04_ctx.budget_state
+    gate.configure_project(project_id="p1", currency="USD",
+                           budget_limit="10.00", soft_limit="7.00",
+                           hard_limit="10.00")
+    res = gate.compare_and_reserve(
+        {"project_id": "p1", "task_id": "t1", "run_id": "r1",
+         "reservation_id": "res-compref", "estimated_amount": "1.00",
+         "reserved_at": "2026-10-26T00:00:00Z",
+         "expires_at": "2026-10-27T00:00:00Z"})
+    assert res.ok is True
+    resp = client.post(
+        "/api/v1/budget/compensations",
+        json={"reservation_id": "res-compref",
+              "compensation_ref": "cref-1", "reason": "failed gate"},
+        headers={"x-actor": "ui-test-compref",
+                 "x-ui-session-token": "ui-test-compref"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["compensation_ref"] == "cref-1", resp.text
+    assert gate.get_reservation("res-compref").compensation_ref == "cref-1"
