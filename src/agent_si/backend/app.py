@@ -1012,6 +1012,22 @@ def create_app(settings: Any = None,
     _k04_ctx: Any = None
     if _k04_config_error is None:
         assert _k04_dir is not None
+        try:
+            from agent_si.model_kb import kb as _k04_kb_persist
+            _k04_kb_persist.set_persist_dir(_k04_dir)
+            try:
+                _k04_kb_persist.load_persisted()
+            except Exception:
+                pass
+            try:
+                import os as _k04_os_persist
+                _pp = _k04_kb_persist.persist_path()
+                if _pp and not _k04_os_persist.path.isfile(_pp):
+                    _k04_kb_persist.persist_bound()
+            except Exception:
+                pass
+        except Exception:
+            pass
         _k04_store = _K04RoutingStore(_k04_dir)
         _k04_kind = _k04_secret_kind(settings)
         _k04_suffix = _k04_label_suffix(settings)

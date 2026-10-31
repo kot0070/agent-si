@@ -167,6 +167,10 @@ def apply_proposal(proposal_id: str,
     catalog = kb.bound_catalog()
     result = updater.apply_proposal(catalog, proposal, user_confirmed=True)
     kb.bind_catalog(result["catalog"])
+    try:
+        kb.persist_bound()
+    except Exception:
+        pass
     del _STAGED_PROPOSALS[proposal_id]
     return {"proposal_id": proposal_id, "applied": result["applied"],
             "version": result["version"],

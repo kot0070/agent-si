@@ -334,3 +334,42 @@ def bound_catalog():
     if _BOUND_CATALOG is None:
         return SEED_CATALOG
     return _BOUND_CATALOG
+
+
+_KB_PERSIST_FILENAME = "kb_catalog.json"
+_PERSIST_DIR = None
+
+
+def set_persist_dir(store_dir):
+    """Set the KB persist dir (app store); None disables persistence."""
+    global _PERSIST_DIR
+    _PERSIST_DIR = str(store_dir) if store_dir else None
+    return _PERSIST_DIR
+
+
+def persist_path():
+    """Persisted catalog path, or None when persistence is disabled."""
+    if not _PERSIST_DIR:
+        return None
+    return os.path.join(_PERSIST_DIR, _KB_PERSIST_FILENAME)
+
+
+def persist_bound():
+    """Save the bound catalog to the persist path (never raises)."""
+    path = persist_path()
+    if not path:
+        return None
+    parent = os.path.dirname(os.path.abspath(path))
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    save_catalog(bound_catalog(), path)
+    return path
+
+
+def load_persisted():
+    """Bind the persisted catalog when present; None when absent/invalid."""
+    path = persist_path()
+    if not path:
+        return None
+    catalog = load_catalog(path)
+    return bind_catalog(catalog)

@@ -185,7 +185,14 @@ def _charge_budget_gate(project_id: str, provider_id: str, model: str,
     every calculated cost references it. Known price: reserve plus settle
     so spent grows by the real cost. Unknown price: leave spent alone and
     let telemetry keep cost UNAVAILABLE (never 0 as if free, never invented).
+    A billed turn with a missing price fails loud (log warning, UNAVAILABLE
+    marker); usage-absent turns stay UNAVAILABLE by the firewall, never 0.
     """
+    try:
+        import logging as _logging
+        _log = _logging.getLogger(__name__)
+    except Exception:
+        _log = None  # type: ignore[assignment]
     try:
         gate = _BUDGET_GATE
         if gate is None:
@@ -201,8 +208,22 @@ def _charge_budget_gate(project_id: str, provider_id: str, model: str,
             return "UNAVAILABLE"
         inp_price, out_price = _kb_price_for_manager(prov, mod)
         if inp_tok is not None and inp_price is None:
+            try:
+                if _log is not None:
+                    _log.warning("spend UNAVAILABLE: no input price for %s/%s "
+                                 "(in=%s out=%s) [MEASURED-absent]", prov, mod,
+                                 inp_tok, out_tok)
+            except Exception:
+                pass
             return "UNAVAILABLE"
         if out_tok is not None and out_price is None:
+            try:
+                if _log is not None:
+                    _log.warning("spend UNAVAILABLE: no output price for %s/%s "
+                                 "(in=%s out=%s) [MEASURED-absent]", prov, mod,
+                                 inp_tok, out_tok)
+            except Exception:
+                pass
             return "UNAVAILABLE"
         from decimal import Decimal as _Dec
         cost = (_Dec(str(inp_price or "0")) * _Dec(int(inp_tok or 0))
