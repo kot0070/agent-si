@@ -51,6 +51,39 @@ K02NEXT2 CODER-A rows (additions only, same USER_WRITE guard shape):
   ledger.persist_ledger to a portable temp file, loads them back with the
   real ledger.load_ledger, and answers the sorted
   PackageLedger.package_ids (row M-P1-17).
+
+K02NEXT3 Quarry rows (register_k02next3_routes; additions only, same
+USER_WRITE guard shape; every route delegates its row decision to the
+named real entry point, never a double):
+
+- GET /v1/k02next3/sdk-transport?provider= (open read) answers the SDK
+  transport for one provider through the single generic entry
+  sdk_adapter.transport_for_provider (rows UI_DELTA-36 + ARCH-57):
+  non-OpenAI providers answer "chat_completions", OpenAI answers
+  "sdk_default"; the served contract never names a Responses API.
+- GET /v1/k02next3/sdk-surface (open read) answers the verified SDK
+  surface through sdk_adapter.verified_sdk_surface (row SDK-132):
+  exactly the module __all__ names that resolve, plus the real guarded
+  SDK availability flag.
+- POST /v1/k02next3/run-config (USER_WRITE guard) binds one
+  RoutingDecision to a RunConfig through the real adapter entry
+  (row BP03-4); the client stays max_retries=0 (any other value
+  refuses SDK_CLIENT_MAX_RETRIES_NONZERO) and runner retries come
+  only from the bound RunConfig.
+- POST /v1/k02next3/target-flow (USER_WRITE guard) loads one
+  project-to-role target flow through the real roles.load_target_flow
+  and resolves every role (row BP06-81); a missing role refuses with
+  NO_TARGET_FLOW_DEFAULT, never a default.
+- POST /v1/k02next3/plan (USER_WRITE guard) decomposes through the
+  real graph.TaskPlanner held on the app (row BP01-10): the same
+  package ref plus goal hash answers the existing plan ref.
+- POST /v1/k02next3/dispatch (USER_WRITE guard) plans the given specs
+  then validates the AgentTask through the real
+  graph.validate_dispatch (row ARCH-7); a missing subtask_id or an
+  unplanned one refuses DISPATCH_REJECTED.
+- POST /v1/k02next3/issue (USER_WRITE guard) issues one TaskPackage
+  through the real split.split_package with the checked corrections
+  hash (row ARCH-705); a mismatch refuses CORRECTIONS_MISMATCH.
 """
 
 from __future__ import annotations
@@ -376,5 +409,280 @@ def register_k02rest2_routes(app: Any) -> Any:
                 os.unlink(path)
         return {"package_ids": reloaded.package_ids(),
                 "rows": len(reloaded.package_ids())}
+
+    return app
+
+
+def register_k02next3_routes(app: Any) -> Any:
+    """Mount the K02NEXT3 Quarry routes; returns the app."""
+    from agent_si.backend.orchestration import graph as _q_graph
+    from agent_si.backend.orchestration import split as _q_split
+    from agent_si.routing import roles as _q_roles
+    from agent_si.routing import types as _q_types
+    from agent_si.sdk_adapter import sdk_adapter as _q_sdk
+
+    planner = _q_graph.TaskPlanner()
+
+    @app.get("/v1/k02next3/sdk-transport")
+    def get_sdk_transport(provider: str = "") -> dict[str, Any]:
+        name = (provider or "").strip()
+        if not name:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "provider must be a non-empty string"})
+        return {"provider": name,
+                "transport": _q_sdk.transport_for_provider(name),
+                "entry": "transport_for_provider"}
+
+    @app.get("/v1/k02next3/sdk-surface")
+    def get_sdk_surface() -> dict[str, Any]:
+        return dict(_q_sdk.verified_sdk_surface(),
+                    entry="verified_sdk_surface")
+
+    @app.post("/v1/k02next3/run-config")
+    async def post_run_config(request: Request) -> dict[str, Any]:
+        _write_guard(request)
+        data = await _json_body(request)
+        decision = data.get("decision")
+        if not isinstance(decision, dict):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "decision must be an object"})
+        fields: dict[str, str] = {}
+        for name in ("decision_id", "project_id", "task_id", "run_id",
+                     "selected_provider", "selected_model"):
+            value = decision.get(name)
+            if not isinstance(value, str) or not value.strip():
+                raise HTTPException(
+                    status_code=400,
+                    detail={"code": "ROW_REFUSED",
+                            "message": f"{name} must be a non-empty string"})
+            fields[name] = value.strip()
+        budget = data.get("executor_attempt_max")
+        if (isinstance(budget, bool) or not isinstance(budget, int)
+                or budget < 0):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "executor_attempt_max must be an int >= 0"})
+        client_retries = data.get("client_max_retries", 0)
+        if isinstance(client_retries, bool) or \
+                not isinstance(client_retries, int):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "client_max_retries must be an int"})
+        try:
+            binding = _q_sdk.RoutingDecisionBinding(
+                decision_id=fields["decision_id"],
+                project_id=fields["project_id"],
+                task_id=fields["task_id"],
+                run_id=fields["run_id"],
+                routing_snapshot_id=str(
+                    decision.get("routing_snapshot_id") or ""),
+                selected_provider=fields["selected_provider"],
+                selected_model=fields["selected_model"],
+                route=str(decision.get("route") or ""),
+                strategy=str(decision.get("strategy") or ""),
+                reason=str(decision.get("reason") or ""))
+            adapter = _q_sdk.OpenAIAgentsSDKAdapter(
+                client_config=_q_sdk.SdkClientConfig(
+                    max_retries=client_retries))
+        except _q_sdk.SdkClientConfigError as err:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": getattr(
+                    err, "code",
+                    _q_sdk.SDK_CLIENT_MAX_RETRIES_NONZERO),
+                    "message": str(err)}) from None
+        run_config = adapter.build_run_config(
+            binding, executor_attempt_max=budget)
+        return {"decision_id": binding.decision_id,
+                "client_max_retries": adapter.client_config.max_retries,
+                "max_runner_retries": run_config.max_runner_retries,
+                "transport": _q_sdk.transport_for_provider(
+                    binding.selected_provider),
+                "route": binding.route,
+                "strategy": binding.strategy}
+
+    @app.post("/v1/k02next3/target-flow")
+    async def post_target_flow(request: Request) -> dict[str, Any]:
+        _write_guard(request)
+        data = await _json_body(request)
+        project_id = data.get("project_id")
+        if not isinstance(project_id, str) or not project_id.strip():
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "project_id must be a non-empty string"})
+        config = data.get("target_flow")
+        if not isinstance(config, dict):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "target_flow must be an object"})
+        clean_project = project_id.strip()
+        table = _q_roles.RoleTable()
+        try:
+            loaded = _q_roles.load_target_flow(
+                table, config, project_id=clean_project)
+        except _q_roles.TargetFlowMissingError as err:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": getattr(
+                    err, "code", _q_roles.NO_TARGET_FLOW_DEFAULT),
+                    "message": str(err)}) from None
+        roles: dict[str, dict[str, Any]] = {}
+        for role in _q_types.ROLES:
+            resolved = table.resolve(clean_project, role)
+            roles[role] = {"provider": resolved.provider,
+                           "model": resolved.model,
+                           "status": resolved.status,
+                           "reason": resolved.reason}
+        return {"project_id": clean_project, "roles": roles,
+                "loaded": loaded}
+
+    @app.post("/v1/k02next3/plan")
+    async def post_plan(request: Request) -> dict[str, Any]:
+        _write_guard(request)
+        data = await _json_body(request)
+        package_id = data.get("package_id")
+        goal = data.get("goal")
+        specs = data.get("specs")
+        if not isinstance(package_id, str) or not package_id.strip():
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "package_id must be a non-empty string"})
+        if not isinstance(goal, str) or not goal.strip():
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "goal must be a non-empty string"})
+        if not isinstance(specs, list) or not specs:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "specs must be a non-empty list"})
+        try:
+            plan_ref, subgraph = planner.plan(
+                package_id.strip(), goal.strip(), list(specs))
+        except ValueError as err:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "PLAN_REFUSED",
+                        "message": str(err)}) from None
+        return {"package_id": package_id.strip(),
+                "plan_ref": plan_ref,
+                "subtasks": subgraph.order()}
+
+    @app.post("/v1/k02next3/dispatch")
+    async def post_dispatch(request: Request) -> dict[str, Any]:
+        _write_guard(request)
+        data = await _json_body(request)
+        agent_task = data.get("agent_task")
+        if not isinstance(agent_task, dict):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "DISPATCH_REJECTED",
+                        "message": "agent_task must be an object"})
+        package_id = data.get("package_id")
+        goal = data.get("goal")
+        specs = data.get("specs")
+        if not isinstance(package_id, str) or not package_id.strip():
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "DISPATCH_REJECTED",
+                        "message": "package_id must be a non-empty string"})
+        if not isinstance(goal, str) or not goal.strip():
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "DISPATCH_REJECTED",
+                        "message": "goal must be a non-empty string"})
+        if not isinstance(specs, list) or not specs:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "DISPATCH_REJECTED",
+                        "message": "specs must be a non-empty list"})
+        try:
+            _, subgraph = _q_graph.TaskPlanner().plan(
+                package_id.strip(), goal.strip(), list(specs))
+        except ValueError as err:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "PLAN_REFUSED",
+                        "message": str(err)}) from None
+        try:
+            dispatched = _q_graph.validate_dispatch(agent_task, subgraph)
+        except _q_graph.DispatchRejected as err:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "DISPATCH_REJECTED",
+                        "message": str(err)}) from None
+        return {"agent_task_id": dispatched.agent_task_id,
+                "subtask_id": dispatched.subtask_id,
+                "status": dispatched.status}
+
+    @app.post("/v1/k02next3/issue")
+    async def post_issue(request: Request) -> dict[str, Any]:
+        _write_guard(request)
+        data = await _json_body(request)
+        package_id = data.get("package_id")
+        goal = data.get("goal")
+        context_refs = data.get("context_refs")
+        max_parts = data.get("max_parts")
+        corrections = data.get("corrections", [])
+        expected = data.get("expected_corrections_hash")
+        if not isinstance(package_id, str) or not package_id.strip():
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ISSUE_REFUSED",
+                        "message": "package_id must be a non-empty string"})
+        if not isinstance(goal, str) or not goal.strip():
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ISSUE_REFUSED",
+                        "message": "goal must be a non-empty string"})
+        if not isinstance(context_refs, list) or not context_refs:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ISSUE_REFUSED",
+                        "message": "context_refs must be a non-empty list"})
+        if isinstance(max_parts, bool) or not isinstance(max_parts, int):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ISSUE_REFUSED",
+                        "message": "max_parts must be an integer"})
+        if not isinstance(corrections, list):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ISSUE_REFUSED",
+                        "message": "corrections must be a list"})
+        if expected is not None and not isinstance(expected, str):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ISSUE_REFUSED",
+                        "message": "expected_corrections_hash must be a string"})
+        try:
+            parts = _q_split.split_package(
+                package_id.strip(), goal.strip(), list(context_refs),
+                max_parts, list(corrections), expected)
+        except ValueError as err:
+            text = str(err)
+            code = "CORRECTIONS_MISMATCH" \
+                if "does not match issuance" in text else "ISSUE_REFUSED"
+            raise HTTPException(
+                status_code=400,
+                detail={"code": code, "message": text}) from None
+        return {"package_id": package_id.strip(),
+                "parts": [{"package_id": part.package_id,
+                           "contract_hash": part.contract_hash,
+                           "gate_verdict_ref": part.gate_verdict_ref,
+                           "audit_verdict_ref": part.audit_verdict_ref}
+                          for part in parts],
+                "corrections_hash": _q_split.issued_corrections_hash(
+                    package_id.strip())}
 
     return app

@@ -462,12 +462,31 @@ class OpenAIAgentsSDKAdapter:
         )
 
 
+def verified_sdk_surface() -> dict[str, Any]:
+    """Return the verified SDK surface architecture conclusions may use.
+
+    The surface is exactly this module's ``__all__`` names that resolve
+    to real module objects (verified by lookup at call time), plus the
+    SDK availability flag from the real guarded import. Anything beyond
+    these names is unverified and must not carry conclusions (SDK-132).
+    """
+    here = globals()
+    names = sorted(here.get("__all__", ()))
+    missing = [name for name in names if name not in here]
+    return {
+        "sdk_available": SDK_AVAILABLE,
+        "surface": [name for name in names if name not in missing],
+        "unverified": missing,
+    }
+
+
 __all__ = [
     "SDK_AVAILABLE",
     "USE_SDK_UNLESS_DOCUMENTED_CRITICAL_BLOCKER",
     "CHAT_COMPLETIONS_TRANSPORT",
     "SDK_DEFAULT_TRANSPORT",
     "transport_for_provider",
+    "verified_sdk_surface",
     "SecretRef",
     "SdkClientConfig",
     "RoutingDecisionBinding",
