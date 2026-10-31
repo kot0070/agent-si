@@ -559,6 +559,8 @@ def create_app(settings: Any = None,
     from agent_si.test_runners import stage_runner as _stage_runner
 
     _kb_routes.register_kb_routes(app)
+    from agent_si.backend.k09rows import k09b_router
+    app.include_router(k09b_router)
     _local_connect.register_local_connect_routes(app)
     _localbench_routes.register_localbench_routes(app)
     _stage_runner.register_stage_routes(app)
