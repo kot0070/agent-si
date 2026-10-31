@@ -9,6 +9,7 @@ import sys
 
 from agent_si.automation import pause as pause_flags
 from agent_si.automation import runner
+from agent_si.automation import scheduler as scheduler_lane
 
 
 #: Dotted name of the frozen automation contract module. Product code
@@ -66,8 +67,42 @@ def get_trigger(project_id, trigger_id):
     return dict(rec)
 
 
+def _fire_bound(project_id, rec):
+    """Fire through the scheduler ledger path; None when unbound/not due."""
+    kind = rec.get("kind") or ""
+    ref = rec.get("schedule_ref") or ""
+    if not ref:
+        return None
+    try:
+        if kind == "TIMER":
+            try:
+                scheduler_lane.get_timer(ref)
+            except _auto_iface().AutomationError as err:
+                if err.code == "TRIGGER_NOT_FOUND":
+                    return None
+                raise
+            return scheduler_lane.fire_timer(ref)
+        if kind == "METRIC":
+            # A manual fire asserts the condition now: a reading forced
+            # above any finite threshold, so the metric action records.
+            return scheduler_lane.evaluate_metric(ref, float("inf"))
+        if kind == "LAUNCHER":
+            return scheduler_lane.fire_launcher(ref)
+    except _auto_iface().AutomationError as err:
+        if err.code == "TRIGGER_NOT_FOUND":
+            return None
+        raise
+    return None
+
+
 def fire_trigger(project_id, trigger_id):
-    """Fire a trigger into a recorded run; refused while paused."""
+    """Fire a trigger into a recorded run; refused while paused.
+
+    Triggers bound to a scheduler row (TIMER/METRIC/LAUNCHER with a
+    schedule_ref) fire through the scheduler path so the action lands in
+    the ledger; anything unbound (or not due) falls back to the direct
+    recorded path, never a silent drop.
+    """
     rec = _triggers.get(trigger_id)
     if rec is None or rec["project_id"] != project_id:
         raise _auto_iface().AutomationError(
@@ -79,6 +114,9 @@ def fire_trigger(project_id, trigger_id):
             code="AUTOMATION_PAUSED",
             detail="automation paused for %s" % project_id,
         )
+    bound = _fire_bound(project_id, rec)
+    if bound is not None:
+        return bound
     pending = runner.create_pending(project_id, trigger_id=trigger_id)
     run = runner.activate_run(project_id, pending.run_id)
     if _journal is not None:
