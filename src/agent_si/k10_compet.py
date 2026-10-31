@@ -259,4 +259,36 @@ def served_rows() -> list[dict]:
                 "test_rowMP389_portable_start_identical"
             ),
         },
+        {
+            "row": "R-345",
+            "route": "tools/start.py --serve quiet close",
+            "test": (
+                "tests/test_k10st1_clean_boot.py::"
+                "test_rowR345_no_console_flash_quiet_close"
+            ),
+        },
+        {
+            "row": "M-P4-134",
+            "route": "create_app consumer-layer data-dir call site",
+            "test": (
+                "tests/test_k10st1_migrate_datadir.py::"
+                "test_k10st1_migrate_first_start_copies_settings_credentials"
+            ),
+        },
+        {
+            "row": "M-P4-138",
+            "route": "GET /k10/start/migrate",
+            "test": (
+                "tests/test_k10open4_start_path.py::"
+                "test_k10open4_start_migrates_settings_keys"
+            ),
+        },
+        {
+            "row": "M-P4-162",
+            "route": "GET /k10/accept",
+            "test": (
+                "tests/test_k10st4_accept_compet.py::"
+                "test_k10st4_accept_served"
+            ),
+        },
     ]

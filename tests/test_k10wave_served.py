@@ -6,14 +6,22 @@ Row R-343: tools/start.py --smoke on a fresh profile seeds no test data.
 Row 165: tools/start.py --smoke writes hashes matching disk plus smoke pass.
 Row 167: tools/start.py --smoke validates served entries on a clean profile.
 Row M-P3-89: tools/start.py --smoke runs identically from a portable copy.
+Row R-345: tools/start.py --serve starts quietly and closes stdin-quiet.
+Row M-P4-134: first start migrates settings plus credentials, originals kept.
+Row M-P4-138: GET /k10/start/migrate reports settings plus keys migration.
+Row M-P4-162: GET /k10/accept returns the final acceptance status.
 Each row is listed by agent_si.k10_compet.served_rows() and proven here
 through its serving seam. Loopback TEST data only; no network, no installs.
 """
 import hashlib
 import json
+import os
 import shutil
+import socket
 import subprocess
 import sys
+import time
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -24,7 +32,10 @@ if str(SRC) not in sys.path:
 import fastapi.testclient  # noqa: E402
 
 from agent_si import k10_compet  # noqa: E402
-from agent_si.backend.app import create_app  # noqa: E402
+from agent_si.backend.app import (  # noqa: E402
+    create_app,
+    migrate_legacy_data,
+)
 
 START = ROOT / "tools" / "start.py"
 TAG = "k10wave-served"
@@ -215,3 +226,184 @@ def test_k10wave_mp389_portable_identical(tmp_path):
     copy_rec = json.loads(copy_record.read_text(encoding="utf-8"))
     for key in ("steps", "step_status", "entries", "smoke", "sha256"):
         assert copy_rec[key] == direct_rec[key], (key, copy_rec, direct_rec)
+
+
+def _free_port():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+    return port
+
+
+def _http_get(url, timeout=5):
+    with urllib.request.urlopen(url, timeout=timeout) as resp:
+        return resp.status, resp.read()
+
+
+def _wait_http_ok(url, deadline_s=30):
+    end = time.time() + deadline_s
+    last = None
+    while time.time() < end:
+        try:
+            status, body = _http_get(url)
+            if status == 200:
+                return status, body
+            last = status
+        except OSError as exc:
+            last = exc
+        time.sleep(0.2)
+    raise AssertionError(f"no HTTP 200 from {url} (last={last!r})")
+
+
+def test_k10wave_mp162_accept_served(tmp_path, monkeypatch):
+    """Row M-P4-162 served through GET /k10/accept."""
+    entry = _served()["M-P4-162"]
+    assert entry["route"] == "GET /k10/accept", entry
+    assert entry["test"] == (
+        "tests/test_k10st4_accept_compet.py::test_k10st4_accept_served"
+    ), entry
+    client, _data_dir = _client_on_temp_dir(tmp_path, monkeypatch, "kw-mp162")
+    resp = client.get("/k10/accept")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["testid"] == "k10st4-accept", body
+    for key in ("ok", "docker", "services", "powershell"):
+        assert key in body, body
+
+
+def test_k10wave_mp138_start_migrate(tmp_path, monkeypatch):
+    """Row M-P4-138 served through GET /k10/start/migrate."""
+    entry = _served()["M-P4-138"]
+    assert entry["route"] == "GET /k10/start/migrate", entry
+    assert entry["test"] == (
+        "tests/test_k10open4_start_path.py::"
+        "test_k10open4_start_migrates_settings_keys"
+    ), entry
+    settings_payload = b'{"theme": "dark", "lane": "k10wave-mp138"}'
+    keys_payload = b'{"loopback": "test-only-keys"}'
+    legacy_home = tmp_path / "home"
+    legacy_home.mkdir()
+    legacy = legacy_home / ".agent_si"
+    legacy.mkdir()
+    (legacy / "settings.json").write_bytes(settings_payload)
+    (legacy / "keys.json").write_bytes(keys_payload)
+    monkeypatch.setenv("HOME", str(legacy_home))
+    monkeypatch.setenv("USERPROFILE", str(legacy_home))
+    monkeypatch.setenv("AGENT_SI_SECRET_STORE", "memory")
+    data_dir = tmp_path / "data"
+    monkeypatch.setenv("AGENT_SI_DATA_DIR", str(data_dir))
+    settings = {
+        "ui_session_token": "kw-mp138",
+        "secret_store": "memory",
+        "testing": True,
+    }
+    create_app(settings)
+    for name, payload in (
+        ("settings.json", settings_payload),
+        ("keys.json", keys_payload),
+    ):
+        assert (data_dir / name).read_bytes() == payload
+        assert (legacy / name).read_bytes() == payload
+    client = fastapi.testclient.TestClient(create_app(settings))
+    resp = client.get("/k10/start/migrate")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["testid"] == "k10open4-start", body
+    assert body["migrated"]["settings.json"] in ("copied", "skipped-present"), body
+    assert body["migrated"]["keys.json"] in ("copied", "skipped-present"), body
+
+
+def test_k10wave_mp134_migrate_datadir(tmp_path, monkeypatch):
+    """Row M-P4-134 served through the consumer-layer data-dir call site."""
+    entry = _served()["M-P4-134"]
+    assert entry["route"] == "create_app consumer-layer data-dir call site", entry
+    assert entry["test"] == (
+        "tests/test_k10st1_migrate_datadir.py::"
+        "test_k10st1_migrate_first_start_copies_settings_credentials"
+    ), entry
+    settings_payload = b'{"theme": "dark", "lane": "k10wave-mp134"}'
+    credentials_payload = b'{"loopback": "test-only"}'
+    legacy_home = tmp_path / "home"
+    legacy_home.mkdir()
+    legacy = legacy_home / ".agent_si"
+    legacy.mkdir()
+    (legacy / "settings.json").write_bytes(settings_payload)
+    (legacy / "credentials.json").write_bytes(credentials_payload)
+    monkeypatch.setenv("HOME", str(legacy_home))
+    monkeypatch.setenv("USERPROFILE", str(legacy_home))
+    monkeypatch.setenv("AGENT_SI_SECRET_STORE", "memory")
+    data_dir = tmp_path / "data"
+    report = migrate_legacy_data(str(data_dir), legacy_dir=str(legacy))
+    assert report == {
+        "settings.json": "copied",
+        "credentials.json": "copied",
+    }, report
+    monkeypatch.setenv("AGENT_SI_DATA_DIR", str(data_dir))
+    settings = {
+        "ui_session_token": "kw-mp134",
+        "secret_store": "memory",
+        "testing": True,
+    }
+    app = create_app(settings)
+    assert app.state.data_dir == os.path.abspath(str(data_dir))
+    for name, payload in (
+        ("settings.json", settings_payload),
+        ("credentials.json", credentials_payload),
+    ):
+        assert (data_dir / name).read_bytes() == payload
+        assert (legacy / name).read_bytes() == payload
+    (data_dir / "settings.json").write_bytes(b'{"theme": "edited"}')
+    create_app(settings)
+    assert (data_dir / "settings.json").read_bytes() == b'{"theme": "edited"}'
+    assert (legacy / "settings.json").read_bytes() == settings_payload
+
+def test_k10wave_r345_serve_quiet_close(tmp_path):
+    """Row R-345 served through tools/start.py --serve quiet close."""
+    entry = _served()["R-345"]
+    assert entry["route"] == "tools/start.py --serve quiet close", entry
+    assert entry["test"] == (
+        "tests/test_k10st1_clean_boot.py::"
+        "test_rowR345_no_console_flash_quiet_close"
+    ), entry
+    text = (ROOT / "tools" / "start.py").read_text(encoding="utf-8")
+    for marker in (
+        "CREATE_NEW_CONSOLE",
+        "STARTUPINFO",
+        "ShowWindow",
+        "ShellExecute",
+        "fullscreen",
+        "os.system",
+        "Popen",
+        "subprocess",
+        "SW_HIDE",
+    ):
+        assert marker not in text, marker
+    port = _free_port()
+    frontend_port = _free_port()
+    data_dir = tmp_path / "serve-data"
+    proc = subprocess.Popen(
+        [sys.executable, str(START), "--serve", "--port", str(port),
+         "--frontend-port", str(frontend_port), "--data-dir", str(data_dir),
+         "--tag", TAG],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=str(tmp_path),
+    )
+    try:
+        status, _ = _wait_http_ok(f"http://127.0.0.1:{port}/openapi.json")
+        assert status == 200
+        status, body = _wait_http_ok(f"http://127.0.0.1:{frontend_port}/")
+        assert status == 200, status
+        assert b"/src/app/main.tsx" in body, body[:200]
+        proc.stdin.close()
+        out, err = proc.communicate(timeout=30)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate(timeout=30)
+    assert proc.returncode == 0, out + err
+    assert "traceback" not in err.lower(), err
+    assert "ready " in out, out[-500:]
