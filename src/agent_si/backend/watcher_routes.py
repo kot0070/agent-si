@@ -501,10 +501,14 @@ async def route_post_stop_all(request: Request) -> Any:
     """POST /api/v1/stop-all -> stop_all_request_stop (token)."""
     data = await _body(request)
     token = _guard_post(request, data)
+    project_id = str(data.get("project_id", "") or data.get("project", ""))
+    if not project_id:
+        _fail("STOP_REASON_MISSING", "stop-all needs a project_id")
+        raise AssertionError("unreachable")
     return _call(
         "stop_all_request_stop",
         str(data.get("actor", "")),
-        str(data.get("project_id", "")),
+        project_id,
         grant_ref=str(data.get("grant_ref", "")),
         session_token=token,
     )
