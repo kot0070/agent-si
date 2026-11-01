@@ -7,12 +7,12 @@
 # quoting that route's server-shaped schema. The boundary module is
 # mounted onto create_app() here (app.py untouched) so every quoted
 # schema is the live served answer, fetched over REAL HTTP:
-#   LIVE0-08  -> POST /api/v1/k07next4/session-write (session_write)
-#   LIVE0B-01 -> POST+GET /api/v1/k07next4/projects (projects)
-#   LIVE0B-04 -> GET /api/v1/k07next4/page-shell (page_shell)
-#   LIVE0B-05 -> POST /api/v1/k07next4/chat-task (chat_task)
-#   MH-5      -> GET /api/v1/k07next4/step-turn (step_turn)
-#   MH-6      -> GET /api/v1/k07next4/turn-triple (turn_triple)
+#   LIVE0-08  -> POST /api/v1/app/session-write (session_write)
+#   LIVE0B-01 -> POST+GET /api/v1/app/projects (projects)
+#   LIVE0B-04 -> GET /api/v1/app/page-shell (page_shell)
+#   LIVE0B-05 -> POST /api/v1/app/chat-task (chat_task)
+#   MH-5      -> GET /api/v1/app/step-turn (step_turn)
+#   MH-6      -> GET /api/v1/app/turn-triple (turn_triple)
 # Each test proves two things: (a) the K07-owned screen is wired to the
 # REAL HttpApiClient (real client + provider imports in the suite, no
 # FakeApiClient, no data injected into a mounted component) with its
@@ -127,9 +127,9 @@ def _check_wiring(screen_file, suite_file, route_path, quote_token):
 def test_row_live008_session_token_served(served):
     _check_wiring("SessionTokenCard.tsx",
                   "k07next4-live008-session-token.test.tsx",
-                  "/api/v1/k07next4/session-write",
+                  "/api/v1/app/session-write",
                   "SERVED_TOKEN_OK")
-    status, payload = _post(served, "/api/v1/k07next4/session-write",
+    status, payload = _post(served, "/api/v1/app/session-write",
                             {})
     assert status == 200, payload
     assert payload == {
@@ -142,13 +142,13 @@ def test_row_live008_session_token_served(served):
 def test_row_live0b01_projects_live_served(served):
     _check_wiring("ProjectsLiveList.tsx",
                   "k07next4-live0b01-projects-live.test.tsx",
-                  "/api/v1/k07next4/projects", "SERVED_PROJECTS")
+                  "/api/v1/app/projects", "SERVED_PROJECTS")
     created_status, created = _post(
-        served, "/api/v1/k07next4/projects",
+        served, "/api/v1/app/projects",
         {"name": "k07next4-bravo", "folder_ref": "f-bravo"})
     assert created_status == 200, created
     assert created["row"] == "LIVE0B-01"
-    status, payload = _get(served, "/api/v1/k07next4/projects")
+    status, payload = _get(served, "/api/v1/app/projects")
     assert status == 200, payload
     assert payload["row"] == "LIVE0B-01"
     names = [row["name"] for row in payload["projects"]]
@@ -158,8 +158,8 @@ def test_row_live0b01_projects_live_served(served):
 def test_row_live0b04_page_shell_served(served):
     _check_wiring("ConsolePageShell.tsx",
                   "k07next4-live0b04-page-shell.test.tsx",
-                  "/api/v1/k07next4/page-shell", "SERVED_SHELL")
-    status, payload = _get(served, "/api/v1/k07next4/page-shell")
+                  "/api/v1/app/page-shell", "SERVED_SHELL")
+    status, payload = _get(served, "/api/v1/app/page-shell")
     assert status == 200, payload
     assert payload == {
         "row": "LIVE0B-04",
@@ -172,8 +172,8 @@ def test_row_live0b04_page_shell_served(served):
 def test_row_live0b05_chat_task_served(served):
     _check_wiring("ChatTaskBox.tsx",
                   "k07next4-live0b05-chat-task.test.tsx",
-                  "/api/v1/k07next4/chat-task", "SERVED_CHAT_TASK")
-    status, payload = _post(served, "/api/v1/k07next4/chat-task",
+                  "/api/v1/app/chat-task", "SERVED_CHAT_TASK")
+    status, payload = _post(served, "/api/v1/app/chat-task",
                             {"prompt_ref": "k07next4-b-hello"})
     assert status == 200, payload
     assert payload["row"] == "LIVE0B-05"
@@ -185,8 +185,8 @@ def test_row_live0b05_chat_task_served(served):
 def test_row_mh5_step_turn_served(served):
     _check_wiring("StepTurnViewer.tsx",
                   "k07next4-mh5-step-turn.test.tsx",
-                  "/api/v1/k07next4/step-turn", "SERVED_STEP_TURN")
-    status, payload = _get(served, "/api/v1/k07next4/step-turn?advance=1")
+                  "/api/v1/app/step-turn", "SERVED_STEP_TURN")
+    status, payload = _get(served, "/api/v1/app/step-turn?advance=1")
     assert status == 200, payload
     assert payload["row"] == "MH-5"
     assert payload["turn"] == 1
@@ -199,9 +199,9 @@ def test_row_mh5_step_turn_served(served):
 def test_row_mh6_turn_triple_served(served):
     _check_wiring("TurnTripleBoard.tsx",
                   "k07next4-mh6-turn-triple.test.tsx",
-                  "/api/v1/k07next4/turn-triple",
+                  "/api/v1/app/turn-triple",
                   "SERVED_TURN_TRIPLE")
-    status, payload = _get(served, "/api/v1/k07next4/turn-triple")
+    status, payload = _get(served, "/api/v1/app/turn-triple")
     assert status == 200, payload
     assert payload["row"] == "MH-6"
     assert len(payload["turns"]) >= 1

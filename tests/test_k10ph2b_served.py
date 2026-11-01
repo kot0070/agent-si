@@ -3,7 +3,7 @@
 Each test calls the real recorded seam in agent_si.k10_compet directly
 (pure recorded data; stdlib only, no network, no providers, no I/O) and
 asserts the exact row discriminants plus served evidence via the recorded
-route/entry string GET /k10/compet/audit (backend app read-only seam
+route/entry string GET /api/v1/release/compet/audit (backend app read-only seam
 reference serving agent_si.k10_compet recorded seams).
 
 Rows (all set B):
@@ -35,12 +35,12 @@ if str(SRC) not in sys.path:
 
 from agent_si import k10_compet  # noqa: E402
 
-SERVED_ROUTE = "GET /k10/compet/audit"
+SERVED_ROUTE = "GET /api/v1/release/compet/audit"
 
 
 def test_k10ph2b_151():
-    """Row B0B-UNCOVERED_MVP_ACCEPT-151 served via GET /k10/compet/audit."""
-    assert SERVED_ROUTE == "GET /k10/compet/audit", SERVED_ROUTE
+    """Row B0B-UNCOVERED_MVP_ACCEPT-151 served via GET /api/v1/release/compet/audit."""
+    assert SERVED_ROUTE == "GET /api/v1/release/compet/audit", SERVED_ROUTE
     rows = k10_compet.clean_boot_record()
     assert [row["step"] for row in rows] == [
         "documented-steps",
@@ -55,8 +55,8 @@ def test_k10ph2b_151():
 
 
 def test_k10ph2b_152():
-    """Row B0B-UNCOVERED_MVP_ACCEPT-152 served via GET /k10/compet/audit."""
-    assert SERVED_ROUTE == "GET /k10/compet/audit", SERVED_ROUTE
+    """Row B0B-UNCOVERED_MVP_ACCEPT-152 served via GET /api/v1/release/compet/audit."""
+    assert SERVED_ROUTE == "GET /api/v1/release/compet/audit", SERVED_ROUTE
     rows = k10_compet.reproducible_startup_record()
     assert [row["leg"] for row in rows] == [
         "demos",
@@ -71,8 +71,8 @@ def test_k10ph2b_152():
 
 
 def test_k10ph2b_209():
-    """Row B0B-UNCOVERED_MVP_ACCEPT-209 served via GET /k10/compet/audit."""
-    assert SERVED_ROUTE == "GET /k10/compet/audit", SERVED_ROUTE
+    """Row B0B-UNCOVERED_MVP_ACCEPT-209 served via GET /api/v1/release/compet/audit."""
+    assert SERVED_ROUTE == "GET /api/v1/release/compet/audit", SERVED_ROUTE
     rows = k10_compet.mvp_verdict_record()
     assert [row["verdict"] for row in rows] == [
         "ACCEPTED",
@@ -87,8 +87,8 @@ def test_k10ph2b_209():
 
 
 def test_k10ph2b_210():
-    """Row B0B-UNCOVERED_MVP_ACCEPT-210 served via GET /k10/compet/audit."""
-    assert SERVED_ROUTE == "GET /k10/compet/audit", SERVED_ROUTE
+    """Row B0B-UNCOVERED_MVP_ACCEPT-210 served via GET /api/v1/release/compet/audit."""
+    assert SERVED_ROUTE == "GET /api/v1/release/compet/audit", SERVED_ROUTE
     rows = k10_compet.mvp_accepted_rule_record()
     assert {row["case"]: row["result"] for row in rows} == {
         "all-items-hold": "ACCEPTED",
@@ -101,8 +101,8 @@ def test_k10ph2b_210():
 
 
 def test_k10ph2b_211():
-    """Row B0B-UNCOVERED_MVP_ACCEPT-211 served via GET /k10/compet/audit."""
-    assert SERVED_ROUTE == "GET /k10/compet/audit", SERVED_ROUTE
+    """Row B0B-UNCOVERED_MVP_ACCEPT-211 served via GET /api/v1/release/compet/audit."""
+    assert SERVED_ROUTE == "GET /api/v1/release/compet/audit", SERVED_ROUTE
     rows = k10_compet.mvp_acceptance_requirements_record()
     assert [row["requirement"] for row in rows] == [
         "readme",
@@ -116,8 +116,8 @@ def test_k10ph2b_211():
 
 
 def test_k10ph2b_212():
-    """Row B0B-UNCOVERED_MVP_ACCEPT-212 served via GET /k10/compet/audit."""
-    assert SERVED_ROUTE == "GET /k10/compet/audit", SERVED_ROUTE
+    """Row B0B-UNCOVERED_MVP_ACCEPT-212 served via GET /api/v1/release/compet/audit."""
+    assert SERVED_ROUTE == "GET /api/v1/release/compet/audit", SERVED_ROUTE
     rows = k10_compet.mvp_shortfall_record()
     assert [row["property"] for row in rows] == [
         "not-accepted-on-shortfall",
@@ -130,8 +130,8 @@ def test_k10ph2b_212():
 
 
 def test_k10ph2b_217():
-    """Row B0B-UNCOVERED_MVP_ACCEPT-217 served via GET /k10/compet/audit."""
-    assert SERVED_ROUTE == "GET /k10/compet/audit", SERVED_ROUTE
+    """Row B0B-UNCOVERED_MVP_ACCEPT-217 served via GET /api/v1/release/compet/audit."""
+    assert SERVED_ROUTE == "GET /api/v1/release/compet/audit", SERVED_ROUTE
     rows = k10_compet.test_fixture_wiring_record()
     assert [row["property"] for row in rows] == [
         "wiring-only",
@@ -145,8 +145,8 @@ def test_k10ph2b_217():
 
 
 def test_k10ph2b_225():
-    """Row B0B-UNCOVERED_MVP_ACCEPT-225 served via GET /k10/compet/audit."""
-    assert SERVED_ROUTE == "GET /k10/compet/audit", SERVED_ROUTE
+    """Row B0B-UNCOVERED_MVP_ACCEPT-225 served via GET /api/v1/release/compet/audit."""
+    assert SERVED_ROUTE == "GET /api/v1/release/compet/audit", SERVED_ROUTE
     rows = k10_compet.local_demo_runtime_record()
     assert [row["need"] for row in rows] == [
         "permission-gated-local-runtime",
@@ -160,8 +160,8 @@ def test_k10ph2b_225():
 
 
 def test_k10ph2b_227():
-    """Row B0B-UNCOVERED_MVP_ACCEPT-227 served via GET /k10/compet/audit."""
-    assert SERVED_ROUTE == "GET /k10/compet/audit", SERVED_ROUTE
+    """Row B0B-UNCOVERED_MVP_ACCEPT-227 served via GET /api/v1/release/compet/audit."""
+    assert SERVED_ROUTE == "GET /api/v1/release/compet/audit", SERVED_ROUTE
     rows = k10_compet.split_demo_cloud_record()
     assert [row["leg"] for row in rows] == [
         "real-cloud-verification",

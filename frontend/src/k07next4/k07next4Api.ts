@@ -16,7 +16,7 @@ export type SessionWriteDoc = z.infer<typeof SessionWriteDocSchema>;
 
 export async function writeSessionTokenDoc(): Promise<SessionWriteDoc> {
   return requestJson(
-    "/api/v1/k07next4/session-write",
+    "/api/v1/app/session-write",
     { method: "POST", kind: "write", body: {} },
     SessionWriteDocSchema,
   );
@@ -42,7 +42,7 @@ export type ProjectsDoc = z.infer<typeof ProjectsDocSchema>;
 
 export async function readProjectsDoc(): Promise<ProjectsDoc> {
   return requestJson(
-    "/api/v1/k07next4/projects",
+    "/api/v1/app/projects",
     { method: "GET", kind: "read" },
     ProjectsDocSchema,
   );
@@ -53,7 +53,7 @@ export async function createProjectsDoc(
   folderRef: string,
 ): Promise<K07Next4Project> {
   const created = await requestJson(
-    "/api/v1/k07next4/projects",
+    "/api/v1/app/projects",
     {
       method: "POST",
       kind: "write",
@@ -80,7 +80,7 @@ export type PageShellDoc = z.infer<typeof PageShellDocSchema>;
 
 export async function readPageShellDoc(): Promise<PageShellDoc> {
   return requestJson(
-    "/api/v1/k07next4/page-shell",
+    "/api/v1/app/page-shell",
     { method: "GET", kind: "read" },
     PageShellDocSchema,
   );
@@ -101,7 +101,7 @@ export async function startChatTaskDoc(
   promptRef: string,
 ): Promise<ChatTaskDoc> {
   return requestJson(
-    "/api/v1/k07next4/chat-task",
+    "/api/v1/app/chat-task",
     { method: "POST", kind: "write", body: { prompt_ref: promptRef } },
     ChatTaskDocSchema,
   );
@@ -123,7 +123,7 @@ export async function readStepTurnDoc(
   advance: number,
 ): Promise<StepTurnDoc> {
   return requestJson(
-    `/api/v1/k07next4/step-turn?advance=${encodeURIComponent(String(advance))}`,
+    `/api/v1/app/step-turn?advance=${encodeURIComponent(String(advance))}`,
     { method: "GET", kind: "read" },
     StepTurnDocSchema,
   );
@@ -150,7 +150,7 @@ export type TurnTripleDoc = z.infer<typeof TurnTripleDocSchema>;
 
 export async function readTurnTripleDoc(): Promise<TurnTripleDoc> {
   return requestJson(
-    "/api/v1/k07next4/turn-triple",
+    "/api/v1/app/turn-triple",
     { method: "GET", kind: "read" },
     TurnTripleDocSchema,
   );

@@ -2,28 +2,28 @@
 
 register_k02rest2_routes(app) mounts onto the seam app (additions-only):
 
-- GET /v1/k02rest2/control-plane (open read) served only through the
+- GET /api/v1/hierarchy/control-plane (open read) served only through the
   frozen graph.control_plane_map reader (row 22).
-- POST /v1/k02rest2/delta-intake (USER_WRITE guard: 401 missing
+- POST /api/v1/hierarchy/delta-intake (USER_WRITE guard: 401 missing
   x-actor, 403 bad token) opens one bounded delta package through the
   real delta.intake_bounded_delta (row 116); an over-bound scope
   refuses with HTTP 400 carrying DELTA_OVER_BOUND.
-- POST /v1/k02rest2/delta-close (USER_WRITE guard) closes one delta
+- POST /api/v1/hierarchy/delta-close (USER_WRITE guard) closes one delta
   with a link-check through the real delta.close_with_linkcheck
   (row 117); PASS plus PASS plus evidence refs closes PASS, a missing
   evidence joint stays BLOCKED.
-- POST /v1/k02rest2/phase-gate (USER_WRITE guard) evaluates the served
+- POST /api/v1/hierarchy/phase-gate (USER_WRITE guard) evaluates the served
   phase gate through the real gates.evaluate_phase_gate (row 87); no
   next phase until CLOSE (HTTP 409 while any verdict is not PASS).
-- POST plus GET /v1/k02rest2/part-register (write guarded, read open)
+- POST plus GET /api/v1/hierarchy/part-register (write guarded, read open)
   delegate every row decision to parts.serve_register_part plus
   parts.serve_part_register (row 33, CODER-B owns orchestration).
-- POST /v1/k02rest2/ledger-nudge (USER_WRITE guard) delegates to
+- POST /api/v1/hierarchy/ledger-nudge (USER_WRITE guard) delegates to
   ledger.serve_package_nudge (row 35, CODER-B owns orchestration).
-- POST /v1/k02rest2/decomposition-record (USER_WRITE guard) delegates
+- POST /api/v1/hierarchy/decomposition-record (USER_WRITE guard) delegates
   to teamcard.serve_decomposition_facts (row R-301, CODER-B owns
   orchestration).
-- POST /v1/k02rest2/team-sizing (USER_WRITE guard) delegates to
+- POST /api/v1/hierarchy/team-sizing (USER_WRITE guard) delegates to
   graph.serve_team_sizing (row R-303, CODER-B owns orchestration).
 
 B-row handlers shape HTTP only and delegate every row decision to the
@@ -33,20 +33,20 @@ entry point surfaces HTTP 503 ROW_UNSERVED until CODER-B lands.
 
 K02NEXT2 CODER-A rows (additions only, same USER_WRITE guard shape):
 
-- POST /v1/k02rest2/team-config-change (USER_WRITE guard) validates one
+- POST /api/v1/hierarchy/team-config-change (USER_WRITE guard) validates one
   team config patch through the real teamcard.validate_team_config_change
   and applies it only when valid through the real
   teamcard.apply_team_config_change (row R-358: every configuration
   change validated and recorded before it applies; a refused change
   answers accepted False with its reason and records no row).
-- POST /v1/k02rest2/multi-manager-settings (USER_WRITE guard) validates
+- POST /api/v1/hierarchy/multi-manager-settings (USER_WRITE guard) validates
   one multi-manager settings dict through the real
   overlap.validate_multi_manager_settings (row R-359: an invalid config
   is blocked with its POLICY_CONFLICT reason and applies nothing).
-- POST /v1/k02rest2/closed-part-ref (USER_WRITE guard) serves the frozen
+- POST /api/v1/hierarchy/closed-part-ref (USER_WRITE guard) serves the frozen
   parts.ClosedPartRef shape {package_id, contract_hash, gate_verdict_ref,
   audit_verdict_ref} (row M-P1-15); blank fields refuse with HTTP 400.
-- POST /v1/k02rest2/ledger-roundtrip (USER_WRITE guard) records the given
+- POST /api/v1/hierarchy/ledger-roundtrip (USER_WRITE guard) records the given
   rows on a fresh ledger, persists them with the real
   ledger.persist_ledger to a portable temp file, loads them back with the
   real ledger.load_ledger, and answers the sorted
@@ -56,32 +56,32 @@ K02NEXT3 Quarry rows (register_k02next3_routes; additions only, same
 USER_WRITE guard shape; every route delegates its row decision to the
 named real entry point, never a double):
 
-- GET /v1/k02next3/sdk-transport?provider= (open read) answers the SDK
+- GET /api/v1/hierarchy/sdk-transport?provider= (open read) answers the SDK
   transport for one provider through the single generic entry
   sdk_adapter.transport_for_provider (rows UI_DELTA-36 + ARCH-57):
   non-OpenAI providers answer "chat_completions", OpenAI answers
   "sdk_default"; the served contract never names a Responses API.
-- GET /v1/k02next3/sdk-surface (open read) answers the verified SDK
+- GET /api/v1/hierarchy/sdk-surface (open read) answers the verified SDK
   surface through sdk_adapter.verified_sdk_surface (row SDK-132):
   exactly the module __all__ names that resolve, plus the real guarded
   SDK availability flag.
-- POST /v1/k02next3/run-config (USER_WRITE guard) binds one
+- POST /api/v1/hierarchy/run-config (USER_WRITE guard) binds one
   RoutingDecision to a RunConfig through the real adapter entry
   (row BP03-4); the client stays max_retries=0 (any other value
   refuses SDK_CLIENT_MAX_RETRIES_NONZERO) and runner retries come
   only from the bound RunConfig.
-- POST /v1/k02next3/target-flow (USER_WRITE guard) loads one
+- POST /api/v1/hierarchy/target-flow (USER_WRITE guard) loads one
   project-to-role target flow through the real roles.load_target_flow
   and resolves every role (row BP06-81); a missing role refuses with
   NO_TARGET_FLOW_DEFAULT, never a default.
-- POST /v1/k02next3/plan (USER_WRITE guard) decomposes through the
+- POST /api/v1/hierarchy/plan (USER_WRITE guard) decomposes through the
   real graph.TaskPlanner held on the app (row BP01-10): the same
   package ref plus goal hash answers the existing plan ref.
-- POST /v1/k02next3/dispatch (USER_WRITE guard) plans the given specs
+- POST /api/v1/hierarchy/dispatch (USER_WRITE guard) plans the given specs
   then validates the AgentTask through the real
   graph.validate_dispatch (row ARCH-7); a missing subtask_id or an
   unplanned one refuses DISPATCH_REJECTED.
-- POST /v1/k02next3/issue (USER_WRITE guard) issues one TaskPackage
+- POST /api/v1/hierarchy/issue (USER_WRITE guard) issues one TaskPackage
   through the real split.split_package with the checked corrections
   hash (row ARCH-705); a mismatch refuses CORRECTIONS_MISMATCH.
 """
@@ -153,11 +153,11 @@ def _unserved(entry: str) -> HTTPException:
 def register_k02rest2_routes(app: Any) -> Any:
     """Mount the K02REST2 hierarchy routes; returns the app."""
 
-    @app.get("/v1/k02rest2/control-plane")
+    @app.get("/api/v1/hierarchy/control-plane")
     def get_control_plane() -> dict[str, str]:
         return _graph.control_plane_map()
 
-    @app.post("/v1/k02rest2/delta-intake")
+    @app.post("/api/v1/hierarchy/delta-intake")
     async def post_delta_intake(request: Request) -> dict[str, Any]:
         _write_guard(request)
         data = await _json_body(request)
@@ -182,7 +182,7 @@ def register_k02rest2_routes(app: Any) -> Any:
                 detail={"code": "DELTA_REFUSED",
                         "message": str(err)}) from None
 
-    @app.post("/v1/k02rest2/delta-close")
+    @app.post("/api/v1/hierarchy/delta-close")
     async def post_delta_close(request: Request) -> dict[str, Any]:
         _write_guard(request)
         data = await _json_body(request)
@@ -195,7 +195,7 @@ def register_k02rest2_routes(app: Any) -> Any:
                         "message": "delta plus verdict must be objects"})
         return _delta.close_with_linkcheck(delta_pkg, verdict)
 
-    @app.post("/v1/k02rest2/phase-gate")
+    @app.post("/api/v1/hierarchy/phase-gate")
     async def post_phase_gate(request: Request) -> dict[str, Any]:
         _write_guard(request)
         data = await _json_body(request)
@@ -220,7 +220,7 @@ def register_k02rest2_routes(app: Any) -> Any:
                 detail={"code": "GATE_NOT_PASSED",
                         "message": str(err)}) from None
 
-    @app.post("/v1/k02rest2/part-register")
+    @app.post("/api/v1/hierarchy/part-register")
     async def post_part_register(request: Request) -> dict[str, Any]:
         _write_guard(request)
         data = await _json_body(request)
@@ -235,14 +235,14 @@ def register_k02rest2_routes(app: Any) -> Any:
                 detail={"code": "ROW_REFUSED",
                         "message": str(err)}) from None
 
-    @app.get("/v1/k02rest2/part-register")
+    @app.get("/api/v1/hierarchy/part-register")
     def get_part_register() -> dict[str, Any]:
         serve = getattr(_parts, "serve_part_register", None)
         if serve is None:
             raise _unserved("parts.serve_part_register")
         return dict(serve())
 
-    @app.post("/v1/k02rest2/ledger-nudge")
+    @app.post("/api/v1/hierarchy/ledger-nudge")
     async def post_ledger_nudge(request: Request) -> dict[str, Any]:
         _write_guard(request)
         data = await _json_body(request)
@@ -262,7 +262,7 @@ def register_k02rest2_routes(app: Any) -> Any:
                 detail={"code": "ROW_NOT_FOUND",
                         "message": str(err)}) from None
 
-    @app.post("/v1/k02rest2/decomposition-record")
+    @app.post("/api/v1/hierarchy/decomposition-record")
     async def post_decomposition_record(request: Request) -> dict[str, Any]:
         _write_guard(request)
         data = await _json_body(request)
@@ -277,7 +277,7 @@ def register_k02rest2_routes(app: Any) -> Any:
                 detail={"code": "ROW_REFUSED",
                         "message": str(err)}) from None
 
-    @app.post("/v1/k02rest2/team-sizing")
+    @app.post("/api/v1/hierarchy/team-sizing")
     async def post_team_sizing(request: Request) -> dict[str, Any]:
         actor = _write_guard(request)
         data = await _json_body(request)
@@ -292,7 +292,7 @@ def register_k02rest2_routes(app: Any) -> Any:
                 detail={"code": "ROW_REFUSED",
                         "message": str(err)}) from None
 
-    @app.post("/v1/k02rest2/team-config-change")
+    @app.post("/api/v1/hierarchy/team-config-change")
     async def post_team_config_change(request: Request) -> dict[str, Any]:
         _write_guard(request)
         data = await _json_body(request)
@@ -326,7 +326,7 @@ def register_k02rest2_routes(app: Any) -> Any:
                 "reason": outcome.reason,
                 "decision_ref": row.decision_id if row is not None else None}
 
-    @app.post("/v1/k02rest2/multi-manager-settings")
+    @app.post("/api/v1/hierarchy/multi-manager-settings")
     async def post_multi_manager_settings(request: Request) -> dict[str, Any]:
         _write_guard(request)
         data = await _json_body(request)
@@ -339,7 +339,7 @@ def register_k02rest2_routes(app: Any) -> Any:
         ok, reason = _overlap.validate_multi_manager_settings(settings)
         return {"ok": bool(ok), "reason": str(reason)}
 
-    @app.post("/v1/k02rest2/closed-part-ref")
+    @app.post("/api/v1/hierarchy/closed-part-ref")
     async def post_closed_part_ref(request: Request) -> dict[str, Any]:
         _write_guard(request)
         data = await _json_body(request)
@@ -359,7 +359,7 @@ def register_k02rest2_routes(app: Any) -> Any:
                 "gate_verdict_ref": ref.gate_verdict_ref,
                 "audit_verdict_ref": ref.audit_verdict_ref}
 
-    @app.post("/v1/k02rest2/ledger-roundtrip")
+    @app.post("/api/v1/hierarchy/ledger-roundtrip")
     async def post_ledger_roundtrip(request: Request) -> dict[str, Any]:
         _write_guard(request)
         data = await _json_body(request)
@@ -423,7 +423,7 @@ def register_k02next3_routes(app: Any) -> Any:
 
     planner = _q_graph.TaskPlanner()
 
-    @app.get("/v1/k02next3/sdk-transport")
+    @app.get("/api/v1/hierarchy/sdk-transport")
     def get_sdk_transport(provider: str = "") -> dict[str, Any]:
         name = (provider or "").strip()
         if not name:
@@ -435,12 +435,12 @@ def register_k02next3_routes(app: Any) -> Any:
                 "transport": _q_sdk.transport_for_provider(name),
                 "entry": "transport_for_provider"}
 
-    @app.get("/v1/k02next3/sdk-surface")
+    @app.get("/api/v1/hierarchy/sdk-surface")
     def get_sdk_surface() -> dict[str, Any]:
         return dict(_q_sdk.verified_sdk_surface(),
                     entry="verified_sdk_surface")
 
-    @app.post("/v1/k02next3/run-config")
+    @app.post("/api/v1/hierarchy/run-config")
     async def post_run_config(request: Request) -> dict[str, Any]:
         _write_guard(request)
         data = await _json_body(request)
@@ -507,7 +507,7 @@ def register_k02next3_routes(app: Any) -> Any:
                 "route": binding.route,
                 "strategy": binding.strategy}
 
-    @app.post("/v1/k02next3/target-flow")
+    @app.post("/api/v1/hierarchy/target-flow")
     async def post_target_flow(request: Request) -> dict[str, Any]:
         _write_guard(request)
         data = await _json_body(request)
@@ -544,7 +544,7 @@ def register_k02next3_routes(app: Any) -> Any:
         return {"project_id": clean_project, "roles": roles,
                 "loaded": loaded}
 
-    @app.post("/v1/k02next3/plan")
+    @app.post("/api/v1/hierarchy/plan")
     async def post_plan(request: Request) -> dict[str, Any]:
         _write_guard(request)
         data = await _json_body(request)
@@ -578,7 +578,7 @@ def register_k02next3_routes(app: Any) -> Any:
                 "plan_ref": plan_ref,
                 "subtasks": subgraph.order()}
 
-    @app.post("/v1/k02next3/dispatch")
+    @app.post("/api/v1/hierarchy/dispatch")
     async def post_dispatch(request: Request) -> dict[str, Any]:
         _write_guard(request)
         data = await _json_body(request)
@@ -625,7 +625,7 @@ def register_k02next3_routes(app: Any) -> Any:
                 "subtask_id": dispatched.subtask_id,
                 "status": dispatched.status}
 
-    @app.post("/v1/k02next3/issue")
+    @app.post("/api/v1/hierarchy/issue")
     async def post_issue(request: Request) -> dict[str, Any]:
         _write_guard(request)
         data = await _json_body(request)

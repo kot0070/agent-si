@@ -597,20 +597,20 @@ def test_641_finalize_binds_verification_served():
     assert TESTID == "k08batch-served"
     client = _client()
     pid = "k08batch-641-p1"
-    ok = client.post("/api/v1/k13/finalizations", json=_finalize_body(pid),
+    ok = client.post("/api/v1/core/finalizations", json=_finalize_body(pid),
                      headers=_auth())
     assert ok.status_code == 200, ok.text
     assert ok.json()["verification_ref"] == "v-k08batch-fin-1"
     assert ok.json()["completion_disposition"] == "VERIFIED_PASS"
     absent = _finalize_body(pid, finalization_id="fin-k08batch-absent")
     del absent["verification"]
-    refused = client.post("/api/v1/k13/finalizations", json=absent,
+    refused = client.post("/api/v1/core/finalizations", json=absent,
                           headers=_auth())
     assert refused.status_code == 400, refused.text
     assert refused.json()["detail"]["code"] == "FINALIZATION_REFUSED"
     mismatch = _finalize_body(pid, finalization_id="fin-k08batch-mismatch")
     mismatch["verification_ref"] = "v-some-other-id"
-    denied = client.post("/api/v1/k13/finalizations", json=mismatch,
+    denied = client.post("/api/v1/core/finalizations", json=mismatch,
                          headers=_auth())
     assert denied.status_code == 400, denied.text
     assert denied.json()["detail"]["code"] == "FINALIZATION_REFUSED"
@@ -621,7 +621,7 @@ def test_642_finalize_binds_audit_served():
     assert TESTID == "k08batch-served"
     client = _client()
     pid = "k08batch-642-p1"
-    ok = client.post("/api/v1/k13/finalizations", json=_finalize_body(pid),
+    ok = client.post("/api/v1/core/finalizations", json=_finalize_body(pid),
                      headers=_auth())
     assert ok.status_code == 200, ok.text
     assert ok.json()["audit_result"] == "PASS"
@@ -629,7 +629,7 @@ def test_642_finalize_binds_audit_served():
     assert ok.json()["audit_ref"]["result"] == ok.json()["audit_result"]
     absent = _finalize_body(pid, finalization_id="fin-k08batch-642-absent")
     del absent["audit"]
-    refused = client.post("/api/v1/k13/finalizations", json=absent,
+    refused = client.post("/api/v1/core/finalizations", json=absent,
                           headers=_auth())
     assert refused.status_code == 400, refused.text
     assert refused.json()["detail"]["code"] == "FINALIZATION_REFUSED"
@@ -637,7 +637,7 @@ def test_642_finalize_binds_audit_served():
                               finalization_id="fin-k08batch-642-mismatch")
     mismatch["audit"] = dict(mismatch["audit"])
     mismatch["audit"]["contract_hash"] = "h-other-hash"
-    denied = client.post("/api/v1/k13/finalizations", json=mismatch,
+    denied = client.post("/api/v1/core/finalizations", json=mismatch,
                          headers=_auth())
     assert denied.status_code == 400, denied.text
     assert denied.json()["detail"]["code"] == "FINALIZATION_REFUSED"

@@ -1,8 +1,8 @@
 """K02OPEN1B served blink: early-start read plus link-check close.
 
-Rows 101+102. GET /k02open1b/early-start answers whether the stored
+Rows 101+102. GET /api/v1/hierarchy/early-start answers whether the stored
 gate plus audit refs both resolve to PASS with overlap on; POST
-/k02open1b/link-check closes the joint verdict and stamps the
+/api/v1/hierarchy/link-check closes the joint verdict and stamps the
 linkcheck marker. Reads stay open; writes keep the frozen USER_WRITE
 guard (401 missing x-actor, 403 bad token). Gate plus audit data come
 from the module registries (never a new store).
@@ -53,7 +53,7 @@ def _k02blink_require_writer(request: Request) -> str:
     return actor
 
 
-@router.get("/k02open1b/early-start")
+@router.get("/api/v1/hierarchy/early-start")
 def k02blink_early_start(gate_ref: str = "",
                          audit_ref: str = "",
                          overlap: str | None = None) -> dict[str, Any]:
@@ -66,7 +66,7 @@ def k02blink_early_start(gate_ref: str = "",
     return {"allowed": allowed}
 
 
-@router.post("/k02open1b/link-check")
+@router.post("/api/v1/hierarchy/link-check")
 def k02blink_link_check(payload: dict[str, Any],
                         request: Request) -> dict[str, Any]:
     """Serve the joint link-check close (USER_WRITE guard)."""

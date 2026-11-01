@@ -32,7 +32,7 @@ export async function writeLocalAiDecisionDoc(
   authority: string,
 ): Promise<LocalAiDecisionDoc> {
   return requestJson(
-    "/api/v1/k07next5/local-ai/decision-update",
+    "/api/v1/app/local-ai/decision-update",
     {
       method: "POST",
       kind: "write",
@@ -66,7 +66,7 @@ export async function readLocalAiViewDoc(
   projectKey: string,
 ): Promise<LocalAiViewDoc> {
   return requestJson(
-    `/api/v1/k07next5/local-ai/view?project_key=${encodeURIComponent(projectKey)}`,
+    `/api/v1/app/local-ai/view?project_key=${encodeURIComponent(projectKey)}`,
     { method: "GET", kind: "read" },
     LocalAiViewDocSchema,
   );
@@ -112,7 +112,7 @@ export async function readBenchTabDoc(
     `&level=${encodeURIComponent(level)}` +
     `&pc_in_use=${pcInUse ? "1" : "0"}`;
   return requestJson(
-    `/api/v1/k07next5/bench/tab?${query}`,
+    `/api/v1/app/bench/tab?${query}`,
     { method: "GET", kind: "read" },
     BenchTabDocSchema,
   );
@@ -142,7 +142,7 @@ export async function readLocalAiSettingsViewDoc(
   projectKey: string,
 ): Promise<LocalAiSettingsViewDoc> {
   return requestJson(
-    `/api/v1/k07next5/local-ai/settings-view?project_key=${encodeURIComponent(projectKey)}`,
+    `/api/v1/app/local-ai/settings-view?project_key=${encodeURIComponent(projectKey)}`,
     { method: "GET", kind: "read" },
     LocalAiSettingsViewDocSchema,
   );
@@ -170,7 +170,7 @@ export type ProviderHealthTransitionsDoc = z.infer<
 
 export async function readProviderHealthTransitionsDoc(): Promise<ProviderHealthTransitionsDoc> {
   return requestJson(
-    "/api/v1/k07next5/provider-health/transitions",
+    "/api/v1/app/provider-health/transitions",
     { method: "GET", kind: "read" },
     ProviderHealthTransitionsDocSchema,
   );

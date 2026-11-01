@@ -39,7 +39,7 @@ beforeEach(() => {
   seen.length = 0;
   vi.stubGlobal("fetch", async (input: unknown) => {
     seen.push(String(input));
-    if (String(input) === "/api/v1/k07next4/turn-triple") {
+    if (String(input) === "/api/v1/app/turn-triple") {
       return jsonBody(SERVED_TURN_TRIPLE);
     }
     throw new Error(`unexpected fetch ${String(input)}`);
@@ -61,7 +61,7 @@ describe("k07next4 MH-6 turn triple over the real screen", () => {
       </ApiClientProvider>,
     );
     await screen.findByTestId("k07next4-turn-triple");
-    expect(seen).toContain("/api/v1/k07next4/turn-triple");
+    expect(seen).toContain("/api/v1/app/turn-triple");
     expect(screen.getByText(en.agents.live.title)).toBeTruthy();
     expect(
       screen.getByText(SERVED_TURN_TRIPLE.turns[0]?.plan ?? ""),

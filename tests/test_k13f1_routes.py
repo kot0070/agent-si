@@ -30,9 +30,9 @@ from agent_si.finalization.finalizer import Finalizer
 TEST_TOKEN = "k13f1-routes-token"
 ACTOR = "tester-k13f1"
 
-AMEND_PATH = "/api/v1/k13/contracts/amend"
-STOP_PATH = "/api/v1/k13/runs/stop"
-FINAL_PATH = "/api/v1/k13/finalizations/%s"
+AMEND_PATH = "/api/v1/core/contracts/amend"
+STOP_PATH = "/api/v1/core/runs/stop"
+FINAL_PATH = "/api/v1/core/finalizations/%s"
 
 
 def _settings():

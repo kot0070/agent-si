@@ -1,7 +1,7 @@
 """MH-4 served proof (Heron): verifier/auditor runs read-only.
 
 Drives the real app built by create_app through an HTTP test client.
-POST /api/v1/k03next2/verifier_readonly runs the real verification
+POST /api/v1/qa/verifier_readonly runs the real verification
 checker entry over the project dir (tree hash before and after proves
 the run changed nothing), judges the verifier write set through the
 real R-304 file-contract entry (checked_written must be 0) and mints
@@ -111,7 +111,7 @@ def test_k03mh4_verifier_readonly_served(client, dirs):
     witness.write_text("mh4 fixture", encoding="utf-8")
 
     resp = client.post(
-        "/api/v1/k03next2/verifier_readonly",
+        "/api/v1/qa/verifier_readonly",
         json=_body(proj, evidence=evidence, producer=producer,
                    run_id=run_id),
     )
@@ -192,7 +192,7 @@ def test_k03mh4_write_attempt_rejected_served(client, dirs):
     before = _tree_bytes(proj)
 
     resp = client.post(
-        "/api/v1/k03next2/verifier_readonly",
+        "/api/v1/qa/verifier_readonly",
         json=_body(proj, evidence=evidence, producer=producer,
                    run_id=run_id,
                    attempted_writes=["write-k03mh4w-%s" % tag]),

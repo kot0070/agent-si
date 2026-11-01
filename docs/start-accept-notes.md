@@ -1,4 +1,4 @@
-# K10PH2D start/accept notes
+# Start/accept notes
 
 Loopback TEST notes only: recorded prose, no live probing.
 
@@ -30,3 +30,9 @@ a registry at install time. Install from the checked-in
 `frontend/package-lock.json` against the pre-fetched tarball cache;
 the declared @types set (`@types/react`, `@types/react-dom`) stays
 intact.
+
+## Fixture runs
+
+The recorded fixture suite runs with no cache provider:
+
+`pytest tests/test_k10ph2d_served.py -q -p no:cacheprovider`

@@ -26,8 +26,8 @@ from fastapi import HTTPException, Request
 from agent_si.assurance import audit_coordinator as _chain_coordinator
 from agent_si.assurance import audit_registry as _chain_registry
 
-_GATE_ROUTE = "/api/v1/k03next/sourcing_gate"
-_SEMANTIC_ROUTE = "/api/v1/k03next/semantic_security"
+_GATE_ROUTE = "/api/v1/qa/sourcing_gate"
+_SEMANTIC_ROUTE = "/api/v1/qa/semantic_security"
 _DEFAULT_TASK_CLASS = "served-turn"
 _DEFAULT_MINIMUM_LEVEL = "L2"
 _DEFAULT_SCOPE = "k03next/sourcing/default"

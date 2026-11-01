@@ -33,7 +33,7 @@ beforeEach(() => {
   seen.length = 0;
   vi.stubGlobal("fetch", async (input: unknown) => {
     seen.push(String(input));
-    if (String(input) === "/api/v1/k07next4/page-shell") {
+    if (String(input) === "/api/v1/app/page-shell") {
       return jsonBody(SERVED_SHELL);
     }
     throw new Error(`unexpected fetch ${String(input)}`);
@@ -55,7 +55,7 @@ describe("k07next4 LIVE0B-04 page shell over the real screen", () => {
       </ApiClientProvider>,
     );
     const shell = await screen.findByTestId("k07next4-page-shell");
-    expect(seen).toContain("/api/v1/k07next4/page-shell");
+    expect(seen).toContain("/api/v1/app/page-shell");
     expect(shell.className).toContain("agent-si-console");
     expect(en.shell.sidebar.projects).toBe("Projects");
     expect(screen.getAllByText("Projects")).toHaveLength(2);

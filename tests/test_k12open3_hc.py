@@ -78,7 +78,7 @@ def test_mark_round_trip_and_get_order(setup):
     _accept(app, "pkg-b")
     today = datetime.date.today().isoformat()
     resp = client.post(
-        "/api/v1/k12open3/contributions/mark",
+        "/api/v1/demo/contributions/mark",
         json={"package_id": "pkg-a", "evidence_ref": "ev-a"},
         headers=_auth(),
     )
@@ -91,12 +91,12 @@ def test_mark_round_trip_and_get_order(setup):
         }
     }
     resp = client.post(
-        "/api/v1/k12open3/contributions/mark",
+        "/api/v1/demo/contributions/mark",
         json={"package_id": "pkg-b", "evidence_ref": "ev-b"},
         headers=_auth(),
     )
     assert resp.status_code == 200, resp.text
-    resp = client.get("/api/v1/k12open3/contributions")
+    resp = client.get("/api/v1/demo/contributions")
     assert resp.status_code == 200, resp.text
     assert resp.json() == {
         "contributions": [
@@ -113,7 +113,7 @@ def test_mark_default_recorded_at_today(setup):
     _accept(app, "pkg-c")
     _accept(app, "pkg-c2")
     resp = client.post(
-        "/api/v1/k12open3/contributions/mark",
+        "/api/v1/demo/contributions/mark",
         json={"package_id": "pkg-c"},
         headers=_auth(),
     )
@@ -122,7 +122,7 @@ def test_mark_default_recorded_at_today(setup):
         datetime.date.today().isoformat()
     )
     resp = client.post(
-        "/api/v1/k12open3/contributions/mark",
+        "/api/v1/demo/contributions/mark",
         json={"package_id": "pkg-c2", "recorded_at": "2026-01-02"},
         headers=_auth(),
     )
@@ -134,13 +134,13 @@ def test_mark_duplicate_409(setup):
     app, client = setup
     _accept(app, "pkg-d")
     resp = client.post(
-        "/api/v1/k12open3/contributions/mark",
+        "/api/v1/demo/contributions/mark",
         json={"package_id": "pkg-d", "evidence_ref": "ev-d"},
         headers=_auth(),
     )
     assert resp.status_code == 200, resp.text
     resp = client.post(
-        "/api/v1/k12open3/contributions/mark",
+        "/api/v1/demo/contributions/mark",
         json={"package_id": "pkg-d", "evidence_ref": "ev-d2"},
         headers=_auth(),
     )
@@ -153,7 +153,7 @@ def test_mark_empty_id_400(setup):
     app, client = setup
     for payload in ({}, {"package_id": ""}, {"package_id": "   "}):
         resp = client.post(
-            "/api/v1/k12open3/contributions/mark",
+            "/api/v1/demo/contributions/mark",
             json=dict(payload),
             headers=_auth(),
         )
@@ -164,7 +164,7 @@ def test_mark_empty_id_400(setup):
 def test_mark_unaccepted_404(setup):
     app, client = setup
     resp = client.post(
-        "/api/v1/k12open3/contributions/mark",
+        "/api/v1/demo/contributions/mark",
         json={"package_id": "pkg-never", "evidence_ref": "ev-x"},
         headers=_auth(),
     )
@@ -176,7 +176,7 @@ def test_finalize_clean_records_mark(setup):
     app, client = setup
     _accept(app, "pkg-e")
     resp = client.post(
-        "/api/v1/k12open3/submission/finalize",
+        "/api/v1/demo/submission/finalize",
         json={
             "package_id": "pkg-e",
             "files": [
@@ -193,7 +193,7 @@ def test_finalize_clean_records_mark(setup):
     assert body["contribution"]["recorded_at"] == (
         datetime.date.today().isoformat()
     )
-    resp = client.get("/api/v1/k12open3/contributions")
+    resp = client.get("/api/v1/demo/contributions")
     assert resp.status_code == 200, resp.text
     ids = [item["package_id"] for item in resp.json()["contributions"]]
     assert "pkg-e" in ids
@@ -203,7 +203,7 @@ def test_finalize_dirty_blocked_409(setup):
     app, client = setup
     _accept(app, "pkg-f")
     resp = client.post(
-        "/api/v1/k12open3/submission/finalize",
+        "/api/v1/demo/submission/finalize",
         json={
             "package_id": "pkg-f",
             "files": [
@@ -221,7 +221,7 @@ def test_finalize_dirty_blocked_409(setup):
     assert "message" in body
     codes = [item["code"] for item in body["findings"]]
     assert _secretscan.SECRET_DETECTED in codes
-    resp = client.get("/api/v1/k12open3/contributions")
+    resp = client.get("/api/v1/demo/contributions")
     assert resp.status_code == 200, resp.text
     ids = [item["package_id"] for item in resp.json()["contributions"]]
     assert "pkg-f" not in ids
@@ -236,7 +236,7 @@ def test_finalize_empty_submission_400(setup):
         {"package_id": "pkg-g", "files": [], "notes": "  "},
     ):
         resp = client.post(
-            "/api/v1/k12open3/submission/finalize",
+            "/api/v1/demo/submission/finalize",
             json=dict(payload),
             headers=_auth(),
         )
@@ -254,8 +254,8 @@ def test_write_guards_on_both_posts(setup):
         "notes": "nothing private here",
     }
     for path, payload in (
-        ("/api/v1/k12open3/contributions/mark", mark_payload),
-        ("/api/v1/k12open3/submission/finalize", finalize_payload),
+        ("/api/v1/demo/contributions/mark", mark_payload),
+        ("/api/v1/demo/submission/finalize", finalize_payload),
     ):
         resp = client.post(
             path, json=dict(payload), headers=_auth(actor=None)

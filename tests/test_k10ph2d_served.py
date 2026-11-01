@@ -70,15 +70,15 @@ def _get_route(client, route):
 
 
 def test_k10ph2d_129_setup_demo_fixture_index(tmp_path, monkeypatch):
-    """Row B0B-UNCOVERED_MVP_ACCEPT-129 served through GET /k10/ph2d/setup-index."""
+    """Row B0B-UNCOVERED_MVP_ACCEPT-129 served through GET /api/v1/release/ph2d/setup-index."""
     _check_entry(
         "B0B-UNCOVERED_MVP_ACCEPT-129",
-        "GET /k10/ph2d/setup-index",
+        "GET /api/v1/release/ph2d/setup-index",
         "test_k10ph2d_129_setup_demo_fixture_index",
     )
     client, _app, _data_dir = _client_on_temp_dir(
         tmp_path, monkeypatch, "k10ph2d-129")
-    body = _get_route(client, "GET /k10/ph2d/setup-index")
+    body = _get_route(client, "GET /api/v1/release/ph2d/setup-index")
     assert body["row"] == "B0B-UNCOVERED_MVP_ACCEPT-129", body
     assert body["records"] == k10_start.setup_demo_fixture_index(), body
     sections = [row["section"] for row in body["records"]]
@@ -104,15 +104,15 @@ def test_k10ph2d_129_setup_demo_fixture_index(tmp_path, monkeypatch):
 
 
 def test_k10ph2d_131_prerequisites_setup_demo(tmp_path, monkeypatch):
-    """Row B0B-UNCOVERED_MVP_ACCEPT-131 served through GET /k10/ph2d/prerequisites."""
+    """Row B0B-UNCOVERED_MVP_ACCEPT-131 served through GET /api/v1/release/ph2d/prerequisites."""
     _check_entry(
         "B0B-UNCOVERED_MVP_ACCEPT-131",
-        "GET /k10/ph2d/prerequisites",
+        "GET /api/v1/release/ph2d/prerequisites",
         "test_k10ph2d_131_prerequisites_setup_demo",
     )
     client, _app, _data_dir = _client_on_temp_dir(
         tmp_path, monkeypatch, "k10ph2d-131")
-    body = _get_route(client, "GET /k10/ph2d/prerequisites")
+    body = _get_route(client, "GET /api/v1/release/ph2d/prerequisites")
     assert body["row"] == "B0B-UNCOVERED_MVP_ACCEPT-131", body
     assert body["records"] == k10_start.checkout_prerequisites_record(), body
     assert [row["topic"] for row in body["records"]] == [
@@ -132,20 +132,20 @@ def test_k10ph2d_131_prerequisites_setup_demo(tmp_path, monkeypatch):
 
 
 def test_k10ph2d_153_startup_idempotence(tmp_path, monkeypatch):
-    """Row B0B-UNCOVERED_MVP_ACCEPT-153 served through GET /k10/ph2d/startup-note."""
+    """Row B0B-UNCOVERED_MVP_ACCEPT-153 served through GET /api/v1/release/ph2d/startup-note."""
     _check_entry(
         "B0B-UNCOVERED_MVP_ACCEPT-153",
-        "GET /k10/ph2d/startup-note",
+        "GET /api/v1/release/ph2d/startup-note",
         "test_k10ph2d_153_startup_idempotence",
     )
     client, _app, _data_dir = _client_on_temp_dir(
         tmp_path, monkeypatch, "k10ph2d-153")
-    body = _get_route(client, "GET /k10/ph2d/startup-note")
+    body = _get_route(client, "GET /api/v1/release/ph2d/startup-note")
     assert body["row"] == "B0B-UNCOVERED_MVP_ACCEPT-153", body
     assert body["records"] == k10_start.startup_idempotence_note(), body
     assert body["records"]["note"] == "startup-idempotence", body
     assert "idempotent" in body["records"]["claim"], body
-    note_path = ROOT / "docs" / "k10ph2d-start-accept-notes.md"
+    note_path = ROOT / "docs" / "start-accept-notes.md"
     notes = note_path.read_text(encoding="utf-8")
     assert "idempotent" in notes, notes
     assert body["records"]["claim"] in notes, (body, notes)
@@ -165,20 +165,20 @@ def test_k10ph2d_153_startup_idempotence(tmp_path, monkeypatch):
 
 
 def test_k10ph2d_249_restart_note(tmp_path, monkeypatch):
-    """Row B0B-UNCOVERED_MVP_ACCEPT-249 served through GET /k10/ph2d/restart-note."""
+    """Row B0B-UNCOVERED_MVP_ACCEPT-249 served through GET /api/v1/release/ph2d/restart-note."""
     _check_entry(
         "B0B-UNCOVERED_MVP_ACCEPT-249",
-        "GET /k10/ph2d/restart-note",
+        "GET /api/v1/release/ph2d/restart-note",
         "test_k10ph2d_249_restart_note",
     )
     client, _app, _data_dir = _client_on_temp_dir(
         tmp_path, monkeypatch, "k10ph2d-249")
-    body = _get_route(client, "GET /k10/ph2d/restart-note")
+    body = _get_route(client, "GET /api/v1/release/ph2d/restart-note")
     assert body["row"] == "B0B-UNCOVERED_MVP_ACCEPT-249", body
     assert body["records"] == k10_start.restart_note(), body
     assert body["records"]["note"] == "restart", body
     assert "restart" in body["records"]["claim"].lower(), body
-    note_path = ROOT / "docs" / "k10ph2d-start-accept-notes.md"
+    note_path = ROOT / "docs" / "start-accept-notes.md"
     notes = note_path.read_text(encoding="utf-8")
     assert body["records"]["claim"] in notes, (body, notes)
     first = k10_start.drive_demo_to_green(None)
@@ -188,15 +188,15 @@ def test_k10ph2d_249_restart_note(tmp_path, monkeypatch):
 
 
 def test_k10ph2d_HC_4_license_notices(tmp_path, monkeypatch):
-    """Row HC-4 served through GET /k10/ph2d/license."""
+    """Row HC-4 served through GET /api/v1/release/ph2d/license."""
     _check_entry(
         "HC-4",
-        "GET /k10/ph2d/license",
+        "GET /api/v1/release/ph2d/license",
         "test_k10ph2d_HC_4_license_notices",
     )
     client, _app, _data_dir = _client_on_temp_dir(
         tmp_path, monkeypatch, "k10ph2d-hc4")
-    body = _get_route(client, "GET /k10/ph2d/license")
+    body = _get_route(client, "GET /api/v1/release/ph2d/license")
     assert body["row"] == "HC-4", body
     assert body["records"] == k10_accept.license_notice_record(), body
     assert body["records"]["license"] == "MIT", body
@@ -213,15 +213,15 @@ def test_k10ph2d_HC_4_license_notices(tmp_path, monkeypatch):
 
 
 def test_k10ph2d_LIVE0_01_cached_tarballs(tmp_path, monkeypatch):
-    """Row LIVE0-01 served through GET /k10/ph2d/frontend-offline."""
+    """Row LIVE0-01 served through GET /api/v1/release/ph2d/frontend-offline."""
     _check_entry(
         "LIVE0-01",
-        "GET /k10/ph2d/frontend-offline",
+        "GET /api/v1/release/ph2d/frontend-offline",
         "test_k10ph2d_LIVE0_01_cached_tarballs",
     )
     client, _app, _data_dir = _client_on_temp_dir(
         tmp_path, monkeypatch, "k10ph2d-live001")
-    body = _get_route(client, "GET /k10/ph2d/frontend-offline")
+    body = _get_route(client, "GET /api/v1/release/ph2d/frontend-offline")
     assert body["row"] == "LIVE0-01", body
     assert body["records"] == k10_accept.frontend_offline_record(), body
     assert body["records"]["procedure"] == (
@@ -237,30 +237,30 @@ def test_k10ph2d_LIVE0_01_cached_tarballs(tmp_path, monkeypatch):
         encoding="utf-8")
     assert "node_modules/@types/react\"" in lock, lock
     assert "node_modules/@types/react-dom\"" in lock, lock
-    note_path = ROOT / "docs" / "k10ph2d-start-accept-notes.md"
+    note_path = ROOT / "docs" / "start-accept-notes.md"
     notes = note_path.read_text(encoding="utf-8")
     assert "cached tarballs" in notes, notes
 
 
 def test_k10ph2d_LIVE0_04_data_dir_start(tmp_path, monkeypatch):
-    """Row LIVE0-04 served through GET /k10/ph2d/data-dir."""
+    """Row LIVE0-04 served through GET /api/v1/release/ph2d/data-dir."""
     _check_entry(
         "LIVE0-04",
-        "GET /k10/ph2d/data-dir",
+        "GET /api/v1/release/ph2d/data-dir",
         "test_k10ph2d_LIVE0_04_data_dir_start",
     )
     client, _app, data_dir = _client_on_temp_dir(
         tmp_path, monkeypatch, "k10ph2d-live004")
-    body = _get_route(client, "GET /k10/ph2d/data-dir")
+    body = _get_route(client, "GET /api/v1/release/ph2d/data-dir")
     assert body["row"] == "LIVE0-04", body
     assert body["records"] == k10_start.data_dir_start_path_note(), body
     assert body["records"]["env_var"] == "AGENT_SI_DATA_DIR", body
     expected = os.path.abspath(str(data_dir))
     assert _app.state.data_dir == expected, _app.state.data_dir
-    resp = client.get("/k10/start/migrate")
+    resp = client.get("/api/v1/release/start/migrate")
     assert resp.status_code == 200, resp.text
     assert resp.json()["testid"] == "k10open4-start", resp.text
-    note_path = ROOT / "docs" / "k10ph2d-start-accept-notes.md"
+    note_path = ROOT / "docs" / "start-accept-notes.md"
     notes = note_path.read_text(encoding="utf-8")
     assert "AGENT_SI_DATA_DIR" in notes, notes
     monkeypatch.setenv("AGENT_SI_DATA_DIR", "   ")

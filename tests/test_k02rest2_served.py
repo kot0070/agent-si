@@ -46,7 +46,7 @@ def test_k02rest2_116():
     clarification opens a bounded delta package."""
     client, headers = make_client()
     resp = client.post(
-        "/v1/k02rest2/delta-intake",
+        "/api/v1/hierarchy/delta-intake",
         json={"scope": ["k02rest2-clarify-1"], "blocking": False},
         headers=headers,
     )
@@ -58,7 +58,7 @@ def test_k02rest2_116():
     assert body["keep"] == ["k02rest2-clarify-1"]
     assert body["patch"] == []
     over = client.post(
-        "/v1/k02rest2/delta-intake",
+        "/api/v1/hierarchy/delta-intake",
         json={"scope": [f"r-{i:02d}" for i in range(17)],
               "blocking": False},
         headers=headers,
@@ -66,12 +66,12 @@ def test_k02rest2_116():
     assert over.status_code == 400
     assert over.json()["detail"]["code"] == "DELTA_OVER_BOUND"
     no_actor = client.post(
-        "/v1/k02rest2/delta-intake",
+        "/api/v1/hierarchy/delta-intake",
         json={"scope": ["k02rest2-clarify-1"], "blocking": False},
     )
     assert no_actor.status_code == 401
     bad_token = client.post(
-        "/v1/k02rest2/delta-intake",
+        "/api/v1/hierarchy/delta-intake",
         json={"scope": ["k02rest2-clarify-1"], "blocking": False},
         headers={"x-actor": "manager-1",
                  "x-ui-session-token": "wrong-token"},
@@ -84,14 +84,14 @@ def test_k02rest2_117():
     non-blocking delta runs in parallel with link-check close."""
     client, headers = make_client()
     taken = client.post(
-        "/v1/k02rest2/delta-intake",
+        "/api/v1/hierarchy/delta-intake",
         json={"scope": ["k02rest2-joint-1"], "blocking": False},
         headers=headers,
     )
     assert taken.status_code == 200, taken.text
     delta = taken.json()
     closed = client.post(
-        "/v1/k02rest2/delta-close",
+        "/api/v1/hierarchy/delta-close",
         json={"delta": delta,
               "verdict": {"gate": "PASS", "audit": "PASS",
                           "evidence_refs": ["artifact://k02rest2/joint-1"]}},
@@ -104,7 +104,7 @@ def test_k02rest2_117():
     assert body["audit"] == "PASS"
     assert "linkcheck:ok" in body["evidence_refs"]
     dangling = client.post(
-        "/v1/k02rest2/delta-close",
+        "/api/v1/hierarchy/delta-close",
         json={"delta": delta,
               "verdict": {"gate": "PASS", "audit": "PASS",
                           "evidence_refs": []}},
@@ -114,7 +114,7 @@ def test_k02rest2_117():
     assert dangling.json()["gate"] == "BLOCKED"
     assert dangling.json()["audit"] == "BLOCKED"
     no_actor = client.post(
-        "/v1/k02rest2/delta-close",
+        "/api/v1/hierarchy/delta-close",
         json={"delta": delta,
               "verdict": {"gate": "PASS", "audit": "PASS",
                           "evidence_refs": ["artifact://k02rest2/joint-1"]}},
@@ -144,7 +144,7 @@ def test_k02rest2_87():
         )
         assert audit.status_code == 200, audit.text
     verdict = client.post(
-        "/v1/k02rest2/phase-gate",
+        "/api/v1/hierarchy/phase-gate",
         json={"package_ids": [package_id]},
         headers=headers,
     )
@@ -155,14 +155,14 @@ def test_k02rest2_87():
     assert body["audit"] == "PASS"
     assert len(body["evidence_refs"]) == 2
     missing = client.post(
-        "/v1/k02rest2/phase-gate",
+        "/api/v1/hierarchy/phase-gate",
         json={"package_ids": ["k02rest2-87-absent-pkg"]},
         headers=headers,
     )
     assert missing.status_code == 409
     assert missing.json()["detail"]["code"] == "GATE_NOT_PASSED"
     no_actor = client.post(
-        "/v1/k02rest2/phase-gate",
+        "/api/v1/hierarchy/phase-gate",
         json={"package_ids": [package_id]},
     )
     assert no_actor.status_code == 401
@@ -172,7 +172,7 @@ def test_k02rest2_22():
     """kit/BUILD_PLAN.md:1324 | 22 | K02 | PARTIAL.
     control-plane mapping documented."""
     client, headers = make_client()
-    resp = client.get("/v1/k02rest2/control-plane")
+    resp = client.get("/api/v1/hierarchy/control-plane")
     assert resp.status_code == 200, resp.text
     mapping = resp.json()
     assert mapping["director.split"] == "split.split_package"
@@ -181,7 +181,7 @@ def test_k02rest2_22():
     assert (mapping["director.integrate"]
             == "graph.HierarchyConfigStore.close_parent")
     assert mapping["director.decide"] == "teamcard.DecisionLog.append"
-    authed = client.get("/v1/k02rest2/control-plane", headers=headers)
+    authed = client.get("/api/v1/hierarchy/control-plane", headers=headers)
     assert authed.status_code == 200
 
 
@@ -190,7 +190,7 @@ def test_k02rest2_33():
     served part register, not a markdown file."""
     client, headers = make_client()
     stored = client.post(
-        "/v1/k02rest2/part-register",
+        "/api/v1/hierarchy/part-register",
         json={"agent": "director-1", "scope": "k02rest2-33-a",
               "deliverable": "artifact://k02rest2/part-a",
               "status": "QUEUED"},
@@ -198,12 +198,12 @@ def test_k02rest2_33():
     )
     assert stored.status_code == 200, stored.text
     assert stored.json()["scope"] == "k02rest2-33-a"
-    rows = client.get("/v1/k02rest2/part-register")
+    rows = client.get("/api/v1/hierarchy/part-register")
     assert rows.status_code == 200, rows.text
     scopes = [row["scope"] for row in rows.json()["rows"]]
     assert "k02rest2-33-a" in scopes
     refused = client.post(
-        "/v1/k02rest2/part-register",
+        "/api/v1/hierarchy/part-register",
         json={"agent": "director-1",
               "deliverable": "artifact://k02rest2/part-b",
               "status": "QUEUED"},
@@ -211,7 +211,7 @@ def test_k02rest2_33():
     )
     assert refused.status_code == 400
     no_actor = client.post(
-        "/v1/k02rest2/part-register",
+        "/api/v1/hierarchy/part-register",
         json={"agent": "director-1", "scope": "k02rest2-33-guard",
               "deliverable": "artifact://k02rest2/part-g",
               "status": "QUEUED"},
@@ -225,7 +225,7 @@ def test_k02rest2_35():
     client, headers = make_client()
     package_id = "k02rest2-35-pkg"
     nudge = client.post(
-        "/v1/k02rest2/ledger-nudge",
+        "/api/v1/hierarchy/ledger-nudge",
         json={"packages": [{"package_id": package_id, "agents": 2,
                             "peak_concurrency": 2, "wall_time_s": 1.5}],
               "package_id": package_id},
@@ -238,7 +238,7 @@ def test_k02rest2_35():
     assert isinstance(body["nudge"], str) and body["nudge"]
     assert body["auto_push"] is False
     unknown = client.post(
-        "/v1/k02rest2/ledger-nudge",
+        "/api/v1/hierarchy/ledger-nudge",
         json={"packages": [{"package_id": package_id, "agents": 2,
                             "peak_concurrency": 2, "wall_time_s": 1.5}],
               "package_id": "k02rest2-35-absent-pkg"},
@@ -246,7 +246,7 @@ def test_k02rest2_35():
     )
     assert unknown.status_code == 404
     no_actor = client.post(
-        "/v1/k02rest2/ledger-nudge",
+        "/api/v1/hierarchy/ledger-nudge",
         json={"packages": [{"package_id": package_id, "agents": 2,
                             "peak_concurrency": 2, "wall_time_s": 1.5}],
               "package_id": package_id},
@@ -259,7 +259,7 @@ def test_k02rest2_R301():
     team card in context; decomposition names the facts used."""
     client, headers = make_client()
     rec = client.post(
-        "/v1/k02rest2/decomposition-record",
+        "/api/v1/hierarchy/decomposition-record",
         json={"part_id": "k02rest2-r301-part-a", "size_units": 3,
               "provider": "acme",
               "model_kb_facts": {"ctx": "128k"},
@@ -274,7 +274,7 @@ def test_k02rest2_R301():
     assert (body["team_card"]["model"] == MODEL_ID)
     assert body["team_card"]["provider"] == "acme"
     refused = client.post(
-        "/v1/k02rest2/decomposition-record",
+        "/api/v1/hierarchy/decomposition-record",
         json={"part_id": "k02rest2-r301-part-b",
               "provider": "acme",
               "model_kb_facts": {"ctx": "128k"},
@@ -284,7 +284,7 @@ def test_k02rest2_R301():
     )
     assert refused.status_code == 400
     no_actor = client.post(
-        "/v1/k02rest2/decomposition-record",
+        "/api/v1/hierarchy/decomposition-record",
         json={"part_id": "k02rest2-r301-part-c", "size_units": 3,
               "provider": "acme",
               "model_kb_facts": {"ctx": "128k"},
@@ -299,7 +299,7 @@ def test_k02rest2_R303():
     team by task: sized and staffed per block with recorded WHY."""
     client, headers = make_client()
     sized = client.post(
-        "/v1/k02rest2/team-sizing",
+        "/api/v1/hierarchy/team-sizing",
         json={"block_id": "k02rest2-r303-block",
               "subtask_count": 3, "risk": "HIGH"},
         headers=headers,
@@ -311,14 +311,14 @@ def test_k02rest2_R303():
     assert "manager" in body["roles"]
     assert "k02rest2-r303-block" in body["why"] and "HIGH" in body["why"]
     refused = client.post(
-        "/v1/k02rest2/team-sizing",
+        "/api/v1/hierarchy/team-sizing",
         json={"block_id": "k02rest2-r303-block",
               "subtask_count": 3, "risk": "EXTREME"},
         headers=headers,
     )
     assert refused.status_code == 400
     no_actor = client.post(
-        "/v1/k02rest2/team-sizing",
+        "/api/v1/hierarchy/team-sizing",
         json={"block_id": "k02rest2-r303-block",
               "subtask_count": 3, "risk": "HIGH"},
     )

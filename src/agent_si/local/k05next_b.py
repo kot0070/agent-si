@@ -79,7 +79,7 @@ def _bad_payload(detail: str) -> HTTPException:
     return HTTPException(status_code=422, detail="K05NEXT_B_BAD_PAYLOAD: " + detail)
 
 
-@router.post("/k05next/arch-352/serve")
+@router.post("/api/v1/local/arch-352/serve")
 def serve_arch_352(payload: dict) -> dict:
     """Contact a local endpoint only with permission; refusal is a violation."""
     endpoint = payload.get("endpoint")
@@ -113,7 +113,7 @@ def serve_arch_352(payload: dict) -> dict:
     )
 
 
-@router.post("/k05next/bp05-65/serve")
+@router.post("/api/v1/local/bp05-65/serve")
 def serve_bp05_65(payload: dict) -> dict:
     """Refuse contact and record GATEWAY_BUSY while preconditions are unmet."""
     gateway = payload.get("gateway")
@@ -159,7 +159,7 @@ def _evidence_signal(entry: Any) -> tuple:
     return "", False
 
 
-@router.post("/k05next/bp05-92/serve")
+@router.post("/api/v1/local/bp05-92/serve")
 def serve_bp05_92(payload: dict) -> dict:
     """Derive the UNKNOWN, PROXY or MEASURED tier from recorded evidence."""
     evidence = payload.get("evidence")
@@ -211,7 +211,7 @@ def serve_bp05_92(payload: dict) -> dict:
     return asdict(result)
 
 
-@router.post("/k05next/mvp-accept-50/serve")
+@router.post("/api/v1/local/mvp-accept-50/serve")
 def serve_mvp_accept_50(payload: dict) -> dict:
     """Carry local draft plus cloud verify atomically with verify before audit."""
     refs = [
@@ -246,7 +246,7 @@ def serve_mvp_accept_50(payload: dict) -> dict:
     )
 
 
-@router.post("/k05next/mvp-accept-53/serve")
+@router.post("/api/v1/local/mvp-accept-53/serve")
 def serve_mvp_accept_53(payload: dict) -> dict:
     """Bind verifier input to the draft hash so verification traces the draft."""
     draft_hash = payload.get("draft_hash")

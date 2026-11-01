@@ -34,7 +34,7 @@ beforeEach(() => {
   seen.length = 0;
   vi.stubGlobal("fetch", async (input: unknown) => {
     seen.push(String(input));
-    if (String(input) === "/api/v1/k07next4/step-turn?advance=1") {
+    if (String(input) === "/api/v1/app/step-turn?advance=1") {
       return jsonBody(SERVED_STEP_TURN);
     }
     throw new Error(`unexpected fetch ${String(input)}`);
@@ -56,7 +56,7 @@ describe("k07next4 MH-5 step turn over the real screen", () => {
       </ApiClientProvider>,
     );
     await screen.findByTestId("k07next4-step-turn");
-    expect(seen).toContain("/api/v1/k07next4/step-turn?advance=1");
+    expect(seen).toContain("/api/v1/app/step-turn?advance=1");
     expect(screen.getByText(en.tasks.list.title)).toBeTruthy();
     expect(
       screen.getByText(SERVED_STEP_TURN.model_input),

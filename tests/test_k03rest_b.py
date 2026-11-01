@@ -57,7 +57,7 @@ def test_k03rest_b_arch_622_served(tmp_path):
     criterion = "crit-k03rest-b-622-%s" % tag
 
     resp = client.post(
-        "/api/v1/k03rest/evidence_criterion",
+        "/api/v1/qa/evidence_criterion",
         json={"criterion_id": criterion, "evidence_refs": []},
     )
     assert resp.status_code == 200, resp.text
@@ -67,7 +67,7 @@ def test_k03rest_b_arch_622_served(tmp_path):
     assert data["silent_pass"] is False
 
     resp = client.post(
-        "/api/v1/k03rest/evidence_criterion",
+        "/api/v1/qa/evidence_criterion",
         json={"criterion_id": criterion, "evidence_refs": ["ev-k03rest-b-%s" % tag]},
     )
     assert resp.status_code == 200, resp.text
@@ -75,7 +75,7 @@ def test_k03rest_b_arch_622_served(tmp_path):
     assert resp.json()["silent_pass"] is False
 
     bad = client.post(
-        "/api/v1/k03rest/evidence_criterion",
+        "/api/v1/qa/evidence_criterion",
         json={"criterion_id": "", "evidence_refs": []},
     )
     assert bad.status_code == 400, bad.text
@@ -104,7 +104,7 @@ def test_k03rest_b_mvp_accept_117_served(tmp_path):
         "producer_session_refs": ["sess-prod-k03rest-b-117-%s" % tag],
         "reaudits": 2,
     }
-    resp = client.post("/api/v1/k03rest/correction_budget", json=payload)
+    resp = client.post("/api/v1/qa/correction_budget", json=payload)
     assert resp.status_code == 200, resp.text
     data = resp.json()
     rows = data["audits"]
@@ -122,7 +122,7 @@ def test_k03rest_b_mvp_accept_117_served(tmp_path):
     assert data["fresh_sessions_distinct"] is True
 
     empty = client.post(
-        "/api/v1/k03rest/correction_budget",
+        "/api/v1/qa/correction_budget",
         json=dict(payload, run_id="run-k03rest-b-117-empty-%s" % tag,
                   work_refs=[], artifact_refs=[]),
     )
@@ -158,7 +158,7 @@ def test_k03rest_b_mvp_accept_224_served(tmp_path):
     scope = "scope-k03rest-b-224-%s" % tag
 
     resp = client.post(
-        "/api/v1/k03rest/provider_dependency",
+        "/api/v1/qa/provider_dependency",
         json={"provider_id": provider, "model": model, "scope": scope,
               "implementer_model_ids": [CONTRIBUTOR_MODEL]},
     )
@@ -175,7 +175,7 @@ def test_k03rest_b_mvp_accept_224_served(tmp_path):
     assert all(isinstance(option, str) and option for option in data["options"])
 
     bad = client.post(
-        "/api/v1/k03rest/provider_dependency",
+        "/api/v1/qa/provider_dependency",
         json={"provider_id": provider},
     )
     assert bad.status_code == 400, bad.text

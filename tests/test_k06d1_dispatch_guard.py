@@ -25,7 +25,7 @@ def test_k06d1_allowlisted_but_unregistered_refuses_404_never_500():
         create_app({"testing": True, "ui_session_token": TEST_TOKEN})
     )
     resp = client.post(
-        "/api/v1/k06/tools/dispatch",
+        "/api/v1/tools/tools/dispatch",
         json={
             "tool": "k06d1-ghost-tool",
             "argv": ["k06d1-ghost-tool"],

@@ -7,22 +7,22 @@ the real module; writes keep the frozen USER_WRITE guard shape
 (401 missing x-actor, 403 bad token).
 
 Rows (CODER-1 Tern owns rows 1-5; one served test per row):
-- R1 B0B-UNCOVERED_BP06-30: route POST /hierarchy/k02next8/chain-guard,
+- R1 B0B-UNCOVERED_BP06-30: route POST /hierarchy/chain-guard,
   test test_k02next8_served_r1_bp06_30. Block activation on invalid
   hierarchy chain shapes without mutating stored configuration.
-- R2 LIVE0-07: route GET /hierarchy/k02next8/schema,
+- R2 LIVE0-07: route GET /hierarchy/schema,
   test test_k02next8_served_r2_live0_07. The OpenAPI and docs schema
   answer, no 500.
-- R3 LIVE0B-02: routes POST /hierarchy/k02next8/project +
-  GET /hierarchy/k02next8/projects,
+- R3 LIVE0B-02: routes POST /hierarchy/project +
+  GET /hierarchy/projects,
   test test_k02next8_served_r3_live0b_02. POST stores the chosen
   folder and GET returns it.
-- R4 LIVE0B-03: routes POST /hierarchy/k02next8/project-disk-write +
-  GET /hierarchy/k02next8/project-disk-read,
+- R4 LIVE0B-03: routes POST /hierarchy/project-disk-write +
+  GET /hierarchy/project-disk-read,
   test test_k02next8_served_r4_live0b_03. A created project is
   written to disk and survives a restart.
-- R5 MH-2: routes POST /hierarchy/k02next8/gate-threshold +
-  POST /hierarchy/k02next8/gate-verdict,
+- R5 MH-2: routes POST /hierarchy/gate-threshold +
+  POST /hierarchy/gate-verdict,
   test test_k02next8_served_r5_mh_2. Each milestone/part gate
   carries a configurable verification threshold param;
   below-threshold cannot PASS, triggers correction/escalation.
@@ -78,7 +78,7 @@ def test_k02next8_served_r1_bp06_30():
         "tool_agent_ids": [],
     }
     refused = client.post(
-        "/hierarchy/k02next8/chain-guard",
+        "/hierarchy/chain-guard",
         json={"establish": establish, "attempt": invalid_attempt},
         headers=headers,
     )
@@ -89,7 +89,7 @@ def test_k02next8_served_r1_bp06_30():
     assert detail["stored"]["director"] == "director-1"
     assert detail["stored"]["manager"] == "manager-1"
     served = client.post(
-        "/hierarchy/k02next8/chain-guard",
+        "/hierarchy/chain-guard",
         json={"establish": establish, "attempt": {
             "director_id": "director-1",
             "manager_id": "manager-1",
@@ -101,7 +101,7 @@ def test_k02next8_served_r1_bp06_30():
     assert served.json()["blocked"] is False
     assert served.json()["stored"]["tool_agents"] == ["tool-1"]
     no_actor = client.post(
-        "/hierarchy/k02next8/chain-guard",
+        "/hierarchy/chain-guard",
         json={"establish": establish, "attempt": establish},
         headers={"x-ui-session-token": TEST_TOKEN},
     )
@@ -111,7 +111,7 @@ def test_k02next8_served_r1_bp06_30():
 def test_k02next8_served_r2_live0_07():
     """R2 LIVE0-07: the OpenAPI and docs schema answer, no 500."""
     client, headers = make_client()
-    resp = client.get("/hierarchy/k02next8/schema", headers=headers)
+    resp = client.get("/hierarchy/schema", headers=headers)
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert isinstance(body["openapi"], str) and body["openapi"]
@@ -129,7 +129,7 @@ def test_k02next8_served_r3_live0b_02():
     """R3 LIVE0B-02: POST stores the chosen folder, GET returns it."""
     client, headers = make_client()
     created = client.post(
-        "/hierarchy/k02next8/project",
+        "/hierarchy/project",
         json={"name": "K02NEXT8 folder proof",
               "folder_ref": "/work/k02next8-proof"},
         headers=headers,
@@ -139,7 +139,7 @@ def test_k02next8_served_r3_live0b_02():
     assert project["folder_ref"] == "/work/k02next8-proof"
     assert project["name"] == "K02NEXT8 folder proof"
     assert project["project_id"]
-    listed = client.get("/hierarchy/k02next8/projects", headers=headers)
+    listed = client.get("/hierarchy/projects", headers=headers)
     assert listed.status_code == 200, listed.text
     rows = listed.json()["projects"]
     match = [row for row in rows
@@ -147,7 +147,7 @@ def test_k02next8_served_r3_live0b_02():
     assert len(match) == 1
     assert match[0]["folder_ref"] == "/work/k02next8-proof"
     bad = client.post(
-        "/hierarchy/k02next8/project",
+        "/hierarchy/project",
         json={"name": "no folder"},
         headers=headers,
     )
@@ -161,7 +161,7 @@ def test_k02next8_served_r4_live0b_03(tmp_path):
     os.makedirs(store_dir, exist_ok=True)
     snapshot = {"name": "restart proof", "folder_ref": "/work/restart"}
     saved = client.post(
-        "/hierarchy/k02next8/project-disk-write",
+        "/hierarchy/project-disk-write",
         json={"store_dir": store_dir, "project_id": "proj-restart-1",
               "snapshot": snapshot},
         headers=headers,
@@ -171,13 +171,13 @@ def test_k02next8_served_r4_live0b_03(tmp_path):
     assert saved.json()["project_id"] == "proj-restart-1"
     restarted, _headers = make_client()
     found = restarted.get(
-        "/hierarchy/k02next8/project-disk-read",
+        "/hierarchy/project-disk-read",
         params={"store_dir": store_dir, "project_id": "proj-restart-1"},
     )
     assert found.status_code == 200, found.text
     assert found.json()["snapshot"] == snapshot
     missing = restarted.get(
-        "/hierarchy/k02next8/project-disk-read",
+        "/hierarchy/project-disk-read",
         params={"store_dir": store_dir, "project_id": "no-such-project"},
     )
     assert missing.status_code == 404
@@ -187,14 +187,14 @@ def test_k02next8_served_r5_mh_2():
     """R5 MH-2: threshold gates the verdict; below cannot PASS."""
     client, headers = make_client()
     stored = client.post(
-        "/hierarchy/k02next8/gate-threshold",
+        "/hierarchy/gate-threshold",
         json={"project_id": "proj-mh2-1", "threshold": 0.7},
         headers=headers,
     )
     assert stored.status_code == 200, stored.text
     assert stored.json()["threshold"] == 0.7
     first = client.post(
-        "/hierarchy/k02next8/gate-verdict",
+        "/hierarchy/gate-verdict",
         json={"project_id": "proj-mh2-1", "part_id": "part-mh2-a",
               "score": 0.2},
         headers=headers,
@@ -202,7 +202,7 @@ def test_k02next8_served_r5_mh_2():
     assert first.status_code == 409, first.text
     assert first.json()["detail"]["action"] == "correction"
     second = client.post(
-        "/hierarchy/k02next8/gate-verdict",
+        "/hierarchy/gate-verdict",
         json={"project_id": "proj-mh2-1", "part_id": "part-mh2-a",
               "score": 0.2},
         headers=headers,
@@ -210,7 +210,7 @@ def test_k02next8_served_r5_mh_2():
     assert second.status_code == 409, second.text
     assert second.json()["detail"]["action"] == "escalation"
     above = client.post(
-        "/hierarchy/k02next8/gate-verdict",
+        "/hierarchy/gate-verdict",
         json={"project_id": "proj-mh2-1", "part_id": "part-mh2-a",
               "score": 0.9},
         headers=headers,
@@ -219,7 +219,7 @@ def test_k02next8_served_r5_mh_2():
     assert above.json()["passed"] is True
     assert above.json()["verdict"] == "PASS"
     bad = client.post(
-        "/hierarchy/k02next8/gate-threshold",
+        "/hierarchy/gate-threshold",
         json={"project_id": "proj-mh2-1", "threshold": 7},
         headers=headers,
     )

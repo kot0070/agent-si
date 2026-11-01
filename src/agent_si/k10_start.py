@@ -213,10 +213,10 @@ def setup_demo_fixture_index() -> list[dict[str, str]]:
         },
         {
             "section": "demo-command-index",
-            "command": "POST /k10/start/demo",
+            "command": "POST /api/v1/release/start/demo",
             "claim": (
                 "Bring the demo project to green inside the acceptance "
-                "drive with POST /k10/start/demo."
+                "drive with POST /api/v1/release/start/demo."
             ),
             "source": (
                 "recorded: kit BUILD_PLAN B0B-UNCOVERED_MVP_ACCEPT-129 "
@@ -229,13 +229,11 @@ def setup_demo_fixture_index() -> list[dict[str, str]]:
         },
         {
             "section": "fixture-command-index",
-            "command": (
-                "pytest tests/test_k10ph2d_served.py -q -p no:cacheprovider"
-            ),
+            "command": "docs/start-accept-notes.md",
             "claim": (
-                "Run the fixture suites under pytest with no cache "
-                "provider: pytest tests/test_k10ph2d_served.py "
-                "-q -p no:cacheprovider."
+                "Bring the demo project to green through POST "
+                "/api/v1/release/start/demo, then run the recorded "
+                "fixtures per docs/start-accept-notes.md."
             ),
             "source": (
                 "recorded: kit BUILD_PLAN B0B-UNCOVERED_MVP_ACCEPT-129 "
@@ -448,7 +446,7 @@ def served_rows_ph2d() -> list[dict[str, str]]:
     return [
         {
             "row": "B0B-UNCOVERED_MVP_ACCEPT-129",
-            "route": "GET /k10/ph2d/setup-index",
+            "route": "GET /api/v1/release/ph2d/setup-index",
             "test": (
                 "tests/test_k10ph2d_served.py::"
                 "test_k10ph2d_129_setup_demo_fixture_index"
@@ -456,7 +454,7 @@ def served_rows_ph2d() -> list[dict[str, str]]:
         },
         {
             "row": "B0B-UNCOVERED_MVP_ACCEPT-131",
-            "route": "GET /k10/ph2d/prerequisites",
+            "route": "GET /api/v1/release/ph2d/prerequisites",
             "test": (
                 "tests/test_k10ph2d_served.py::"
                 "test_k10ph2d_131_prerequisites_setup_demo"
@@ -464,7 +462,7 @@ def served_rows_ph2d() -> list[dict[str, str]]:
         },
         {
             "row": "B0B-UNCOVERED_MVP_ACCEPT-153",
-            "route": "GET /k10/ph2d/startup-note",
+            "route": "GET /api/v1/release/ph2d/startup-note",
             "test": (
                 "tests/test_k10ph2d_served.py::"
                 "test_k10ph2d_153_startup_idempotence"
@@ -472,7 +470,7 @@ def served_rows_ph2d() -> list[dict[str, str]]:
         },
         {
             "row": "B0B-UNCOVERED_MVP_ACCEPT-249",
-            "route": "GET /k10/ph2d/restart-note",
+            "route": "GET /api/v1/release/ph2d/restart-note",
             "test": (
                 "tests/test_k10ph2d_served.py::"
                 "test_k10ph2d_249_restart_note"
@@ -480,7 +478,7 @@ def served_rows_ph2d() -> list[dict[str, str]]:
         },
         {
             "row": "HC-4",
-            "route": "GET /k10/ph2d/license",
+            "route": "GET /api/v1/release/ph2d/license",
             "test": (
                 "tests/test_k10ph2d_served.py::"
                 "test_k10ph2d_HC_4_license_notices"
@@ -488,7 +486,7 @@ def served_rows_ph2d() -> list[dict[str, str]]:
         },
         {
             "row": "LIVE0-01",
-            "route": "GET /k10/ph2d/frontend-offline",
+            "route": "GET /api/v1/release/ph2d/frontend-offline",
             "test": (
                 "tests/test_k10ph2d_served.py::"
                 "test_k10ph2d_LIVE0_01_cached_tarballs"
@@ -496,7 +494,7 @@ def served_rows_ph2d() -> list[dict[str, str]]:
         },
         {
             "row": "LIVE0-04",
-            "route": "GET /k10/ph2d/data-dir",
+            "route": "GET /api/v1/release/ph2d/data-dir",
             "test": (
                 "tests/test_k10ph2d_served.py::"
                 "test_k10ph2d_LIVE0_04_data_dir_start"
@@ -564,12 +562,12 @@ def register_k10ph2d_routes(app) -> None:
         }
 
     for _path, _handler in (
-        ("/k10/ph2d/setup-index", _setup_index),
-        ("/k10/ph2d/prerequisites", _prerequisites),
-        ("/k10/ph2d/startup-note", _startup_note),
-        ("/k10/ph2d/restart-note", _restart_note),
-        ("/k10/ph2d/license", _license),
-        ("/k10/ph2d/frontend-offline", _frontend_offline),
-        ("/k10/ph2d/data-dir", _data_dir),
+        ("/api/v1/release/ph2d/setup-index", _setup_index),
+        ("/api/v1/release/ph2d/prerequisites", _prerequisites),
+        ("/api/v1/release/ph2d/startup-note", _startup_note),
+        ("/api/v1/release/ph2d/restart-note", _restart_note),
+        ("/api/v1/release/ph2d/license", _license),
+        ("/api/v1/release/ph2d/frontend-offline", _frontend_offline),
+        ("/api/v1/release/ph2d/data-dir", _data_dir),
     ):
         app.get(_path)(_handler)

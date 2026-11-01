@@ -31,7 +31,7 @@ beforeEach(() => {
   setLocale("en");
   window.localStorage.clear();
   vi.stubGlobal("fetch", async (input: unknown) => {
-    if (String(input) === "/api/v1/k07next/telemetry-themes") {
+    if (String(input) === "/api/v1/app/telemetry-themes") {
       return jsonBody(SERVED_THEMES);
     }
     throw new Error(`unexpected fetch ${String(input)}`);

@@ -127,19 +127,19 @@ def team_card() -> dict[str, Any]:
 
 
 ROUTES: tuple[tuple[str, str, str, Callable[[], dict[str, Any]]], ...] = (
-    ("get", "/api/v1/k07next3/policy-lifecycle", "policy_lifecycle",
+    ("get", "/api/v1/app/policy-lifecycle", "policy_lifecycle",
      policy_lifecycle),
-    ("get", "/api/v1/k07next3/gate-verdicts", "gate_verdicts",
+    ("get", "/api/v1/app/gate-verdicts", "gate_verdicts",
      gate_verdicts),
-    ("get", "/api/v1/k07next3/ledger-register", "ledger_register",
+    ("get", "/api/v1/app/ledger-register", "ledger_register",
      ledger_register),
-    ("get", "/api/v1/k07next3/step-limits", "step_limits",
+    ("get", "/api/v1/app/step-limits", "step_limits",
      step_limits),
-    ("get", "/api/v1/k07next3/project-defaults", "project_defaults",
+    ("get", "/api/v1/app/project-defaults", "project_defaults",
      project_defaults),
-    ("get", "/api/v1/k07next3/control-plane", "control_plane",
+    ("get", "/api/v1/app/control-plane", "control_plane",
      control_plane),
-    ("get", "/api/v1/k07next3/team-card", "team_card",
+    ("get", "/api/v1/app/team-card", "team_card",
      team_card),
 )
 

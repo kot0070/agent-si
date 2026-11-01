@@ -54,15 +54,15 @@ def _client_on_temp_dir(tmp_path, monkeypatch, token):
 
 
 def test_k10code_231_provider_routing(tmp_path, monkeypatch):
-    """Row B0B-UNCOVERED_MVP_ACCEPT-231 served through GET /k10/code/provider-routing."""
+    """Row B0B-UNCOVERED_MVP_ACCEPT-231 served through GET /api/v1/release/code/provider-routing."""
     entry = _served()["B0B-UNCOVERED_MVP_ACCEPT-231"]
-    assert entry["route"] == "GET /k10/code/provider-routing", entry
+    assert entry["route"] == "GET /api/v1/release/code/provider-routing", entry
     assert entry["test"] == (
         "tests/test_k10code_served.py::test_k10code_231_provider_routing"
     ), entry
     client, _app, _data_dir = _client_on_temp_dir(
         tmp_path, monkeypatch, "kc-231")
-    resp = client.get("/k10/code/provider-routing")
+    resp = client.get("/api/v1/release/code/provider-routing")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["testid"] == "k10code-falcon", body
@@ -82,15 +82,15 @@ def test_k10code_231_provider_routing(tmp_path, monkeypatch):
 
 
 def test_k10code_233_provider_blocker(tmp_path, monkeypatch):
-    """Row B0B-UNCOVERED_MVP_ACCEPT-233 served through GET /k10/code/provider-blocker."""
+    """Row B0B-UNCOVERED_MVP_ACCEPT-233 served through GET /api/v1/release/code/provider-blocker."""
     entry = _served()["B0B-UNCOVERED_MVP_ACCEPT-233"]
-    assert entry["route"] == "GET /k10/code/provider-blocker", entry
+    assert entry["route"] == "GET /api/v1/release/code/provider-blocker", entry
     assert entry["test"] == (
         "tests/test_k10code_served.py::test_k10code_233_provider_blocker"
     ), entry
     client, _app, _data_dir = _client_on_temp_dir(
         tmp_path, monkeypatch, "kc-233")
-    resp = client.get("/k10/code/provider-blocker")
+    resp = client.get("/api/v1/release/code/provider-blocker")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["testid"] == "k10code-falcon", body
@@ -107,15 +107,15 @@ def test_k10code_233_provider_blocker(tmp_path, monkeypatch):
 
 
 def test_k10code_235_localhost_standins(tmp_path, monkeypatch):
-    """Row B0B-UNCOVERED_MVP_ACCEPT-235 served through GET /k10/code/localhost-standins."""
+    """Row B0B-UNCOVERED_MVP_ACCEPT-235 served through GET /api/v1/release/code/localhost-standins."""
     entry = _served()["B0B-UNCOVERED_MVP_ACCEPT-235"]
-    assert entry["route"] == "GET /k10/code/localhost-standins", entry
+    assert entry["route"] == "GET /api/v1/release/code/localhost-standins", entry
     assert entry["test"] == (
         "tests/test_k10code_served.py::test_k10code_235_localhost_standins"
     ), entry
     client, _app, _data_dir = _client_on_temp_dir(
         tmp_path, monkeypatch, "kc-235")
-    resp = client.get("/k10/code/localhost-standins")
+    resp = client.get("/api/v1/release/code/localhost-standins")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["testid"] == "k10code-falcon", body
@@ -136,15 +136,15 @@ def test_k10code_235_localhost_standins(tmp_path, monkeypatch):
 
 
 def test_k10code_242_offline_install(tmp_path, monkeypatch):
-    """Row B0B-UNCOVERED_MVP_ACCEPT-242 served through GET /k10/code/offline-install."""
+    """Row B0B-UNCOVERED_MVP_ACCEPT-242 served through GET /api/v1/release/code/offline-install."""
     entry = _served()["B0B-UNCOVERED_MVP_ACCEPT-242"]
-    assert entry["route"] == "GET /k10/code/offline-install", entry
+    assert entry["route"] == "GET /api/v1/release/code/offline-install", entry
     assert entry["test"] == (
         "tests/test_k10code_served.py::test_k10code_242_offline_install"
     ), entry
     client, _app, _data_dir = _client_on_temp_dir(
         tmp_path, monkeypatch, "kc-242")
-    resp = client.get("/k10/code/offline-install")
+    resp = client.get("/api/v1/release/code/offline-install")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["testid"] == "k10code-falcon", body
@@ -162,15 +162,15 @@ def test_k10code_242_offline_install(tmp_path, monkeypatch):
 
 
 def test_k10code_243_absent_wheel(tmp_path, monkeypatch):
-    """Row B0B-UNCOVERED_MVP_ACCEPT-243 served through GET /k10/code/absent-wheel."""
+    """Row B0B-UNCOVERED_MVP_ACCEPT-243 served through GET /api/v1/release/code/absent-wheel."""
     entry = _served()["B0B-UNCOVERED_MVP_ACCEPT-243"]
-    assert entry["route"] == "GET /k10/code/absent-wheel", entry
+    assert entry["route"] == "GET /api/v1/release/code/absent-wheel", entry
     assert entry["test"] == (
         "tests/test_k10code_served.py::test_k10code_243_absent_wheel"
     ), entry
     client, _app, _data_dir = _client_on_temp_dir(
         tmp_path, monkeypatch, "kc-243")
-    resp = client.get("/k10/code/absent-wheel")
+    resp = client.get("/api/v1/release/code/absent-wheel")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["testid"] == "k10code-falcon", body
@@ -190,15 +190,15 @@ def test_k10code_243_absent_wheel(tmp_path, monkeypatch):
 
 
 def test_k10code_246_frontend_tarball(tmp_path, monkeypatch):
-    """Row B0B-UNCOVERED_MVP_ACCEPT-246 served through GET /k10/code/frontend-tarball."""
+    """Row B0B-UNCOVERED_MVP_ACCEPT-246 served through GET /api/v1/release/code/frontend-tarball."""
     entry = _served()["B0B-UNCOVERED_MVP_ACCEPT-246"]
-    assert entry["route"] == "GET /k10/code/frontend-tarball", entry
+    assert entry["route"] == "GET /api/v1/release/code/frontend-tarball", entry
     assert entry["test"] == (
         "tests/test_k10code_served.py::test_k10code_246_frontend_tarball"
     ), entry
     client, _app, _data_dir = _client_on_temp_dir(
         tmp_path, monkeypatch, "kc-246")
-    resp = client.get("/k10/code/frontend-tarball")
+    resp = client.get("/api/v1/release/code/frontend-tarball")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["testid"] == "k10code-falcon", body
@@ -216,15 +216,15 @@ def test_k10code_246_frontend_tarball(tmp_path, monkeypatch):
 
 
 def test_k10code_248_startup_versions(tmp_path, monkeypatch):
-    """Row B0B-UNCOVERED_MVP_ACCEPT-248 served through GET /k10/code/startup-versions."""
+    """Row B0B-UNCOVERED_MVP_ACCEPT-248 served through GET /api/v1/release/code/startup-versions."""
     entry = _served()["B0B-UNCOVERED_MVP_ACCEPT-248"]
-    assert entry["route"] == "GET /k10/code/startup-versions", entry
+    assert entry["route"] == "GET /api/v1/release/code/startup-versions", entry
     assert entry["test"] == (
         "tests/test_k10code_served.py::test_k10code_248_startup_versions"
     ), entry
     client, _app, _data_dir = _client_on_temp_dir(
         tmp_path, monkeypatch, "kc-248")
-    resp = client.get("/k10/code/startup-versions")
+    resp = client.get("/api/v1/release/code/startup-versions")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["testid"] == "k10code-falcon", body
@@ -241,15 +241,15 @@ def test_k10code_248_startup_versions(tmp_path, monkeypatch):
 
 
 def test_k10code_250_startup_providers(tmp_path, monkeypatch):
-    """Row B0B-UNCOVERED_MVP_ACCEPT-250 served through GET /k10/code/startup-providers."""
+    """Row B0B-UNCOVERED_MVP_ACCEPT-250 served through GET /api/v1/release/code/startup-providers."""
     entry = _served()["B0B-UNCOVERED_MVP_ACCEPT-250"]
-    assert entry["route"] == "GET /k10/code/startup-providers", entry
+    assert entry["route"] == "GET /api/v1/release/code/startup-providers", entry
     assert entry["test"] == (
         "tests/test_k10code_served.py::test_k10code_250_startup_providers"
     ), entry
     client, _app, _data_dir = _client_on_temp_dir(
         tmp_path, monkeypatch, "kc-250")
-    resp = client.get("/k10/code/startup-providers")
+    resp = client.get("/api/v1/release/code/startup-providers")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["testid"] == "k10code-falcon", body
@@ -268,15 +268,15 @@ def test_k10code_250_startup_providers(tmp_path, monkeypatch):
 
 
 def test_k10code_251_second_provider(tmp_path, monkeypatch):
-    """Row B0B-UNCOVERED_MVP_ACCEPT-251 served through GET /k10/code/second-provider."""
+    """Row B0B-UNCOVERED_MVP_ACCEPT-251 served through GET /api/v1/release/code/second-provider."""
     entry = _served()["B0B-UNCOVERED_MVP_ACCEPT-251"]
-    assert entry["route"] == "GET /k10/code/second-provider", entry
+    assert entry["route"] == "GET /api/v1/release/code/second-provider", entry
     assert entry["test"] == (
         "tests/test_k10code_served.py::test_k10code_251_second_provider"
     ), entry
     client, _app, _data_dir = _client_on_temp_dir(
         tmp_path, monkeypatch, "kc-251")
-    resp = client.get("/k10/code/second-provider")
+    resp = client.get("/api/v1/release/code/second-provider")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["testid"] == "k10code-falcon", body
@@ -293,15 +293,15 @@ def test_k10code_251_second_provider(tmp_path, monkeypatch):
 
 
 def test_k10code_512_abort_graceful(tmp_path, monkeypatch):
-    """Row B0B-UNCOVERED_ARCH-512 served through GET /k10/code/abort-graceful."""
+    """Row B0B-UNCOVERED_ARCH-512 served through GET /api/v1/release/code/abort-graceful."""
     entry = _served()["B0B-UNCOVERED_ARCH-512"]
-    assert entry["route"] == "GET /k10/code/abort-graceful", entry
+    assert entry["route"] == "GET /api/v1/release/code/abort-graceful", entry
     assert entry["test"] == (
         "tests/test_k10code_served.py::test_k10code_512_abort_graceful"
     ), entry
     client, _app, _data_dir = _client_on_temp_dir(
         tmp_path, monkeypatch, "kc-512")
-    resp = client.get("/k10/code/abort-graceful")
+    resp = client.get("/api/v1/release/code/abort-graceful")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["testid"] == "k10code-falcon", body
@@ -325,7 +325,7 @@ def test_k10code_real_state(tmp_path, monkeypatch):
         tmp_path, monkeypatch, "kc-real")
     assert app.state.data_dir == os.path.abspath(str(data_dir))
     assert data_dir.is_dir(), data_dir
-    resp = client.get("/k10/compet/audit")
+    resp = client.get("/api/v1/release/compet/audit")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["testid"] == "k10st4-accept", body

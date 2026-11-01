@@ -32,7 +32,7 @@ _BAD_PAYLOAD = ERROR_CODES[0]
 _VALIDATION_FAILED = ERROR_CODES[1]
 _UNKNOWN_ROW = ERROR_CODES[2]
 
-router = APIRouter(prefix="/k05next")
+router = APIRouter(prefix="/api/v1/local")
 
 
 def _error(status: int, code: str, detail: str) -> JSONResponse:

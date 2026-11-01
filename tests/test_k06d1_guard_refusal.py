@@ -1,4 +1,4 @@
-"""K06D1SUB guard-refusal proofs for POST /api/v1/k06/tools/dispatch.
+"""K06D1SUB guard-refusal proofs for POST /api/v1/tools/tools/dispatch.
 
 Allowlisted-but-unregistered tool refuses honest 404 (never 500
 IndexError); registered allowlisted tool still dispatches 200; off-list
@@ -36,7 +36,7 @@ def _auth_r0():
 def test_k06d1sub_allowlisted_but_unregistered_refuses_404_never_500():
     client = _client()
     resp = client.post(
-        "/api/v1/k06/tools/dispatch",
+        "/api/v1/tools/tools/dispatch",
         json={
             "tool": "k06d1sub-ghost-tool",
             "argv": ["k06d1sub-ghost-tool"],
@@ -57,7 +57,7 @@ def test_k06d1sub_allowlisted_but_unregistered_refuses_404_never_500():
 def test_k06d1sub_registered_allowlisted_tool_still_dispatches_200():
     client = _client()
     resp = client.post(
-        "/api/v1/k06/tools/dispatch",
+        "/api/v1/tools/tools/dispatch",
         json={
             "tool": "status",
             "argv": ["status"],
@@ -74,7 +74,7 @@ def test_k06d1sub_registered_allowlisted_tool_still_dispatches_200():
 def test_k06d1sub_off_list_tool_still_refuses_403_with_guard_record():
     client = _client()
     resp = client.post(
-        "/api/v1/k06/tools/dispatch",
+        "/api/v1/tools/tools/dispatch",
         json={
             "tool": "other",
             "argv": ["other", "run"],

@@ -28,12 +28,12 @@ Installs run offline from the checked-in lockfiles against the pre-fetched tarba
 ## Demo and fixture command index
 
 - Setup: `tools/start.py --smoke`
-- Demo (bring the demo project to green): `POST /k10/start/demo`
-- Fixtures: `pytest tests/test_k10ph2d_served.py -q -p no:cacheprovider`
+- Demo (bring the demo project to green): `POST /api/v1/release/start/demo`
+- Fixtures: see `docs/start-accept-notes.md`
 
 - Data dir: the product start path takes the data dir from consumer-layer env `AGENT_SI_DATA_DIR`, never harness settings; blank fails loud.
 
-See `docs/k10ph2d-start-accept-notes.md` for the startup idempotence
+See `docs/start-accept-notes.md` for the startup idempotence
 note, the restart note, the data-dir start path note, and the
 frontend cached-tarballs note.
 

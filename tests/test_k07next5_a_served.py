@@ -95,7 +95,7 @@ def _post(base, path, body, headers=None):
 
 def test_row_111_local_ai_decision_write_served(served):
     created_status, created = _post(
-        served, "/api/v1/k07next5/local-ai/decision-update",
+        served, "/api/v1/app/local-ai/decision-update",
         {"project_key": "k07next5-a",
          "patch": {"model_id": "k07next5-model"},
          "statement": "k07next5 adopt model",
@@ -106,7 +106,7 @@ def test_row_111_local_ai_decision_write_served(served):
     assert created["decision_id"].startswith("dec-")
     assert created["config"]["model_id"] == "k07next5-model"
     updated_status, updated = _post(
-        served, "/api/v1/k07next5/local-ai/decision-update",
+        served, "/api/v1/app/local-ai/decision-update",
         {"project_key": "k07next5-a",
          "patch": {"endpoint_url": "http://127.0.0.1:11434"},
          "statement": "k07next5 point endpoint",
@@ -116,7 +116,7 @@ def test_row_111_local_ai_decision_write_served(served):
     assert updated["config"]["endpoint_url"] == "http://127.0.0.1:11434"
     assert updated["config"]["model_id"] == "k07next5-model"
     status, payload = _get(
-        served, "/api/v1/k07next5/local-ai/view?project_key=k07next5-a")
+        served, "/api/v1/app/local-ai/view?project_key=k07next5-a")
     assert status == 200, payload
     assert payload["row"] == "111-UI"
     assert payload["title_key"] == "settings.localAi.title"
@@ -124,13 +124,13 @@ def test_row_111_local_ai_decision_write_served(served):
     bare = dict(WRITE_HEADERS)
     del bare["x-ui-session-token"]
     denied, _ = _post(
-        served, "/api/v1/k07next5/local-ai/decision-update",
+        served, "/api/v1/app/local-ai/decision-update",
         {"project_key": "k07next5-a", "patch": {},
          "statement": "s", "reason": "r", "authority": "ui"},
         headers=bare)
     assert denied == 403, denied
     missing_status, missing = _post(
-        served, "/api/v1/k07next5/local-ai/decision-update",
+        served, "/api/v1/app/local-ai/decision-update",
         {"project_key": "k07next5-a", "patch": {}})
     assert missing_status == 400, missing
     assert missing["detail"] == "decision record fields are required"
@@ -139,7 +139,7 @@ def test_row_111_local_ai_decision_write_served(served):
 def test_row_r341_bench_tab_served(served):
     query = urllib.parse.urlencode(
         {"model_id": "k07next5-bench", "level": "Quick", "pc_in_use": "1"})
-    status, payload = _get(served, "/api/v1/k07next5/bench/tab?" + query)
+    status, payload = _get(served, "/api/v1/app/bench/tab?" + query)
     assert status == 200, payload
     assert payload["row"] == "R-341-UI"
     estimate = payload["estimate"]
@@ -155,7 +155,7 @@ def test_row_r341_bench_tab_served(served):
     assert isinstance(payload["gateway"]["reachable"], bool)
     idle_query = urllib.parse.urlencode(
         {"model_id": "k07next5-bench", "level": "Quick"})
-    idle_status, idle = _get(served, "/api/v1/k07next5/bench/tab?" + idle_query)
+    idle_status, idle = _get(served, "/api/v1/app/bench/tab?" + idle_query)
     assert idle_status == 200, idle
     idle_codes = [warning["code"] for warning in idle["warnings"]]
     assert idle_codes == ["BENCH_DURATION"]
@@ -163,7 +163,7 @@ def test_row_r341_bench_tab_served(served):
 
 def test_row_arch526_settings_view_served(served):
     status, payload = _get(
-        served, "/api/v1/k07next5/local-ai/settings-view?project_key=proj-a")
+        served, "/api/v1/app/local-ai/settings-view?project_key=proj-a")
     assert status == 200, payload
     assert payload["row"] == "B0B-UNCOVERED_ARCH-526"
     assert payload["title_key"] == "settings.localAi.title"
@@ -175,13 +175,13 @@ def test_row_arch526_settings_view_served(served):
     assert payload["endpoint_url"] == config["endpoint_url"]
     assert isinstance(payload["models"], list)
     missing_status, _ = _get(
-        served, "/api/v1/k07next5/local-ai/settings-view?project_key=nope")
+        served, "/api/v1/app/local-ai/settings-view?project_key=nope")
     assert missing_status == 404, missing_status
 
 
 def test_row_mvp199_provider_health_transitions_served(served):
     status, payload = _get(
-        served, "/api/v1/k07next5/provider-health/transitions")
+        served, "/api/v1/app/provider-health/transitions")
     assert status == 200, payload
     assert payload["row"] == "B0B-UNCOVERED_MVP_ACCEPT-199"
     assert payload["transitions"] == ["UP", "DEGRADED", "DOWN", "DOWN"]

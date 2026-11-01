@@ -32,7 +32,7 @@ def test_mvp_accept_221_served() -> None:
     client = _client()
 
     stopped = client.post(
-        "/k05next/mvp-accept-221/serve",
+        "/api/v1/local/mvp-accept-221/serve",
         json={"store_ref": "store-ref-221", "running": False, "tiers": ["MEASURED"]},
     )
     assert stopped.status_code == 200, stopped.text
@@ -43,7 +43,7 @@ def test_mvp_accept_221_served() -> None:
     assert body["granted"] == []
 
     unknown_only = client.post(
-        "/k05next/mvp-accept-221/serve",
+        "/api/v1/local/mvp-accept-221/serve",
         json={"store_ref": "store-ref-221", "running": True, "tiers": ["UNKNOWN"]},
     )
     assert unknown_only.status_code == 200, unknown_only.text
@@ -55,7 +55,7 @@ def test_mvp_accept_221_served() -> None:
     assert body["granted"] == []
 
     measured = client.post(
-        "/k05next/mvp-accept-221/serve",
+        "/api/v1/local/mvp-accept-221/serve",
         json={"store_ref": "store-ref-221", "running": True, "tiers": ["UNKNOWN", "MEASURED"]},
     )
     assert measured.status_code == 200, measured.text
@@ -65,7 +65,7 @@ def test_mvp_accept_221_served() -> None:
     assert body["eligible"] is True
 
     bad = client.post(
-        "/k05next/mvp-accept-221/serve",
+        "/api/v1/local/mvp-accept-221/serve",
         json={"store_ref": "  ", "running": True, "tiers": []},
     )
     assert bad.status_code == 422, bad.text
@@ -77,7 +77,7 @@ def test_mvp_accept_222_served() -> None:
     client = _client()
 
     bare = client.post(
-        "/k05next/mvp-accept-222/serve",
+        "/api/v1/local/mvp-accept-222/serve",
         json={"model_id": "k05next-probe", "task_class": "draft", "columns": ["model_id", "task_class"]},
     )
     assert bare.status_code == 200, bare.text
@@ -87,7 +87,7 @@ def test_mvp_accept_222_served() -> None:
     assert body["row_found"] is False
 
     evidenced = client.post(
-        "/k05next/mvp-accept-222/serve",
+        "/api/v1/local/mvp-accept-222/serve",
         json={
             "model_id": "k05next-probe",
             "task_class": "draft",
@@ -101,7 +101,7 @@ def test_mvp_accept_222_served() -> None:
     assert body["row_found"] is True
 
     bad = client.post(
-        "/k05next/mvp-accept-222/serve",
+        "/api/v1/local/mvp-accept-222/serve",
         json={"model_id": "", "task_class": "draft", "columns": []},
     )
     assert bad.status_code == 422, bad.text
@@ -113,7 +113,7 @@ def test_bp05_94_served() -> None:
     client = _client()
 
     stale = client.post(
-        "/k05next/bp05-94/serve",
+        "/api/v1/local/bp05-94/serve",
         json={"notes": "agent_ops.db prose note", "fresh_benchmark": False},
     )
     assert stale.status_code == 200, stale.text
@@ -124,7 +124,7 @@ def test_bp05_94_served() -> None:
     assert body["score"] is None
 
     fresh = client.post(
-        "/k05next/bp05-94/serve",
+        "/api/v1/local/bp05-94/serve",
         json={"notes": "agent_ops.db prose note", "fresh_benchmark": True, "threshold": 85, "shape": "scalar"},
     )
     assert fresh.status_code == 200, fresh.text
@@ -134,14 +134,14 @@ def test_bp05_94_served() -> None:
     assert body["score"] == 85
 
     unmeasured = client.post(
-        "/k05next/bp05-94/serve",
+        "/api/v1/local/bp05-94/serve",
         json={"notes": "agent_ops.db prose note", "fresh_benchmark": True},
     )
     assert unmeasured.status_code == 422, unmeasured.text
     assert unmeasured.json()["code"] == "K05NEXT_A_VALIDATION_FAILED"
 
     bad = client.post(
-        "/k05next/bp05-94/serve",
+        "/api/v1/local/bp05-94/serve",
         json={"notes": " ", "fresh_benchmark": False},
     )
     assert bad.status_code == 422, bad.text
@@ -153,7 +153,7 @@ def test_arch_367_served() -> None:
     client = _client()
 
     mixed = client.post(
-        "/k05next/arch-367/serve",
+        "/api/v1/local/arch-367/serve",
         json={
             "copies": [
                 {"ref": "cap:probe:draft", "version": 3},
@@ -175,7 +175,7 @@ def test_arch_367_served() -> None:
     assert "versioned stale backup copies are never served as current" in body["refused"][0]["reason"]
 
     unknown = client.post(
-        "/k05next/arch-367/serve",
+        "/api/v1/local/arch-367/serve",
         json={
             "copies": [],
             "current": {},
@@ -185,7 +185,7 @@ def test_arch_367_served() -> None:
     assert unknown.status_code == 404, unknown.text
     assert unknown.json()["code"] == "K05NEXT_A_UNKNOWN_ROW"
 
-    bad = client.post("/k05next/arch-367/serve", json={"requested": []})
+    bad = client.post("/api/v1/local/arch-367/serve", json={"requested": []})
     assert bad.status_code == 422, bad.text
     assert bad.json()["code"] == "K05NEXT_A_BAD_PAYLOAD"
 
@@ -195,7 +195,7 @@ def test_arch_373_served() -> None:
     client = _client()
 
     adapted = client.post(
-        "/k05next/arch-373/serve",
+        "/api/v1/local/arch-373/serve",
         json={"notes": "prose capability note", "label": "k05next-proxy"},
     )
     assert adapted.status_code == 200, adapted.text
@@ -207,14 +207,14 @@ def test_arch_373_served() -> None:
     assert body["score"] is None
 
     unlabelled = client.post(
-        "/k05next/arch-373/serve",
+        "/api/v1/local/arch-373/serve",
         json={"notes": "prose capability note", "label": "  "},
     )
     assert unlabelled.status_code == 422, unlabelled.text
     assert unlabelled.json()["code"] == "K05NEXT_A_VALIDATION_FAILED"
 
     bad = client.post(
-        "/k05next/arch-373/serve",
+        "/api/v1/local/arch-373/serve",
         json={"notes": "", "label": "k05next-proxy"},
     )
     assert bad.status_code == 422, bad.text

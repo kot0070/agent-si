@@ -7,19 +7,19 @@ the real module; refusals keep the frozen USER_WRITE guard shape
 (401 missing x-actor, 403 bad token).
 
 Rows (CODER-1 Sable owns rows 1-5; one served test per row):
-- R1 B0B-UNCOVERED_UI_DELTA-36: route GET /hierarchy/k02next7/sdk-transport,
+- R1 B0B-UNCOVERED_UI_DELTA-36: route GET /hierarchy/sdk-transport,
   test test_k02next7_served_r1_ui_delta_36. Non-OpenAI providers route
   through the generic OpenAI-compatible Chat Completions adapter.
-- R2 B0B-BP03-4: route POST /hierarchy/k02next7/run-config,
+- R2 B0B-BP03-4: route POST /hierarchy/run-config,
   test test_k02next7_served_r2_bp03_4. SDK client max_retries=0;
   runner retries only through the RoutingDecision-bound RunConfig.
-- R3 B0B-UNCOVERED_BP06-81: route POST /hierarchy/k02next7/target-flow,
+- R3 B0B-UNCOVERED_BP06-81: route POST /hierarchy/target-flow,
   test test_k02next7_served_r3_bp06_81. Project work reaches roles
   through the defined project-to-role target flow, never a default.
-- R4 B0B-SDK-132: route GET /hierarchy/k02next7/sdk-surface,
+- R4 B0B-SDK-132: route GET /hierarchy/sdk-surface,
   test test_k02next7_served_r4_sdk_132. Architecture conclusions stay
   within the verified SDK surface.
-- R5 B0B-UNCOVERED_ARCH-57: route GET /hierarchy/k02next7/sdk-transport,
+- R5 B0B-UNCOVERED_ARCH-57: route GET /hierarchy/sdk-transport,
   test test_k02next7_served_r5_arch_57. Chat Completions for non-OpenAI
   providers; the served contract never assumes a Responses API.
 """
@@ -78,7 +78,7 @@ def test_k02next7_served_r1_ui_delta_36():
     client, headers = make_client()
     for provider in ("meta", "acme-custom", "openai-compatible-x"):
         resp = client.get(
-            "/hierarchy/k02next7/sdk-transport",
+            "/hierarchy/sdk-transport",
             params={"provider": provider},
             headers=headers,
         )
@@ -91,14 +91,14 @@ def test_k02next7_served_r1_ui_delta_36():
         assert body["openai_compat"] is True
         assert body["chat_path"] == "/chat/completions"
     openai = client.get(
-        "/hierarchy/k02next7/sdk-transport",
+        "/hierarchy/sdk-transport",
         params={"provider": "openai"},
         headers=headers,
     )
     assert openai.status_code == 200, openai.text
     assert openai.json()["transport"] == "sdk_default"
     blank = client.get(
-        "/hierarchy/k02next7/sdk-transport",
+        "/hierarchy/sdk-transport",
         params={"provider": "  "},
         headers=headers,
     )
@@ -136,7 +136,7 @@ def test_k02next7_served_r2_bp03_4():
         "strategy": "single",
     }
     bound = client.post(
-        "/hierarchy/k02next7/run-config",
+        "/hierarchy/run-config",
         json={"decision": decision, "executor_attempt_max": 3},
         headers=headers,
     )
@@ -147,7 +147,7 @@ def test_k02next7_served_r2_bp03_4():
     assert body["max_runner_retries"] == 3
     assert body["transport"] == "chat_completions"
     refused = client.post(
-        "/hierarchy/k02next7/run-config",
+        "/hierarchy/run-config",
         json={"decision": decision, "executor_attempt_max": 3,
               "client_max_retries": 1},
         headers=headers,
@@ -156,7 +156,7 @@ def test_k02next7_served_r2_bp03_4():
     assert refused.json()["detail"]["code"] == \
         "SDK_CLIENT_MAX_RETRIES_NONZERO"
     no_actor = client.post(
-        "/hierarchy/k02next7/run-config",
+        "/hierarchy/run-config",
         json={"decision": decision, "executor_attempt_max": 3},
     )
     assert no_actor.status_code == 401
@@ -166,7 +166,7 @@ def test_k02next7_served_r3_bp06_81():
     """R3 B0B-UNCOVERED_BP06-81: project work via the target flow."""
     client, headers = make_client()
     served = client.post(
-        "/hierarchy/k02next7/target-flow",
+        "/hierarchy/target-flow",
         json={"project_id": "pkg-n7", "target_flow": _target_flow()},
         headers=headers,
     )
@@ -181,14 +181,14 @@ def test_k02next7_served_r3_bp06_81():
     partial = _target_flow()
     del partial["worker"]
     missing = client.post(
-        "/hierarchy/k02next7/target-flow",
+        "/hierarchy/target-flow",
         json={"project_id": "pkg-n7", "target_flow": partial},
         headers=headers,
     )
     assert missing.status_code == 400, missing.text
     assert missing.json()["detail"]["code"] == "NO_TARGET_FLOW_DEFAULT"
     no_actor = client.post(
-        "/hierarchy/k02next7/target-flow",
+        "/hierarchy/target-flow",
         json={"project_id": "pkg-n7", "target_flow": _target_flow()},
     )
     assert no_actor.status_code == 401
@@ -199,7 +199,7 @@ def test_k02next7_served_r4_sdk_132():
     from agent_si.sdk_adapter import sdk_adapter as _sdk
 
     client, headers = make_client()
-    resp = client.get("/hierarchy/k02next7/sdk-surface", headers=headers)
+    resp = client.get("/hierarchy/sdk-surface", headers=headers)
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["sdk_available"] == _sdk.SDK_AVAILABLE
@@ -219,7 +219,7 @@ def test_k02next7_served_r5_arch_57():
     client, headers = make_client()
     for provider in ("meta", "anthropic", "acme-custom"):
         resp = client.get(
-            "/hierarchy/k02next7/sdk-transport",
+            "/hierarchy/sdk-transport",
             params={"provider": provider},
             headers=headers,
         )

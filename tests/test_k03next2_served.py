@@ -106,7 +106,7 @@ def _gate(client, scope, candidates=None, implementers=None,
             "visible_to_user": True,
             "user_resolution_ref": "resolve-k03next2-b0b-%s" % scope,
         }
-    return client.post("/api/v1/k03next2/sourcing_gate", json=body)
+    return client.post("/api/v1/qa/sourcing_gate/scoped", json=body)
 
 
 def test_k03next2_b0b_uncovered_arch_740(client):
@@ -282,14 +282,14 @@ def test_k03next2_b0b_uncovered_mvp_accept_33(client):
     ]
     for signal, expected in cases:
         resp = client.post(
-            "/api/v1/k03next2/classify_failure",
+            "/api/v1/qa/classify_failure",
             json={"signal": signal, "severity": "HIGH"},
         )
         assert resp.status_code == 200, resp.text
         assert resp.json()["failure_class"] == expected
 
     bad = client.post(
-        "/api/v1/k03next2/classify_failure",
+        "/api/v1/qa/classify_failure",
         json={"signal": 42, "severity": "HIGH"},
     )
     assert bad.status_code == 400, bad.text
@@ -310,7 +310,7 @@ def test_k03next2_b0b_sdk_109(client):
     tag = _tag()
     turn_ref = "turn-cap-k03next2-%s" % tag
     resp = client.post(
-        "/api/v1/k03next2/turn_handlers",
+        "/api/v1/qa/turn_handlers",
         json={"handler": "turn_cap", "turn_ref": turn_ref,
               "budget_state_ref": "budget-k03next2-%s" % tag},
     )
@@ -321,7 +321,7 @@ def test_k03next2_b0b_sdk_109(client):
 
     out_ref = "out-bad-k03next2-%s" % tag
     resp = client.post(
-        "/api/v1/k03next2/turn_handlers",
+        "/api/v1/qa/turn_handlers",
         json={"handler": "invalid_output", "output_ref": out_ref,
               "reason": "bad json"},
     )
@@ -330,7 +330,7 @@ def test_k03next2_b0b_sdk_109(client):
     assert resp.json()["ref"] == "invalid-output:%s:bad json" % out_ref
 
     bad = client.post(
-        "/api/v1/k03next2/turn_handlers",
+        "/api/v1/qa/turn_handlers",
         json={"handler": "no-such-handler"},
     )
     assert bad.status_code == 400, bad.text
@@ -354,7 +354,7 @@ def test_k03next2_b0b_sdk_104(client):
     tag = _tag()
     schema_id = "schema-k03next2-%s" % tag
     resp = client.post(
-        "/api/v1/k03next2/deliverable_schema",
+        "/api/v1/qa/deliverable_schema",
         json={"schema_id": schema_id,
               "expected_outputs": ["out-1", "out-2"],
               "evidence_required": True},
@@ -368,7 +368,7 @@ def test_k03next2_b0b_sdk_104(client):
     assert data["hash"]
 
     again = client.post(
-        "/api/v1/k03next2/deliverable_schema",
+        "/api/v1/qa/deliverable_schema",
         json={"schema_id": schema_id,
               "expected_outputs": ["out-1", "out-2"],
               "evidence_required": True},
@@ -377,7 +377,7 @@ def test_k03next2_b0b_sdk_104(client):
     assert again.json()["hash"] == data["hash"]
 
     bad = client.post(
-        "/api/v1/k03next2/deliverable_schema",
+        "/api/v1/qa/deliverable_schema",
         json={"schema_id": "  ", "expected_outputs": ["out-1"],
               "evidence_required": True},
     )
@@ -414,7 +414,7 @@ def test_k03next2_b0b_uncovered_mvp_accept_111(client):
     }
 
     pending = client.post(
-        "/api/v1/k03next2/recovery_confirm",
+        "/api/v1/qa/recovery_confirm",
         json={"run_ref": run_ref, "verification_ref": "",
               "turn": dict(turn)},
     )
@@ -422,7 +422,7 @@ def test_k03next2_b0b_uncovered_mvp_accept_111(client):
     assert pending.json()["confirmed"] is False
 
     done = client.post(
-        "/api/v1/k03next2/recovery_confirm",
+        "/api/v1/qa/recovery_confirm",
         json={"run_ref": run_ref, "verification_ref": "ver-k03next2-r111",
               "turn": dict(turn)},
     )
@@ -433,7 +433,7 @@ def test_k03next2_b0b_uncovered_mvp_accept_111(client):
     assert data["check_ref"] == "context-recovery-check"
 
     bad = client.post(
-        "/api/v1/k03next2/recovery_confirm",
+        "/api/v1/qa/recovery_confirm",
         json={"run_ref": "  ", "verification_ref": "ver-x",
               "turn": dict(turn)},
     )

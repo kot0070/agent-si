@@ -339,9 +339,9 @@ def _k06rest_client(monkeypatch, tmp_path):
 
 def test_k06rest_189_contract_texts_served_secretref_only(
         monkeypatch, tmp_path) -> None:
-    """Row 189 via GET /api/v1/k06/script-contract: texts carry secretRef."""
+    """Row 189 via GET /api/v1/tools/script-contract: texts carry secretRef."""
     _, client = _k06rest_client(monkeypatch, tmp_path)
-    resp = client.get("/api/v1/k06/script-contract")
+    resp = client.get("/api/v1/tools/script-contract")
     assert resp.status_code == 200, resp.text
     payload = resp.json()
     joined = "\n".join(
@@ -353,10 +353,10 @@ def test_k06rest_189_contract_texts_served_secretref_only(
 
 def test_k06rest_253_acceptance_run_filed_and_listed(
         monkeypatch, tmp_path) -> None:
-    """Row 253 via POST+GET /api/v1/k06/services/acceptance: run filed."""
+    """Row 253 via POST+GET /api/v1/tools/services/acceptance: run filed."""
     _, client = _k06rest_client(monkeypatch, tmp_path)
     resp = client.post(
-        "/api/v1/k06/services/acceptance",
+        "/api/v1/tools/services/acceptance",
         json={
             "service": "status",
             "argv": ["status"],
@@ -370,7 +370,7 @@ def test_k06rest_253_acceptance_run_filed_and_listed(
     assert run["run_id"].startswith("acceptance-")
     assert run["ok"] is True
     assert run["evidence_refs"]
-    listed = client.get("/api/v1/k06/services/acceptance")
+    listed = client.get("/api/v1/tools/services/acceptance")
     assert listed.status_code == 200, listed.text
     assert any(
         r["run_id"] == run["run_id"] for r in listed.json()["runs"])
@@ -381,7 +381,7 @@ def test_k06rest_253_raw_secret_auth_refused_and_unfiled(
     """Row 253 secretref guard: raw auth refused (400), nothing filed."""
     _, client = _k06rest_client(monkeypatch, tmp_path)
     resp = client.post(
-        "/api/v1/k06/services/acceptance",
+        "/api/v1/tools/services/acceptance",
         json={
             "service": "status",
             "argv": ["status"],
@@ -393,16 +393,16 @@ def test_k06rest_253_raw_secret_auth_refused_and_unfiled(
     )
     assert resp.status_code == 400, resp.text
     assert K06REST_RAW not in resp.text
-    listed = client.get("/api/v1/k06/services/acceptance")
+    listed = client.get("/api/v1/tools/services/acceptance")
     assert listed.json()["runs"] == []
 
 
 def test_k06rest_254_install_record_view_names_unknown(
         monkeypatch, tmp_path) -> None:
-    """Row 254 via POST+GET /api/v1/k06/installs: view names unknown."""
+    """Row 254 via POST+GET /api/v1/tools/installs: view names unknown."""
     _, client = _k06rest_client(monkeypatch, tmp_path)
     resp = client.post(
-        "/api/v1/k06/installs",
+        "/api/v1/tools/installs",
         json={
             "tool": "ruff",
             "version": "0.8.0",
@@ -414,10 +414,10 @@ def test_k06rest_254_install_record_view_names_unknown(
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["tool"] == "ruff"
-    view = client.get("/api/v1/k06/installs", params={"tool": "ruff"})
+    view = client.get("/api/v1/tools/installs", params={"tool": "ruff"})
     assert view.status_code == 200, view.text
     assert view.json()["records"][0]["version"] == "0.8.0"
-    unknown = client.get("/api/v1/k06/installs", params={"tool": "nope"})
+    unknown = client.get("/api/v1/tools/installs", params={"tool": "nope"})
     assert unknown.status_code == 200, unknown.text
     assert unknown.json()["records"] == []
     assert unknown.json()["unknown_tool"] == "nope"

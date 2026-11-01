@@ -60,7 +60,7 @@ def test_k10open4_start_evidence_keeps_screenshots(tmp_path, monkeypatch):
     """Row 166: clean start keeps release evidence (screenshots)."""
     client, data_dir, _home = _client_with_data_dir(
         tmp_path, monkeypatch, "k10open4-evidence-token")
-    resp = client.get("/k10/start/evidence")
+    resp = client.get("/api/v1/release/start/evidence")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["testid"] == _TESTID, body
@@ -76,7 +76,7 @@ def test_k10open4_start_demo_brought_to_green(tmp_path, monkeypatch):
     """Row R-328: clean start brings the demo project to green."""
     client, data_dir, _home = _client_with_data_dir(
         tmp_path, monkeypatch, "k10open4-demo-token")
-    resp = client.post("/k10/start/demo")
+    resp = client.post("/api/v1/release/start/demo")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["testid"] == _TESTID, body
@@ -113,7 +113,7 @@ def test_k10open4_start_migrates_settings_keys(tmp_path, monkeypatch):
 
     client = fastapi.testclient.TestClient(
         create_app(_clean_settings("k10open4-migrate-token")))
-    resp = client.get("/k10/start/migrate")
+    resp = client.get("/api/v1/release/start/migrate")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["testid"] == _TESTID, body

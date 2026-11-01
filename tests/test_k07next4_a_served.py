@@ -93,7 +93,7 @@ def _post(base, path, body, headers=None):
 
 
 def test_row_live008_session_write_served(served):
-    status, payload = _post(served, "/api/v1/k07next4/session-write",
+    status, payload = _post(served, "/api/v1/app/session-write",
                             {})
     assert status == 200, payload
     assert payload == {
@@ -103,21 +103,21 @@ def test_row_live008_session_write_served(served):
     }
     bare = dict(WRITE_HEADERS)
     del bare["x-ui-session-token"]
-    denied, _ = _post(served, "/api/v1/k07next4/session-write", {},
+    denied, _ = _post(served, "/api/v1/app/session-write", {},
                       headers=bare)
     assert denied == 403, denied
 
 
 def test_row_live0b01_projects_live_served(served):
     created_status, created = _post(
-        served, "/api/v1/k07next4/projects",
+        served, "/api/v1/app/projects",
         {"name": "k07next4-alpha", "folder_ref": "f-alpha"})
     assert created_status == 200, created
     assert created["row"] == "LIVE0B-01"
     project = created["project"]
     assert project["name"] == "k07next4-alpha"
     assert project["project_id"]
-    status, payload = _get(served, "/api/v1/k07next4/projects")
+    status, payload = _get(served, "/api/v1/app/projects")
     assert status == 200, payload
     assert payload["row"] == "LIVE0B-01"
     names = [row["name"] for row in payload["projects"]]
@@ -125,7 +125,7 @@ def test_row_live0b01_projects_live_served(served):
 
 
 def test_row_live0b04_page_shell_served(served):
-    status, payload = _get(served, "/api/v1/k07next4/page-shell")
+    status, payload = _get(served, "/api/v1/app/page-shell")
     assert status == 200, payload
     assert payload == {
         "row": "LIVE0B-04",
@@ -136,7 +136,7 @@ def test_row_live0b04_page_shell_served(served):
 
 
 def test_row_live0b05_chat_task_served(served):
-    status, payload = _post(served, "/api/v1/k07next4/chat-task",
+    status, payload = _post(served, "/api/v1/app/chat-task",
                             {"prompt_ref": "k07next4-hello"})
     assert status == 200, payload
     assert payload["row"] == "LIVE0B-05"
@@ -146,7 +146,7 @@ def test_row_live0b05_chat_task_served(served):
 
 
 def test_row_mh5_step_turn_served(served):
-    status, payload = _get(served, "/api/v1/k07next4/step-turn?advance=1")
+    status, payload = _get(served, "/api/v1/app/step-turn?advance=1")
     assert status == 200, payload
     assert payload["row"] == "MH-5"
     assert payload["turn"] == 1
@@ -157,7 +157,7 @@ def test_row_mh5_step_turn_served(served):
 
 
 def test_row_mh6_turn_triple_served(served):
-    status, payload = _get(served, "/api/v1/k07next4/turn-triple")
+    status, payload = _get(served, "/api/v1/app/turn-triple")
     assert status == 200, payload
     assert payload["row"] == "MH-6"
     assert len(payload["turns"]) >= 1

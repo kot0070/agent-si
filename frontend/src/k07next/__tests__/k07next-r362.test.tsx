@@ -31,7 +31,7 @@ beforeEach(() => {
   resetLocaleForTests();
   window.localStorage.clear();
   vi.stubGlobal("fetch", async (input: unknown) => {
-    if (String(input) === "/api/v1/k07next/locale-coverage") {
+    if (String(input) === "/api/v1/app/locale-coverage") {
       return jsonBody(SERVED_COVERAGE);
     }
     throw new Error(`unexpected fetch ${String(input)}`);

@@ -11,7 +11,7 @@ import en from "../../locale/en.json";
 import { LocalAiViewCard } from "../LocalAiViewCard";
 
 const SETTINGS_VIEW_URL =
-  "/api/v1/k07next5/local-ai/settings-view?project_key=proj-a";
+  "/api/v1/app/local-ai/settings-view?project_key=proj-a";
 
 const SERVED_LOCAL_AI_VIEW = {
   row: "B0B-UNCOVERED_ARCH-526",

@@ -167,7 +167,7 @@ def test_k10ph2c_214_host_blockers():
             assert row.get(key), row
         assert "host blockers name missing permissions" in row[
             "snippet"], row
-        assert "route GET /k10/compet/audit" in row["evidence"], row
+        assert "route GET /api/v1/release/compet/audit" in row["evidence"], row
         assert "test_k10ph2c_214_host_blockers" in row["evidence"], row
 
 
@@ -187,5 +187,5 @@ def test_k10ph2c_215_attainability_gate():
         for key in ("claim", "source", "snippet", "evidence"):
             assert row.get(key), row
         assert "not attainable on a host" in row["snippet"], row
-        assert "route GET /k10/compet/audit" in row["evidence"], row
+        assert "route GET /api/v1/release/compet/audit" in row["evidence"], row
         assert "test_k10ph2c_215_attainability_gate" in row["evidence"], row

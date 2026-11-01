@@ -8,14 +8,14 @@
 # quoting that route's server-shaped schema. The boundary module is
 # mounted onto create_app() here (app.py untouched) so every quoted
 # schema is the live served answer, fetched over REAL HTTP:
-#   111-UI                  -> POST /api/v1/k07next5/local-ai/decision-update
+#   111-UI                  -> POST /api/v1/app/local-ai/decision-update
 #                              (local_ai_decision_update) + GET
-#                              /api/v1/k07next5/local-ai/view (local_ai_view)
-#   R-341-UI                -> GET /api/v1/k07next5/bench/tab (bench_tab)
-#   B0B-UNCOVERED_ARCH-526  -> GET /api/v1/k07next5/local-ai/settings-view
+#                              /api/v1/app/local-ai/view (local_ai_view)
+#   R-341-UI                -> GET /api/v1/app/bench/tab (bench_tab)
+#   B0B-UNCOVERED_ARCH-526  -> GET /api/v1/app/local-ai/settings-view
 #                              (local_ai_settings_view)
 #   B0B-UNCOVERED_MVP_ACCEPT-199 -> GET
-#                              /api/v1/k07next5/provider-health/transitions
+#                              /api/v1/app/provider-health/transitions
 #                              (provider_health_transitions)
 # Each test proves two things: (a) the K07-owned screen is wired to the
 # REAL HttpApiClient (real client + provider imports in the suite, no
@@ -132,7 +132,7 @@ def _check_wiring(screen_file, suite_file, route_path, quote_token):
 def test_row_111ui_local_ai_decision_served(served):
     _check_wiring("LocalAiDecisionCard.tsx",
                   "k07next5-111ui-local-ai-decision.test.tsx",
-                  "/api/v1/k07next5/local-ai/decision-update",
+                  "/api/v1/app/local-ai/decision-update",
                   "SERVED_DECISION")
     body = {"project_key": "k07next5-b",
             "patch": {"model_id": "k07next5-b-model"},
@@ -140,14 +140,14 @@ def test_row_111ui_local_ai_decision_served(served):
             "reason": "k07next5 proof",
             "authority": "ui"}
     status, payload = _post(
-        served, "/api/v1/k07next5/local-ai/decision-update", body)
+        served, "/api/v1/app/local-ai/decision-update", body)
     assert status == 200, payload
     assert payload["row"] == "111-UI"
     assert payload["decision_id"].startswith("dec-")
     assert payload["config"]["project_key"] == "k07next5-b"
     assert payload["config"]["model_id"] == "k07next5-b-model"
     view_status, view = _get(
-        served, "/api/v1/k07next5/local-ai/view?project_key=k07next5-b")
+        served, "/api/v1/app/local-ai/view?project_key=k07next5-b")
     assert view_status == 200, view
     assert view["row"] == "111-UI"
     assert view["title_key"] == "settings.localAi.title"
@@ -157,11 +157,11 @@ def test_row_111ui_local_ai_decision_served(served):
 def test_row_r341ui_bench_tab_served(served):
     _check_wiring("BenchSettingsTab.tsx",
                   "k07next5-r341ui-bench-tab.test.tsx",
-                  "/api/v1/k07next5/bench/tab", "SERVED_BENCH_TAB")
+                  "/api/v1/app/bench/tab", "SERVED_BENCH_TAB")
     query = urllib.parse.urlencode(
         {"model_id": "k07next5-bench-b", "level": "Quick",
          "pc_in_use": "1"})
-    status, payload = _get(served, "/api/v1/k07next5/bench/tab?" + query)
+    status, payload = _get(served, "/api/v1/app/bench/tab?" + query)
     assert status == 200, payload
     assert payload["row"] == "R-341-UI"
     estimate = payload["estimate"]
@@ -179,7 +179,7 @@ def test_row_r341ui_bench_tab_served(served):
     idle_query = urllib.parse.urlencode(
         {"model_id": "k07next5-bench-b", "level": "Quick"})
     idle_status, idle = _get(
-        served, "/api/v1/k07next5/bench/tab?" + idle_query)
+        served, "/api/v1/app/bench/tab?" + idle_query)
     assert idle_status == 200, idle
     idle_codes = [warning["code"] for warning in idle["warnings"]]
     assert idle_codes == ["BENCH_DURATION"]
@@ -188,11 +188,11 @@ def test_row_r341ui_bench_tab_served(served):
 def test_row_arch526_local_ai_view_served(served):
     _check_wiring("LocalAiViewCard.tsx",
                   "k07next5-arch526-local-ai-view.test.tsx",
-                  "/api/v1/k07next5/local-ai/settings-view",
+                  "/api/v1/app/local-ai/settings-view",
                   "SERVED_LOCAL_AI_VIEW")
     status, payload = _get(
         served,
-        "/api/v1/k07next5/local-ai/settings-view?project_key=proj-a")
+        "/api/v1/app/local-ai/settings-view?project_key=proj-a")
     assert status == 200, payload
     assert payload["row"] == "B0B-UNCOVERED_ARCH-526"
     assert payload["title_key"] == "settings.localAi.title"
@@ -208,10 +208,10 @@ def test_row_arch526_local_ai_view_served(served):
 def test_row_mvpaccept199_provider_outage_served(served):
     _check_wiring("ProviderOutageCard.tsx",
                   "k07next5-mvpaccept199-provider-outage.test.tsx",
-                  "/api/v1/k07next5/provider-health/transitions",
+                  "/api/v1/app/provider-health/transitions",
                   "SERVED_TRANSITIONS")
     status, payload = _get(
-        served, "/api/v1/k07next5/provider-health/transitions")
+        served, "/api/v1/app/provider-health/transitions")
     assert status == 200, payload
     assert payload["row"] == "B0B-UNCOVERED_MVP_ACCEPT-199"
     assert payload["transitions"] == ["UP", "DEGRADED", "DOWN", "DOWN"]

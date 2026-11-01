@@ -44,7 +44,7 @@ def _check_recorded(rows, test_id):
         assert "not live" in row["source"], row
         assert row["snippet"].startswith("verbatim recorded: '"), row
         assert row["snippet"].endswith("'"), row
-        assert "route GET /k10/compet/audit" in row["evidence"], row
+        assert "route GET /api/v1/release/compet/audit" in row["evidence"], row
         assert test_id in row["evidence"], row
 
 

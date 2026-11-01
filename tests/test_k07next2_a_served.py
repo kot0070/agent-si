@@ -76,7 +76,7 @@ def _get(base, path):
 
 
 def test_row_m_p4_159_context_card_served(served):
-    status, payload = _get(served, "/api/v1/k07next2/context-card")
+    status, payload = _get(served, "/api/v1/app/context-card")
     assert status == 200, payload
     assert payload == {
         "row": "M-P4-159",
@@ -90,7 +90,7 @@ def test_row_m_p4_159_context_card_served(served):
 
 
 def test_row_m_d_d5_channel_lane_served(served):
-    status, payload = _get(served, "/api/v1/k07next2/channel-lane")
+    status, payload = _get(served, "/api/v1/app/channel-lane")
     assert status == 200, payload
     assert payload == {
         "row": "M-D-D5",
@@ -103,7 +103,7 @@ def test_row_m_d_d5_channel_lane_served(served):
 
 
 def test_row_hd_app_id_served(served):
-    status, payload = _get(served, "/api/v1/k07next2/app-id")
+    status, payload = _get(served, "/api/v1/app/app-id")
     assert status == 200, payload
     assert payload == {
         "row": "HD-APP-ID",
@@ -113,7 +113,7 @@ def test_row_hd_app_id_served(served):
 
 
 def test_row_m_r_brand_served(served):
-    status, payload = _get(served, "/api/v1/k07next2/brand")
+    status, payload = _get(served, "/api/v1/app/brand")
     assert status == 200, payload
     assert payload == {
         "row": "M-R-BRAND",
@@ -124,7 +124,7 @@ def test_row_m_r_brand_served(served):
 
 
 def test_row_b0b_bp09_27_retry_policy_served(served):
-    status, payload = _get(served, "/api/v1/k07next2/retry-policy")
+    status, payload = _get(served, "/api/v1/app/retry-policy")
     assert status == 200, payload
     assert payload == {
         "row": "B0B-BP09-27",
@@ -142,7 +142,7 @@ def test_row_b0b_bp09_27_retry_policy_served(served):
 
 def test_row_b0b_uncovered_bp06_67_local_config_gate_served(served):
     status, payload = _get(
-        served, "/api/v1/k07next2/local-config-gate")
+        served, "/api/v1/app/local-config-gate")
     assert status == 200, payload
     assert payload == {
         "row": "B0B-UNCOVERED_BP06-67",
@@ -155,7 +155,7 @@ def test_row_b0b_uncovered_bp06_67_local_config_gate_served(served):
 
 
 def test_row_b0b_uncovered_arch_541_planner_router_served(served):
-    status, payload = _get(served, "/api/v1/k07next2/planner-router")
+    status, payload = _get(served, "/api/v1/app/planner-router")
     assert status == 200, payload
     assert payload == {
         "row": "B0B-UNCOVERED_ARCH-541",
@@ -167,7 +167,7 @@ def test_row_b0b_uncovered_arch_541_planner_router_served(served):
 
 
 def test_row_b0b_uncovered_arch_679_shell_menus_served(served):
-    status, payload = _get(served, "/api/v1/k07next2/shell-menus")
+    status, payload = _get(served, "/api/v1/app/shell-menus")
     assert status == 200, payload
     assert payload == {
         "row": "B0B-UNCOVERED_ARCH-679",

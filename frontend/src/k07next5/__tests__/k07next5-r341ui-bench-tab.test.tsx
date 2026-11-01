@@ -11,7 +11,7 @@ import en from "../../locale/en.json";
 import { BenchSettingsTab } from "../BenchSettingsTab";
 
 const BENCH_TAB_URL =
-  "/api/v1/k07next5/bench/tab" +
+  "/api/v1/app/bench/tab" +
   "?model_id=k07next5-bench-b&level=Quick&pc_in_use=1";
 
 const SERVED_BENCH_TAB = {

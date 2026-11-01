@@ -888,23 +888,23 @@ def register_hierarchy_routes(app: Any) -> Any:
 # K02NEXT7 adds 4 routes (additive-only; every path, handler name and
 # orchestration signature above stays unchanged):
 #
-# - GET /hierarchy/k02next7/sdk-transport?provider= (UI_DELTA-36 +
+# - GET /hierarchy/sdk-transport?provider= (UI_DELTA-36 +
 #   ARCH-57): the SDK transport for one provider through the single
 #   generic entry sdk_adapter.transport_for_provider; non-OpenAI
 #   providers answer "chat_completions" with the generic
 #   OpenAI-compatible Chat Completions adapter descriptor, OpenAI
 #   answers "sdk_default"; the served contract never names a
 #   Responses API.
-# - GET /hierarchy/k02next7/sdk-surface (SDK-132): the verified SDK
+# - GET /hierarchy/sdk-surface (SDK-132): the verified SDK
 #   surface through sdk_adapter.verified_sdk_surface; exactly the
 #   module __all__ names that resolve, plus the real guarded SDK
 #   availability flag.
-# - POST /hierarchy/k02next7/run-config (BP03-4): binds one
+# - POST /hierarchy/run-config (BP03-4): binds one
 #   RoutingDecision to a RunConfig through the real adapter entry;
 #   the client stays max_retries=0 (any other value refuses
 #   SDK_CLIENT_MAX_RETRIES_NONZERO) and runner retries come only
 #   from the bound RunConfig.
-# - POST /hierarchy/k02next7/target-flow (BP06-81): loads one
+# - POST /hierarchy/target-flow (BP06-81): loads one
 #   project-to-role target flow through the real
 #   roles.load_target_flow and resolves every role; a missing role
 #   refuses with NO_TARGET_FLOW_DEFAULT, never a default.
@@ -916,7 +916,7 @@ def register_k02next7_routes(app: Any) -> Any:
     from agent_si.routing import types as _n7_types
     from agent_si.sdk_adapter import sdk_adapter as _n7_sdk
 
-    @app.get("/hierarchy/k02next7/sdk-transport")
+    @app.get("/hierarchy/sdk-transport")
     def get_k02next7_sdk_transport(provider: str = "") -> dict[str, Any]:
         """UI_DELTA-36 + ARCH-57: SDK transport for one provider."""
         from agent_si.providers.adapters import (
@@ -943,13 +943,13 @@ def register_k02next7_routes(app: Any) -> Any:
             body["chat_path"] = _n7_compat.CHAT_COMPLETIONS_PATH
         return body
 
-    @app.get("/hierarchy/k02next7/sdk-surface")
+    @app.get("/hierarchy/sdk-surface")
     def get_k02next7_sdk_surface() -> dict[str, Any]:
         """SDK-132: verified SDK surface architecture may conclude on."""
         return dict(_n7_sdk.verified_sdk_surface(),
                     entry="verified_sdk_surface")
 
-    @app.post("/hierarchy/k02next7/run-config")
+    @app.post("/hierarchy/run-config")
     async def post_k02next7_run_config(request: Request) -> dict[str, Any]:
         """BP03-4: client max_retries=0; runner retries via RunConfig."""
         _write_guard(request)
@@ -1018,7 +1018,7 @@ def register_k02next7_routes(app: Any) -> Any:
                 "route": binding.route,
                 "strategy": binding.strategy}
 
-    @app.post("/hierarchy/k02next7/target-flow")
+    @app.post("/hierarchy/target-flow")
     async def post_k02next7_target_flow(request: Request) -> dict[str, Any]:
         """BP06-81: project work reaches roles via the target flow."""
         _write_guard(request)
@@ -1061,25 +1061,25 @@ def register_k02next7_routes(app: Any) -> Any:
 # K02NEXT8 adds 8 endpoints on 5 rows (additive-only; every path,
 # handler name and orchestration signature above stays unchanged):
 #
-# - POST /hierarchy/k02next8/chain-guard (B0B-UNCOVERED_BP06-30):
+# - POST /hierarchy/chain-guard (B0B-UNCOVERED_BP06-30):
 #   establish one valid chain on a fresh HierarchyConfigStore, then
 #   try one attempted chain on the same real store; an invalid shape
 #   refuses with HTTP 400 carrying proof the stored configuration is
 #   unchanged (nothing mutated), a valid shape applies.
-# - GET /hierarchy/k02next8/schema (LIVE0-07): the served OpenAPI
+# - GET /hierarchy/schema (LIVE0-07): the served OpenAPI
 #   summary plus the docs/openapi URLs; the FastAPI app itself serves
 #   the openapi and docs paths.
-# - POST /hierarchy/k02next8/project + GET
-#   /hierarchy/k02next8/projects (LIVE0B-02): store the chosen folder
+# - POST /hierarchy/project + GET
+#   /hierarchy/projects (LIVE0B-02): store the chosen folder
 #   on the real K13 project port shared with the console project
 #   routes (repos_for + project_view), GET returns it.
-# - POST /hierarchy/k02next8/project-disk-write + GET
-#   /hierarchy/k02next8/project-disk-read (LIVE0B-03): the real
+# - POST /hierarchy/project-disk-write + GET
+#   /hierarchy/project-disk-read (LIVE0B-03): the real
 #   hierarchy.save_project_snapshot / load_project_snapshot; a
 #   project written before a restart reads back from the same store
 #   dir. A project with no snapshot answers HTTP 404.
-# - POST /hierarchy/k02next8/gate-threshold + POST
-#   /hierarchy/k02next8/gate-verdict (MH-2): the real
+# - POST /hierarchy/gate-threshold + POST
+#   /hierarchy/gate-verdict (MH-2): the real
 #   gates.set_verification_threshold / decide_gated_verdict; a score
 #   at or above the threshold records a real gate PASS, while a
 #   below-threshold milestone cannot PASS and answers HTTP 409
@@ -1117,7 +1117,7 @@ def _k02next8_chain_from(raw: Any) -> Any:
 def register_k02next8_routes(app: Any) -> Any:
     """Mount the K02NEXT8 served-proof routes; returns the app."""
 
-    @app.post("/hierarchy/k02next8/chain-guard")
+    @app.post("/hierarchy/chain-guard")
     async def post_k02next8_chain_guard(request: Request) -> dict[str, Any]:
         """BP06-30: invalid chain shapes blocked, stored unchanged."""
         from agent_si.backend import (
@@ -1179,7 +1179,7 @@ def register_k02next8_routes(app: Any) -> Any:
             "stored": dict(store.config),
         }
 
-    @app.get("/hierarchy/k02next8/schema")
+    @app.get("/hierarchy/schema")
     def get_k02next8_schema() -> dict[str, Any]:
         """LIVE0-07: the OpenAPI and docs schema answer, no 500."""
         spec = app.openapi()
@@ -1194,7 +1194,7 @@ def register_k02next8_routes(app: Any) -> Any:
             "openapi_url": "/openapi.json",
         }
 
-    @app.post("/hierarchy/k02next8/project")
+    @app.post("/hierarchy/project")
     async def post_k02next8_project(request: Request) -> dict[str, Any]:
         """LIVE0B-02: store the chosen folder on the real project port."""
         import uuid as _uuid
@@ -1231,7 +1231,7 @@ def register_k02next8_routes(app: Any) -> Any:
         _k02n8_read.persist_k02r3_store(request.app)
         return {"project": _k02n8_read.project_view(stored)}
 
-    @app.get("/hierarchy/k02next8/projects")
+    @app.get("/hierarchy/projects")
     def get_k02next8_projects() -> dict[str, Any]:
         """LIVE0B-02: GET returns the stored chosen folders."""
         from agent_si.backend import read_routes as _k02n8_read
@@ -1244,7 +1244,7 @@ def register_k02next8_routes(app: Any) -> Any:
         ]
         return {"projects": rows}
 
-    @app.post("/hierarchy/k02next8/project-disk-write")
+    @app.post("/hierarchy/project-disk-write")
     async def post_k02next8_project_disk_write(
         request: Request,
     ) -> dict[str, Any]:
@@ -1265,7 +1265,7 @@ def register_k02next8_routes(app: Any) -> Any:
         return {"saved": saved["saved"], "project_id": saved["project_id"],
                 "file": saved["file"], "saved_at": saved["saved_at"]}
 
-    @app.get("/hierarchy/k02next8/project-disk-read")
+    @app.get("/hierarchy/project-disk-read")
     def get_k02next8_project_disk_read(
         project_id: str = "", store_dir: str = ""
     ) -> dict[str, Any]:
@@ -1288,7 +1288,7 @@ def register_k02next8_routes(app: Any) -> Any:
                 "snapshot": found["snapshot"],
                 "saved_at": found["saved_at"]}
 
-    @app.post("/hierarchy/k02next8/gate-threshold")
+    @app.post("/hierarchy/gate-threshold")
     async def post_k02next8_gate_threshold(
         request: Request,
     ) -> dict[str, Any]:
@@ -1310,7 +1310,7 @@ def register_k02next8_routes(app: Any) -> Any:
                          else project_id)
         return {"project_id": clean_project, "threshold": threshold}
 
-    @app.post("/hierarchy/k02next8/gate-verdict")
+    @app.post("/hierarchy/gate-verdict")
     async def post_k02next8_gate_verdict(request: Request) -> dict[str, Any]:
         """MH-2: threshold-gated milestone verdict."""
         from agent_si.backend.orchestration import gates as _k02n8_gates

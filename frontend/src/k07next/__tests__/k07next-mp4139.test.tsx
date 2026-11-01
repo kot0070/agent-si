@@ -31,7 +31,7 @@ beforeEach(() => {
   resetLocaleForTests();
   window.localStorage.clear();
   vi.stubGlobal("fetch", async (input: unknown) => {
-    if (String(input) === "/api/v1/k07next/copyright") {
+    if (String(input) === "/api/v1/app/copyright") {
       return jsonBody(SERVED_COPYRIGHT);
     }
     throw new Error(`unexpected fetch ${String(input)}`);

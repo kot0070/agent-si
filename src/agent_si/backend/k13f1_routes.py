@@ -1,7 +1,7 @@
 """K13F1 HTTP routes: amend, finalize-read, and stop over the real entries.
 
 register_k13f1_routes(app) wires three endpoints onto the FastAPI app
-built by create_app (prefix /api/v1/k13/). Per-app in-memory K13 stores
+built by create_app (prefix /api/v1/core/). Per-app in-memory K13 stores
 live on app.state (bound by bind_k13f1_state, called from the K13F1
 block in create_app); no secret and no path is hardcoded here.
 
@@ -26,9 +26,9 @@ from agent_si.storage import repositories
 
 USER_WRITE = "USER_WRITE"
 
-AMEND_PATH = "/api/v1/k13/contracts/amend"
-STOP_PATH = "/api/v1/k13/runs/stop"
-FINAL_PATH = "/api/v1/k13/finalizations/{finalization_id}"
+AMEND_PATH = "/api/v1/core/contracts/amend"
+STOP_PATH = "/api/v1/core/runs/stop"
+FINAL_PATH = "/api/v1/core/finalizations/{finalization_id}"
 
 _CONTRACT_FIELD_NAMES = {f.name for f in _dc_fields(contracts.TaskContract)}
 _ACTIVATION_FIELD_NAMES = {

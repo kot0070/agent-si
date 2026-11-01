@@ -32,8 +32,8 @@ from agent_si.backend.app import create_app  # noqa: E402
 TEST_TOKEN = "k08open2-finalize-token"
 ACTOR = "tester-k08open2-finalize"
 
-FINALIZE_WRITE_PATH = "/api/v1/k13/finalizations"
-FINALIZE_READ_PATH = "/api/v1/k13/finalizations/%s"
+FINALIZE_WRITE_PATH = "/api/v1/core/finalizations"
+FINALIZE_READ_PATH = "/api/v1/core/finalizations/%s"
 
 
 def _settings():
