@@ -1,1 +1,44 @@
-{"audit_policy": "REQUIRED_L2", "draft_hash_binding": true, "endpoint": "cloud-verify-endpoint", "fixture_class": "SPLIT-DRAFT-VERIFY"}
+{
+  "audit_policy": "REQUIRED_L2",
+  "draft_hash_binding": true,
+  "endpoint": "cloud-verify-endpoint",
+  "fixture_class": "SPLIT-DRAFT-VERIFY",
+  "label": "TEST FIXTURES",
+  "provenance": {
+    "fixture_sha256": "5c784d2ca6ca3a807d0f69c299435e3e05769c839458cda15d16a2720f263af0",
+    "pack_manifest_sha256": "b75ed1aab3ef78de4c0805c69ccb2718ad6a7f07845ad6536d439fa7b10add22",
+    "source": "tools/drive/demo/demo_split.py"
+  },
+  "rows": [
+    {
+      "claim": "MVP fixture pack ships under checkout and is not measured evidence.",
+      "label": "TEST FIXTURES",
+      "provenance": {
+        "fixture_sha256": "5c784d2ca6ca3a807d0f69c299435e3e05769c839458cda15d16a2720f263af0",
+        "pack_manifest_sha256": "b75ed1aab3ef78de4c0805c69ccb2718ad6a7f07845ad6536d439fa7b10add22",
+        "source": "tools/drive/demo/demo_split.py"
+      },
+      "row": "B0B-UNCOVERED_MVP_ACCEPT-173"
+    },
+    {
+      "claim": "TEST FIXTURE rows prove wiring only and are never presented as measured evidence.",
+      "label": "TEST FIXTURES",
+      "provenance": {
+        "fixture_sha256": "5c784d2ca6ca3a807d0f69c299435e3e05769c839458cda15d16a2720f263af0",
+        "pack_manifest_sha256": "b75ed1aab3ef78de4c0805c69ccb2718ad6a7f07845ad6536d439fa7b10add22",
+        "source": "tools/drive/demo/demo_split.py"
+      },
+      "row": "B0B-UNCOVERED_MVP_ACCEPT-217"
+    },
+    {
+      "claim": "Split demo includes real cloud verification over the local draft output with draft-hash binding before acceptance.",
+      "label": "TEST FIXTURES",
+      "provenance": {
+        "fixture_sha256": "5c784d2ca6ca3a807d0f69c299435e3e05769c839458cda15d16a2720f263af0",
+        "pack_manifest_sha256": "b75ed1aab3ef78de4c0805c69ccb2718ad6a7f07845ad6536d439fa7b10add22",
+        "source": "tools/drive/demo/demo_split.py"
+      },
+      "row": "B0B-UNCOVERED_MVP_ACCEPT-227"
+    }
+  ]
+}

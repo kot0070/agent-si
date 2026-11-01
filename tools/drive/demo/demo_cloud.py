@@ -114,5 +114,104 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+# --- K10FIXT2 BEGIN (TEST FIXTURES label + provenance) ---
+# The cloud demo stays as-is except this marked block, which copies the
+# TEST FIXTURES label plus provenance from the fixture file into the
+# verification and audit outputs. Fixtures without the label plus
+# provenance are refused. Everything new in this file lives inside this
+# marked block.
+
+_K10FIXT2_LABEL = "TEST FIXTURES"
+
+
+def _k10fixt2_argv_value(argv, name, default):
+    items = list(argv) if argv is not None else sys.argv[1:]
+    for index, token in enumerate(items):
+        if token == name and index + 1 < len(items):
+            return items[index + 1]
+        if token.startswith(name + "="):
+            return token[len(name) + 1:]
+    return default
+
+
+def _k10fixt2_provenance_of(fixture):
+    provenance = fixture.get("provenance") if isinstance(
+        fixture, dict) else None
+    if not isinstance(provenance, dict):
+        return {}
+    return {key: provenance.get(key) for key in (
+        "source", "pack_manifest_sha256", "fixture_sha256")}
+
+
+_orig_main = main
+
+
+def main(argv=None):
+    import io as _k10fixt2_io
+    from contextlib import redirect_stdout as _k10fixt2_redirect_stdout
+    fixtures_arg = _k10fixt2_argv_value(
+        argv, "--fixtures", "tools/drive/demo/fixtures_remote.json")
+    try:
+        fixture = json.loads(Path(fixtures_arg).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        print("error: fixture unreadable %s: %s" % (fixtures_arg, exc))
+        return 1
+    if not (isinstance(fixture, dict)
+            and fixture.get("label") == _K10FIXT2_LABEL
+            and isinstance(fixture.get("provenance"), dict)):
+        print("error: fixture rows must carry the TEST FIXTURES label plus "
+              "provenance")
+        return 1
+    buffer = _k10fixt2_io.StringIO()
+    with _k10fixt2_redirect_stdout(buffer):
+        code = _orig_main(argv)
+    out_text = buffer.getvalue()
+    sys.stdout.write(out_text)
+    if code == 0:
+        for line in out_text.splitlines():
+            if line.startswith("artifact:"):
+                raw = line.split("artifact:", 1)[1].strip()
+                artifact_path = Path(raw)
+                if not artifact_path.is_absolute():
+                    try:
+                        artifact_path = Path.cwd() / artifact_path
+                    except OSError:
+                        break
+                try:
+                    artifact = json.loads(
+                        artifact_path.read_bytes().decode("utf-8"))
+                except (OSError, ValueError):
+                    break
+                verification = artifact.get("verification")
+                if isinstance(verification, dict):
+                    verification["label"] = fixture.get(
+                        "label", _K10FIXT2_LABEL)
+                    verification["provenance"] = (
+                        _k10fixt2_provenance_of(fixture))
+                audit = artifact.get("audit")
+                if isinstance(audit, dict):
+                    audit["label"] = fixture.get(
+                        "label", _K10FIXT2_LABEL)
+                try:
+                    tmp = artifact_path.parent / (
+                        artifact_path.name + ".tmp-%d" % os.getpid())
+                    tmp.write_text(
+                        json.dumps(artifact, indent=2) + "\n",
+                        encoding="utf-8")
+                    os.replace(tmp, artifact_path)
+                except OSError:
+                    try:
+                        tmp.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                    return 1
+                break
+    return code
+
+
+# --- K10FIXT2 END ---
+
+
+
 if __name__ == "__main__":
     sys.exit(main())

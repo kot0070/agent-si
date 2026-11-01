@@ -1,0 +1,28 @@
+{
+  "fixtures": [
+    {
+      "path": "tools/drive/demo/fixtures_local.json",
+      "sha256": "a6027352a34f80b9d3b707dc62bdbb3e0788cefdb44efc9ee3061951f52a795c"
+    },
+    {
+      "path": "tools/drive/demo/fixtures_remote.json",
+      "sha256": "5c784d2ca6ca3a807d0f69c299435e3e05769c839458cda15d16a2720f263af0"
+    }
+  ],
+  "label": "TEST FIXTURES",
+  "manifest_sha256": "b75ed1aab3ef78de4c0805c69ccb2718ad6a7f07845ad6536d439fa7b10add22",
+  "origins": [
+    {
+      "script": "tools/drive/demo/demo_local.py",
+      "sha256": "57ca895e236f2b624d24c4f6a666652eaca123141f175b466567f4a1d387c667"
+    },
+    {
+      "script": "tools/drive/demo/demo_split.py",
+      "sha256": "4ff2fe2a0ec7806e341e0ff2a1b9cc1b9cb7784da62d77831b4f572aeb5ebc88"
+    },
+    {
+      "script": "tools/drive/demo/demo_cloud.py",
+      "sha256": "48329e4701a72960cb5bf58861083501e6dd7dc86f1dc4dfdf9293442032482e"
+    }
+  ]
+}

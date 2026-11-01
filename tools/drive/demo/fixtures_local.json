@@ -1,9 +1,50 @@
 {
-  "fixture_class": "local-permission-gated",
-  "endpoint": "http://localhost:11434/v1",
   "capabilities": [
     "local.chat",
     "local.generate"
   ],
-  "model": "llama3.1:8b"
+  "endpoint": "http://localhost:11434/v1",
+  "fixture_class": "local-permission-gated",
+  "label": "TEST FIXTURES",
+  "model": "llama3.1:8b",
+  "permission": {
+    "scope": "local-contact-allowed"
+  },
+  "provenance": {
+    "fixture_sha256": "a6027352a34f80b9d3b707dc62bdbb3e0788cefdb44efc9ee3061951f52a795c",
+    "pack_manifest_sha256": "b75ed1aab3ef78de4c0805c69ccb2718ad6a7f07845ad6536d439fa7b10add22",
+    "source": "tools/drive/demo/demo_local.py"
+  },
+  "rows": [
+    {
+      "claim": "Fixture capability rows are labelled TEST FIXTURES with provenance and are never measured evidence.",
+      "label": "TEST FIXTURES",
+      "provenance": {
+        "fixture_sha256": "a6027352a34f80b9d3b707dc62bdbb3e0788cefdb44efc9ee3061951f52a795c",
+        "pack_manifest_sha256": "b75ed1aab3ef78de4c0805c69ccb2718ad6a7f07845ad6536d439fa7b10add22",
+        "source": "tools/drive/demo/demo_local.py"
+      },
+      "row": "B0B-UNCOVERED_MVP_ACCEPT-172"
+    },
+    {
+      "claim": "Local demo needs a permission-gated local runtime plus capability evidence for the fixture class.",
+      "label": "TEST FIXTURES",
+      "provenance": {
+        "fixture_sha256": "a6027352a34f80b9d3b707dc62bdbb3e0788cefdb44efc9ee3061951f52a795c",
+        "pack_manifest_sha256": "b75ed1aab3ef78de4c0805c69ccb2718ad6a7f07845ad6536d439fa7b10add22",
+        "source": "tools/drive/demo/demo_local.py"
+      },
+      "row": "B0B-UNCOVERED_MVP_ACCEPT-225"
+    },
+    {
+      "claim": "Unavailable local legs use labelled localhost doubles as TEST FIXTURES.",
+      "label": "TEST FIXTURES",
+      "provenance": {
+        "fixture_sha256": "a6027352a34f80b9d3b707dc62bdbb3e0788cefdb44efc9ee3061951f52a795c",
+        "pack_manifest_sha256": "b75ed1aab3ef78de4c0805c69ccb2718ad6a7f07845ad6536d439fa7b10add22",
+        "source": "tools/drive/demo/demo_local.py"
+      },
+      "row": "B0B-UNCOVERED_MVP_ACCEPT-229"
+    }
+  ]
 }

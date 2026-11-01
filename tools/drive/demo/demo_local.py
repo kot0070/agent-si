@@ -220,5 +220,131 @@ def main(argv: list | None = None) -> int:
     return 0
 
 
+# --- K10FIXT2 BEGIN (permission gate + TEST FIXTURES labels) ---
+# Row 225: the local demo runs only behind its permission gate. The gate
+# reads the fixture file's declared permission scope and admits only the
+# allowlisted local-contact scope; anything else is refused before any
+# artifact is written. Row 229: the verification output carries the TEST
+# FIXTURES label plus provenance copied from the fixture file, and the
+# capability evidence tier is recorded as labelled, never MEASURED.
+# Everything new in this file lives inside this marked block.
+
+_K10FIXT2_ALLOWED_PERMISSION_SCOPES = ("local-contact-allowed",)
+
+_K10FIXT2_LABEL = "TEST FIXTURES"
+
+
+def _k10fixt2_argv_value(argv, name, default):
+    items = list(argv) if argv is not None else sys.argv[1:]
+    for index, token in enumerate(items):
+        if token == name and index + 1 < len(items):
+            return items[index + 1]
+        if token.startswith(name + "="):
+            return token[len(name) + 1:]
+    return default
+
+
+def _k10fixt2_permission_scope(fixture):
+    permission = fixture.get("permission")
+    if not isinstance(permission, dict):
+        return ""
+    scope = permission.get("scope")
+    return scope if isinstance(scope, str) else ""
+
+
+def _k10fixt2_provenance_of(fixture):
+    provenance = fixture.get("provenance")
+    if not isinstance(provenance, dict):
+        return {}
+    return {key: provenance.get(key) for key in (
+        "source", "pack_manifest_sha256", "fixture_sha256")}
+
+
+def _k10fixt2_labelled(fixture):
+    return (isinstance(fixture, dict)
+            and fixture.get("label") == _K10FIXT2_LABEL
+            and isinstance(fixture.get("provenance"), dict))
+
+
+def _k10fixt2_apply_labels(artifact_path, fixture):
+    try:
+        raw = artifact_path.read_bytes()
+    except OSError:
+        return False
+    try:
+        artifact = json.loads(raw.decode("utf-8"))
+    except ValueError:
+        return False
+    verification = artifact.get("verification")
+    if not isinstance(verification, dict):
+        return False
+    verification["label"] = fixture.get("label", _K10FIXT2_LABEL)
+    verification["provenance"] = _k10fixt2_provenance_of(fixture)
+    verification["capability_evidence_tier"] = (
+        "PROXY (fixture rows labelled TEST FIXTURES, never MEASURED)")
+    try:
+        text = json.dumps(artifact, indent=2) + "\n"
+        tmp = artifact_path.parent / (
+            artifact_path.name + ".tmp-%d" % os.getpid())
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, artifact_path)
+    except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return False
+    return True
+
+
+_orig_main = main
+
+
+def main(argv=None):
+    import io as _k10fixt2_io
+    from contextlib import redirect_stdout as _k10fixt2_redirect_stdout
+    fixtures_arg = _k10fixt2_argv_value(
+        argv, "--fixtures", "tools/drive/demo/fixtures_local.json")
+    try:
+        fixture = json.loads(Path(fixtures_arg).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        print("error: fixture unreadable %s: %s" % (fixtures_arg, exc))
+        return 1
+    if not isinstance(fixture, dict):
+        print("error: fixture shape violation: top level must be an object")
+        return 1
+    if (_k10fixt2_permission_scope(fixture)
+            not in _K10FIXT2_ALLOWED_PERMISSION_SCOPES):
+        print("error: permission refused: the local demo runs only behind "
+              "its permission gate (scope 'local-contact-allowed' required)")
+        return 2
+    if not _k10fixt2_labelled(fixture):
+        print("error: fixture rows must carry the TEST FIXTURES label plus "
+              "provenance")
+        return 1
+    buffer = _k10fixt2_io.StringIO()
+    with _k10fixt2_redirect_stdout(buffer):
+        code = _orig_main(argv)
+    out_text = buffer.getvalue()
+    sys.stdout.write(out_text)
+    if code == 0:
+        for line in out_text.splitlines():
+            if line.startswith("artifact:"):
+                raw = line.split("artifact:", 1)[1].strip()
+                artifact_path = Path(raw)
+                if not artifact_path.is_absolute():
+                    try:
+                        artifact_path = Path.cwd() / artifact_path
+                    except OSError:
+                        break
+                _k10fixt2_apply_labels(artifact_path, fixture)
+                break
+    return code
+
+
+# --- K10FIXT2 END ---
+
+
+
 if __name__ == "__main__":
     raise SystemExit(main())
