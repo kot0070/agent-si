@@ -12,7 +12,10 @@ normcase, escape refused).
 
 from __future__ import annotations
 
+import importlib.util
+import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -75,6 +78,138 @@ def bind_data_root(path: Optional[str]) -> Optional[str]:
 def executor_data_root() -> Optional[str]:
     """Return the bound default data root, or None when unbound."""
     return _EXECUTOR_ROOT
+
+
+#: Per-test timeout overrides in seconds; ids missing here keep the default.
+_TEST_TIMEOUTS: Dict[str, float] = {}
+
+#: Folder markers that identify a python project with a runnable suite.
+_PYTEST_MARKER_FILES = ("pytest.ini", "pyproject.toml", "setup.cfg", "tox.ini")
+
+#: Node manifest plus the script key the resolver honors.
+_NODE_MANIFEST = "package.json"
+_NODE_TEST_SCRIPT = "test"
+
+
+def set_test_timeout(test_id: str, timeout_s: float) -> float:
+    """Record a per-test timeout override; returns the clamped value."""
+    if not isinstance(test_id, str) or not test_id.strip():
+        raise ValueError("test id must be a non-empty string")
+    try:
+        value = float(timeout_s)
+    except (TypeError, ValueError):
+        raise ValueError(
+            "timeout for test %r must be a number of seconds" % (test_id,)
+        ) from None
+    if value != value:
+        raise ValueError(
+            "timeout for test %r must be a number of seconds" % (test_id,)
+        ) from None
+    clamped = _clamp_timeout(value)
+    _TEST_TIMEOUTS[str(test_id)] = clamped
+    return clamped
+
+
+def test_timeout_for(test_id: str, timeout_s: float) -> float:
+    """Effective per-test timeout: an explicit non-default wins, else the
+    per-test setting, else the default."""
+    try:
+        value = float(timeout_s)
+    except (TypeError, ValueError):
+        value = EXECUTOR_DEFAULT_TIMEOUT_S
+    if value != value:
+        value = EXECUTOR_DEFAULT_TIMEOUT_S
+    if value != EXECUTOR_DEFAULT_TIMEOUT_S:
+        return _clamp_timeout(value)
+    override = _TEST_TIMEOUTS.get(str(test_id))
+    if override is not None:
+        return override
+    return _clamp_timeout(value)
+
+
+def _is_python_project(project_dir: str) -> bool:
+    """True when the folder holds a runnable pytest suite."""
+    try:
+        names = os.listdir(project_dir)
+    except OSError:
+        return False
+    for name in names:
+        lowered = name.lower()
+        if lowered in _PYTEST_MARKER_FILES:
+            return True
+        stem, ext = os.path.splitext(lowered)
+        if ext == ".py" and (
+            stem.startswith("test_") or stem.endswith("_test")
+        ):
+            return True
+    return False
+
+
+def _node_test_script(project_dir: str) -> bool:
+    """True when package.json carries a non-empty test script."""
+    manifest = os.path.join(project_dir, _NODE_MANIFEST)
+    try:
+        with open(manifest, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    scripts = data.get("scripts")
+    if not isinstance(scripts, dict):
+        return False
+    script = scripts.get(_NODE_TEST_SCRIPT)
+    return isinstance(script, str) and bool(script.strip())
+
+
+def resolve_code_command(
+    *,
+    project_dir: Optional[str],
+    test_id: str,
+) -> tuple:
+    """Map one CODE test to a real argv list for its project folder.
+
+    Returns ``(argv, None)`` with an argv list (never a shell string),
+    or ``(None, reason)`` when the folder has nothing to run; the
+    reason names the gap. Python projects run pytest on the suite,
+    node projects with a test script run npm test, and a matching
+    single file runs as the folder check.
+    """
+    folder = str(project_dir or "")
+    if folder and os.path.isdir(folder):
+        if _is_python_project(folder):
+            if importlib.util.find_spec("pytest") is None:
+                return None, (
+                    "CODE test %r of folder %r looks like a python "
+                    "project but pytest is not installed; "
+                    "install pytest to run the suite" % (test_id, folder)
+                )
+            return [sys.executable, "-m", "pytest", folder, "-q"], None
+        if _node_test_script(folder):
+            npm = shutil.which("npm")
+            if not npm:
+                return None, (
+                    "CODE test %r of folder %r is a node project with "
+                    "a test script but npm is not on PATH; "
+                    "install node to run npm test" % (test_id, folder)
+                )
+            return [npm, "test"], None
+        candidate = os.path.join(folder, "%s.py" % _safe_name(test_id))
+        if os.path.isfile(candidate):
+            return [sys.executable, candidate], None
+    if not folder or not os.path.isdir(folder):
+        return None, (
+            "CODE test %r has no project folder %r to run in: "
+            "stage a python suite (test_*.py), a node test script, "
+            "or a %s.py file" % (
+                test_id, folder or ".", _safe_name(test_id))
+        )
+    return None, (
+        "CODE test %r of folder %r has nothing to run: "
+        "no pytest suite (test_*.py), no npm test script, "
+        "and no %s.py file" % (
+            test_id, folder, _safe_name(test_id))
+    )
 
 
 @dataclass(frozen=True)
@@ -438,16 +573,53 @@ def execute_catalog_test(
     """Execute one catalog test for real; per-kind honest outcome dict.
 
     Returns ``{"test_id", "kind", "status", "evidence_ref", "reason",
-    "output"}``. PASS appears only for an executed check that passed;
-    unavailable tools, gateways or answers yield BLOCKED plus a reason.
+    "output", "duration_s"}``. PASS appears only for an executed check
+    that passed; unavailable tools, gateways or answers yield BLOCKED
+    plus a reason. A CODE test without an explicit argv runs the
+    command the resolver derives from the project folder.
     """
     outcome_kind = kind if kind in ("CODE", "AI", "HUMAN") else "CODE"
+    started = time.monotonic()
     if outcome_kind == "CODE":
+        effective_argv = list(argv) if argv is not None else None
+        if effective_argv is None:
+            if project_dir:
+                folder = str(project_dir)
+            else:
+                root = data_root if data_root else executor_data_root()
+                if not root:
+                    return {
+                        "test_id": test_id, "kind": outcome_kind,
+                        "status": "BLOCKED",
+                        "evidence_ref": _pending_ref(
+                            project_id, test_id, runner_id),
+                        "reason": (
+                            "CODE test %r of project %r has no data "
+                            "root to stage evidence under"
+                            % (test_id, project_id)),
+                        "output": "",
+                        "duration_s": 0.0,
+                    }
+                folder = _project_dir(str(root), project_id)
+            resolved, blocked_reason = resolve_code_command(
+                project_dir=folder, test_id=test_id)
+            if resolved is None:
+                return {
+                    "test_id": test_id, "kind": outcome_kind,
+                    "status": "BLOCKED",
+                    "evidence_ref": _pending_ref(
+                        project_id, test_id, runner_id),
+                    "reason": blocked_reason, "output": "",
+                    "duration_s": 0.0,
+                }
+            effective_argv = resolved
         try:
             outcome = execute_code_test(
                 data_root=data_root, project_id=project_id,
-                test_id=test_id, argv=argv, project_dir=project_dir,
-                runner_id=runner_id, timeout_s=timeout_s,
+                test_id=test_id, argv=effective_argv,
+                project_dir=project_dir,
+                runner_id=runner_id,
+                timeout_s=test_timeout_for(test_id, timeout_s),
             )
         except ExecutorBlocked as exc:
             return {
@@ -456,12 +628,14 @@ def execute_catalog_test(
                 "evidence_ref": _pending_ref(
                     project_id, test_id, runner_id),
                 "reason": str(exc), "output": "",
+                "duration_s": 0.0,
             }
         return {
             "test_id": test_id, "kind": outcome_kind,
             "status": outcome.status,
             "evidence_ref": outcome.evidence_ref,
             "reason": outcome.reason, "output": "",
+            "duration_s": outcome.duration_s,
         }
     if outcome_kind == "AI":
         resolved = gateway
@@ -481,6 +655,7 @@ def execute_catalog_test(
                 "reason": "AI test %r of project %r has no provider "
                 "gateway bound" % (test_id, project_id),
                 "output": "",
+                "duration_s": time.monotonic() - started,
             }
         if not data_root and not executor_data_root():
             return {
@@ -491,6 +666,7 @@ def execute_catalog_test(
                 "reason": "AI test %r of project %r has no data root "
                 "to stage evidence under" % (test_id, project_id),
                 "output": "",
+                "duration_s": time.monotonic() - started,
             }
         try:
             response = resolved.invoke(
@@ -504,6 +680,7 @@ def execute_catalog_test(
                 "reason": "AI gateway call for test %r failed: %s: %s"
                 % (test_id, type(exc).__name__, exc),
                 "output": "",
+                "duration_s": time.monotonic() - started,
             }
         text = _gateway_reply_text(response)
         _record_gateway_cost(project_id, "local-tests",
@@ -533,6 +710,7 @@ def execute_catalog_test(
             "evidence_ref": "%s%s/test-output/%s" % (
                 EVIDENCE_SCHEME, project_id, fname),
             "reason": reason, "output": text,
+            "duration_s": time.monotonic() - started,
         }
     sign_off = answer if answer else assertion_ref
     if not sign_off:
@@ -545,6 +723,7 @@ def execute_catalog_test(
             "sign-off; no PASS without a real answer" % (
                 test_id, project_id),
             "output": "",
+            "duration_s": time.monotonic() - started,
         }
     if not data_root and not executor_data_root():
         return {
@@ -555,6 +734,7 @@ def execute_catalog_test(
             "reason": "HUMAN test %r of project %r has no data root "
             "to stage evidence under" % (test_id, project_id),
             "output": "",
+            "duration_s": time.monotonic() - started,
         }
     root = data_root if data_root else executor_data_root()
     folder = _project_dir(str(root), project_id)
@@ -576,6 +756,7 @@ def execute_catalog_test(
         "evidence_ref": "%s%s/test-output/%s" % (
             EVIDENCE_SCHEME, project_id, fname),
         "reason": None, "output": str(sign_off),
+        "duration_s": time.monotonic() - started,
     }
 
 
