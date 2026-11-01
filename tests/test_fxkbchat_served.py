@@ -413,3 +413,30 @@ def _registry_sources(kb_id, project):
         role=None,
         purpose="Fxkbchat notes.",
     )
+
+
+def test_natural_question_retrieves_attached_kb(tmp_path, monkeypatch):
+    """PART1DRIVE4 F11 (01.11): a real chat question is never a verbatim substring of a
+    section; the attached KB must still be retrieved and cited (the lane test used the
+    single word "quokka", live users ask full questions)."""
+    project = "proj-fxkbchat-question"
+    kb_id = _write_kb_dir(tmp_path / "kb1", {QUOKKA_SECTION: QUOKKA_FACT})
+    client = _served_client(tmp_path, project, monkeypatch)
+    try:
+        attached = _attach(client, {"source": {
+            "kb_id": kb_id, "kind": "DEV_SHARED",
+            "project_id": project, "purpose": "Fxkbchat notes.",
+        }})
+        assert attached.status_code == 200, attached.text
+        resp = client.post(
+            "/api/v1/chat/stream",
+            json={"project": project,
+                  "message": "What does the field note say about quokkas?"},
+            headers=_auth(),
+        )
+        assert resp.status_code == 200, resp.text
+        texts = _event_texts(resp.text)
+        assert QUOKKA_FACT in texts
+        assert ("#%s" % QUOKKA_SECTION) in texts
+    finally:
+        _kb.detach_kb(kb_id)

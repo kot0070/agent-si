@@ -5,6 +5,7 @@
     "hard_limit": "5.00",
     "project_id": "wire-project-001",
     "provider_spend_caps": {},
+    "provider_spending": {},
     "remaining_derived": "5.00",
     "reserved": "0",
     "soft_limit": "4.00",

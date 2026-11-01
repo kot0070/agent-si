@@ -94,6 +94,33 @@ def registry_online_connected(request: Request) -> list | None:
     return online
 
 
+
+def _row_price(row) -> float | None:
+    """Known input + output token price of a KB row; None when either is UNKNOWN."""
+    try:
+        fields = (row or {}).get("fields") or {}
+        total = 0.0
+        for name in ("input_token_price", "output_token_price"):
+            value = (fields.get(name) or {}).get("value")
+            total += float(value)
+        return total
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
+def _cheapest_first(candidates: list) -> list:
+    """Known-price candidates cheapest first, unknown prices after them, catalog
+    order kept inside ties (PART1DRIVE4 F03 01.11: gpt-4o was picked over the
+    cheaper KB-priced gpt-4o-mini because the first catalog row always won)."""
+    indexed = list(enumerate(candidates))
+
+    def key(item):
+        idx, cand = item
+        price = _row_price(cand.get("row"))
+        return (price is None, price if price is not None else 0.0, idx)
+    return [cand for _idx, cand in sorted(indexed, key=key)]
+
+
 def pick_auto(catalog: dict, connected: list,
               task_type: str) -> dict:
     """Resolve the AUTO manager choice through the frozen seams.
@@ -115,7 +142,10 @@ def pick_auto(catalog: dict, connected: list,
             "unknown task_type %r (known: %s)"
             % (task_type, ", ".join(KNOWN_TASK_TYPES)))
     auto = _loader.candidates_for_auto(catalog, list(connected or []))
-    for cand in auto.get("candidates", []):
+    ranked = _cheapest_first(auto.get("candidates", []))
+    compared = [{"provider": c.get("provider_id"), "model": c.get("model_id"),
+                 "price_in_plus_out": _row_price(c.get("row"))} for c in ranked]
+    for cand in ranked:
         provider = cand.get("provider_id")
         model = cand.get("model_id")
         if not provider or not model:
@@ -128,7 +158,9 @@ def pick_auto(catalog: dict, connected: list,
                 "model": str(bound.model),
                 "why": {"connected": list(connected or []),
                         "task_type": task,
-                        "reason": auto.get("reason")}}
+                        "reason": auto.get("reason"),
+                        "rule": "cheapest known price first, UNKNOWN prices last",
+                        "compared": compared}}
     raise AutoBlocked(
         "AUTO BLOCKED: %s" % (auto.get("reason") or "no candidate"))
 

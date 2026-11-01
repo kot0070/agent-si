@@ -117,6 +117,12 @@ def test_1293_run_assurance_gate(client, tmp_path):
 
 def test_1300_fresh_auditor_per_call(client):
     tag = _tag()
+    pinned = client.post(
+        "/api/v1/assurance/served-turn", json=_turn(tag, work=True),
+        headers=_auth(),
+    )
+    assert pinned.status_code == 200, pinned.text
+    assert pinned.json()["audit_id"]
     first = client.post(
         "/api/v1/assurance/fresh-audit", json=_turn(tag, work=True),
         headers=_auth(),

@@ -20,6 +20,7 @@ above the hard cap are blocked.
 
 from __future__ import annotations
 
+import functools
 import sys
 import types
 from dataclasses import dataclass
@@ -218,6 +219,22 @@ def _store_assurance_status(run_id: str, status: Dict[str, Optional[str]]) -> No
     _ASSURANCE_STATUS[run_id] = dict(status)
 
 
+
+def _journal(project_id, run_id, phase, status, note=""):
+    """Append one watcher journal row for a served stage step (never breaks the stage).
+
+    PART1DRIVE4 F06 (01.11): the live F04 chain runs through the teststage routes
+    (start/advance/record/finish here), but P6JOURNAL wired only
+    assurance.coordinator.run_assurance, so the journal stayed [] for a full chain.
+    """
+    try:
+        from agent_si.state_machines import run_machine as _run_machine
+        _run_machine.emit_lifecycle_event(
+            project_id or "", run_id, phase, status, note)
+    except Exception:  # journal rows are evidence, never a stage failure
+        pass
+
+
 def start_stage(project_id: str, plan_id: str, run_id: str) -> StageRun:
     """Open a stage run in PLAN state for an existing plan."""
     run = StageRun(
@@ -227,6 +244,7 @@ def start_stage(project_id: str, plan_id: str, run_id: str) -> StageRun:
     _RUNS[run_id] = run
     _RESULTS[run_id] = []
     _ASSURANCE_STATUS.pop(run_id, None)
+    _journal(project_id, run_id, "plan", "PLAN", "stage run opened plan=%s" % plan_id)
     return run
 
 
@@ -248,6 +266,9 @@ def advance_stage(run: StageRun, target_state: StageState) -> StageRun:
         state=target_state,
     )
     _RUNS[current.run_id] = advanced
+    _journal(current.project_id, current.run_id,
+             "start" if str(getattr(target_state, "value", target_state)).endswith("RUNNING") else "advance",
+             str(getattr(target_state, "value", target_state)), "stage advanced")
     return advanced
 
 
@@ -306,7 +327,7 @@ def stage_counters(run_id: str) -> StageCounters:
     )
 
 
-def finish_stage(
+def _finish_stage_impl(
     run_id: str,
     project_id: Optional[str] = None,
     task_id: Optional[str] = None,
@@ -689,6 +710,20 @@ def finish_stage(
     _conclude_episode(current.project_id if current is not None else None)
     return finished
 
+
+
+@functools.wraps(_finish_stage_impl)
+def finish_stage(run_id, *args, **kwargs) -> StageRun:
+    """Close a run into RESULTS (see _finish_stage_impl) and journal the outcome."""
+    finished = _finish_stage_impl(run_id, *args, **kwargs)
+    _journal(getattr(finished, "project_id", "") or kwargs.get("project_id") or "",
+             run_id, "finish",
+             str(getattr(getattr(finished, "state", ""), "value", getattr(finished, "state", ""))),
+             "phase=%s code=%s" % (getattr(finished, "phase", None), getattr(finished, "code", None)))
+    return finished
+
+
+finish_stage.__name__ = finish_stage.__qualname__ = "finish_stage"
 
 def request_refix(run_id: str, failure_ids: List[str], requested_at: str) -> RefixRequest:
     """Send failures back for fixing; empty failure lists are refused."""

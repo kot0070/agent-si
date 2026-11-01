@@ -18,6 +18,8 @@ then falls back to the flat ``<id>.md``.
 
 from __future__ import annotations
 
+import re
+
 import json
 from pathlib import Path
 from typing import Optional
@@ -145,20 +147,39 @@ def section_text(kb_id: str, section_id: str) -> str:
     raise KeyError(section_id)
 
 
+#: Question words that carry no content (never used as KB match terms).
+_STOP_WORDS = frozenset({
+    "what", "which", "where", "when", "does", "about", "with", "from", "that", "this",
+    "have", "your", "there", "their", "will", "would", "could", "should", "tell",
+    "please", "know", "give", "show", "into", "than", "then", "they", "them",
+})
+
+
+def _query_terms(query: str) -> list[str]:
+    """Significant words of a user question (4+ letters/digits, lower case)."""
+    return [w for w in re.findall(r"[0-9a-zЀ-ӿ]{4,}", query.lower())
+            if w not in _STOP_WORDS]
+
+
 def find_sections(kb_id: str, query: str) -> list[str]:
-    """Section ids whose id or text contains query (case-insensitive)."""
+    """Section ids whose id or text contains the whole query or any of its
+    significant words (case-insensitive). A chat question is never a verbatim
+    substring of a section, so the whole-query test alone found nothing live
+    (PART1DRIVE4 F11 01.11: "quokka beacon code?" missed "...beacon code is QUOKKA-7Z")."""
     if not query or not query.strip():
         return []
     needle = query.lower()
+    terms = _query_terms(query)
     hits: list[str] = []
     for section_id in section_ids(kb_id):
-        if needle in section_id.lower():
+        sid = section_id.lower()
+        if needle in sid or any(term in sid for term in terms):
             hits.append(section_id)
             continue
         try:
-            text = section_text(kb_id, section_id)
+            text = section_text(kb_id, section_id).lower()
         except KeyError:
             continue
-        if needle in text.lower():
+        if needle in text or any(term in text for term in terms):
             hits.append(section_id)
     return hits
