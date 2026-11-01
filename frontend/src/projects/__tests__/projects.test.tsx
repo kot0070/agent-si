@@ -310,8 +310,22 @@ describe("project views", () => {
         <ProjectView projectId="p-9" view="tokens" decisionId="d-9" />
       </ApiClientProvider>,
     );
-    expect(await screen.findByText(en.ui.table.empty)).toBeTruthy();
+    expect((await screen.findByTestId("tokens-spent")).textContent).toContain(
+      "10",
+    );
+    expect((await screen.findByTestId("tokens-limit")).textContent).toContain(
+      "100",
+    );
     shown.unmount();
+    cleanup();
+
+    const missing = render(
+      <ApiClientProvider client={client}>
+        <ProjectView projectId="no-such" view="tokens" decisionId="d-9" />
+      </ApiClientProvider>,
+    );
+    expect(await screen.findByTestId("kit-error-panel")).toBeTruthy();
+    missing.unmount();
     cleanup();
 
     const audits = render(

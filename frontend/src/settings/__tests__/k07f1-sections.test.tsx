@@ -1,8 +1,9 @@
 /** @vitest-environment jsdom */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { ApiClientProvider } from "../../app/ApiClientProvider";
+import { HttpApiClient } from "../../api/client";
 import { FakeApiClient } from "../../api/__tests__/fakeApiClient";
 import { ENDPOINTS } from "../../api/endpoints";
 import { App } from "../../app/App";
@@ -25,6 +26,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   resetLocaleForTests();
   window.localStorage.clear();
   window.sessionStorage.clear();
@@ -41,7 +43,7 @@ function renderAppAt(route: string): void {
   );
 }
 
-describe.each(["models", "routing", "optimization", "capabilityDB"])(
+describe.each(["models", "routing", "optimization"])(
   "settings %s section mounts ProvidersPage",
   (section) => {
     it("renders provider cards plus the search box inside the section body", async () => {
@@ -101,5 +103,42 @@ describe("settings localAI section labels the endpoint", () => {
     expect(screen.getByTestId("localai-endpoint").textContent).toBe(
       ENDPOINTS.agentsLive,
     );
+  });
+});
+
+describe("settings capabilityDB section mounts the model KB", () => {
+  it("shows KB status plus Update and no ProvidersPage", async () => {
+    vi.stubGlobal(
+      "fetch",
+      async (input: unknown) => {
+        if (String(input) === "/api/v1/kb/status") {
+          return new Response(
+            JSON.stringify({ overall: "2026-10-27", per_provider: {} }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        if (String(input) === "/api/v1/kb/refresh/proposal") {
+          return new Response(
+            JSON.stringify({ kb_id: null, stale: false, proposals: [] }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        throw new Error(`unexpected fetch ${String(input)}`);
+      },
+    );
+    const router = createMemoryRouter([{ path: "*", element: <App /> }], {
+      initialEntries: ["/settings/capabilityDB"],
+    });
+    render(
+      <ApiClientProvider client={new HttpApiClient()}>
+        <RouterProvider router={router} />
+      </ApiClientProvider>,
+    );
+    expect(await screen.findByTestId("kb-status")).toBeTruthy();
+    expect(await screen.findByTestId("kb-update")).toBeTruthy();
+    expect(
+      await screen.findByTestId("k07next2-kb-proposal-empty"),
+    ).toBeTruthy();
+    expect(screen.queryByTestId("provider-card")).toBeNull();
   });
 });

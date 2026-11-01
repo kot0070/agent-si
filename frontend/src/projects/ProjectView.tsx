@@ -52,6 +52,7 @@ import { HealthView } from "./observe/HealthView";
 import { MatrixView } from "./observe/MatrixView";
 import { VerifierView } from "./observe/VerifierView";
 import { classifyScope } from "./scope";
+import { AttachControl } from "../kb/AttachControl";
 
 export type { ProjectViewName };
 export { PROJECT_VIEWS };
@@ -542,6 +543,7 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
             <LimitsSectionBoundary>
               <ProjectLimitsSection projectId={props.projectId} />
             </LimitsSectionBoundary>
+            <AttachControl projectId={props.projectId} />
           </div>
         );
       }
@@ -651,12 +653,35 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
         );
       }
       case "tokens": {
+        if (budgetError !== null) {
+          return panelError(budgetError);
+        }
+        if (budget === null) {
+          return <LoadingState loadingKey="ui.loading.more" />;
+        }
         return (
-          <EmptyState
-            stateKey="ui.table.empty"
-            actionKey={null}
-            onAction={null}
-          />
+          <div>
+            <Fact
+              testId="tokens-spent"
+              labelKey="telemetry.cost"
+              value={budget.spent}
+            />
+            <Fact
+              testId="tokens-reserved"
+              labelKey="projects.cost.title"
+              value={budget.reserved}
+            />
+            <Fact
+              testId="tokens-limit"
+              labelKey="ui.card.total"
+              value={budget.hard_limit}
+            />
+            <Fact
+              testId="tokens-remaining"
+              labelKey="projects.derived.label"
+              value={remainingBudget(budget)}
+            />
+          </div>
         );
       }
       case "cost": {

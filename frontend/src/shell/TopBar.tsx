@@ -4,6 +4,7 @@
 // locale surface: setLocale updates the module plus persistence, then a
 // window event carries the new locale to App for a full re-render.
 
+import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
 import type { ReactElement } from "react";
 import type { ProjectRecord } from "../api/iface";
@@ -129,7 +130,9 @@ export function TopBar(props: TopBarProps): ReactElement {
           ) : null}
         </select>
       </label>
-      <span data-testid="topbar-watcher">{t("shell.topbar.watcher")}</span>
+      <Link data-testid="topbar-watcher" to="/watcher">
+        {t("shell.topbar.watcher")}
+      </Link>
       <button
         type="button"
         data-testid="topbar-stop-all"
