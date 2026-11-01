@@ -731,7 +731,8 @@ def host_blockers_record() -> list[dict]:
             ),
             "evidence": (
                 "route GET /k10/compet/audit proven by "
-                "tests/test_k10e_served.py::test_k10e_host_blockers"
+                "tests/test_k10e_served.py::test_k10e_host_blockers and "
+                "tests/test_k10ph2c_served.py::test_k10ph2c_214_host_blockers"
             ),
         },
     ]
@@ -765,7 +766,8 @@ def attainability_gate_record() -> list[dict]:
             ),
             "evidence": (
                 "route GET /k10/compet/audit proven by "
-                "tests/test_k10e_served.py::test_k10e_attainability_gate"
+                "tests/test_k10e_served.py::test_k10e_attainability_gate and "
+                "tests/test_k10ph2c_served.py::test_k10ph2c_215_attainability_gate"
             ),
         },
     ]
@@ -2121,6 +2123,22 @@ def served_rows() -> list[dict]:
             "test": (
                 "tests/test_k10wave_served.py::"
                 "test_k10wave5_localhost_doubles"
+            ),
+        },
+        {
+            "row": "B0B-UNCOVERED_MVP_ACCEPT-214",
+            "route": "agent_si.k10_compet.host_blockers_record recorded seam",
+            "test": (
+                "tests/test_k10ph2c_served.py::"
+                "test_k10ph2c_214_host_blockers"
+            ),
+        },
+        {
+            "row": "B0B-UNCOVERED_MVP_ACCEPT-215",
+            "route": "agent_si.k10_compet.attainability_gate_record recorded seam",
+            "test": (
+                "tests/test_k10ph2c_served.py::"
+                "test_k10ph2c_215_attainability_gate"
             ),
         },
         {
