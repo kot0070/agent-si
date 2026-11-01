@@ -28,7 +28,8 @@ BAIT_M = "FAKE-K04BIND3-M-1111-yyyy-not-a-real-key"
 HEADERS = {"x-actor": "ui-probe", "x-ui-session-token": APP_TOKEN}
 
 CANNED_TEXT = "k04bind3 canned reply"
-CANNED_USAGE = {"input_tokens": 4, "output_tokens": 6}
+# Per-1M scale (see bud1): 4000/6000 at 0.001/0.002 -> 0.000016 exact.
+CANNED_USAGE = {"input_tokens": 4000, "output_tokens": 6000}
 
 META_MODEL_FULL = "meta/muse-spark-1.3-contributor"
 META_MODEL_BARE = "muse-spark-1.3-contributor"
@@ -258,8 +259,8 @@ def test_budget_known_price_charges_spent(tmp_path, monkeypatch):
         assert "NO_PROVIDER_BOUND" not in chat.text, chat.text
         after = _budget_spent(client, pid)
         assert after > before, (before, after)
-        # 4 in plus 6 out at 0.001/0.002 = 0.016000
+        # 4000 in plus 6000 out at 0.001/0.002 per 1M = 0.000016
         from decimal import Decimal
-        assert after - before == Decimal("0.016000"), (before, after)
+        assert after - before == Decimal("0.000016"), (before, after)
     finally:
         _kb.bind_catalog(seed)

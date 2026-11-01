@@ -30,7 +30,10 @@ BAIT = "FAKE-K04BUD1-0000-zzzz-not-a-real-key"
 HEADERS = {"x-actor": "ui-probe", "x-ui-session-token": APP_TOKEN}
 
 CANNED_TEXT = "k04bud1 canned reply"
-CANNED_USAGE = {"input_tokens": 4, "output_tokens": 6}
+# Per-1M scale: (4000*0.001 + 6000*0.002)/1e6 = 16/1e6 = 0.000016,
+# so the 6dp gate delta survives quantization (tiny 4/6 usage would
+# quantize to 0.000000 and prove nothing).
+CANNED_USAGE = {"input_tokens": 4000, "output_tokens": 6000}
 
 PRICED_MODEL = "k04bud1-priced-model"
 UNKNOWN_MODEL = "gpt-4o-mini"
@@ -163,7 +166,8 @@ def test_known_price_charges_spent_and_measured_cost(tmp_path, monkeypatch):
         assert "NO_PROVIDER_BOUND" not in chat.text, chat.text
         after = _budget_spent(client, pid)
         assert after > before, (before, after)
-        assert after - before == Decimal("0.016000"), (before, after)
+        # (4000*0.001 + 6000*0.002)/1e6 = 16/1e6 = 0.000016, per-1M prices.
+        assert after - before == Decimal("0.000016"), (before, after)
         costs = _cost_rows(app)
         assert costs, "no cost rows recorded"
         measured = [r for r in costs if r.get("state") == "MEASURED"]
