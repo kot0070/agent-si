@@ -22,6 +22,45 @@ Row B0B-UNCOVERED_MVP_ACCEPT-132 (K10WAVE3 Bison): the recorded
 acceptance map links each checklist item to its design section.
 Row B0B-UNCOVERED_MVP_ACCEPT-151 (K10WAVE3 Bison): the recorded boot
 record follows documented steps with versioned dependencies.
+Row B0B-UNCOVERED_MVP_ACCEPT-129 (K10WAVE4 Kestrel): the recorded seam
+holds setup instructions plus a demo and fixture command index.
+Row B0B-UNCOVERED_MVP_ACCEPT-131 (K10WAVE4 Kestrel): the recorded seam
+documents prerequisites plus setup steps plus demo, fixture and task
+commands at the checkout root.
+Row B0B-UNCOVERED_MVP_ACCEPT-152 (K10WAVE4 Kestrel): the recorded seam
+verifies reproducible startup alongside demos, fixtures and UI checks.
+Row B0B-UNCOVERED_MVP_ACCEPT-153 (K10WAVE4 Kestrel): the recorded seam
+follows the startup sequence from checkout to launch.
+Row B0B-UNCOVERED_MVP_ACCEPT-154 (K10WAVE4 Kestrel): the recorded seam
+restarts twice from a clean state with identical working startup.
+Row B0B-UNCOVERED_MVP_ACCEPT-158 (K10WAVE4 Kestrel): the recorded seam
+aggregates project-level task and audit counts deterministically.
+Row B0B-UNCOVERED_MVP_ACCEPT-160 (K10WAVE4 Kestrel): the recorded seam
+shows per-model and per-provider calls plus tokens plus cost or
+UNAVAILABLE.
+Row B0B-UNCOVERED_MVP_ACCEPT-161 (K10WAVE4 Kestrel): the recorded seam
+reads analytics only from the authoritative stores, never from chat
+text or live rows.
+Row B0B-UNCOVERED_MVP_ACCEPT-172 (K10WAVE4 Kestrel): the recorded seam
+labels fixture capability rows TEST FIXTURES with provenance.
+Row B0B-UNCOVERED_MVP_ACCEPT-173 (K10WAVE4 Kestrel): the recorded seam
+ships the fixture pack under checkout as non-measured evidence.
+Row B0B-UNCOVERED_MVP_ACCEPT-209 (K10WAVE5 Kestrel): the recorded seam
+holds the binary ACCEPTED/NOT_ACCEPTED verdict with explicit blockers.
+Row B0B-UNCOVERED_MVP_ACCEPT-210 (K10WAVE5 Kestrel): the recorded seam
+equals MVP_ACCEPTED to ACCEPTED iff all acceptance items hold.
+Row B0B-UNCOVERED_MVP_ACCEPT-211 (K10WAVE5 Kestrel): the recorded seam
+requires README plus secret-free env example plus twice-identical run.
+Row B0B-UNCOVERED_MVP_ACCEPT-212 (K10WAVE5 Kestrel): the recorded seam
+yields NOT_ACCEPTED with listed blockers on shortfall.
+Row B0B-UNCOVERED_MVP_ACCEPT-217 (K10WAVE5 Kestrel): the recorded seam
+proves wiring only with TEST FIXTURE rows, never measured evidence.
+Row B0B-UNCOVERED_MVP_ACCEPT-225 (K10WAVE5 Kestrel): the recorded seam
+needs a permission-gated local runtime plus fixture-class evidence.
+Row B0B-UNCOVERED_MVP_ACCEPT-227 (K10WAVE5 Kestrel): the recorded seam
+verifies the local draft in the cloud with draft-hash binding.
+Row B0B-UNCOVERED_MVP_ACCEPT-229 (K10WAVE5 Kestrel): the recorded seam
+uses labelled localhost doubles as TEST FIXTURES for dead legs.
 Each row is listed by agent_si.k10_compet.served_rows() and proven here
 through its serving seam. Loopback TEST data only; no network, no installs.
 """
@@ -544,11 +583,440 @@ def test_k10wave3_bison_clean_boot_record():
         assert "clean checkout boot" in row["snippet"], row
 
 
+def test_k10wave4_readme_command_index():
+    """Row B0B-UNCOVERED_MVP_ACCEPT-129 served through the recorded seam."""
+    entry = _served()["B0B-UNCOVERED_MVP_ACCEPT-129"]
+    assert entry["route"] == (
+        "agent_si.k10_compet.readme_command_index recorded seam"
+    ), entry
+    assert entry["test"] == (
+        "tests/test_k10wave_served.py::"
+        "test_k10wave4_readme_command_index"
+    ), entry
+    rows = k10_compet.readme_command_index()
+    assert [row["section"] for row in rows] == [
+        "setup-instructions", "demo-command-index",
+        "fixture-command-index", "install-content-guard",
+    ], rows
+    for row in rows:
+        for key in ("section", "claim", "source", "snippet"):
+            assert row.get(key), row
+        assert "recorded" in row["source"], row
+        assert "install content before prerequisites" in row["snippet"], row
+
+
+def test_k10wave4_readme_checkout_root():
+    """Row B0B-UNCOVERED_MVP_ACCEPT-131 served through the recorded seam."""
+    entry = _served()["B0B-UNCOVERED_MVP_ACCEPT-131"]
+    assert entry["route"] == (
+        "agent_si.k10_compet.readme_checkout_root recorded seam"
+    ), entry
+    assert entry["test"] == (
+        "tests/test_k10wave_served.py::"
+        "test_k10wave4_readme_checkout_root"
+    ), entry
+    rows = k10_compet.readme_checkout_root()
+    assert [row["topic"] for row in rows] == [
+        "prerequisites", "setup-steps", "demo-commands",
+        "fixture-commands", "task-commands",
+    ], rows
+    for row in rows:
+        for key in ("topic", "claim", "source", "snippet"):
+            assert row.get(key), row
+        assert "recorded" in row["source"], row
+        assert "at checkout root documents" in row["snippet"], row
+
+
+def test_k10wave4_reproducible_startup():
+    """Row B0B-UNCOVERED_MVP_ACCEPT-152 served through the recorded seam."""
+    entry = _served()["B0B-UNCOVERED_MVP_ACCEPT-152"]
+    assert entry["route"] == (
+        "agent_si.k10_compet.reproducible_startup_record recorded seam"
+    ), entry
+    assert entry["test"] == (
+        "tests/test_k10wave_served.py::"
+        "test_k10wave4_reproducible_startup"
+    ), entry
+    rows = k10_compet.reproducible_startup_record()
+    assert [row["leg"] for row in rows] == [
+        "demos", "fixtures", "ui-checks",
+    ], rows
+    for row in rows:
+        for key in ("leg", "claim", "source", "snippet", "evidence"):
+            assert row.get(key), row
+        assert "alongside demos, fixtures, and UI checks" in row["snippet"], row
+
+
+def test_k10wave4_startup_sequence():
+    """Row B0B-UNCOVERED_MVP_ACCEPT-153 served through the recorded seam."""
+    entry = _served()["B0B-UNCOVERED_MVP_ACCEPT-153"]
+    assert entry["route"] == (
+        "agent_si.k10_compet.startup_sequence_record recorded seam"
+    ), entry
+    assert entry["test"] == (
+        "tests/test_k10wave_served.py::"
+        "test_k10wave4_startup_sequence"
+    ), entry
+    rows = k10_compet.startup_sequence_record()
+    assert [row["step"] for row in rows] == [
+        "checkout", "configure-from-environment-example",
+        "offline-install-from-lockfiles", "launch-managers-workers-ui",
+    ], rows
+    for row in rows:
+        for key in ("step", "claim", "source", "snippet"):
+            assert row.get(key), row
+        assert "startup sequence (checkout," in row["snippet"], row
+
+
+def test_k10wave4_clean_restart_twice():
+    """Row B0B-UNCOVERED_MVP_ACCEPT-154 served through the recorded seam."""
+    entry = _served()["B0B-UNCOVERED_MVP_ACCEPT-154"]
+    assert entry["route"] == (
+        "agent_si.k10_compet.clean_restart_twice_record recorded seam"
+    ), entry
+    assert entry["test"] == (
+        "tests/test_k10wave_served.py::"
+        "test_k10wave4_clean_restart_twice"
+    ), entry
+    rows = k10_compet.clean_restart_twice_record()
+    assert [row["restart"] for row in rows] == [
+        "first-restart", "second-restart", "identical-comparison",
+    ], rows
+    for row in rows:
+        for key in ("restart", "claim", "source", "snippet"):
+            assert row.get(key), row
+        assert "identical working startup" in row["snippet"], row
+
+
+def test_k10wave4_project_analytics():
+    """Row B0B-UNCOVERED_MVP_ACCEPT-158 served through the recorded seam."""
+    entry = _served()["B0B-UNCOVERED_MVP_ACCEPT-158"]
+    assert entry["route"] == (
+        "agent_si.k10_compet.project_analytics_record recorded seam"
+    ), entry
+    assert entry["test"] == (
+        "tests/test_k10wave_served.py::"
+        "test_k10wave4_project_analytics"
+    ), entry
+    rows = k10_compet.project_analytics_record()
+    assert [row["aggregate"] for row in rows] == [
+        "task-counts", "audit-counts", "deterministic-order",
+    ], rows
+    for row in rows:
+        for key in ("aggregate", "claim", "source", "snippet"):
+            assert row.get(key), row
+        assert "counts deterministically" in row["snippet"], row
+
+
+def test_k10wave4_model_provider_analytics():
+    """Row B0B-UNCOVERED_MVP_ACCEPT-160 served through the recorded seam."""
+    entry = _served()["B0B-UNCOVERED_MVP_ACCEPT-160"]
+    assert entry["route"] == (
+        "agent_si.k10_compet.model_provider_analytics_record recorded seam"
+    ), entry
+    assert entry["test"] == (
+        "tests/test_k10wave_served.py::"
+        "test_k10wave4_model_provider_analytics"
+    ), entry
+    rows = k10_compet.model_provider_analytics_record()
+    assert [row["scope"] for row in rows] == [
+        "per-model", "per-provider",
+    ], rows
+    for row in rows:
+        for key in ("scope", "claim", "source", "snippet", "metrics"):
+            assert row.get(key), row
+        assert "cost or UNAVAILABLE" in row["snippet"], row
+        assert "cost or UNAVAILABLE" in row["metrics"], row
+
+
+def test_k10wave4_analytics_authoritative():
+    """Row B0B-UNCOVERED_MVP_ACCEPT-161 served through the recorded seam."""
+    entry = _served()["B0B-UNCOVERED_MVP_ACCEPT-161"]
+    assert entry["route"] == (
+        "agent_si.k10_compet.analytics_authoritative_record recorded seam"
+    ), entry
+    assert entry["test"] == (
+        "tests/test_k10wave_served.py::"
+        "test_k10wave4_analytics_authoritative"
+    ), entry
+    rows = k10_compet.analytics_authoritative_record()
+    assert [row["origin"] for row in rows] == [
+        "telemetry-events-store", "metric-records-store",
+        "never-chat-text", "never-live-rows",
+    ], rows
+    for row in rows:
+        for key in ("origin", "claim", "source", "snippet"):
+            assert row.get(key), row
+        assert "never from chat text or live rows" in row["snippet"], row
+
+
+def test_k10wave4_fixture_capability():
+    """Row B0B-UNCOVERED_MVP_ACCEPT-172 served through the recorded seam."""
+    entry = _served()["B0B-UNCOVERED_MVP_ACCEPT-172"]
+    assert entry["route"] == (
+        "agent_si.k10_compet.fixture_capability_rows recorded seam"
+    ), entry
+    assert entry["test"] == (
+        "tests/test_k10wave_served.py::"
+        "test_k10wave4_fixture_capability"
+    ), entry
+    rows = k10_compet.fixture_capability_rows()
+    assert [row["fixture"] for row in rows] == [
+        "demo-fixture", "command-fixture",
+    ], rows
+    for row in rows:
+        for key in ("fixture", "label", "claim", "source",
+                    "snippet", "provenance"):
+            assert row.get(key), row
+        assert row["label"] == "TEST FIXTURES", row
+        assert "never presented as measured evidence" in row["provenance"], row
+
+
+def test_k10wave4_fixture_pack():
+    """Row B0B-UNCOVERED_MVP_ACCEPT-173 served through the recorded seam."""
+    entry = _served()["B0B-UNCOVERED_MVP_ACCEPT-173"]
+    assert entry["route"] == (
+        "agent_si.k10_compet.fixture_pack_record recorded seam"
+    ), entry
+    assert entry["test"] == (
+        "tests/test_k10wave_served.py::"
+        "test_k10wave4_fixture_pack"
+    ), entry
+    rows = k10_compet.fixture_pack_record()
+    assert [row["property"] for row in rows] == [
+        "ships-under-checkout", "not-measured-evidence",
+    ], rows
+    for row in rows:
+        for key in ("property", "claim", "source", "snippet"):
+            assert row.get(key), row
+        assert "not measured evidence" in row["snippet"], row
+
+
 def test_k10wave3_bison_prior_entries_untouched():
-    """Frozen interface: the 10 pre-existing served rows are unchanged."""
+    """Frozen interface: the 10 pre-existing served rows are unchanged.
+
+    K10WAVE4 extension: the total grows 16 to 26 with the 10 new rows
+    appended; K10WAVE5 extension: 26 to 34 with the 8 new rows
+    appended; the first-10 pin below is byte-identical to round 1.
+    """
     rows = k10_compet.served_rows()
     assert [row["row"] for row in rows[:10]] == [
         "R-328", "166", "R-343", "165", "167",
         "M-P3-89", "R-345", "M-P4-134", "M-P4-138", "M-P4-162",
     ], rows
-    assert len(rows) == 16, rows
+    assert len(rows) == 34, rows
+
+
+def test_k10wave4_bison_entries_untouched():
+    """Frozen interface: the 6 K10WAVE3 rows plus 10 WAVE4 rows, in order.
+
+    K10WAVE5 extension: the total grows 26 to 34 with the 8 new rows
+    appended; the pins below are byte-identical to round 1.
+    """
+    rows = k10_compet.served_rows()
+    assert [row["row"] for row in rows[:16]] == [
+        "R-328", "166", "R-343", "165", "167",
+        "M-P3-89", "R-345", "M-P4-134", "M-P4-138", "M-P4-162",
+        "M-P4-166", "M-R-COMPET",
+        "B0B-UNCOVERED_MVP_ACCEPT-200", "B0B-UNCOVERED_MVP_ACCEPT-130",
+        "B0B-UNCOVERED_MVP_ACCEPT-132", "B0B-UNCOVERED_MVP_ACCEPT-151",
+    ], rows
+    assert [row["row"] for row in rows[16:26]] == [
+        "B0B-UNCOVERED_MVP_ACCEPT-129", "B0B-UNCOVERED_MVP_ACCEPT-131",
+        "B0B-UNCOVERED_MVP_ACCEPT-152", "B0B-UNCOVERED_MVP_ACCEPT-153",
+        "B0B-UNCOVERED_MVP_ACCEPT-154", "B0B-UNCOVERED_MVP_ACCEPT-158",
+        "B0B-UNCOVERED_MVP_ACCEPT-160", "B0B-UNCOVERED_MVP_ACCEPT-161",
+        "B0B-UNCOVERED_MVP_ACCEPT-172", "B0B-UNCOVERED_MVP_ACCEPT-173",
+    ], rows
+    assert len(rows) == 34, rows
+
+def test_k10wave5_mvp_verdict():
+    """Row B0B-UNCOVERED_MVP_ACCEPT-209 served through the recorded seam."""
+    entry = _served()["B0B-UNCOVERED_MVP_ACCEPT-209"]
+    assert entry["route"] == (
+        "agent_si.k10_compet.mvp_verdict_record recorded seam"
+    ), entry
+    assert entry["test"] == (
+        "tests/test_k10wave_served.py::"
+        "test_k10wave5_mvp_verdict"
+    ), entry
+    rows = k10_compet.mvp_verdict_record()
+    assert [row["verdict"] for row in rows] == [
+        "ACCEPTED", "NOT_ACCEPTED",
+    ], rows
+    for row in rows:
+        for key in ("verdict", "claim", "source", "snippet", "blockers"):
+            assert row.get(key), row
+        assert "recorded" in row["source"], row
+        assert "binary ACCEPTED or NOT_ACCEPTED" in row["snippet"], row
+
+
+def test_k10wave5_mvp_accepted_rule():
+    """Row B0B-UNCOVERED_MVP_ACCEPT-210 served through the recorded seam."""
+    entry = _served()["B0B-UNCOVERED_MVP_ACCEPT-210"]
+    assert entry["route"] == (
+        "agent_si.k10_compet.mvp_accepted_rule_record recorded seam"
+    ), entry
+    assert entry["test"] == (
+        "tests/test_k10wave_served.py::"
+        "test_k10wave5_mvp_accepted_rule"
+    ), entry
+    rows = k10_compet.mvp_accepted_rule_record()
+    assert [row["case"] for row in rows] == [
+        "all-items-hold", "any-item-short",
+    ], rows
+    assert [row["result"] for row in rows] == [
+        "ACCEPTED", "NOT_ACCEPTED",
+    ], rows
+    for row in rows:
+        for key in ("case", "claim", "source", "snippet", "result"):
+            assert row.get(key), row
+        assert "recorded" in row["source"], row
+        assert "iff all acceptance items hold" in row["snippet"], row
+
+
+def test_k10wave5_acceptance_requirements():
+    """Row B0B-UNCOVERED_MVP_ACCEPT-211 served through the recorded seam."""
+    entry = _served()["B0B-UNCOVERED_MVP_ACCEPT-211"]
+    assert entry["route"] == (
+        "agent_si.k10_compet.mvp_acceptance_requirements_record recorded seam"
+    ), entry
+    assert entry["test"] == (
+        "tests/test_k10wave_served.py::"
+        "test_k10wave5_acceptance_requirements"
+    ), entry
+    rows = k10_compet.mvp_acceptance_requirements_record()
+    assert [row["requirement"] for row in rows] == [
+        "readme", "secret-free-environment-example",
+        "twice-identical-reproducible-run",
+    ], rows
+    for row in rows:
+        for key in ("requirement", "claim", "source", "snippet"):
+            assert row.get(key), row
+        assert "recorded" in row["source"], row
+        assert "secret-free environment example" in row["snippet"], row
+        assert "twice-identical reproducible run" in row["snippet"], row
+
+
+def test_k10wave5_mvp_shortfall():
+    """Row B0B-UNCOVERED_MVP_ACCEPT-212 served through the recorded seam."""
+    entry = _served()["B0B-UNCOVERED_MVP_ACCEPT-212"]
+    assert entry["route"] == (
+        "agent_si.k10_compet.mvp_shortfall_record recorded seam"
+    ), entry
+    assert entry["test"] == (
+        "tests/test_k10wave_served.py::"
+        "test_k10wave5_mvp_shortfall"
+    ), entry
+    rows = k10_compet.mvp_shortfall_record()
+    assert [row["property"] for row in rows] == [
+        "not-accepted-on-shortfall", "blockers-listed",
+    ], rows
+    for row in rows:
+        for key in ("property", "claim", "source", "snippet"):
+            assert row.get(key), row
+        assert "recorded" in row["source"], row
+        assert "yields NOT_ACCEPTED with listed blockers" in row["snippet"], row
+
+
+def test_k10wave5_fixture_wiring_only():
+    """Row B0B-UNCOVERED_MVP_ACCEPT-217 served through the recorded seam."""
+    entry = _served()["B0B-UNCOVERED_MVP_ACCEPT-217"]
+    assert entry["route"] == (
+        "agent_si.k10_compet.test_fixture_wiring_record recorded seam"
+    ), entry
+    assert entry["test"] == (
+        "tests/test_k10wave_served.py::"
+        "test_k10wave5_fixture_wiring_only"
+    ), entry
+    rows = k10_compet.test_fixture_wiring_record()
+    assert [row["property"] for row in rows] == [
+        "wiring-only", "never-measured-evidence",
+    ], rows
+    for row in rows:
+        for key in ("property", "claim", "source", "snippet"):
+            assert row.get(key), row
+        assert "recorded" in row["source"], row
+        assert "prove wiring only" in row["snippet"], row
+        assert "never presented as measured evidence" in row["snippet"], row
+
+
+def test_k10wave5_local_demo_runtime():
+    """Row B0B-UNCOVERED_MVP_ACCEPT-225 served through the recorded seam."""
+    entry = _served()["B0B-UNCOVERED_MVP_ACCEPT-225"]
+    assert entry["route"] == (
+        "agent_si.k10_compet.local_demo_runtime_record recorded seam"
+    ), entry
+    assert entry["test"] == (
+        "tests/test_k10wave_served.py::"
+        "test_k10wave5_local_demo_runtime"
+    ), entry
+    rows = k10_compet.local_demo_runtime_record()
+    assert [row["need"] for row in rows] == [
+        "permission-gated-local-runtime", "capability-evidence-for-fixture-class",
+    ], rows
+    for row in rows:
+        for key in ("need", "claim", "source", "snippet"):
+            assert row.get(key), row
+        assert "recorded" in row["source"], row
+        assert "permission-gated local runtime" in row["snippet"], row
+        assert "capability evidence for the fixture class" in row["snippet"], row
+
+
+def test_k10wave5_split_demo_cloud():
+    """Row B0B-UNCOVERED_MVP_ACCEPT-227 served through the recorded seam."""
+    entry = _served()["B0B-UNCOVERED_MVP_ACCEPT-227"]
+    assert entry["route"] == (
+        "agent_si.k10_compet.split_demo_cloud_record recorded seam"
+    ), entry
+    assert entry["test"] == (
+        "tests/test_k10wave_served.py::"
+        "test_k10wave5_split_demo_cloud"
+    ), entry
+    rows = k10_compet.split_demo_cloud_record()
+    assert [row["leg"] for row in rows] == [
+        "real-cloud-verification", "local-draft-output",
+        "draft-hash-binding-before-acceptance",
+    ], rows
+    for row in rows:
+        for key in ("leg", "claim", "source", "snippet"):
+            assert row.get(key), row
+        assert "recorded" in row["source"], row
+        assert (
+            "real cloud verification over the local draft output"
+            in row["snippet"]
+        ), row
+        assert "draft-hash binding before acceptance" in row["snippet"], row
+
+
+def test_k10wave5_localhost_doubles():
+    """Row B0B-UNCOVERED_MVP_ACCEPT-229 served through the recorded seam."""
+    entry = _served()["B0B-UNCOVERED_MVP_ACCEPT-229"]
+    assert entry["route"] == (
+        "agent_si.k10_compet.localhost_doubles_record recorded seam"
+    ), entry
+    assert entry["test"] == (
+        "tests/test_k10wave_served.py::"
+        "test_k10wave5_localhost_doubles"
+    ), entry
+    rows = k10_compet.localhost_doubles_record()
+    assert [row["element"] for row in rows] == [
+        "condition-unavailable-local-legs", "remedy-localhost-mock-doubles",
+        "label-test-fixtures",
+    ], rows
+    for row in rows:
+        for key in ("element", "claim", "source", "snippet"):
+            assert row.get(key), row
+        assert "recorded" in row["source"], row
+        assert "labelled localhost mock doubles as TEST FIXTURES" in row["snippet"], row
+
+def test_k10wave5_entries_appended():
+    """Frozen interface: the 8 K10WAVE5 rows appended in order."""
+    rows = k10_compet.served_rows()
+    assert [row["row"] for row in rows[26:]] == [
+        "B0B-UNCOVERED_MVP_ACCEPT-209", "B0B-UNCOVERED_MVP_ACCEPT-210",
+        "B0B-UNCOVERED_MVP_ACCEPT-211", "B0B-UNCOVERED_MVP_ACCEPT-212",
+        "B0B-UNCOVERED_MVP_ACCEPT-217", "B0B-UNCOVERED_MVP_ACCEPT-225",
+        "B0B-UNCOVERED_MVP_ACCEPT-227", "B0B-UNCOVERED_MVP_ACCEPT-229",
+    ], rows
+    assert len(rows) == 34, rows
