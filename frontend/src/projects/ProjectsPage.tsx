@@ -22,6 +22,32 @@ import { LoadingState } from "../ui/LoadingState";
 const FOLDER_PICK_URL = "/api/v1/sidecar/pick-folder";
 const FOLDER_PICK_UNAVAILABLE = 409;
 
+// FXKITUI labelled project form: every input carries a visible label plus
+// a placeholder example. Keys are projectForm.<field>.label/.placeholder;
+// EN defaults live in code as the fallback and the locale lane ships the
+// uk lines from _task/FXKITUI/HITS.md. Locale files stay untouched.
+export const PROJECT_FORM_KEYS = {
+  nameLabel: "projectForm.name.label",
+  namePlaceholder: "projectForm.name.placeholder",
+  folderLabel: "projectForm.folder.label",
+  folderPlaceholder: "projectForm.folder.placeholder",
+} as const;
+
+const PROJECT_FORM_EN: Record<string, string> = {
+  [PROJECT_FORM_KEYS.nameLabel]: "Project name",
+  [PROJECT_FORM_KEYS.namePlaceholder]: "My project",
+  [PROJECT_FORM_KEYS.folderLabel]: "Project folder",
+  [PROJECT_FORM_KEYS.folderPlaceholder]: "my-app-folder",
+};
+
+function projectFormText(key: string): string {
+  try {
+    return t(key);
+  } catch {
+    return PROJECT_FORM_EN[key] ?? key;
+  }
+}
+
 function folderLabel(key: string, fallback: string): string {
   try {
     return t(key);
@@ -204,22 +230,32 @@ export function ProjectsPage(): ReactElement {
               void submitAdd(event);
             }}
           >
-            <input
-              data-testid="project-add-name"
-              aria-label={t("shell.topbar.project")}
-              value={name}
-              onChange={(event) => {
-                setName(event.target.value);
-              }}
-            />
-            <input
-              data-testid="project-add-folder"
-              aria-label={t("firstrun.steps.projectFolder")}
-              value={folder}
-              onChange={(event) => {
-                setFolder(event.target.value);
-              }}
-            />
+            <label htmlFor="project-add-name-input">
+              {projectFormText(PROJECT_FORM_KEYS.nameLabel)}
+              <input
+                id="project-add-name-input"
+                data-testid="project-add-name"
+                aria-label={t("shell.topbar.project")}
+                placeholder={projectFormText(PROJECT_FORM_KEYS.namePlaceholder)}
+                value={name}
+                onChange={(event) => {
+                  setName(event.target.value);
+                }}
+              />
+            </label>
+            <label htmlFor="project-add-folder-input">
+              {projectFormText(PROJECT_FORM_KEYS.folderLabel)}
+              <input
+                id="project-add-folder-input"
+                data-testid="project-add-folder"
+                aria-label={t("firstrun.steps.projectFolder")}
+                placeholder={projectFormText(PROJECT_FORM_KEYS.folderPlaceholder)}
+                value={folder}
+                onChange={(event) => {
+                  setFolder(event.target.value);
+                }}
+              />
+            </label>
             {pickOpen ? (
               <button
                 type="button"

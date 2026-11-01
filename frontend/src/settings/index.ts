@@ -1,7 +1,9 @@
 import { createElement, useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { t } from '../locale/index';
-import { ApiError } from '../api/errors';
+import { ApiError, requestResponse } from '../api/errors';
+import { useApiClient } from '../app/ApiClientProvider';
 import {
   readRoleProfileFromServer,
   readRoleProfilesFromServer,
@@ -16,6 +18,28 @@ export interface SettingsRoute {
   titleKey: string;
   purposeKey: string;
   needItNowKey: string;
+}
+
+// FXKITUI guided first run: completion record in the settings store. The
+// flag is one input to the start gate; the gate always pairs it with live
+// server profile state (connected providers plus stored projects), so a
+// start decision is never localStorage-only.
+export const FIRST_RUN_DONE_KEY = 'agentsi.firstrun.done';
+
+export function readFirstRunDone(): boolean {
+  try {
+    return window.localStorage.getItem(FIRST_RUN_DONE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+export function markFirstRunDone(): void {
+  try {
+    window.localStorage.setItem(FIRST_RUN_DONE_KEY, 'true');
+  } catch {
+    // Storage unavailable: the in-memory flow still completes this visit.
+  }
 }
 
 export const SETTINGS_ROUTES: SettingsRoute[] = [
@@ -376,4 +400,138 @@ export function AcceptedRiskSwitch(props: AcceptedRiskSwitchProps): ReactElement
     t('settings.risk.label'),
     createElement('p', null, t('settings.risk.warning')),
   );
+}
+
+// FXKITUI guided-first-run start gate. A fresh profile (no connected
+// provider AND no stored project) opens /firstrun once at start; an
+// existing profile with a project never leaves chat. Completion comes from
+// the settings store above; provider and project state are always read
+// live from the server, so the decision is never localStorage-only. On the
+// Settings General page the gate renders the link to the How-it-works
+// diagram; on /firstrun it renders the always-visible skip plus the
+// How-it-works link (they live here so the flow component stays
+// untouched). Finishing the flow always creates a project, so the gate
+// naturally stays quiet afterwards. Mounted by the single FXKITUI-FIRSTRUN
+// block in App.tsx. Written with createElement: this module is a .ts file.
+async function readConnectedProviderIds(): Promise<string[] | null> {
+  try {
+    const response = await requestResponse('/api/v1/providers', {
+      method: 'GET',
+    });
+    const data: unknown = await response.json();
+    if (typeof data !== 'object' || data === null) {
+      return null;
+    }
+    const providers = (data as { providers?: unknown }).providers;
+    if (!Array.isArray(providers)) {
+      return null;
+    }
+    const ids: string[] = [];
+    for (const row of providers) {
+      if (
+        typeof row === 'object' &&
+        row !== null &&
+        typeof (row as { provider_id?: unknown }).provider_id === 'string'
+      ) {
+        ids.push((row as { provider_id: string }).provider_id);
+      }
+    }
+    return ids;
+  } catch {
+    return null;
+  }
+}
+
+export function FirstRunGate(): ReactElement | null {
+  const client = useApiClient();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [settled, setSettled] = useState<boolean>(() => readFirstRunDone());
+  useEffect(() => {
+    if (readFirstRunDone()) {
+      setSettled(true);
+      return;
+    }
+    let alive = true;
+    void Promise.all([readConnectedProviderIds(), client.listProjects()]).then(
+      ([providers, projects]) => {
+        if (!alive) {
+          return;
+        }
+        setSettled(true);
+        if (
+          providers !== null &&
+          providers.length === 0 &&
+          projects.length === 0 &&
+          location.pathname === '/'
+        ) {
+          navigate('/firstrun', { replace: true });
+        }
+      },
+      () => {
+        // A failed probe fails open to chat: a start gate must never lock
+        // a newcomer out when the server cannot be reached.
+        if (alive) {
+          setSettled(true);
+        }
+      },
+    );
+    return () => {
+      alive = false;
+    };
+  }, [client, navigate, location.pathname]);
+  // Anchors with client-side navigation (createElement over the router
+  // Link rejects test ids under .ts typing; the behavior is identical).
+  function go(event: { preventDefault(): void }, to: string): void {
+    event.preventDefault();
+    navigate(to);
+  }
+  if (location.pathname === '/settings' && settled) {
+    return createElement(
+      'p',
+      { 'data-testid': 'settings-how-it-works-wrap' },
+      createElement(
+        'a',
+        {
+          'data-testid': 'settings-how-it-works',
+          href: '/how-it-works',
+          onClick: (event: { preventDefault(): void }) => {
+            go(event, '/how-it-works');
+          },
+        },
+        t('howItWorks.runs.title'),
+      ),
+    );
+  }
+  if (location.pathname === '/firstrun') {
+    return createElement(
+      'p',
+      { 'data-testid': 'firstrun-gate-links' },
+      createElement(
+        'a',
+        {
+          'data-testid': 'firstrun-skip',
+          href: '/',
+          onClick: (event: { preventDefault(): void }) => {
+            markFirstRunDone();
+            go(event, '/');
+          },
+        },
+        t('firstrun.skip'),
+      ),
+      ' ',
+      createElement(
+        'a',
+        {
+          'data-testid': 'firstrun-how-it-works',
+          href: '/how-it-works',
+          onClick: (event: { preventDefault(): void }) => {
+            go(event, '/how-it-works');
+          },
+        },
+        t('howItWorks.runs.title'),
+      ),
+    );
+  }
+  return null;
 }
