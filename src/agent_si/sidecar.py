@@ -285,8 +285,104 @@ def build_app():
     return app
 
 
+#: CLI flag routing the frozen exe (or a source checkout) to one QA
+#: runner module with the host stdio contract. Handled first in main(),
+#: before any window, port pick or server start.
+_QA_RUNNER_FLAG = "--qa-runner"
+
+
+def _qa_runner_ref(argv: list[str] | None) -> str | None:
+    """Return the runner ref after --qa-runner, or None when absent."""
+    args = list(sys.argv[1:] if argv is None else argv)
+    if _QA_RUNNER_FLAG not in args:
+        return None
+    index = args.index(_QA_RUNNER_FLAG)
+    if index + 1 >= len(args):
+        return ""
+    return args[index + 1]
+
+
+def run_qa_runner(runner_ref: str) -> int:
+    """Run one QA runner module with the host stdio contract.
+
+    Reads the host input JSON on stdin and lets the runner module emit
+    exactly one result JSON on stdout, then exits: no window, no port
+    pick, no server. Unknown runners answer a BLOCKED envelope.
+    """
+    import importlib.util
+    import json
+
+    def envelope(runner_id: str, status: str, reason: str) -> None:
+        try:
+            stream = sys.stdout
+            if stream is None:
+                return
+            stream.write(
+                json.dumps(
+                    {
+                        "test_id": "",
+                        "runner_id": runner_id,
+                        "status": status,
+                        "reason": reason,
+                        "assertions": 0,
+                        "evidence": [],
+                    }
+                )
+                + "\n"
+            )
+        except Exception:
+            return
+
+    ref = (runner_ref or "").strip()
+    if not ref:
+        envelope("", "BLOCKED", "missing_runner")
+        return 0
+    here = os.path.dirname(os.path.abspath(__file__))
+    src_root = os.path.dirname(here)
+    if src_root and src_root not in sys.path:
+        sys.path.insert(0, src_root)
+    stem = os.path.basename(ref)
+    if stem.endswith(".py"):
+        stem = stem[:-3]
+    if not stem.isidentifier():
+        envelope(ref, "BLOCKED", "unknown_runner")
+        return 0
+    module = None
+    if ref.endswith(".py") and os.path.isfile(ref):
+        try:
+            spec = importlib.util.spec_from_file_location(
+                "agent_si.qa_catalog.runners." + stem, ref)
+            if spec is not None and spec.loader is not None:
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+        except Exception:
+            module = None
+    else:
+        try:
+            module = importlib.import_module(
+                "agent_si.qa_catalog.runners." + stem)
+        except Exception:
+            module = None
+    if module is None:
+        envelope(stem, "BLOCKED", "unknown_runner")
+        return 0
+    entry = getattr(module, "main", None)
+    if not callable(entry):
+        envelope(stem, "BLOCKED", "unknown_runner")
+        return 0
+    try:
+        return int(entry())
+    except SystemExit as exc:
+        if isinstance(exc.code, int):
+            return exc.code
+        return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the sidecar: serve on loopback, open the native window."""
+    qa_ref = _qa_runner_ref(argv)
+    if qa_ref is not None:
+        return run_qa_runner(qa_ref)
     _ = argv
     app = build_app()
     token = getattr(app.state, "ui_session_token", "")

@@ -1,0 +1,11 @@
+{
+  "name": "fxcatalog-seed-node",
+  "version": "0.1.0",
+  "description": "Seed node project fixture for catalog served checks.",
+  "scripts": {
+    "test": "node check.js"
+  },
+  "dependencies": {
+    "left-pad": "1.3.0"
+  }
+}

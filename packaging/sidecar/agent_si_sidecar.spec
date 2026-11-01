@@ -72,6 +72,18 @@ for _rel, _dest, _owner in _DATA_CANDIDATES:
     else:
         print("sidecar spec: skip missing " + _owner + " input (owning lane pending): " + _rel)
 
+# FXCATALOG lane: the frozen QA catalog data consumed by the catalog
+# lane at runtime. Absent until its owning lane stages it; a missing
+# file is skipped with a build-log line (never synthesized here).
+_CATALOG_V2 = os.path.join(
+    ROOT, "src", "agent_si", "qa_catalog", "catalog_v2.json")
+if os.path.isfile(_CATALOG_V2):
+    datas.append((_CATALOG_V2, "qa_catalog"))
+else:
+    print(
+        "sidecar spec: skip missing FXCATALOG catalog data "
+        "(owning lane pending): src/agent_si/qa_catalog/catalog_v2.json")
+
 block_cipher = None
 
 # pathex is src-first so the frozen backend package resolves before site-packages.
@@ -84,7 +96,27 @@ a = Analysis(
     pathex=[SRC_DIR, ROOT],
     binaries=[],
     datas=datas,
-    hiddenimports=["iface.frozen_manifest.manifest"],
+    hiddenimports=[
+        "iface.frozen_manifest.manifest",
+        "agent_si.qa_catalog.runners.host",
+        "agent_si.qa_catalog.runners.suite_invoke",
+        "agent_si.qa_catalog.runners.static_lint",
+        "agent_si.qa_catalog.runners.secret_scan",
+        "agent_si.qa_catalog.runners.dep_audit",
+        "agent_si.qa_catalog.runners.build_check",
+        "agent_si.qa_catalog.runners.install_check",
+        "agent_si.qa_catalog.runners.policy_gate",
+        "agent_si.qa_catalog.runners.observability_lint",
+        "agent_si.qa_catalog.runners.i18n_parity",
+        "agent_si.qa_catalog.runners.a11y_scan",
+        "agent_si.qa_catalog.runners.contract_test",
+        "agent_si.qa_catalog.runners.db_check",
+        "agent_si.qa_catalog.runners.file_roundtrip",
+        "agent_si.qa_catalog.runners.perf_bench",
+        "agent_si.qa_catalog.runners.api_smoke",
+        "agent_si.qa_catalog.runners.net_probe",
+        "agent_si.qa_catalog.runners.link_check",
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
