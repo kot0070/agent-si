@@ -184,17 +184,18 @@ function Get-PlanArtifacts {
 }
 
 function Invoke-WebBuild {
-    if (Test-Path -LiteralPath "frontend/dist") {
-        Copy-TreeArtifacts -From "frontend/dist" -To (Join-Path $StageDir "web")
-        $script:staged.web = $true
-    } elseif ((Test-Path -LiteralPath "frontend/package.json") -and (Test-Path -LiteralPath "frontend/node_modules")) {
-        & npm --prefix frontend run build --offline
-        if (-not $?) { throw "web build failed (offline local build)" }
-        Copy-TreeArtifacts -From "frontend/dist" -To (Join-Path $StageDir "web")
-        $script:staged.web = $true
-    } else {
-        Write-Warning "web build SKIPPED: frontend/ lane input missing (need frontend/dist, or frontend sources + node_modules for an offline build); recorded in SMOKE.json, never faked."
+    $hasSources = ((Test-Path -LiteralPath "frontend/package.json") -and (Test-Path -LiteralPath "frontend/src") -and (Test-Path -LiteralPath "frontend/index.html") -and (Test-Path -LiteralPath "frontend/node_modules"))
+    if (-not $hasSources) {
+        throw "web build UNBUILDABLE: need frontend sources (package.json, src, index.html) plus frontend/node_modules for an offline build; stale frontend/dist is never reused."
     }
+    if (Test-Path -LiteralPath "frontend/dist") {
+        Remove-Item -LiteralPath "frontend/dist" -Recurse -Force
+    }
+    & npm --prefix frontend run build --offline
+    if (-not $?) { throw "web build failed (offline local build)" }
+    if (-not (Test-Path -LiteralPath "frontend/dist/index.html")) { throw "web build failed: frontend/dist/index.html absent after the offline build" }
+    Copy-TreeArtifacts -From "frontend/dist" -To (Join-Path $StageDir "web")
+    $script:staged.web = $true
 }
 
 function Invoke-SidecarFreeze {

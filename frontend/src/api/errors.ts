@@ -195,6 +195,28 @@ export function clearUiToken(): void {
   }
 }
 
+// FXEXEUI: accept the per-launch UI session token from the address once
+// at module load; the token moves into the token store and leaves the
+// address, while every other query param stays in place.
+try {
+  if (typeof window !== "undefined" && typeof window.location !== "undefined") {
+    const params = new URLSearchParams(window.location.search);
+    const queryToken = params.get("token");
+    if (queryToken !== null && queryToken.length > 0) {
+      setUiToken(queryToken);
+      params.delete("token");
+      const rest = params.toString();
+      const next =
+        window.location.pathname +
+        (rest.length > 0 ? `?${rest}` : "") +
+        window.location.hash;
+      window.history.replaceState(null, "", next);
+    }
+  }
+} catch {
+  // Non-browser context: the token stays available from other sources.
+}
+
 export type RequestKind = "read" | "write" | "chat";
 
 export interface RequestOptions {
