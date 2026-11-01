@@ -613,6 +613,49 @@ class BudgetGate:
             return str(self._provider_committed_locked(
                 project_id, provider_id))
 
+    def provider_spending(self, project_id):
+        """Per-provider settled spend vs reserved estimates plus cap.
+
+        Returns {provider_id: {"spent", "reserved", "cap"}} with string
+        amounts; "cap" is None when no cap is configured. Providers
+        cover every cap key plus every provider seen on this project's
+        reservations. Only settled actuals count as "spent"; live
+        ACTIVE/CREATED estimates count as "reserved".
+        """
+        with self._lock:
+            try:
+                state = self._states[project_id]
+            except KeyError:
+                raise
+            caps = dict(state.provider_spend_caps or {})
+            spent: dict = {}
+            reserved: dict = {}
+            for res in self._reservations.values():
+                if res.project_id != project_id or not res.provider_id:
+                    continue
+                if res.status in ("ACTIVE", "CREATED"):
+                    reserved[res.provider_id] = (
+                        reserved.get(res.provider_id, _dec("0"))
+                        + _dec(res.estimated_amount))
+            for stl in self._settlements.values():
+                if stl.status != "SETTLED" or stl.actual_amount is None:
+                    continue
+                res = self._reservations.get(stl.reservation_id)
+                if res is None or res.project_id != project_id \
+                        or not res.provider_id:
+                    continue
+                spent[res.provider_id] = (
+                    spent.get(res.provider_id, _dec("0"))
+                    + _dec(stl.actual_amount))
+            rows = {}
+            for provider in sorted(set(caps) | set(spent) | set(reserved)):
+                rows[provider] = {
+                    "spent": str(spent.get(provider, _dec("0"))),
+                    "reserved": str(reserved.get(provider, _dec("0"))),
+                    "cap": caps.get(provider),
+                }
+            return rows
+
     def _record_incident_locked(self, state, task_id, run_id, timestamp,
                                 description,
                                 root_cause="budget admission refused"):
@@ -778,7 +821,8 @@ class BudgetGate:
                            project_id, provider_id) + requested),
                     root_cause="provider-cap admission refused",
                 )
-                raise BudgetBlockedError(incident.description)
+                raise BudgetBlockedError(
+                    incident.description + " [PROVIDER_SPEND_CAP_BLOCKED]")
             if committed + requested <= _dec(state.hard_limit):
                 return self._take(
                     state, project_id, task_id, run_id, reservation_id,
@@ -908,6 +952,33 @@ class BudgetGate:
                     existing=prior,
                 )
             state = self._states[reservation.project_id]
+            if provider_usage_evidence_ref is not None \
+                    and actual_amount is not None \
+                    and reservation.provider_id:
+                cap = (state.provider_spend_caps or {}).get(
+                    reservation.provider_id)
+                if cap is not None:
+                    projected = (
+                        self._provider_committed_locked(
+                            reservation.project_id, reservation.provider_id)
+                        - _dec(reservation.estimated_amount)
+                        + _dec(actual_amount))
+                    if projected > _dec(cap):
+                        incident = self._record_incident_locked(
+                            state, reservation.task_id, reservation.run_id,
+                            settled_at,
+                            "provider budget spend cap blocks charge: "
+                            "project %s provider %s actual %s %s would push "
+                            "spent to %s over cap %s %s"
+                            % (reservation.project_id,
+                               reservation.provider_id, actual_amount,
+                               state.currency, projected, cap,
+                               state.currency),
+                            root_cause="provider-cap charge refused",
+                        )
+                        raise BudgetBlockedError(
+                            incident.description
+                            + " [PROVIDER_SPEND_CAP_BLOCKED]")
             self._settlement_seq += 1
             settlement_id = "stl-%s-%d" % (reservation_id, self._settlement_seq)
             if provider_usage_evidence_ref is None:
