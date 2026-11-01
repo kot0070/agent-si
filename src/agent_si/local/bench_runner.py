@@ -13,10 +13,12 @@ modules only; real local runs happen only via the HD gateway, never here.
 
 from __future__ import annotations
 
+import http.client
 import itertools
 import json
 import os
 import socket
+import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -31,6 +33,7 @@ from agent_si.local.bench_protocol import (
     BenchLevel,
     BenchResultRow,
     HardwareProfile,
+    ResultKind,
     level_floor_minutes,
 )
 
@@ -512,6 +515,7 @@ def start_run(
     level: BenchLevel,
     authorized: bool,
     admission: dict | None = None,
+    chat_endpoint: str | None = None,
 ) -> RunHandle | RunSkip:
     """Start a serial run: passive check, then auth, then the busy guard.
 
@@ -522,7 +526,9 @@ def start_run(
     lands (R-371). When the caller binds the four admission refs, the
     run is admitted through the production admission path first and a
     refusal raises fail-closed with no run created; without refs the
-    start behaves exactly as before.
+    start behaves exactly as before. The optional chat_endpoint is the
+    run-start chain winner (served POST body, else remembered check);
+    without it the executor falls back to the env var, else stays idle.
     """
     lvl = BenchLevel(level)
     if not isinstance(model_id, str) or not model_id:
@@ -579,6 +585,9 @@ def start_run(
     if admission_verdict is not None:
         _RUN_ADMISSION[run_id] = admission_verdict
     _journal_append("start_run")
+    _start_executor_thread(
+        run_id, model_id, lvl, _resolve_bench_chat_endpoint(chat_endpoint)
+    )
     return handle
 
 
@@ -1588,3 +1597,360 @@ def complete_run(
     except Exception:
         pass
     return outcome
+
+#: --- Additive F10 background executor (FB2B8; new names only). ---
+#: start_run spawns one daemon thread per run; the thread walks the run's
+#: frozen slice over loopback-only chat, appends one BenchResultRow per
+#: case with its deterministic score, honours pause/stop, and on full
+#: completion writes the MEASURED base row via the adapter seam. Contact
+#: Contact
+#: is loopback-only through the run-start resolved endpoint (served POST
+#: body, else remembered check, else env var) used via the chat seam;
+#: with no endpoint resolved the thread returns at once and the run keeps
+#: today's semantics (active until stopped, no rows). Never real Ollama,
+#: never non-loopback.
+BENCH_CHAT_ENDPOINT_ENV = "AGENT_SI_BENCH_CHAT_ENDPOINT"
+
+#: Per-attempt loopback chat timeout: the loopback endpoint answers fast;
+#: a hung runtime never hangs the executor past stop.
+_BENCH_CHAT_TIMEOUT_S = 5.0
+
+#: Pause-wait granularity: a stop arriving during a pause aborts fast.
+_BENCH_EXECUTOR_PAUSE_POLL_S = 0.05
+
+#: Reply text kept per row: the leading chars of the scored reply.
+_BENCH_REPLY_EXCERPT_CHARS = 200
+
+#: Executor threads by run id (daemon; spawned by start_run, never joined
+#: by the product: tests join them through this registry).
+_RUN_THREADS: dict[str, threading.Thread] = {}
+
+
+def bench_chat_endpoint() -> str | None:
+    """Loopback chat endpoint from the env var (chain fallback).
+
+    Reads the env var live; None means no runtime is configured and the
+    executor performs no contact at all.
+    """
+    raw = os.environ.get(BENCH_CHAT_ENDPOINT_ENV, "")
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    return raw.strip()
+
+
+def _resolve_bench_chat_endpoint(chat_endpoint: str | None) -> str | None:
+    """Run-start endpoint chain: explicit start arg wins, else env var.
+
+    The served POST body (else the remembered check endpoint) arrives as
+    the explicit arg; None/blank falls back to the env var; None means no
+    runtime is configured and the executor performs no contact at all.
+    """
+    if isinstance(chat_endpoint, str) and chat_endpoint.strip():
+        return chat_endpoint.strip()
+    return bench_chat_endpoint()
+
+
+class _EndpointChat:
+    """chat-seam object bound to one loopback endpoint (executor use).
+
+    Exposes the calibrate seam shape chat(model_id, prompt) -> dict over
+    the run-start resolved endpoint.
+    """
+
+    def __init__(self, endpoint: str) -> None:
+        self.endpoint = endpoint
+
+    def chat(self, model_id: str, prompt: str) -> dict:
+        """One chat turn through the bound loopback endpoint."""
+        return _loopback_chat(model_id, prompt, self.endpoint)
+
+
+def _guard_loopback_chat_endpoint(endpoint: str) -> tuple[str, int, str]:
+    """Split a chat endpoint into (host, port, path); loopback http only.
+
+    Anything unparsable, non-http or non-loopback refuses fail-closed:
+    the executor never contacts it.
+    """
+    try:
+        parts = urlparse(endpoint if "://" in endpoint else f"http://{endpoint}")
+    except ValueError as exc:
+        raise BenchRefusedError(
+            f"bench chat refused: unparsable endpoint {endpoint!r}; state unchanged"
+        ) from exc
+    if (parts.scheme or "http").lower() != "http":
+        raise BenchRefusedError(
+            f"bench chat refused: endpoint {endpoint!r} is not plain http; "
+            "state unchanged"
+        )
+    host = (parts.hostname or "").lower()
+    if host not in ("127.0.0.1", "::1", "localhost"):
+        raise BenchRefusedError(
+            f"bench chat refused: endpoint {endpoint!r} is not loopback; "
+            "state unchanged"
+        )
+    return host, parts.port or 80, parts.path or "/"
+
+
+def _loopback_chat(model_id: str, prompt: str, endpoint: str) -> dict:
+    """One chat turn over loopback HTTP only; refuses instead of reaching out.
+
+    POSTs {"model", "prompt"} JSON to the run-start resolved endpoint and
+    returns the reply dict (the calibrate chat seam contract:
+    chat(model_id, prompt) -> dict). Anything unparsable, non-http or
+    non-loopback refuses fail-closed; raises on unreachable runtimes,
+    non-200 answers, non-JSON bodies or non-dict replies.
+    """
+    if not isinstance(endpoint, str) or not endpoint.strip():
+        raise BenchRefusedError(
+            "bench chat refused: no loopback chat endpoint configured "
+            f"({BENCH_CHAT_ENDPOINT_ENV} is unset); state unchanged"
+        )
+    host, port, path = _guard_loopback_chat_endpoint(endpoint.strip())
+    body = json.dumps({"model": model_id, "prompt": prompt}).encode("utf-8")
+    try:
+        conn = http.client.HTTPConnection(host, port, timeout=_BENCH_CHAT_TIMEOUT_S)
+        try:
+            conn.request(
+                "POST",
+                path,
+                body,
+                {
+                    "Content-Type": "application/json",
+                    "Content-Length": str(len(body)),
+                },
+            )
+            response = conn.getresponse()
+            status = response.status
+            raw = response.read()
+        finally:
+            conn.close()
+    except OSError as exc:
+        raise BenchRefusedError(
+            f"bench chat refused: loopback runtime unreachable ({exc}); "
+            "state unchanged"
+        ) from exc
+    if status != 200:
+        raise BenchRefusedError(
+            f"bench chat refused: loopback runtime answered HTTP {status}; "
+            "state unchanged"
+        )
+    try:
+        reply = json.loads(raw.decode("utf-8"))
+    except ValueError as exc:
+        raise BenchRefusedError(
+            "bench chat refused: loopback runtime answered non-JSON; "
+            "state unchanged"
+        ) from exc
+    if not isinstance(reply, dict):
+        raise ValueError(
+            f"chat seam must return a dict, got {type(reply).__name__}"
+        )
+    return reply
+
+
+def _bench_reply_text(reply: dict) -> str:
+    """Deterministic reply text for scoring: first known text key, else JSON."""
+    for key in ("response", "text", "output", "content"):
+        value = reply.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return json.dumps(reply, sort_keys=True)
+
+
+def _bench_parse_numbers(text: str) -> list[int] | None:
+    """Strict comma-separated integers, else None (no stray content)."""
+    parts = [part.strip() for part in text.strip().split(",")]
+    if not parts or any(not part for part in parts):
+        return None
+    try:
+        return [int(part) for part in parts]
+    except ValueError:
+        return None
+
+
+def _bench_score_reply(rule: str, reply_text: str) -> float:
+    """Score one reply against its frozen expected-answer rule.
+
+    Returns checks passed / checks, derived only from the reply text:
+    exact text, case-insensitive text, JSON object plus required keys,
+    single word plus word match, parsed numbers plus ascending order.
+    Unknown rules raise (fail-closed: never a score not from the reply).
+    """
+    text = reply_text if isinstance(reply_text, str) else ""
+    kind, _, arg = rule.partition(":") if isinstance(rule, str) else ("", "", "")
+    checks: list[bool] = []
+    if kind == "exact" and arg != "":
+        checks = [text.strip() == arg]
+    elif kind == "exact-ci" and arg != "":
+        checks = [text.strip().casefold() == arg.strip().casefold()]
+    elif kind == "json-keys":
+        keys = [part.strip() for part in arg.split(",") if part.strip()]
+        if not keys:
+            raise ValueError(f"unknown bench expected-answer rule {rule!r}")
+        try:
+            document = json.loads(text)
+        except ValueError:
+            document = None
+        checks = [
+            isinstance(document, dict),
+            isinstance(document, dict)
+            and all(key in document for key in keys),
+        ]
+    elif kind == "one-word" and arg != "":
+        tokens = text.split()
+        checks = [
+            len(tokens) == 1,
+            len(tokens) == 1 and tokens[0].casefold() == arg.strip().casefold(),
+        ]
+    elif kind == "numbers-asc":
+        try:
+            want = [int(part) for part in arg.split(",")]
+        except ValueError:
+            want = None
+        got = _bench_parse_numbers(text)
+        checks = [got is not None, got is not None and got == want]
+    else:
+        raise ValueError(f"unknown bench expected-answer rule {rule!r}")
+    passed = sum(1 for check in checks if check)
+    return passed / len(checks)
+
+
+def _executor_wait_while_paused(progress: RunProgress) -> bool:
+    """Wait while a run is paused; False when the run stopped meanwhile."""
+    while progress.paused and not progress.stopped:
+        time.sleep(_BENCH_EXECUTOR_PAUSE_POLL_S)
+    return not progress.stopped
+
+
+def _executor_settle(run_id: str, completed: bool) -> None:
+    """Settle a background run: stopped plus the serial slot freed.
+
+    Same settlement as stop_run (stopped, slot freed when active) so a
+    finished or aborted executor never leaks the machine.
+    """
+    global _ACTIVE_RUN_ID
+    try:
+        progress = _require_progress(run_id)
+    except KeyError:
+        if _ACTIVE_RUN_ID == run_id:
+            _ACTIVE_RUN_ID = None
+        return
+    if completed:
+        progress.done_cases = len(_RUN_ROWS.get(run_id, []))
+    progress.stopped = True
+    if _ACTIVE_RUN_ID == run_id:
+        _ACTIVE_RUN_ID = None
+    _journal_append("executor_complete" if completed else "executor_abort")
+
+
+def _executor_complete(run_id: str, model_id: str, level: BenchLevel) -> None:
+    """Write the completion MEASURED row via the adapter seam, then settle.
+
+    Only a full, unstopped slice completes: anything short settles
+    aborted with no base write (fail-closed, no partial measurements).
+    """
+    try:
+        progress = _require_progress(run_id)
+    except KeyError:
+        return
+    if progress.stopped:
+        _executor_settle(run_id, completed=False)
+        return
+    expected = len(_bench_cases.list_cases(level))
+    rows = _RUN_ROWS.get(run_id, [])
+    scores = [row.score for row in rows if isinstance(row.score, float)]
+    hardware = _RUN_HARDWARE.get(run_id) or detect_hardware()
+    if len(rows) != expected or len(scores) != expected or not rows:
+        _executor_settle(run_id, completed=False)
+        return
+    try:
+        _adapter.record_bench_measured(
+            model_id=model_id,
+            task_class=f"localbench:{BenchLevel(level).value}",
+            score=sum(scores) / len(scores),
+            sample_count=len(rows),
+            confidence=len(rows) / expected,
+            environment_fingerprint=_hardware_fingerprint(hardware),
+            source="localbench background executor",
+        )
+    except Exception:
+        _executor_settle(run_id, completed=False)
+        return
+    _executor_settle(run_id, completed=True)
+
+
+def _execute_run(
+    run_id: str, model_id: str, level: BenchLevel, chat_endpoint: str | None
+) -> None:
+    """Background executor body: walk the slice, score, append, complete.
+
+    Never raises into the thread: a dead executor always settles the run
+    (completed only on a full slice, aborted otherwise) and the serial
+    slot never leaks after a settled run.
+    """
+    try:
+        cases = _bench_cases.list_cases(level)
+    except (ValueError, TypeError, AttributeError):
+        _executor_settle(run_id, completed=False)
+        return
+    try:
+        progress = _require_progress(run_id)
+    except KeyError:
+        return
+    if not chat_endpoint:
+        return
+    chat_fn = _EndpointChat(chat_endpoint).chat
+    hardware = _RUN_HARDWARE.get(run_id) or detect_hardware()
+    for case in cases:
+        if progress.stopped:
+            return
+        if not _executor_wait_while_paused(progress):
+            return
+        if progress.stopped:
+            return
+        try:
+            spec = _bench_cases.quick_case_spec(case.case_id)
+        except (ValueError, TypeError, AttributeError):
+            _executor_settle(run_id, completed=False)
+            return
+        try:
+            reply = chat_fn(model_id, spec.prompt)
+        except Exception:
+            _executor_settle(run_id, completed=False)
+            return
+        try:
+            reply_text = _bench_reply_text(reply)
+            score = _bench_score_reply(spec.rule, reply_text)
+            row = BenchResultRow(
+                case_id=case.case_id,
+                kind=ResultKind.MEASURED,
+                model_id=model_id,
+                hardware=hardware,
+                score=float(score),
+                expected_rule=spec.rule,
+                reply_excerpt=reply_text[:_BENCH_REPLY_EXCERPT_CHARS],
+            )
+        except (ValueError, TypeError):
+            _executor_settle(run_id, completed=False)
+            return
+        _RUN_ROWS.setdefault(run_id, []).append(row)
+        progress.done_cases = len(_RUN_ROWS[run_id])
+    _executor_complete(run_id, model_id, level)
+
+
+def _start_executor_thread(
+    run_id: str,
+    model_id: str,
+    level: BenchLevel,
+    chat_endpoint: str | None = None,
+) -> threading.Thread:
+    """Spawn the daemon background executor for a run; returns at once."""
+    thread = threading.Thread(
+        target=_execute_run,
+        args=(run_id, model_id, level, chat_endpoint),
+        name=f"bench-exec-{run_id}",
+        daemon=True,
+    )
+    _RUN_THREADS[run_id] = thread
+    thread.start()
+    return thread

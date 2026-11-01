@@ -50,10 +50,22 @@ class BenchWarning:
 
 @dataclass
 class BenchResultRow:
+    """One bench result row; score is the deterministic per-case score.
+
+    score is None for rows recorded without the F10 background executor
+    (every pre-F10 writer); executor rows carry a finite 0..1 score.
+    expected_rule is the frozen expected-answer rule the reply was scored
+    against; reply_excerpt is the leading reply text scored (both set only
+    on executor rows).
+    """
+
     case_id: str
     kind: ResultKind
     model_id: str
     hardware: HardwareProfile
+    score: float | None = None
+    expected_rule: str | None = None
+    reply_excerpt: str | None = None
 
 
 #: BUILD_PLAN reference minima in minutes at 8B params (Quick ~10-15min@8B,
@@ -122,15 +134,51 @@ def build_prestart_warnings(estimate: BenchEstimate, pc_in_use: bool) -> list[Be
 
 
 def build_result_row(
-    case_id: str, kind: ResultKind, model_id: str, hardware: HardwareProfile
+    case_id: str,
+    kind: ResultKind,
+    model_id: str,
+    hardware: HardwareProfile,
+    score: float | None = None,
+    expected_rule: str | None = None,
+    reply_excerpt: str | None = None,
 ) -> BenchResultRow:
-    """One results row carrying its hardware profile (PROXY|MEASURED)."""
+    """One results row carrying its hardware profile (PROXY|MEASURED).
+
+    score is None for non-executor rows; executor rows carry a finite
+    0..1 per-case score, anything else raises. expected_rule records the
+    frozen rule the reply was scored against; reply_excerpt records the
+    leading reply text scored (both optional, executor rows only).
+    """
     if not isinstance(case_id, str) or not case_id:
         raise ValueError(f"case_id must be a non-empty string, got {case_id!r}")
     if not isinstance(model_id, str) or not model_id:
         raise ValueError(f"model_id must be a non-empty string, got {model_id!r}")
+    if score is not None and (
+        not isinstance(score, float)
+        or isinstance(score, bool)
+        or not 0.0 <= score <= 1.0
+        or score != score
+    ):
+        raise ValueError(f"score must be a finite 0..1 float or None, got {score!r}")
+    if expected_rule is not None and (
+        not isinstance(expected_rule, str) or not expected_rule
+    ):
+        raise ValueError(
+            "expected_rule must be a non-empty string or None, "
+            f"got {expected_rule!r}"
+        )
+    if reply_excerpt is not None and not isinstance(reply_excerpt, str):
+        raise ValueError(
+            f"reply_excerpt must be a string or None, got {reply_excerpt!r}"
+        )
     return BenchResultRow(
-        case_id=case_id, kind=ResultKind(kind), model_id=model_id, hardware=hardware
+        case_id=case_id,
+        kind=ResultKind(kind),
+        model_id=model_id,
+        hardware=hardware,
+        score=score,
+        expected_rule=expected_rule,
+        reply_excerpt=reply_excerpt,
     )
 
 
