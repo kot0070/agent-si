@@ -19,6 +19,7 @@ export type LeftoverKeyFinderProps = {
   linkedSecretIds: string[];
   refreshKey?: number;
   loadEntries?: () => Promise<SecretRef[]>;
+  deleteEntry?: (entry: SecretRef) => Promise<void>;
 };
 
 export function LeftoverKeyFinder({
@@ -27,6 +28,7 @@ export function LeftoverKeyFinder({
   linkedSecretIds,
   refreshKey = 0,
   loadEntries,
+  deleteEntry,
 }: LeftoverKeyFinderProps) {
   const fallback = useMemo(() => async (): Promise<SecretRef[]> => store.list(APP_NAMESPACE_PREFIX), [store]);
   const load = loadEntries ?? fallback;
@@ -40,6 +42,7 @@ export function LeftoverKeyFinder({
       sessionToken={sessionToken}
       linkedSecretIds={linkedSecretIds}
       refreshKey={refreshKey}
+      deleteEntry={deleteEntry}
     />
   );
 }

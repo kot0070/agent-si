@@ -112,3 +112,52 @@ export async function disconnectProvider(providerId: string): Promise<void> {
     },
   );
 }
+
+// GET the leftover-key list for the app namespace. Reads never send a
+// token. The route serves names plus dates only, never key material,
+// so rows map straight onto id-only refs.
+export async function listLeftoverKeys(appPrefix: string): Promise<SecretRef[]> {
+  const response = await requestResponse(
+    `/api/v1/budget/providers/leftover-keys?app_prefix=${encodeURIComponent(appPrefix)}`,
+    {
+      method: "GET",
+    },
+  );
+  const data: unknown = await response.json();
+  if (!isRecord(data) || !Array.isArray(data["entries"])) {
+    return [];
+  }
+  const refs: SecretRef[] = [];
+  for (const row of data["entries"] as unknown[]) {
+    if (!isRecord(row) || typeof row["name"] !== "string") {
+      continue;
+    }
+    const name = row["name"] as string;
+    const stamp = typeof row["last_used_at"] === "string" ? (row["last_used_at"] as string) : "";
+    refs.push({
+      secret_id: name,
+      provider_id: name.startsWith(appPrefix) ? name.slice(appPrefix.length) : name,
+      type: "api-key",
+      scope: "providers",
+      source: "route",
+      created_at: stamp,
+      last_rotated_at: null,
+    });
+  }
+  return refs;
+}
+
+// POST one leftover-key delete for a user-confirmed entry. The lane
+// takes the session token in the body next to the confirm; the header
+// token travels through kind write as usual.
+export async function deleteLeftoverKey(
+  appPrefix: string,
+  name: string,
+  sessionToken: string,
+): Promise<void> {
+  await requestResponse("/api/v1/budget/providers/leftover-delete", {
+    method: "POST",
+    kind: "write",
+    body: { app_prefix: appPrefix, name, confirmed: true, session_token: sessionToken },
+  });
+}
