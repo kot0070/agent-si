@@ -153,7 +153,7 @@ describe('localbench settings route', () => {
     expect(LOCALBENCH_ENDPOINTS.stop).toBe('/api/v1/local/bench/runs/stop');
     expect(LOCALBENCH_ENDPOINTS.results).toBe('/api/v1/local/bench/results');
     expect(expandBenchScan(LOCALBENCH_ENDPOINTS.scan, 'bench-cases')).toBe(
-      '/api/v1/local/bench/scan?path=bench-cases',
+      '/api/v1/local/bench/scan?path=bench-cases&allowlist=bench-cases',
     );
     expect(
       expandBenchEstimate(LOCALBENCH_ENDPOINTS.estimate, 'local-b', 'deep'),
@@ -178,7 +178,7 @@ describe('localbench settings route', () => {
     });
     const client = new HttpLocalBenchClient();
     const result = await client.scanModels('bench-cases');
-    expect(seen).toEqual(['/api/v1/local/bench/scan?path=bench-cases']);
+    expect(seen).toEqual(['/api/v1/local/bench/scan?path=bench-cases&allowlist=bench-cases']);
     expect(result.path).toBe('bench-cases');
     expect(result.models).toEqual([
       { model_id: 'local-a', display_name: 'local-a', evidence: 'UNKNOWN' },

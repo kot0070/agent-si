@@ -131,7 +131,10 @@ export const LOCALBENCH_ENDPOINTS = {
 export type LocalBenchEndpointKey = keyof typeof LOCALBENCH_ENDPOINTS;
 
 export function expandBenchScan(template: string, path: string): string {
-  return `${template}?path=${encodeURIComponent(path)}`;
+  // The folder the user typed is the allowlist entry: scan_models stays
+  // allowlist-first and still refuses drive roots and forbidden segments.
+  const folder = encodeURIComponent(path);
+  return `${template}?path=${folder}&allowlist=${folder}`;
 }
 
 export function expandBenchEstimate(
