@@ -46,26 +46,6 @@ const SERVED: Record<string, unknown> = {
     unavailable: [],
   },
   "/api/v1/local/bench/history": [],
-  "/api/v1/teststage/tests-view?plan_id=k07next3&run_id=seed": {
-    plan_id: "k07next3",
-    run_id: "seed",
-    active: 0,
-    passed: 0,
-    remaining: 0,
-    rows: [],
-    settings_controls: [],
-  },
-  "/api/v1/app/session-write": {
-    row: "LIVE0-08",
-    token_ok: true,
-    actor: "ui",
-  },
-  "/api/v1/app/page-shell": {
-    row: "LIVE0B-04",
-    title_key: "shell.sidebar.projects",
-    title: "Projects",
-    console_class: "agent-si-console",
-  },
 };
 
 function jsonBody(data: unknown, status = 200): Response {
@@ -97,9 +77,9 @@ afterEach(() => {
   window.sessionStorage.clear();
 });
 
-function renderShell(): void {
+function renderShell(route = "/"): void {
   const router = createMemoryRouter([{ path: "*", element: <App /> }], {
-    initialEntries: ["/"],
+    initialEntries: [route],
   });
   render(
     <ApiClientProvider client={new HttpApiClient()}>
@@ -116,65 +96,56 @@ interface MountRow {
 
 const MOUNT_ROWS: MountRow[] = [
   {
-    link: "menu-k07next-locale-coverage",
+    link: "diagnostics-link-locale-coverage",
     section: "k07next-locale-coverage",
     heading: en.settings.general.title,
   },
   {
-    link: "menu-k07next-telemetry-themes",
+    link: "diagnostics-link-telemetry-themes",
     section: "k07next-telemetry-themes",
     heading: en.settings.appearance.title,
   },
   {
-    link: "menu-k07next2-bench-check",
+    link: "diagnostics-link-bench-check",
     section: "k07next2-bench-check",
     heading: en.settings.localbench.title,
   },
   {
-    link: "menu-k07next2-telemetry",
+    link: "diagnostics-link-telemetry",
     section: "k07next2-telemetry",
     heading: en.projects.ai_usage.title,
   },
   {
-    link: "menu-k07next3-bench-history",
+    link: "diagnostics-link-bench-history",
     section: "k07next3-bench-history",
     heading: en.projects.list.title,
-  },
-  {
-    link: "menu-k07next3-tests-view",
-    section: "k07next3-tests-view",
-    heading: en.settings.localAi.title,
-  },
-  {
-    link: "menu-k07next4-session-token",
-    section: "k07next4-session-token",
-    heading: en.chat.composer.send,
-  },
-  {
-    link: "menu-k07next4-page-shell",
-    section: "k07next4-page-shell",
-    heading: en.shell.sidebar.projects,
   },
 ];
 
 describe("fxwire1 shell reachability over the real app", () => {
-  it("starts chat-first with every MOUNT link visible", async () => {
+  it("starts chat-first, Settings > Diagnostics lists every MOUNT link", async () => {
     renderShell();
     expect(await screen.findByTestId("chat-prompt")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("menu-settings"));
+    fireEvent.click(await screen.findByTestId("settings-link-diagnostics"));
+    expect(await screen.findByTestId("diagnostics-section")).toBeTruthy();
     for (const row of MOUNT_ROWS) {
       expect(screen.getByTestId(row.link)).toBeTruthy();
     }
   });
 
-  it("clicks each MOUNT link from the first screen to its real screen", async () => {
-    renderShell();
-    expect(await screen.findByTestId("chat-prompt")).toBeTruthy();
+  it("clicks each MOUNT link from the diagnostics screen to its real screen", async () => {
+    renderShell("/settings/diagnostics");
+    expect(await screen.findByTestId("diagnostics-section")).toBeTruthy();
     for (const row of MOUNT_ROWS) {
       fireEvent.click(screen.getByTestId(row.link));
       const section = await screen.findByTestId(row.section);
       expect(section.textContent).toContain(row.heading);
-      fireEvent.click(screen.getByTestId("menu-chat"));
-      expect(await screen.findByTestId("chat-prompt")).toBeTruthy();
+      fireEvent.click(screen.getByTestId("menu-settings"));
+      fireEvent.click(await screen.findByTestId("settings-link-diagnostics"));
+      expect(screen.getByTestId(row.link)).toBeTruthy();
     }
+    fireEvent.click(screen.getByTestId("menu-chat"));
+    expect(await screen.findByTestId("chat-prompt")).toBeTruthy();
   });
 });

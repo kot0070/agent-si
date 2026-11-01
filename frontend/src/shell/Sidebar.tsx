@@ -38,30 +38,6 @@ export function Sidebar(props: SidebarProps): ReactElement {
       <Link data-testid="menu-settings" to="/settings">
         {t("settings.general.title")}
       </Link>
-      <Link data-testid="menu-k07next-locale-coverage" to="/k07next/locale-coverage">
-        {t("settings.general.title")}
-      </Link>
-      <Link data-testid="menu-k07next-telemetry-themes" to="/k07next/telemetry-themes">
-        {t("settings.appearance.title")}
-      </Link>
-      <Link data-testid="menu-k07next2-bench-check" to="/k07next2/bench-check">
-        {t("settings.localbench.title")}
-      </Link>
-      <Link data-testid="menu-k07next2-telemetry" to="/k07next2/telemetry">
-        {t("projects.ai_usage.title")}
-      </Link>
-      <Link data-testid="menu-k07next3-bench-history" to="/k07next3/bench-history">
-        {t("projects.runs.title")}
-      </Link>
-      <Link data-testid="menu-k07next3-tests-view" to="/k07next3/tests-view">
-        {t("settings.localAi.title")}
-      </Link>
-      <Link data-testid="menu-k07next4-session-token" to="/k07next4/session-token">
-        {t("chat.composer.send")}
-      </Link>
-      <Link data-testid="menu-k07next4-page-shell" to="/k07next4/page-shell">
-        {t("shell.sidebar.projects")}
-      </Link>
     </nav>
   );
 }

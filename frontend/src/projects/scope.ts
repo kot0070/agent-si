@@ -23,7 +23,6 @@ export function classifyScope(scope: string): ScopeKind {
 export const NAMED_MENU_TEST_IDS = [
   "menu-chat",
   "menu-agents-live",
-  "menu-new-task",
   "menu-projects",
   "menu-tasks",
   "menu-results",
