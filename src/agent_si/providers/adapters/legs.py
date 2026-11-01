@@ -38,6 +38,10 @@ LEG_IDS = (
 
 _NON_COMPAT = ("anthropic", "claude", "gemini")
 
+#: Pinned Anthropic API version sent on the /v1/messages probe
+#: (FB2B3 F1: the Anthropic API rejects version-less requests).
+ANTHROPIC_API_VERSION = "2023-06-01"
+
 
 def _capabilities():
     """Pre-evidence capability surface: nothing evidenced yet (SPEC 34A)."""
