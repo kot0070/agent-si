@@ -74,14 +74,14 @@ def test_limits_need_token_served(tmp_path):
 def test_over_cap_reserve_refused_served(tmp_path):
     client, app = _client(tmp_path)
     _limits(client, "fxcaps-res", {"acme": "5.00"})
-    ok = client.post("/api/v1/budget/k04f/reserve-tokens",
+    ok = client.post("/api/v1/budget/providers/reserve-tokens",
                      json={"project_id": "fxcaps-res", "task_id": "t1",
                            "run_id": "r1", "reservation_id": "fxcaps-r1",
                            "estimated_amount": "4.00", "currency": "USD",
                            "provider_id": "acme"},
                      headers=HEADERS)
     assert ok.status_code == 200, ok.text
-    over = client.post("/api/v1/budget/k04f/reserve-tokens",
+    over = client.post("/api/v1/budget/providers/reserve-tokens",
                        json={"project_id": "fxcaps-res", "task_id": "t1",
                              "run_id": "r1", "reservation_id": "fxcaps-r2",
                              "estimated_amount": "2.00", "currency": "USD",

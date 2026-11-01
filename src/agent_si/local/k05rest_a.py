@@ -36,7 +36,7 @@ _UNKNOWN_ROW = ERROR_CODES[2]
 _STALE_REFUSED_REASON = "versioned stale backup copies are never served as current"
 _PASSIVE_GATE_REFUSED = "PASSIVE_GATE_REFUSED"
 
-router = APIRouter(prefix="/k05rest")
+router = APIRouter(prefix="/api/v1/local")
 
 
 def _error(status: int, code: str, detail: str) -> JSONResponse:

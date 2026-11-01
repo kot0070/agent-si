@@ -666,17 +666,17 @@ def k04f_snapshot(ctx, query, body):
 
 
 K04F_ROUTES = (
-    ("post", "/api/v1/budget/k04f/breach", "k04f_breach", k04f_breach),
-    ("post", "/api/v1/budget/k04f/blocked-terminate",
+    ("post", "/api/v1/budget/providers/breach", "k04f_breach", k04f_breach),
+    ("post", "/api/v1/budget/providers/blocked-terminate",
      "k04f_blocked_terminate", k04f_blocked_terminate),
-    ("get", "/api/v1/budget/k04f/estimate", "k04f_estimate",
+    ("get", "/api/v1/budget/providers/estimate", "k04f_estimate",
      k04f_estimate),
-    ("post", "/api/v1/budget/k04f/reserve-tokens",
+    ("post", "/api/v1/budget/providers/reserve-tokens",
      "k04f_reserve_tokens", k04f_reserve_tokens),
-    ("post", "/api/v1/budget/k04f/route-block", "k04f_route_block",
+    ("post", "/api/v1/budget/providers/route-block", "k04f_route_block",
      k04f_route_block),
-    ("post", "/api/v1/budget/k04f/attach", "k04f_attach", k04f_attach),
-    ("post", "/api/v1/budget/k04f/snapshot-proof", "k04f_snapshot",
+    ("post", "/api/v1/budget/providers/attach", "k04f_attach", k04f_attach),
+    ("post", "/api/v1/budget/providers/snapshot-proof", "k04f_snapshot",
      k04f_snapshot),
 )
 
@@ -1027,15 +1027,15 @@ def k04n4_leftover_delete(ctx, query, body):
 
 
 K04NEXT4_ROUTES = (
-    ("post", "/api/v1/budget/k04next4/trial-cap", "k04n4_trial_cap",
+    ("post", "/api/v1/budget/providers/trial-cap", "k04n4_trial_cap",
      k04n4_trial_cap),
-    ("get", "/api/v1/budget/k04next4/kb-auto", "k04n4_kb_auto",
+    ("get", "/api/v1/budget/providers/kb-auto", "k04n4_kb_auto",
      k04n4_kb_auto),
-    ("post", "/api/v1/budget/k04next4/leftover-seed",
+    ("post", "/api/v1/budget/providers/leftover-seed",
      "k04n4_leftover_seed", k04n4_leftover_seed),
-    ("get", "/api/v1/budget/k04next4/leftover-keys",
+    ("get", "/api/v1/budget/providers/leftover-keys",
      "k04n4_leftover_keys", k04n4_leftover_keys),
-    ("post", "/api/v1/budget/k04next4/leftover-delete",
+    ("post", "/api/v1/budget/providers/leftover-delete",
      "k04n4_leftover_delete", k04n4_leftover_delete),
 )
 

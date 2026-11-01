@@ -162,19 +162,19 @@ def shell_menus() -> dict[str, Any]:
 
 
 ROUTES: tuple[tuple[str, str, str, Callable[[], dict[str, Any]]], ...] = (
-    ("get", "/api/v1/k07next2/context-card", "context_card",
+    ("get", "/api/v1/app/context-card", "context_card",
      context_card),
-    ("get", "/api/v1/k07next2/channel-lane", "channel_lane",
+    ("get", "/api/v1/app/channel-lane", "channel_lane",
      channel_lane),
-    ("get", "/api/v1/k07next2/app-id", "app_id", app_id),
-    ("get", "/api/v1/k07next2/brand", "brand", brand),
-    ("get", "/api/v1/k07next2/retry-policy", "retry_policy",
+    ("get", "/api/v1/app/app-id", "app_id", app_id),
+    ("get", "/api/v1/app/brand", "brand", brand),
+    ("get", "/api/v1/app/retry-policy", "retry_policy",
      retry_policy),
-    ("get", "/api/v1/k07next2/local-config-gate", "local_config_gate",
+    ("get", "/api/v1/app/local-config-gate", "local_config_gate",
      local_config_gate),
-    ("get", "/api/v1/k07next2/planner-router", "planner_router",
+    ("get", "/api/v1/app/planner-router", "planner_router",
      planner_router),
-    ("get", "/api/v1/k07next2/shell-menus", "shell_menus",
+    ("get", "/api/v1/app/shell-menus", "shell_menus",
      shell_menus),
 )
 

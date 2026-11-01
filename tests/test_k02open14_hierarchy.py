@@ -203,7 +203,7 @@ def test_k02open14_hierarchy_row358_team_config_change_validated_first():
     it applies; a refused change applies nothing and records no row."""
     client, headers = make_k02rest2_client()
     good = client.post(
-        "/v1/k02rest2/team-config-change",
+        "/api/v1/hierarchy/team-config-change",
         json={
             "statement": "raise agent cap for build",
             "reason": "build needs more agents",
@@ -218,7 +218,7 @@ def test_k02open14_hierarchy_row358_team_config_change_validated_first():
     assert body["decision_ref"].startswith("team-config-")
     assert body["reason"] == "applied"
     bad = client.post(
-        "/v1/k02rest2/team-config-change",
+        "/api/v1/hierarchy/team-config-change",
         json={
             "statement": "merge auditor and worker",
             "reason": "short crew for audit",
@@ -233,7 +233,7 @@ def test_k02open14_hierarchy_row358_team_config_change_validated_first():
     assert refused["decision_ref"] is None
     assert "audit independence" in refused["reason"]
     no_actor = client.post(
-        "/v1/k02rest2/team-config-change",
+        "/api/v1/hierarchy/team-config-change",
         json={
             "statement": "raise agent cap for build",
             "reason": "build needs more agents",
@@ -258,7 +258,7 @@ def test_k02open14_hierarchy_row359_multi_manager_settings_validated():
         },
     }
     good = client.post(
-        "/v1/k02rest2/multi-manager-settings",
+        "/api/v1/hierarchy/multi-manager-settings",
         json={"settings": settings},
         headers=headers,
     )
@@ -267,7 +267,7 @@ def test_k02open14_hierarchy_row359_multi_manager_settings_validated():
     broken = dict(settings)
     broken["max_parallel_managers"] = 0
     bad = client.post(
-        "/v1/k02rest2/multi-manager-settings",
+        "/api/v1/hierarchy/multi-manager-settings",
         json={"settings": broken},
         headers=headers,
     )
@@ -276,7 +276,7 @@ def test_k02open14_hierarchy_row359_multi_manager_settings_validated():
     assert body["ok"] is False
     assert "POLICY_CONFLICT" in body["reason"]
     no_actor = client.post(
-        "/v1/k02rest2/multi-manager-settings",
+        "/api/v1/hierarchy/multi-manager-settings",
         json={"settings": settings},
     )
     assert no_actor.status_code == 401
@@ -292,20 +292,20 @@ def test_k02open14_hierarchy_rowmp115_closed_part_ref_frozen():
         "audit_verdict_ref": "audit-1",
     }
     resp = client.post(
-        "/v1/k02rest2/closed-part-ref",
+        "/api/v1/hierarchy/closed-part-ref",
         json=ref,
         headers=headers,
     )
     assert resp.status_code == 200, resp.text
     assert resp.json() == ref
     blank = client.post(
-        "/v1/k02rest2/closed-part-ref",
+        "/api/v1/hierarchy/closed-part-ref",
         json=dict(ref, package_id="  "),
         headers=headers,
     )
     assert blank.status_code == 400
     no_actor = client.post(
-        "/v1/k02rest2/closed-part-ref",
+        "/api/v1/hierarchy/closed-part-ref",
         json=ref,
     )
     assert no_actor.status_code == 401
@@ -321,7 +321,7 @@ def test_k02open14_hierarchy_rowmp117_ledger_persist_load_roundtrip():
          "peak_concurrency": 1, "wall_time_s": 0.5},
     ]
     resp = client.post(
-        "/v1/k02rest2/ledger-roundtrip",
+        "/api/v1/hierarchy/ledger-roundtrip",
         json={"rows": rows},
         headers=headers,
     )
@@ -330,13 +330,13 @@ def test_k02open14_hierarchy_rowmp117_ledger_persist_load_roundtrip():
     assert body["package_ids"] == ["k02next2-pkg-a", "k02next2-pkg-b"]
     assert body["rows"] == 2
     bad = client.post(
-        "/v1/k02rest2/ledger-roundtrip",
+        "/api/v1/hierarchy/ledger-roundtrip",
         json={"rows": [{"package_id": "k02next2-pkg-c"}]},
         headers=headers,
     )
     assert bad.status_code == 400
     no_actor = client.post(
-        "/v1/k02rest2/ledger-roundtrip",
+        "/api/v1/hierarchy/ledger-roundtrip",
         json={"rows": rows},
     )
     assert no_actor.status_code == 401

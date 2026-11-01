@@ -6,7 +6,7 @@ Row R-351 (kit BUILD_PLAN: acceptance on the tech-handbook copy, all
 functions, n8n excluded, final evidence table): every served K10 function
 carries one evidence-table row with an artifact link (serving route plus
 proving test); no row mentions n8n. Served through create_app plus HTTP
-client on the named route GET /k10/compet/audit (which serves this lane's
+client on the named route GET /api/v1/release/compet/audit (which serves this lane's
 owned module agent_si.k10_compet); the table itself is the module's
 evidence_table(). Loopback TEST data only.
 """
@@ -43,9 +43,9 @@ def _client():
 
 
 def test_k10r351_named_route_serves_compet_audit():
-    """R-351 named route GET /k10/compet/audit serves the owned module."""
+    """R-351 named route GET /api/v1/release/compet/audit serves the owned module."""
     client = _client()
-    resp = client.get("/k10/compet/audit")
+    resp = client.get("/api/v1/release/compet/audit")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["testid"] == "k10st4-accept", body
@@ -59,7 +59,7 @@ def test_k10r351_named_route_serves_compet_audit():
 def test_k10r351_unknown_route_is_404():
     """The served app is a real router: unknown paths 404, not catch-all."""
     client = _client()
-    resp = client.get("/k10/no-such-r351-route")
+    resp = client.get("/api/v1/release/no-such-r351-route")
     assert resp.status_code == 404, resp.text
 
 
@@ -71,7 +71,7 @@ def test_k10r351_evidence_table_one_row_per_function():
     for row in table:
         for key in ("function", "claim", "source", "snippet", "artifact"):
             assert row.get(key), row
-        assert "/k10/" in row["artifact"], row
+        assert "/api/v1/release/" in row["artifact"], row
         assert ".py" in row["artifact"], row
 
 

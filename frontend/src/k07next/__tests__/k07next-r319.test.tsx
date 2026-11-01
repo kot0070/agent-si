@@ -33,7 +33,7 @@ beforeEach(() => {
   setLocale("en");
   window.localStorage.clear();
   vi.stubGlobal("fetch", async (input: unknown) => {
-    if (String(input) === "/api/v1/k07next/newcomer-guide") {
+    if (String(input) === "/api/v1/app/newcomer-guide") {
       return jsonBody(SERVED_GUIDE);
     }
     throw new Error(`unexpected fetch ${String(input)}`);

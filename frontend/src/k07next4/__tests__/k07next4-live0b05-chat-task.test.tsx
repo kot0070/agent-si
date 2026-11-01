@@ -37,7 +37,7 @@ beforeEach(() => {
   (window as unknown as Record<string, unknown>)[WINDOW_TOKEN_KEY] = TOKEN;
   vi.stubGlobal("fetch", async (input: unknown, init?: RequestInit) => {
     seen.push(`${init?.method ?? "GET"} ${String(input)}`);
-    if (String(input) === "/api/v1/k07next4/chat-task") {
+    if (String(input) === "/api/v1/app/chat-task") {
       return jsonBody(SERVED_CHAT_TASK);
     }
     throw new Error(`unexpected fetch ${String(input)}`);
@@ -67,6 +67,6 @@ describe("k07next4 LIVE0B-05 chat box over the real screen", () => {
     );
     fireEvent.click(screen.getByText(en.chat.composer.send));
     await screen.findByText("started");
-    expect(seen).toContain("POST /api/v1/k07next4/chat-task");
+    expect(seen).toContain("POST /api/v1/app/chat-task");
   });
 });

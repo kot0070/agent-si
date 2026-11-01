@@ -1,8 +1,8 @@
 """K10PH2A3 served map: one proving test per open row.
 
-Row M-P4-166 (combine): GET /k10/combine combines best plus KB
+Row M-P4-166 (combine): GET /api/v1/release/combine combines best plus KB
 plus benchmark plus Watcher on DEFAULT.
-Row M-R-COMPET (audit): GET /k10/compet/audit returns the
+Row M-R-COMPET (audit): GET /api/v1/release/compet/audit returns the
 flow-by-flow claims each with a recorded source plus snippet.
 Row B0B-UNCOVERED_MVP_ACCEPT-200: the recorded
 report-export seam carries dataset rows per demo and fixture.
@@ -52,20 +52,20 @@ def _client_on_temp_dir(tmp_path, monkeypatch, token):
 
 
 def test_k10ph2a3_mp166_combine_served(tmp_path, monkeypatch):
-    """Row M-P4-166 served through GET /k10/combine.
+    """Row M-P4-166 served through GET /api/v1/release/combine.
 
     Already proven by tests/test_k10st4_accept_compet.py::
     test_k10st4_combine_default_served; cited here and re-exercised
     live through the same seam.
     """
     entry = _served()["M-P4-166"]
-    assert entry["route"] == "GET /k10/combine", entry
+    assert entry["route"] == "GET /api/v1/release/combine", entry
     assert entry["test"] == (
         "tests/test_k10st4_accept_compet.py::"
         "test_k10st4_combine_default_served"
     ), entry
     client, _data_dir = _client_on_temp_dir(tmp_path, monkeypatch, "ph2a3-mp166")
-    resp = client.get("/k10/combine", params={"package_id": "TEST-PKG-PH2A3"})
+    resp = client.get("/api/v1/release/combine", params={"package_id": "TEST-PKG-PH2A3"})
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["testid"] == "k10st4-accept", body
@@ -76,20 +76,20 @@ def test_k10ph2a3_mp166_combine_served(tmp_path, monkeypatch):
 
 
 def test_k10ph2a3_mrcompet_audit_served(tmp_path, monkeypatch):
-    """Row M-R-COMPET served through GET /k10/compet/audit.
+    """Row M-R-COMPET served through GET /api/v1/release/compet/audit.
 
     Already proven by tests/test_k10st4_accept_compet.py::
     test_k10st4_compet_audit_served; cited here and re-exercised
     live through the same seam.
     """
     entry = _served()["M-R-COMPET"]
-    assert entry["route"] == "GET /k10/compet/audit", entry
+    assert entry["route"] == "GET /api/v1/release/compet/audit", entry
     assert entry["test"] == (
         "tests/test_k10st4_accept_compet.py::"
         "test_k10st4_compet_audit_served"
     ), entry
     client, _data_dir = _client_on_temp_dir(tmp_path, monkeypatch, "ph2a3-mrcompet")
-    resp = client.get("/k10/compet/audit")
+    resp = client.get("/api/v1/release/compet/audit")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["testid"] == "k10st4-accept", body

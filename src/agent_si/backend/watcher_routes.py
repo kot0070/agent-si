@@ -590,9 +590,9 @@ def _persist_finalization(app: Any, record: Any) -> None:
         _fail("FINALIZATION_CONFLICT", str(err))
 
 
-@router.post("/api/v1/k13/finalizations")
+@router.post("/api/v1/core/finalizations")
 async def route_post_finalize(request: Request) -> Any:
-    """POST /api/v1/k13/finalizations -> finalize_with_records (token)."""
+    """POST /api/v1/core/finalizations -> finalize_with_records (token)."""
     data = await _body(request)
     token = _guard_post(request, data)
     record = _serve_owned(_finalize_bound, data, session_token=token)

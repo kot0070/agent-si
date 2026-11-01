@@ -32,7 +32,7 @@ def test_d_d10_served() -> None:
     client = _client()
 
     current = client.post(
-        "/k05rest/d-d10/serve",
+        "/api/v1/local/d-d10/serve",
         json={
             "copies": [
                 {"ref": "cap:probe:refresh", "version": 4},
@@ -55,7 +55,7 @@ def test_d_d10_served() -> None:
     assert body["original_untouched"] is True
 
     unknown = client.post(
-        "/k05rest/d-d10/serve",
+        "/api/v1/local/d-d10/serve",
         json={
             "copies": [],
             "current": {},
@@ -65,7 +65,7 @@ def test_d_d10_served() -> None:
     assert unknown.status_code == 404, unknown.text
     assert unknown.json()["code"] == "K05REST_A_UNKNOWN_ROW"
 
-    bad = client.post("/k05rest/d-d10/serve", json={"requested": []})
+    bad = client.post("/api/v1/local/d-d10/serve", json={"requested": []})
     assert bad.status_code == 422, bad.text
     assert bad.json()["code"] == "K05REST_A_BAD_PAYLOAD"
 
@@ -75,7 +75,7 @@ def test_d_d22_served() -> None:
     client = _client()
 
     idle = client.post(
-        "/k05rest/d-d22/serve",
+        "/api/v1/local/d-d22/serve",
         json={"gateway": "gw-idle-1", "passive_ok": True},
     )
     assert idle.status_code == 200, idle.text
@@ -86,7 +86,7 @@ def test_d_d22_served() -> None:
     assert body["violation"] is None
 
     busy = client.post(
-        "/k05rest/d-d22/serve",
+        "/api/v1/local/d-d22/serve",
         json={"gateway": "gw-busy-1", "passive_ok": False},
     )
     assert busy.status_code == 200, busy.text
@@ -97,7 +97,7 @@ def test_d_d22_served() -> None:
     assert body["violation"] == "PASSIVE_GATE_REFUSED"
 
     bad = client.post(
-        "/k05rest/d-d22/serve",
+        "/api/v1/local/d-d22/serve",
         json={"gateway": "  ", "passive_ok": True},
     )
     assert bad.status_code == 422, bad.text
@@ -109,7 +109,7 @@ def test_mvp_accept_50_served() -> None:
     client = _client()
 
     ordered = client.post(
-        "/k05rest/mvp-accept-50/serve",
+        "/api/v1/local/mvp-accept-50/serve",
         json={
             "local_draft_ref": "draft-50",
             "cloud_verify_ref": "verify-50",
@@ -124,7 +124,7 @@ def test_mvp_accept_50_served() -> None:
     assert body["dual"] is True
 
     swapped = client.post(
-        "/k05rest/mvp-accept-50/serve",
+        "/api/v1/local/mvp-accept-50/serve",
         json={
             "local_draft_ref": "draft-50",
             "cloud_verify_ref": "verify-50",
@@ -136,7 +136,7 @@ def test_mvp_accept_50_served() -> None:
     assert swapped.json()["code"] == "K05REST_A_VALIDATION_FAILED"
 
     gap = client.post(
-        "/k05rest/mvp-accept-50/serve",
+        "/api/v1/local/mvp-accept-50/serve",
         json={
             "local_draft_ref": "draft-50",
             "cloud_verify_ref": "verify-50",
@@ -148,7 +148,7 @@ def test_mvp_accept_50_served() -> None:
     assert gap.json()["code"] == "K05REST_A_VALIDATION_FAILED"
 
     bad = client.post(
-        "/k05rest/mvp-accept-50/serve",
+        "/api/v1/local/mvp-accept-50/serve",
         json={
             "local_draft_ref": "",
             "cloud_verify_ref": "verify-50",
@@ -165,7 +165,7 @@ def test_mvp_accept_53_served() -> None:
     client = _client()
 
     bound = client.post(
-        "/k05rest/mvp-accept-53/serve",
+        "/api/v1/local/mvp-accept-53/serve",
         json={
             "draft_ref": "heron-draft",
             "verify_ref": "heron-verify",
@@ -180,7 +180,7 @@ def test_mvp_accept_53_served() -> None:
     assert body["draft_hash"] == "heron-hash"
 
     unknown = client.post(
-        "/k05rest/mvp-accept-53/serve",
+        "/api/v1/local/mvp-accept-53/serve",
         json={
             "draft_ref": "ghost-draft",
             "verify_ref": "heron-verify",
@@ -192,7 +192,7 @@ def test_mvp_accept_53_served() -> None:
     assert unknown.json()["code"] == "K05REST_A_UNKNOWN_ROW"
 
     bad = client.post(
-        "/k05rest/mvp-accept-53/serve",
+        "/api/v1/local/mvp-accept-53/serve",
         json={
             "draft_ref": "heron-draft",
             "verify_ref": "heron-verify",

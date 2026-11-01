@@ -40,7 +40,7 @@ def _auth_r0():
 
 def test_189_contract_template_instruction_served():
     client = _client()
-    resp = client.get("/api/v1/k06/script-contract")
+    resp = client.get("/api/v1/tools/script-contract")
     assert resp.status_code == 200, resp.text
     payload = resp.json()
     contract = payload["contract_text"]
@@ -57,7 +57,7 @@ def test_189_contract_template_instruction_served():
 
 def test_189_texts_carry_refs_never_raw_values():
     client = _client()
-    payload = client.get("/api/v1/k06/script-contract").json()
+    payload = client.get("/api/v1/tools/script-contract").json()
     joined = "\n".join(
         [payload["contract_text"], payload["template_text"],
          payload["instruction_text"]]
@@ -72,7 +72,7 @@ def test_189_texts_carry_refs_never_raw_values():
 def test_253_acceptance_run_filed_through_real_belt():
     client = _client()
     resp = client.post(
-        "/api/v1/k06/services/acceptance",
+        "/api/v1/tools/services/acceptance",
         json={
             "service": "status",
             "argv": ["status"],
@@ -87,7 +87,7 @@ def test_253_acceptance_run_filed_through_real_belt():
     assert run["service"] == "status"
     assert run["ok"] is True
     assert run["evidence_refs"]
-    listed = client.get("/api/v1/k06/services/acceptance")
+    listed = client.get("/api/v1/tools/services/acceptance")
     assert listed.status_code == 200, listed.text
     runs = listed.json()["runs"]
     assert any(r["run_id"] == run["run_id"] for r in runs)
@@ -96,7 +96,7 @@ def test_253_acceptance_run_filed_through_real_belt():
 def test_253_unknown_service_refused_without_filing():
     client = _client()
     resp = client.post(
-        "/api/v1/k06/services/acceptance",
+        "/api/v1/tools/services/acceptance",
         json={
             "service": "nope",
             "argv": ["nope"],
@@ -106,7 +106,7 @@ def test_253_unknown_service_refused_without_filing():
         headers=_auth(),
     )
     assert resp.status_code == 400, resp.text
-    listed = client.get("/api/v1/k06/services/acceptance")
+    listed = client.get("/api/v1/tools/services/acceptance")
     assert listed.json()["runs"] == []
 
 
@@ -116,7 +116,7 @@ def test_253_unknown_service_refused_without_filing():
 def test_254_install_record_view():
     client = _client()
     resp = client.post(
-        "/api/v1/k06/installs",
+        "/api/v1/tools/installs",
         json={
             "tool": "ruff",
             "version": "0.8.0",
@@ -128,14 +128,14 @@ def test_254_install_record_view():
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["tool"] == "ruff"
-    view = client.get("/api/v1/k06/installs", params={"tool": "ruff"})
+    view = client.get("/api/v1/tools/installs", params={"tool": "ruff"})
     assert view.status_code == 200, view.text
     assert view.json()["records"][0]["version"] == "0.8.0"
 
 
 def test_254_unknown_tool_named_in_view():
     client = _client()
-    view = client.get("/api/v1/k06/installs", params={"tool": "nope"})
+    view = client.get("/api/v1/tools/installs", params={"tool": "nope"})
     assert view.status_code == 200, view.text
     assert view.json()["records"] == []
     assert view.json()["unknown_tool"] == "nope"
@@ -227,13 +227,13 @@ def test_r367_detected_environment_unknown_not_alarm_served():
 
 def test_d3_contract_frozen_and_targets_pinned_served():
     client = _client()
-    first = client.get("/api/v1/k06/script-contract")
+    first = client.get("/api/v1/tools/script-contract")
     assert first.status_code == 200, first.text
-    second = client.get("/api/v1/k06/script-contract")
+    second = client.get("/api/v1/tools/script-contract")
     assert second.json() == first.json()
     assert "contract_hash" in first.json()["template_text"]
     refused = client.post(
-        "/api/v1/k06/tools/dispatch",
+        "/api/v1/tools/tools/dispatch",
         json={
             "tool": "other",
             "argv": ["other", "run"],
@@ -252,7 +252,7 @@ def test_d3_contract_frozen_and_targets_pinned_served():
 
 def test_141_env_example_secretref_pointers_served():
     client = _client()
-    payload = client.get("/api/v1/k06/script-contract").json()
+    payload = client.get("/api/v1/tools/script-contract").json()
     import json as _json
 
     template, _ = _json.JSONDecoder().raw_decode(

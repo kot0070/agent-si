@@ -5,19 +5,19 @@ secret store) and hits a real HTTP route, then asserts the row behavior
 against the real product module (no fakes in product; no network; no keys).
 
 Row -> route -> test:
-- B0B-UNCOVERED_BP04-8 -> POST /api/v1/budget/k04f/breach ->
+- B0B-UNCOVERED_BP04-8 -> POST /api/v1/budget/providers/breach ->
   test_k04f_bp04_8_breach_persistent_incident_served
-- B0B-UNCOVERED_BP04-34 -> POST /api/v1/budget/k04f/blocked-terminate ->
+- B0B-UNCOVERED_BP04-34 -> POST /api/v1/budget/providers/blocked-terminate ->
   test_k04f_bp04_34_blocked_terminates_run_served
-- B0B-UNCOVERED_ARCH-412 -> GET /api/v1/budget/k04f/estimate ->
+- B0B-UNCOVERED_ARCH-412 -> GET /api/v1/budget/providers/estimate ->
   test_k04f_arch_412_estimated_tokens_served
-- B0B-UNCOVERED_ARCH-416 -> POST /api/v1/budget/k04f/reserve-tokens ->
+- B0B-UNCOVERED_ARCH-416 -> POST /api/v1/budget/providers/reserve-tokens ->
   test_k04f_arch_416_reserve_tokens_served
-- B0B-UNCOVERED_ARCH-427 -> POST /api/v1/budget/k04f/route-block ->
+- B0B-UNCOVERED_ARCH-427 -> POST /api/v1/budget/providers/route-block ->
   test_k04f_arch_427_routable_block_served
-- B0B-UNCOVERED_BP04-5 -> POST /api/v1/budget/k04f/attach ->
+- B0B-UNCOVERED_BP04-5 -> POST /api/v1/budget/providers/attach ->
   test_k04f_bp04_5_recollect_attaches_served
-- B0B-UNCOVERED_BP04-14 -> POST /api/v1/budget/k04f/snapshot-proof ->
+- B0B-UNCOVERED_BP04-14 -> POST /api/v1/budget/providers/snapshot-proof ->
   test_k04f_bp04_14_snapshot_immutable_served
 - B0B-UNCOVERED_UI_DELTA-32 -> PUT /api/v1/roles/pools (+ reads) ->
   test_k04f_ui_delta_32_settings_roles_served
@@ -62,7 +62,7 @@ def test_k04f_bp04_8_breach_persistent_incident_served(tmp_path):
     resp = client.get("/api/v1/budget", params={"project_id": "k04f-b8"})
     assert resp.status_code == 404, resp.text
     resp = client.post(
-        "/api/v1/budget/k04f/breach",
+        "/api/v1/budget/providers/breach",
         json={"project_id": "k04f-b8", "currency": "USD",
               "hard_limit": "1.00", "fill_amount": "1.00",
               "over_amount": "0.01", "task_id": "t1", "run_id": "r1"},
@@ -88,7 +88,7 @@ def test_k04f_bp04_8_breach_persistent_incident_served(tmp_path):
 def test_k04f_bp04_34_blocked_terminates_run_served(tmp_path):
     client, _app = _client(tmp_path)
     resp = client.post(
-        "/api/v1/budget/k04f/blocked-terminate",
+        "/api/v1/budget/providers/blocked-terminate",
         json={"project_id": "k04f-b34", "task_id": "t1", "run_id": "r1",
               "contract_hash": "k04f-ch-1", "start_amount": "1.00"},
         headers=HEADERS)
@@ -107,15 +107,15 @@ def test_k04f_bp04_34_blocked_terminates_run_served(tmp_path):
 # [ARCH-412]-part: estimated_tokens = max_tokens + policy overhead.
 def test_k04f_arch_412_estimated_tokens_served(tmp_path):
     client, _app = _client(tmp_path)
-    resp = client.get("/api/v1/budget/k04f/estimate",
+    resp = client.get("/api/v1/budget/providers/estimate",
                       params={"max_tokens": "1000", "token_overhead": "64"})
     assert resp.status_code == 200, resp.text
     assert resp.json()["estimated_tokens"] == 1064, resp.text
-    resp = client.get("/api/v1/budget/k04f/estimate",
+    resp = client.get("/api/v1/budget/providers/estimate",
                       params={"token_overhead": "64"})
     assert resp.status_code == 200, resp.text
     assert resp.json()["estimated_tokens"] == 64, resp.text
-    resp = client.get("/api/v1/budget/k04f/estimate",
+    resp = client.get("/api/v1/budget/providers/estimate",
                       params={"max_tokens": "-5", "token_overhead": "0"})
     assert resp.status_code == 400, resp.text
 
@@ -127,7 +127,7 @@ def test_k04f_arch_416_reserve_tokens_served(tmp_path):
     base = {"project_id": "k04f-b416", "task_id": "t1", "run_id": "r1",
             "reservation_id": "k04f-res-1", "estimated_amount": "2.50",
             "currency": "USD", "hard_limit": "10.00"}
-    resp = client.post("/api/v1/budget/k04f/reserve-tokens", json=dict(base),
+    resp = client.post("/api/v1/budget/providers/reserve-tokens", json=dict(base),
                        headers=HEADERS)
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -135,13 +135,13 @@ def test_k04f_arch_416_reserve_tokens_served(tmp_path):
     assert body["estimated_amount"] == "2.50", body
     assert body["status"] == "ACTIVE", body
     bad = dict(base, reservation_id="k04f-res-2", currency="EUR")
-    resp = client.post("/api/v1/budget/k04f/reserve-tokens", json=bad,
+    resp = client.post("/api/v1/budget/providers/reserve-tokens", json=bad,
                        headers=HEADERS)
     assert resp.status_code == 409, resp.text
     assert resp.json()["code"] == "CURRENCY_MISMATCH", resp.text
     no_amount = dict(base, reservation_id="k04f-res-3")
     del no_amount["estimated_amount"]
-    resp = client.post("/api/v1/budget/k04f/reserve-tokens", json=no_amount,
+    resp = client.post("/api/v1/budget/providers/reserve-tokens", json=no_amount,
                        headers=HEADERS)
     assert resp.status_code == 400, resp.text
     resp = client.get("/api/v1/budget", params={"project_id": "k04f-b416"},
@@ -154,14 +154,14 @@ def test_k04f_arch_416_reserve_tokens_served(tmp_path):
 # restores) and to ESCALATED otherwise.
 def test_k04f_arch_427_routable_block_served(tmp_path):
     client, _app = _client(tmp_path)
-    resp = client.post("/api/v1/budget/k04f/route-block",
+    resp = client.post("/api/v1/budget/providers/route-block",
                        json={"recoverable": True}, headers=HEADERS)
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["failure_class"] == "BUDGET_BLOCKED", body
     assert body["task_effect"] == "BLOCKED", body
     assert body["run_effect"] is None, body
-    resp = client.post("/api/v1/budget/k04f/route-block",
+    resp = client.post("/api/v1/budget/providers/route-block",
                        json={"recoverable": False}, headers=HEADERS)
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -174,7 +174,7 @@ def test_k04f_arch_427_routable_block_served(tmp_path):
 def test_k04f_bp04_5_recollect_attaches_served(tmp_path):
     client, _app = _client(tmp_path)
     resp = client.post(
-        "/api/v1/budget/k04f/attach",
+        "/api/v1/budget/providers/attach",
         json={"usage_ref": "k04f-uref-1",
               "metric": {"metric_id": "k04f-m-1", "project_id": "k04f-b5",
                          "task_id": "t1", "run_id": "r1",
@@ -198,7 +198,7 @@ def test_k04f_bp04_5_recollect_attaches_served(tmp_path):
 def test_k04f_bp04_14_snapshot_immutable_served(tmp_path):
     client, _app = _client(tmp_path)
     resp = client.post(
-        "/api/v1/budget/k04f/snapshot-proof",
+        "/api/v1/budget/providers/snapshot-proof",
         json={"pricing_snapshot_id": "k04f-ps-1",
               "provider_id": "cloud-a", "model_id": "cloud-a/m1",
               "currency": "USD", "input_token_price": "0.001",

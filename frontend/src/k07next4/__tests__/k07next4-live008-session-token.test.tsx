@@ -44,7 +44,7 @@ beforeEach(() => {
       method: (init?.method ?? "GET").toUpperCase(),
       headers: { ...((init?.headers ?? {}) as Record<string, string>) },
     });
-    if (String(input) === "/api/v1/k07next4/session-write") {
+    if (String(input) === "/api/v1/app/session-write") {
       return jsonBody(SERVED_TOKEN_OK);
     }
     throw new Error(`unexpected fetch ${String(input)}`);
@@ -69,7 +69,7 @@ describe("k07next4 LIVE0-08 session token over the real screen", () => {
     await screen.findByTestId("k07next4-session-token");
     const posts = seen.filter(
       (request) =>
-        request.url === "/api/v1/k07next4/session-write" &&
+        request.url === "/api/v1/app/session-write" &&
         request.method === "POST",
     );
     expect(posts).toHaveLength(1);

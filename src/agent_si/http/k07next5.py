@@ -277,15 +277,15 @@ async def provider_health_transitions(request: Request) -> dict[str, Any]:
 
 
 ROUTES = (
-    ("post", "/api/v1/k07next5/local-ai/decision-update",
+    ("post", "/api/v1/app/local-ai/decision-update",
      "local_ai_decision_update", local_ai_decision_update),
-    ("get", "/api/v1/k07next5/local-ai/view",
+    ("get", "/api/v1/app/local-ai/view",
      "local_ai_view", local_ai_view),
-    ("get", "/api/v1/k07next5/bench/tab",
+    ("get", "/api/v1/app/bench/tab",
      "bench_tab", bench_tab),
-    ("get", "/api/v1/k07next5/local-ai/settings-view",
+    ("get", "/api/v1/app/local-ai/settings-view",
      "local_ai_settings_view", local_ai_settings_view),
-    ("get", "/api/v1/k07next5/provider-health/transitions",
+    ("get", "/api/v1/app/provider-health/transitions",
      "provider_health_transitions", provider_health_transitions),
 )
 

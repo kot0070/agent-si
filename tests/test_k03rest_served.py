@@ -497,7 +497,7 @@ def test_k03rest_b0b_bp07_17_served(client, dirs):
 def test_k03rest_b0b_bp07_18_served(client):
     """B0B-BP07-18: sourcing gate BLOCKED until sourcing succeeds."""
     resp = client.post(
-        "/api/v1/k03rest/sourcing_gate",
+        "/api/v1/qa/sourcing_gate/basic",
         json={"implementer_model_ids": [CONTRIBUTOR_MODEL],
               "task_class": "served-turn", "minimum_level": "L2"},
     )
@@ -511,7 +511,7 @@ def test_k03rest_b0b_bp07_18_served(client):
     assert data["auditor"] is None
 
     resp = client.post(
-        "/api/v1/k03rest/sourcing_gate",
+        "/api/v1/qa/sourcing_gate/basic",
         json={"implementer_model_ids": [CONTRIBUTOR_MODEL],
               "task_class": "served-turn", "minimum_level": "L2",
               "auditor_candidates": [{
@@ -541,7 +541,7 @@ def test_k03rest_b0b_bp07_18_served(client):
     assert selection.auditor.model not in (CONTRIBUTOR_MODEL,)
 
     bad = client.post(
-        "/api/v1/k03rest/sourcing_gate",
+        "/api/v1/qa/sourcing_gate/basic",
         json={"implementer_model_ids": [CONTRIBUTOR_MODEL],
               "auditor_candidates": ["not-an-object"]},
     )
@@ -553,7 +553,7 @@ def test_k03rest_b0b_bp07_20_served(client):
     tag = _tag()
     provider = "provider-k03rest-20-%s" % tag
     resp = client.post(
-        "/api/v1/k03rest/registry_gate",
+        "/api/v1/qa/registry_gate",
         json={"provider_id": provider, "model": AUDITOR_MODEL,
               "implementer_model_ids": [CONTRIBUTOR_MODEL]},
     )
@@ -565,7 +565,7 @@ def test_k03rest_b0b_bp07_20_served(client):
     assert data["pass_allowed"] is False
 
     resp = client.post(
-        "/api/v1/k03rest/registry_gate",
+        "/api/v1/qa/registry_gate",
         json={"provider_id": provider, "model": AUDITOR_MODEL,
               "capability_evidence_refs": ["cap-ev-k03rest-20-%s" % tag],
               "implementer_model_ids": [CONTRIBUTOR_MODEL]},
@@ -586,7 +586,7 @@ def test_k03rest_b0b_bp07_20_served(client):
         provider, AUDITOR_MODEL, "cap-ev-k03rest-20-%s" % tag)
     assert registry.is_eligible(provider, AUDITOR_MODEL) is True
 
-    bad = client.post("/api/v1/k03rest/registry_gate", json={})
+    bad = client.post("/api/v1/qa/registry_gate", json={})
     assert bad.status_code == 400, bad.text
 
 
@@ -598,7 +598,7 @@ def test_k03rest_sdk_107_served(client):
     crit = "crit-k03rest-107-%s" % tag
     ev = "ev-k03rest-107-%s" % tag
     resp = client.post(
-        "/api/v1/k03rest/semantic_security",
+        "/api/v1/qa/semantic_security/lenient",
         json={"criterion_refs": [crit], "evidence_refs": [ev]},
     )
     assert resp.status_code == 200, resp.text
@@ -608,13 +608,13 @@ def test_k03rest_sdk_107_served(client):
     assert data["checked_evidence"] == 1
 
     resp = client.post(
-        "/api/v1/k03rest/semantic_security",
+        "/api/v1/qa/semantic_security/lenient",
         json={"criterion_refs": [crit], "evidence_refs": []},
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["verdict"] == "FAIL"
 
-    resp = client.post("/api/v1/k03rest/semantic_security", json={})
+    resp = client.post("/api/v1/qa/semantic_security/lenient", json={})
     assert resp.status_code == 200, resp.text
     assert resp.json()["verdict"] == "FAIL"
 

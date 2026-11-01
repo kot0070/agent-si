@@ -1,18 +1,18 @@
 """K10WAVE served map: one proving test per open row.
 
-Row R-328: POST /k10/start/demo brings the demo project to green.
-Row 166: GET /k10/start/evidence keeps release evidence (screenshots).
+Row R-328: POST /api/v1/release/start/demo brings the demo project to green.
+Row 166: GET /api/v1/release/start/evidence keeps release evidence (screenshots).
 Row R-343: tools/start.py --smoke on a fresh profile seeds no test data.
 Row 165: tools/start.py --smoke writes hashes matching disk plus smoke pass.
 Row 167: tools/start.py --smoke validates served entries on a clean profile.
 Row M-P3-89: tools/start.py --smoke runs identically from a portable copy.
 Row R-345: tools/start.py --serve starts quietly and closes stdin-quiet.
 Row M-P4-134: first start migrates settings plus credentials, originals kept.
-Row M-P4-138: GET /k10/start/migrate reports settings plus keys migration.
-Row M-P4-162: GET /k10/accept returns the final acceptance status.
-Row M-P4-166 (K10WAVE3 Bison): GET /k10/combine combines best plus KB
+Row M-P4-138: GET /api/v1/release/start/migrate reports settings plus keys migration.
+Row M-P4-162: GET /api/v1/release/accept returns the final acceptance status.
+Row M-P4-166 (K10WAVE3 Bison): GET /api/v1/release/combine combines best plus KB
 plus benchmark plus Watcher on DEFAULT.
-Row M-R-COMPET (K10WAVE3 Bison): GET /k10/compet/audit returns the
+Row M-R-COMPET (K10WAVE3 Bison): GET /api/v1/release/compet/audit returns the
 flow-by-flow claims each with a recorded source plus snippet.
 Row B0B-UNCOVERED_MVP_ACCEPT-200 (K10WAVE3 Bison): the recorded
 report-export seam carries dataset rows per demo and fixture.
@@ -122,15 +122,15 @@ def _run_start(args, cwd=None, env=None, timeout=120):
 
 
 def test_k10wave_r328_demo_green(tmp_path, monkeypatch):
-    """Row R-328 served through POST /k10/start/demo."""
+    """Row R-328 served through POST /api/v1/release/start/demo."""
     entry = _served()["R-328"]
-    assert entry["route"] == "POST /k10/start/demo", entry
+    assert entry["route"] == "POST /api/v1/release/start/demo", entry
     assert entry["test"] == (
         "tests/test_k10open4_start_path.py::"
         "test_k10open4_start_demo_brought_to_green"
     ), entry
     client, data_dir = _client_on_temp_dir(tmp_path, monkeypatch, "kw-r328")
-    resp = client.post("/k10/start/demo")
+    resp = client.post("/api/v1/release/start/demo")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["testid"] == "k10open4-start", body
@@ -140,15 +140,15 @@ def test_k10wave_r328_demo_green(tmp_path, monkeypatch):
 
 
 def test_k10wave_166_evidence_screenshots(tmp_path, monkeypatch):
-    """Row 166 served through GET /k10/start/evidence."""
+    """Row 166 served through GET /api/v1/release/start/evidence."""
     entry = _served()["166"]
-    assert entry["route"] == "GET /k10/start/evidence", entry
+    assert entry["route"] == "GET /api/v1/release/start/evidence", entry
     assert entry["test"] == (
         "tests/test_k10open4_start_path.py::"
         "test_k10open4_start_evidence_keeps_screenshots"
     ), entry
     client, data_dir = _client_on_temp_dir(tmp_path, monkeypatch, "kw-166")
-    resp = client.get("/k10/start/evidence")
+    resp = client.get("/api/v1/release/start/evidence")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["testid"] == "k10open4-start", body
@@ -308,14 +308,14 @@ def _wait_http_ok(url, deadline_s=30):
 
 
 def test_k10wave_mp162_accept_served(tmp_path, monkeypatch):
-    """Row M-P4-162 served through GET /k10/accept."""
+    """Row M-P4-162 served through GET /api/v1/release/accept."""
     entry = _served()["M-P4-162"]
-    assert entry["route"] == "GET /k10/accept", entry
+    assert entry["route"] == "GET /api/v1/release/accept", entry
     assert entry["test"] == (
         "tests/test_k10st4_accept_compet.py::test_k10st4_accept_served"
     ), entry
     client, _data_dir = _client_on_temp_dir(tmp_path, monkeypatch, "kw-mp162")
-    resp = client.get("/k10/accept")
+    resp = client.get("/api/v1/release/accept")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["testid"] == "k10st4-accept", body
@@ -324,9 +324,9 @@ def test_k10wave_mp162_accept_served(tmp_path, monkeypatch):
 
 
 def test_k10wave_mp138_start_migrate(tmp_path, monkeypatch):
-    """Row M-P4-138 served through GET /k10/start/migrate."""
+    """Row M-P4-138 served through GET /api/v1/release/start/migrate."""
     entry = _served()["M-P4-138"]
-    assert entry["route"] == "GET /k10/start/migrate", entry
+    assert entry["route"] == "GET /api/v1/release/start/migrate", entry
     assert entry["test"] == (
         "tests/test_k10open4_start_path.py::"
         "test_k10open4_start_migrates_settings_keys"
@@ -357,7 +357,7 @@ def test_k10wave_mp138_start_migrate(tmp_path, monkeypatch):
         assert (data_dir / name).read_bytes() == payload
         assert (legacy / name).read_bytes() == payload
     client = fastapi.testclient.TestClient(create_app(settings))
-    resp = client.get("/k10/start/migrate")
+    resp = client.get("/api/v1/release/start/migrate")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["testid"] == "k10open4-start", body
@@ -461,15 +461,15 @@ def test_k10wave_r345_serve_quiet_close(tmp_path):
 
 
 def test_k10wave3_bison_mp166_combine_served(tmp_path, monkeypatch):
-    """Row M-P4-166 served through GET /k10/combine (K10WAVE3 Bison)."""
+    """Row M-P4-166 served through GET /api/v1/release/combine (K10WAVE3 Bison)."""
     entry = _served()["M-P4-166"]
-    assert entry["route"] == "GET /k10/combine", entry
+    assert entry["route"] == "GET /api/v1/release/combine", entry
     assert entry["test"] == (
         "tests/test_k10st4_accept_compet.py::"
         "test_k10st4_combine_default_served"
     ), entry
     client, _data_dir = _client_on_temp_dir(tmp_path, monkeypatch, "kw3-mp166")
-    resp = client.get("/k10/combine", params={"package_id": "TEST-PKG-BISON"})
+    resp = client.get("/api/v1/release/combine", params={"package_id": "TEST-PKG-BISON"})
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["testid"] == "k10st4-accept", body
@@ -480,15 +480,15 @@ def test_k10wave3_bison_mp166_combine_served(tmp_path, monkeypatch):
 
 
 def test_k10wave3_bison_mrcompet_audit_served(tmp_path, monkeypatch):
-    """Row M-R-COMPET served through GET /k10/compet/audit (K10WAVE3 Bison)."""
+    """Row M-R-COMPET served through GET /api/v1/release/compet/audit (K10WAVE3 Bison)."""
     entry = _served()["M-R-COMPET"]
-    assert entry["route"] == "GET /k10/compet/audit", entry
+    assert entry["route"] == "GET /api/v1/release/compet/audit", entry
     assert entry["test"] == (
         "tests/test_k10st4_accept_compet.py::"
         "test_k10st4_compet_audit_served"
     ), entry
     client, _data_dir = _client_on_temp_dir(tmp_path, monkeypatch, "kw3-mrcompet")
-    resp = client.get("/k10/compet/audit")
+    resp = client.get("/api/v1/release/compet/audit")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["testid"] == "k10st4-accept", body

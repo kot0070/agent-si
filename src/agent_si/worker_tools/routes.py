@@ -1,7 +1,7 @@
 """K06 OC served worker path (MH-1/MH-3 + rows 189/253/254).
 
 Binds per-app in-memory K06 state on app.state and registers the
-/api/v1/k06/ handlers. All handlers run the real K06 product modules
+/api/v1/tools/ handlers. All handlers run the real K06 product modules
 (worker_tools dispatcher/escalation/install_records, services
 acceptance, script_import text); reads are open, writes keep the K02
 guard (401 missing x-actor, 403 bad token via app.state.auth_hook).
@@ -68,7 +68,7 @@ def register_k06oc_routes(app: Any) -> None:
         ToolNotFoundError,
     )
 
-    @app.post("/api/v1/k06/tools/dispatch")
+    @app.post("/api/v1/tools/tools/dispatch")
     async def k06oc_dispatch(request: Request) -> Any:
         """POST dispatch -> real guarded_dispatch over the served registry."""
         _write_auth(app, request)
@@ -122,7 +122,7 @@ def register_k06oc_routes(app: Any) -> None:
             )
         return dict(result)
 
-    @app.post("/api/v1/k06/tools/command/start")
+    @app.post("/api/v1/tools/tools/command/start")
     async def k06oc_command_start(request: Request) -> Any:
         """POST command/start -> real spawn via dispatcher, attached."""
         _write_auth(app, request)
@@ -150,7 +150,7 @@ def register_k06oc_routes(app: Any) -> None:
             )
         return dict(result)
 
-    @app.get("/api/v1/k06/tools/command/status")
+    @app.get("/api/v1/tools/tools/command/status")
     def k06oc_command_status(request: Request,
                              run_id: str = "") -> Any:
         """GET command/status -> pid plus liveness for one tracked run."""
@@ -168,14 +168,14 @@ def register_k06oc_routes(app: Any) -> None:
                 content={"code": "COMMAND_UNKNOWN", "message": str(exc)},
             )
 
-    @app.get("/api/v1/k06/guard-records")
+    @app.get("/api/v1/tools/guard-records")
     def k06oc_guard_records() -> dict[str, Any]:
         """GET guard-records -> every filed guard decision, oldest first."""
         return {
             "records": list_guard_records(app.state.k06oc_guard_records)
         }
 
-    @app.post("/api/v1/k06/runs/attempt")
+    @app.post("/api/v1/tools/runs/attempt")
     async def k06oc_run_attempt(request: Request) -> Any:
         """POST attempt -> record vs budget; exhaustion parks ESCALATED."""
         _write_auth(app, request)
@@ -198,31 +198,31 @@ def register_k06oc_routes(app: Any) -> None:
         )
         return dict(state)
 
-    @app.post("/api/v1/k06/runs/{run_id}/resume")
+    @app.post("/api/v1/tools/runs/{run_id}/resume")
     async def k06oc_run_resume(run_id: str, request: Request) -> Any:
         """POST resume -> parked run back to RUNNING, card cleared."""
         _write_auth(app, request)
         return dict(_escalation.resume_run(app.state.k06oc_runs, run_id))
 
-    @app.post("/api/v1/k06/runs/{run_id}/discard")
+    @app.post("/api/v1/tools/runs/{run_id}/discard")
     async def k06oc_run_discard(run_id: str, request: Request) -> Any:
         """POST discard -> parked run terminally DISCARDED."""
         _write_auth(app, request)
         return dict(_escalation.discard_run(app.state.k06oc_runs, run_id))
 
-    @app.get("/api/v1/k06/runs/{run_id}")
+    @app.get("/api/v1/tools/runs/{run_id}")
     def k06oc_run_view(run_id: str) -> dict[str, Any]:
         """GET run view -> run state plus the escalation card when parked."""
         return dict(_escalation.get_run_state(app.state.k06oc_runs, run_id))
 
-    @app.get("/api/v1/k06/chat/cards")
+    @app.get("/api/v1/tools/chat/cards")
     def k06oc_chat_cards(run_id: str = "") -> dict[str, Any]:
         """GET chat cards -> the escalation card for a parked run."""
         state = _escalation.get_run_state(app.state.k06oc_runs, run_id)
         cards = [state["card"]] if state.get("card") else []
         return {"run_id": run_id, "cards": cards}
 
-    @app.get("/api/v1/k06/script-contract")
+    @app.get("/api/v1/tools/script-contract")
     def k06oc_script_contract() -> dict[str, Any]:
         """GET script-contract -> row 189 texts (contract/template/rules)."""
         return {
@@ -231,7 +231,7 @@ def register_k06oc_routes(app: Any) -> None:
             "instruction_text": _contract_text.instruction_text(),
         }
 
-    @app.post("/api/v1/k06/services/acceptance")
+    @app.post("/api/v1/tools/services/acceptance")
     async def k06oc_acceptance(request: Request) -> Any:
         """POST acceptance -> declared service via the real belt, run filed."""
         _write_auth(app, request)
@@ -258,14 +258,14 @@ def register_k06oc_routes(app: Any) -> None:
             raise HTTPException(status_code=400, detail=run)
         return dict(run)
 
-    @app.get("/api/v1/k06/services/acceptance")
+    @app.get("/api/v1/tools/services/acceptance")
     def k06oc_acceptance_list() -> dict[str, Any]:
         """GET acceptance -> every filed declared-services run."""
         return {
             "runs": list_acceptance_runs(app.state.k06oc_acceptance_runs)
         }
 
-    @app.post("/api/v1/k06/installs")
+    @app.post("/api/v1/tools/installs")
     async def k06oc_install_record(request: Request) -> Any:
         """POST installs -> file one install record (ASK decision)."""
         _write_auth(app, request)
@@ -286,7 +286,7 @@ def register_k06oc_routes(app: Any) -> None:
             )
         )
 
-    @app.get("/api/v1/k06/installs")
+    @app.get("/api/v1/tools/installs")
     def k06oc_install_view(tool: str | None = None) -> dict[str, Any]:
         """GET installs -> row 254 install-record view (names unknown)."""
         return dict(

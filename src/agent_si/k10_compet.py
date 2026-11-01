@@ -7,7 +7,7 @@ functions, n8n excluded, final evidence table". The final evidence table
 is evidence_table(): one row per served K10 function (n8n excluded; no
 n8n content exists in this checkout), each row with an artifact link
 (serving route plus proving test). Served through the named route
-GET /k10/compet/audit (backend app, read-only seam reference).
+GET /api/v1/release/compet/audit (backend app, read-only seam reference).
 This module carries a small FIXED recorded dataset: plain in-code strings,
 stdlib only, no network, no providers, no I/O, deterministic order.
 Sources are recorded strings (never fetched live); snippets are verbatim
@@ -15,8 +15,8 @@ recorded strings. Pure functions, no settings or global mutation.
 
 K10WAVE3 (CODE-ONLY): six more open rows on this module. Row M-P4-166 is
 the combine contract (best plus KB plus benchmark plus Watcher on
-DEFAULT) served by GET /k10/combine. Row M-R-COMPET is the flow-by-flow
-claims above, served by GET /k10/compet/audit. Rows
+DEFAULT) served by GET /api/v1/release/combine. Row M-R-COMPET is the flow-by-flow
+claims above, served by GET /api/v1/release/compet/audit. Rows
 B0B-UNCOVERED_MVP_ACCEPT-200, -130, -132 and -151 are recorded seams
 below in the same style (report_export_rows, readme_setup_checks,
 acceptance_map, clean_boot_record): loopback recorded data only.
@@ -117,7 +117,7 @@ def evidence_table() -> list[dict]:
                 "declared services, PowerShell'"
             ),
             "artifact": (
-                "route GET /k10/accept proven by "
+                "route GET /api/v1/release/accept proven by "
                 "tests/test_k10st4_accept_compet.py::"
                 "test_k10st4_accept_served"
             ),
@@ -138,7 +138,7 @@ def evidence_table() -> list[dict]:
                 "plus Watcher on DEFAULT'"
             ),
             "artifact": (
-                "route GET /k10/combine proven by "
+                "route GET /api/v1/release/combine proven by "
                 "tests/test_k10st4_accept_compet.py::"
                 "test_k10st4_combine_default_served"
             ),
@@ -158,7 +158,7 @@ def evidence_table() -> list[dict]:
                 "fetched source plus snippet per claim'"
             ),
             "artifact": (
-                "route GET /k10/compet/audit proven by "
+                "route GET /api/v1/release/compet/audit proven by "
                 "tests/test_k10st4_accept_compet.py::"
                 "test_k10st4_compet_audit_served"
             ),
@@ -179,7 +179,7 @@ def evidence_table() -> list[dict]:
                 "the acceptance drive'"
             ),
             "artifact": (
-                "route POST /k10/start/demo proven by "
+                "route POST /api/v1/release/start/demo proven by "
                 "tests/test_k10open4_start_path.py::"
                 "test_k10open4_start_demo_brought_to_green"
             ),
@@ -200,7 +200,7 @@ def evidence_table() -> list[dict]:
                 "(screenshots)'"
             ),
             "artifact": (
-                "route GET /k10/start/evidence proven by "
+                "route GET /api/v1/release/start/evidence proven by "
                 "tests/test_k10open4_start_path.py::"
                 "test_k10open4_start_evidence_keeps_screenshots"
             ),
@@ -222,7 +222,7 @@ def evidence_table() -> list[dict]:
                 "keys, originals kept'"
             ),
             "artifact": (
-                "route GET /k10/start/migrate proven by "
+                "route GET /api/v1/release/start/migrate proven by "
                 "tests/test_k10open4_start_path.py::"
                 "test_k10open4_start_migrates_settings_keys"
             ),
@@ -258,7 +258,7 @@ def report_export_rows() -> list[dict]:
                 "versions, providers'"
             ),
             "artifact": (
-                "route GET /k10/start/demo proven by "
+                "route GET /api/v1/release/start/demo proven by "
                 "tests/test_k10open4_start_path.py::"
                 "test_k10open4_start_demo_brought_to_green"
             ),
@@ -284,7 +284,7 @@ def report_export_rows() -> list[dict]:
                 "versions, providers'"
             ),
             "artifact": (
-                "route GET /k10/compet/audit proven by "
+                "route GET /api/v1/release/compet/audit proven by "
                 "tests/test_k10st4_accept_compet.py::"
                 "test_k10st4_compet_audit_served"
             ),
@@ -359,7 +359,7 @@ def readme_setup_checks() -> list[dict]:
                 "fixtures'"
             ),
             "evidence": (
-                "route GET /k10/start/demo proven by "
+                "route GET /api/v1/release/start/demo proven by "
                 "tests/test_k10open4_start_path.py::"
                 "test_k10open4_start_demo_brought_to_green"
             ),
@@ -379,7 +379,7 @@ def readme_setup_checks() -> list[dict]:
                 "fixtures'"
             ),
             "evidence": (
-                "route GET /k10/compet/audit proven by "
+                "route GET /api/v1/release/compet/audit proven by "
                 "tests/test_k10st4_accept_compet.py::"
                 "test_k10st4_compet_audit_served"
             ),
@@ -460,7 +460,7 @@ def acceptance_map() -> list[dict]:
                 "(demos and fixtures)"
             ),
             "evidence": (
-                "route GET /k10/start/demo proven by "
+                "route GET /api/v1/release/start/demo proven by "
                 "tests/test_k10open4_start_path.py::"
                 "test_k10open4_start_demo_brought_to_green"
             ),
@@ -484,7 +484,7 @@ def acceptance_map() -> list[dict]:
                 "(demos and fixtures)"
             ),
             "evidence": (
-                "route GET /k10/compet/audit proven by "
+                "route GET /api/v1/release/compet/audit proven by "
                 "tests/test_k10st4_accept_compet.py::"
                 "test_k10st4_compet_audit_served"
             ),
@@ -508,7 +508,7 @@ def acceptance_map() -> list[dict]:
                 "plus KB plus benchmark plus Watcher on DEFAULT)"
             ),
             "evidence": (
-                "route GET /k10/combine proven by "
+                "route GET /api/v1/release/combine proven by "
                 "tests/test_k10st4_accept_compet.py::"
                 "test_k10st4_combine_default_served"
             ),
@@ -532,7 +532,7 @@ def acceptance_map() -> list[dict]:
                 "flow; fetched source plus snippet per claim)"
             ),
             "evidence": (
-                "route GET /k10/compet/audit proven by "
+                "route GET /api/v1/release/compet/audit proven by "
                 "tests/test_k10st4_accept_compet.py::"
                 "test_k10st4_compet_audit_served"
             ),
@@ -628,7 +628,7 @@ def readme_root_checks() -> list[dict]:
                 "commands, task'"
             ),
             "evidence": (
-                "route GET /k10/compet/audit proven by "
+                "route GET /api/v1/release/compet/audit proven by "
                 "tests/test_k10e_served.py::test_k10e_readme_root_checks"
             ),
         },
@@ -667,7 +667,7 @@ def k10e_startup_sequence_record() -> list[dict]:
                 "from lockfiles, laun'"
             ),
             "evidence": (
-                "route GET /k10/compet/audit proven by "
+                "route GET /api/v1/release/compet/audit proven by "
                 "tests/test_k10e_served.py::test_k10e_startup_sequence"
             ),
         },
@@ -701,7 +701,7 @@ def k10e_fixture_pack_record() -> list[dict]:
                 "checkout and is not measured evidence.'"
             ),
             "evidence": (
-                "route GET /k10/compet/audit proven by "
+                "route GET /api/v1/release/compet/audit proven by "
                 "tests/test_k10e_served.py::test_k10e_fixture_pack"
             ),
         },
@@ -730,7 +730,7 @@ def host_blockers_record() -> list[dict]:
                 "permissions, auditor provider, and second provider.'"
             ),
             "evidence": (
-                "route GET /k10/compet/audit proven by "
+                "route GET /api/v1/release/compet/audit proven by "
                 "tests/test_k10e_served.py::test_k10e_host_blockers and "
                 "tests/test_k10ph2c_served.py::test_k10ph2c_214_host_blockers"
             ),
@@ -765,7 +765,7 @@ def attainability_gate_record() -> list[dict]:
                 "second real provider'"
             ),
             "evidence": (
-                "route GET /k10/compet/audit proven by "
+                "route GET /api/v1/release/compet/audit proven by "
                 "tests/test_k10e_served.py::test_k10e_attainability_gate and "
                 "tests/test_k10ph2c_served.py::test_k10ph2c_215_attainability_gate"
             ),
@@ -793,7 +793,7 @@ def licence_check_record() -> list[dict]:
                 "decision)'"
             ),
             "evidence": (
-                "route GET /k10/compet/audit proven by "
+                "route GET /api/v1/release/compet/audit proven by "
                 "tests/test_k10e_served.py::test_k10e_licence_check"
             ),
         },
@@ -985,7 +985,7 @@ def reproducible_startup_record() -> list[dict]:
                 "alongside demos, fixtures, and UI checks'"
             ),
             "evidence": (
-                "route GET /k10/start/demo proven by "
+                "route GET /api/v1/release/start/demo proven by "
                 "tests/test_k10open4_start_path.py::"
                 "test_k10open4_start_demo_brought_to_green"
             ),
@@ -1004,7 +1004,7 @@ def reproducible_startup_record() -> list[dict]:
                 "alongside demos, fixtures, and UI checks'"
             ),
             "evidence": (
-                "route GET /k10/compet/audit proven by "
+                "route GET /api/v1/release/compet/audit proven by "
                 "tests/test_k10st4_accept_compet.py::"
                 "test_k10st4_compet_audit_served"
             ),
@@ -1840,7 +1840,7 @@ def served_rows() -> list[dict]:
     return [
         {
             "row": "R-328",
-            "route": "POST /k10/start/demo",
+            "route": "POST /api/v1/release/start/demo",
             "test": (
                 "tests/test_k10open4_start_path.py::"
                 "test_k10open4_start_demo_brought_to_green"
@@ -1848,7 +1848,7 @@ def served_rows() -> list[dict]:
         },
         {
             "row": "166",
-            "route": "GET /k10/start/evidence",
+            "route": "GET /api/v1/release/start/evidence",
             "test": (
                 "tests/test_k10open4_start_path.py::"
                 "test_k10open4_start_evidence_keeps_screenshots"
@@ -1904,7 +1904,7 @@ def served_rows() -> list[dict]:
         },
         {
             "row": "M-P4-138",
-            "route": "GET /k10/start/migrate",
+            "route": "GET /api/v1/release/start/migrate",
             "test": (
                 "tests/test_k10open4_start_path.py::"
                 "test_k10open4_start_migrates_settings_keys"
@@ -1912,7 +1912,7 @@ def served_rows() -> list[dict]:
         },
         {
             "row": "M-P4-162",
-            "route": "GET /k10/accept",
+            "route": "GET /api/v1/release/accept",
             "test": (
                 "tests/test_k10st4_accept_compet.py::"
                 "test_k10st4_accept_served"
@@ -1920,7 +1920,7 @@ def served_rows() -> list[dict]:
         },
         {
             "row": "M-P4-166",
-            "route": "GET /k10/combine",
+            "route": "GET /api/v1/release/combine",
             "test": (
                 "tests/test_k10st4_accept_compet.py::"
                 "test_k10st4_combine_default_served"
@@ -1928,7 +1928,7 @@ def served_rows() -> list[dict]:
         },
         {
             "row": "M-R-COMPET",
-            "route": "GET /k10/compet/audit",
+            "route": "GET /api/v1/release/compet/audit",
             "test": (
                 "tests/test_k10st4_accept_compet.py::"
                 "test_k10st4_compet_audit_served"
@@ -2706,7 +2706,7 @@ def abort_graceful_record() -> list[dict]:
 
 
 def k10code_provider_routing() -> dict:
-    """Serve row B0B-UNCOVERED_MVP_ACCEPT-231 over GET /k10/code/provider-routing."""
+    """Serve row B0B-UNCOVERED_MVP_ACCEPT-231 over GET /api/v1/release/code/provider-routing."""
     return {
         "testid": "k10code-falcon",
         "row": "B0B-UNCOVERED_MVP_ACCEPT-231",
@@ -2715,7 +2715,7 @@ def k10code_provider_routing() -> dict:
 
 
 def k10code_provider_blocker() -> dict:
-    """Serve row B0B-UNCOVERED_MVP_ACCEPT-233 over GET /k10/code/provider-blocker."""
+    """Serve row B0B-UNCOVERED_MVP_ACCEPT-233 over GET /api/v1/release/code/provider-blocker."""
     return {
         "testid": "k10code-falcon",
         "row": "B0B-UNCOVERED_MVP_ACCEPT-233",
@@ -2724,7 +2724,7 @@ def k10code_provider_blocker() -> dict:
 
 
 def k10code_localhost_standins() -> dict:
-    """Serve row B0B-UNCOVERED_MVP_ACCEPT-235 over GET /k10/code/localhost-standins."""
+    """Serve row B0B-UNCOVERED_MVP_ACCEPT-235 over GET /api/v1/release/code/localhost-standins."""
     return {
         "testid": "k10code-falcon",
         "row": "B0B-UNCOVERED_MVP_ACCEPT-235",
@@ -2733,7 +2733,7 @@ def k10code_localhost_standins() -> dict:
 
 
 def k10code_offline_install() -> dict:
-    """Serve row B0B-UNCOVERED_MVP_ACCEPT-242 over GET /k10/code/offline-install."""
+    """Serve row B0B-UNCOVERED_MVP_ACCEPT-242 over GET /api/v1/release/code/offline-install."""
     return {
         "testid": "k10code-falcon",
         "row": "B0B-UNCOVERED_MVP_ACCEPT-242",
@@ -2742,7 +2742,7 @@ def k10code_offline_install() -> dict:
 
 
 def k10code_absent_wheel() -> dict:
-    """Serve row B0B-UNCOVERED_MVP_ACCEPT-243 over GET /k10/code/absent-wheel."""
+    """Serve row B0B-UNCOVERED_MVP_ACCEPT-243 over GET /api/v1/release/code/absent-wheel."""
     return {
         "testid": "k10code-falcon",
         "row": "B0B-UNCOVERED_MVP_ACCEPT-243",
@@ -2751,7 +2751,7 @@ def k10code_absent_wheel() -> dict:
 
 
 def k10code_frontend_tarball() -> dict:
-    """Serve row B0B-UNCOVERED_MVP_ACCEPT-246 over GET /k10/code/frontend-tarball."""
+    """Serve row B0B-UNCOVERED_MVP_ACCEPT-246 over GET /api/v1/release/code/frontend-tarball."""
     return {
         "testid": "k10code-falcon",
         "row": "B0B-UNCOVERED_MVP_ACCEPT-246",
@@ -2760,7 +2760,7 @@ def k10code_frontend_tarball() -> dict:
 
 
 def k10code_startup_versions() -> dict:
-    """Serve row B0B-UNCOVERED_MVP_ACCEPT-248 over GET /k10/code/startup-versions."""
+    """Serve row B0B-UNCOVERED_MVP_ACCEPT-248 over GET /api/v1/release/code/startup-versions."""
     return {
         "testid": "k10code-falcon",
         "row": "B0B-UNCOVERED_MVP_ACCEPT-248",
@@ -2769,7 +2769,7 @@ def k10code_startup_versions() -> dict:
 
 
 def k10code_startup_providers() -> dict:
-    """Serve row B0B-UNCOVERED_MVP_ACCEPT-250 over GET /k10/code/startup-providers."""
+    """Serve row B0B-UNCOVERED_MVP_ACCEPT-250 over GET /api/v1/release/code/startup-providers."""
     return {
         "testid": "k10code-falcon",
         "row": "B0B-UNCOVERED_MVP_ACCEPT-250",
@@ -2778,7 +2778,7 @@ def k10code_startup_providers() -> dict:
 
 
 def k10code_second_provider() -> dict:
-    """Serve row B0B-UNCOVERED_MVP_ACCEPT-251 over GET /k10/code/second-provider."""
+    """Serve row B0B-UNCOVERED_MVP_ACCEPT-251 over GET /api/v1/release/code/second-provider."""
     return {
         "testid": "k10code-falcon",
         "row": "B0B-UNCOVERED_MVP_ACCEPT-251",
@@ -2787,7 +2787,7 @@ def k10code_second_provider() -> dict:
 
 
 def k10code_abort_graceful() -> dict:
-    """Serve row B0B-UNCOVERED_ARCH-512 over GET /k10/code/abort-graceful."""
+    """Serve row B0B-UNCOVERED_ARCH-512 over GET /api/v1/release/code/abort-graceful."""
     return {
         "testid": "k10code-falcon",
         "row": "B0B-UNCOVERED_ARCH-512",
@@ -2796,16 +2796,16 @@ def k10code_abort_graceful() -> dict:
 
 
 _K10CODE_ROUTES = (
-    ("/k10/code/provider-routing", k10code_provider_routing),
-    ("/k10/code/provider-blocker", k10code_provider_blocker),
-    ("/k10/code/localhost-standins", k10code_localhost_standins),
-    ("/k10/code/offline-install", k10code_offline_install),
-    ("/k10/code/absent-wheel", k10code_absent_wheel),
-    ("/k10/code/frontend-tarball", k10code_frontend_tarball),
-    ("/k10/code/startup-versions", k10code_startup_versions),
-    ("/k10/code/startup-providers", k10code_startup_providers),
-    ("/k10/code/second-provider", k10code_second_provider),
-    ("/k10/code/abort-graceful", k10code_abort_graceful),
+    ("/api/v1/release/code/provider-routing", k10code_provider_routing),
+    ("/api/v1/release/code/provider-blocker", k10code_provider_blocker),
+    ("/api/v1/release/code/localhost-standins", k10code_localhost_standins),
+    ("/api/v1/release/code/offline-install", k10code_offline_install),
+    ("/api/v1/release/code/absent-wheel", k10code_absent_wheel),
+    ("/api/v1/release/code/frontend-tarball", k10code_frontend_tarball),
+    ("/api/v1/release/code/startup-versions", k10code_startup_versions),
+    ("/api/v1/release/code/startup-providers", k10code_startup_providers),
+    ("/api/v1/release/code/second-provider", k10code_second_provider),
+    ("/api/v1/release/code/abort-graceful", k10code_abort_graceful),
 )
 
 
@@ -2831,7 +2831,7 @@ def served_rows_k10code() -> list[dict]:
     return [
         {
             "row": "B0B-UNCOVERED_MVP_ACCEPT-231",
-            "route": "GET /k10/code/provider-routing",
+            "route": "GET /api/v1/release/code/provider-routing",
             "test": (
                 "tests/test_k10code_served.py::"
                 "test_k10code_231_provider_routing"
@@ -2839,7 +2839,7 @@ def served_rows_k10code() -> list[dict]:
         },
         {
             "row": "B0B-UNCOVERED_MVP_ACCEPT-233",
-            "route": "GET /k10/code/provider-blocker",
+            "route": "GET /api/v1/release/code/provider-blocker",
             "test": (
                 "tests/test_k10code_served.py::"
                 "test_k10code_233_provider_blocker"
@@ -2847,7 +2847,7 @@ def served_rows_k10code() -> list[dict]:
         },
         {
             "row": "B0B-UNCOVERED_MVP_ACCEPT-235",
-            "route": "GET /k10/code/localhost-standins",
+            "route": "GET /api/v1/release/code/localhost-standins",
             "test": (
                 "tests/test_k10code_served.py::"
                 "test_k10code_235_localhost_standins"
@@ -2855,7 +2855,7 @@ def served_rows_k10code() -> list[dict]:
         },
         {
             "row": "B0B-UNCOVERED_MVP_ACCEPT-242",
-            "route": "GET /k10/code/offline-install",
+            "route": "GET /api/v1/release/code/offline-install",
             "test": (
                 "tests/test_k10code_served.py::"
                 "test_k10code_242_offline_install"
@@ -2863,7 +2863,7 @@ def served_rows_k10code() -> list[dict]:
         },
         {
             "row": "B0B-UNCOVERED_MVP_ACCEPT-243",
-            "route": "GET /k10/code/absent-wheel",
+            "route": "GET /api/v1/release/code/absent-wheel",
             "test": (
                 "tests/test_k10code_served.py::"
                 "test_k10code_243_absent_wheel"
@@ -2871,7 +2871,7 @@ def served_rows_k10code() -> list[dict]:
         },
         {
             "row": "B0B-UNCOVERED_MVP_ACCEPT-246",
-            "route": "GET /k10/code/frontend-tarball",
+            "route": "GET /api/v1/release/code/frontend-tarball",
             "test": (
                 "tests/test_k10code_served.py::"
                 "test_k10code_246_frontend_tarball"
@@ -2879,7 +2879,7 @@ def served_rows_k10code() -> list[dict]:
         },
         {
             "row": "B0B-UNCOVERED_MVP_ACCEPT-248",
-            "route": "GET /k10/code/startup-versions",
+            "route": "GET /api/v1/release/code/startup-versions",
             "test": (
                 "tests/test_k10code_served.py::"
                 "test_k10code_248_startup_versions"
@@ -2887,7 +2887,7 @@ def served_rows_k10code() -> list[dict]:
         },
         {
             "row": "B0B-UNCOVERED_MVP_ACCEPT-250",
-            "route": "GET /k10/code/startup-providers",
+            "route": "GET /api/v1/release/code/startup-providers",
             "test": (
                 "tests/test_k10code_served.py::"
                 "test_k10code_250_startup_providers"
@@ -2895,7 +2895,7 @@ def served_rows_k10code() -> list[dict]:
         },
         {
             "row": "B0B-UNCOVERED_MVP_ACCEPT-251",
-            "route": "GET /k10/code/second-provider",
+            "route": "GET /api/v1/release/code/second-provider",
             "test": (
                 "tests/test_k10code_served.py::"
                 "test_k10code_251_second_provider"
@@ -2903,7 +2903,7 @@ def served_rows_k10code() -> list[dict]:
         },
         {
             "row": "B0B-UNCOVERED_ARCH-512",
-            "route": "GET /k10/code/abort-graceful",
+            "route": "GET /api/v1/release/code/abort-graceful",
             "test": (
                 "tests/test_k10code_served.py::"
                 "test_k10code_512_abort_graceful"

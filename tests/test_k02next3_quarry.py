@@ -82,7 +82,7 @@ def test_k02next3_row_ui_delta_36_non_openai_chat_completions():
     client, headers = make_client()
     for provider in ("meta", "acme-custom", "openai-compatible-x"):
         resp = client.get(
-            "/v1/k02next3/sdk-transport",
+            "/api/v1/hierarchy/sdk-transport",
             params={"provider": provider},
             headers=headers,
         )
@@ -92,14 +92,14 @@ def test_k02next3_row_ui_delta_36_non_openai_chat_completions():
         assert body["transport"] == "chat_completions"
         assert body["entry"] == "transport_for_provider"
     openai = client.get(
-        "/v1/k02next3/sdk-transport",
+        "/api/v1/hierarchy/sdk-transport",
         params={"provider": "openai"},
         headers=headers,
     )
     assert openai.status_code == 200, openai.text
     assert openai.json()["transport"] == "sdk_default"
     blank = client.get(
-        "/v1/k02next3/sdk-transport",
+        "/api/v1/hierarchy/sdk-transport",
         params={"provider": "  "},
         headers=headers,
     )
@@ -111,7 +111,7 @@ def test_k02next3_row_arch_57_never_responses_api():
     client, headers = make_client()
     for provider in ("meta", "anthropic", "acme-custom"):
         resp = client.get(
-            "/v1/k02next3/sdk-transport",
+            "/api/v1/hierarchy/sdk-transport",
             params={"provider": provider},
             headers=headers,
         )
@@ -135,7 +135,7 @@ def test_k02next3_row_bp03_4_max_retries_zero_routing_decision_retries():
         "strategy": "single",
     }
     bound = client.post(
-        "/v1/k02next3/run-config",
+        "/api/v1/hierarchy/run-config",
         json={"decision": decision, "executor_attempt_max": 3},
         headers=headers,
     )
@@ -146,7 +146,7 @@ def test_k02next3_row_bp03_4_max_retries_zero_routing_decision_retries():
     assert body["max_runner_retries"] == 3
     assert body["transport"] == "chat_completions"
     refused = client.post(
-        "/v1/k02next3/run-config",
+        "/api/v1/hierarchy/run-config",
         json={"decision": decision, "executor_attempt_max": 3,
               "client_max_retries": 1},
         headers=headers,
@@ -155,7 +155,7 @@ def test_k02next3_row_bp03_4_max_retries_zero_routing_decision_retries():
     assert refused.json()["detail"]["code"] == \
         "SDK_CLIENT_MAX_RETRIES_NONZERO"
     no_actor = client.post(
-        "/v1/k02next3/run-config",
+        "/api/v1/hierarchy/run-config",
         json={"decision": decision, "executor_attempt_max": 3},
     )
     assert no_actor.status_code == 401
@@ -165,7 +165,7 @@ def test_k02next3_row_bp06_81_project_to_role_target_flow():
     """| B0B-UNCOVERED_BP06-81 | K02 | Route project work to roles through a defined project-to-role target flow |"""
     client, headers = make_client()
     served = client.post(
-        "/v1/k02next3/target-flow",
+        "/api/v1/hierarchy/target-flow",
         json={"project_id": "pkg-q", "target_flow": _target_flow()},
         headers=headers,
     )
@@ -180,14 +180,14 @@ def test_k02next3_row_bp06_81_project_to_role_target_flow():
     partial = _target_flow()
     del partial["worker"]
     missing = client.post(
-        "/v1/k02next3/target-flow",
+        "/api/v1/hierarchy/target-flow",
         json={"project_id": "pkg-q", "target_flow": partial},
         headers=headers,
     )
     assert missing.status_code == 400, missing.text
     assert missing.json()["detail"]["code"] == "NO_TARGET_FLOW_DEFAULT"
     no_actor = client.post(
-        "/v1/k02next3/target-flow",
+        "/api/v1/hierarchy/target-flow",
         json={"project_id": "pkg-q", "target_flow": _target_flow()},
     )
     assert no_actor.status_code == 401
@@ -198,7 +198,7 @@ def test_k02next3_row_sdk_132_verified_sdk_surface():
     from agent_si.sdk_adapter import sdk_adapter as _sdk
 
     client, headers = make_client()
-    resp = client.get("/v1/k02next3/sdk-surface", headers=headers)
+    resp = client.get("/api/v1/hierarchy/sdk-surface", headers=headers)
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["sdk_available"] == _sdk.SDK_AVAILABLE
@@ -216,7 +216,7 @@ def test_k02next3_row_bp01_10_planner_idempotent_plan_ref():
     """| B0B-BP01-10 | K02 | TaskPlanner decompose is idempotent on package ref and goal hash via the existing plan ref |"""
     client, headers = make_client()
     first = client.post(
-        "/v1/k02next3/plan",
+        "/api/v1/hierarchy/plan",
         json={"package_id": "pkg-q", "goal": "quarry goal",
               "specs": _specs()},
         headers=headers,
@@ -224,7 +224,7 @@ def test_k02next3_row_bp01_10_planner_idempotent_plan_ref():
     assert first.status_code == 200, first.text
     assert first.json()["subtasks"] == ["pkg-q:part-000", "pkg-q:part-001"]
     second = client.post(
-        "/v1/k02next3/plan",
+        "/api/v1/hierarchy/plan",
         json={"package_id": "pkg-q", "goal": "quarry goal",
               "specs": _specs()},
         headers=headers,
@@ -232,7 +232,7 @@ def test_k02next3_row_bp01_10_planner_idempotent_plan_ref():
     assert second.status_code == 200, second.text
     assert second.json()["plan_ref"] == first.json()["plan_ref"]
     other = client.post(
-        "/v1/k02next3/plan",
+        "/api/v1/hierarchy/plan",
         json={"package_id": "pkg-q", "goal": "different goal",
               "specs": _specs()},
         headers=headers,
@@ -240,7 +240,7 @@ def test_k02next3_row_bp01_10_planner_idempotent_plan_ref():
     assert other.status_code == 200, other.text
     assert other.json()["plan_ref"] != first.json()["plan_ref"]
     no_actor = client.post(
-        "/v1/k02next3/plan",
+        "/api/v1/hierarchy/plan",
         json={"package_id": "pkg-q", "goal": "quarry goal",
               "specs": _specs()},
     )
@@ -259,13 +259,13 @@ def test_k02next3_row_arch_7_dispatch_rejects_unplanned():
     ok_body = {"package_id": "pkg-q", "goal": "quarry goal",
                "specs": _specs(), "agent_task": planned}
     ok_resp = client.post(
-        "/v1/k02next3/dispatch", json=ok_body, headers=headers)
+        "/api/v1/hierarchy/dispatch", json=ok_body, headers=headers)
     assert ok_resp.status_code == 200, ok_resp.text
     assert ok_resp.json()["subtask_id"] == "pkg-q:part-000"
     bare = dict(planned)
     del bare["subtask_id"]
     missing = client.post(
-        "/v1/k02next3/dispatch",
+        "/api/v1/hierarchy/dispatch",
         json={"package_id": "pkg-q", "goal": "quarry goal",
               "specs": _specs(), "agent_task": bare},
         headers=headers,
@@ -274,7 +274,7 @@ def test_k02next3_row_arch_7_dispatch_rejects_unplanned():
     assert missing.json()["detail"]["code"] == "DISPATCH_REJECTED"
     unplanned = dict(planned, subtask_id="pkg-q:never-planned")
     refused = client.post(
-        "/v1/k02next3/dispatch",
+        "/api/v1/hierarchy/dispatch",
         json={"package_id": "pkg-q", "goal": "quarry goal",
               "specs": _specs(), "agent_task": unplanned},
         headers=headers,
@@ -282,7 +282,7 @@ def test_k02next3_row_arch_7_dispatch_rejects_unplanned():
     assert refused.status_code == 400, refused.text
     assert refused.json()["detail"]["code"] == "DISPATCH_REJECTED"
     no_actor = client.post(
-        "/v1/k02next3/dispatch", json=ok_body)
+        "/api/v1/hierarchy/dispatch", json=ok_body)
     assert no_actor.status_code == 401
 
 
@@ -292,7 +292,7 @@ def test_k02next3_row_arch_705_corrections_mismatch_rejected():
     refs = ["ARTIFACT_REF:pkg-q705/shared-a",
             "ARTIFACT_REF:pkg-q705/shared-b"]
     good = client.post(
-        "/v1/k02next3/issue",
+        "/api/v1/hierarchy/issue",
         json={"package_id": "pkg-q705", "goal": "issue quarry",
               "context_refs": refs, "max_parts": 2,
               "corrections": [{"actor": "user", "text": "fix scope"}]},
@@ -303,7 +303,7 @@ def test_k02next3_row_arch_705_corrections_mismatch_rejected():
     assert len(issued["parts"]) == 2
     assert issued["corrections_hash"]
     stale = client.post(
-        "/v1/k02next3/issue",
+        "/api/v1/hierarchy/issue",
         json={"package_id": "pkg-q705", "goal": "issue quarry",
               "context_refs": refs, "max_parts": 2,
               "corrections": [{"actor": "user", "text": "fix scope"}],
@@ -313,7 +313,7 @@ def test_k02next3_row_arch_705_corrections_mismatch_rejected():
     assert stale.status_code == 400, stale.text
     assert stale.json()["detail"]["code"] == "CORRECTIONS_MISMATCH"
     match = client.post(
-        "/v1/k02next3/issue",
+        "/api/v1/hierarchy/issue",
         json={"package_id": "pkg-q705b", "goal": "issue quarry",
               "context_refs": refs, "max_parts": 2,
               "corrections": [{"actor": "user", "text": "fix scope"}],
@@ -323,7 +323,7 @@ def test_k02next3_row_arch_705_corrections_mismatch_rejected():
     assert match.status_code == 200, match.text
     assert match.json()["corrections_hash"] == issued["corrections_hash"]
     no_actor = client.post(
-        "/v1/k02next3/issue",
+        "/api/v1/hierarchy/issue",
         json={"package_id": "pkg-q705", "goal": "issue quarry",
               "context_refs": refs, "max_parts": 2},
     )

@@ -99,7 +99,7 @@ async def k09b_validate(request: Request) -> dict[str, Any]:
         return {"ok": False, "kb_dir": None, "error_code": "KB_MANIFEST_MISSING"}
 
 
-@k09b_router.get("/api/v1/k09b/live")
+@k09b_router.get("/api/v1/kb/live")
 def k09b_live() -> dict[str, Any]:
     """LIVE0-06: served-proof listing the four served rows."""
     return {

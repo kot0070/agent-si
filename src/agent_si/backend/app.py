@@ -1886,7 +1886,7 @@ def create_app(settings: Any = None,
 
     # K13F1 routes: amend / finalize-read / stop over the real K13 entries.
     # Additions-only block: binds per-app in-memory K13 state on app.state
-    # and registers the /api/v1/k13/ handlers. Writes keep the K02 guard
+    # and registers the /api/v1/core/ handlers. Writes keep the K02 guard
     # (401 missing x-actor, 403 bad token via app.state.auth_hook).
     from agent_si.backend import k13f1_routes as _k13f1_routes
 
@@ -2028,7 +2028,7 @@ def create_app(settings: Any = None,
 
     # --- K06 OC served worker path (MH-1/MH-3 + rows 189/253/254). ---
     # Additions-only block: binds per-app K06 OC state on app.state and
-    # registers the /api/v1/k06/ handlers over the real worker_tools /
+    # registers the /api/v1/tools/ handlers over the real worker_tools /
     # services / script_import modules. No existing line above changes.
     from agent_si.worker_tools import routes as _k06oc_routes
 
@@ -2359,7 +2359,7 @@ def create_app(settings: Any = None,
 
     _k12open1_routes.register_k12open1_routes(app)
 
-    # K12OPEN2 rows (R-350 + HC-3): same pure logic, new /k12open2/ paths.
+    # K12OPEN2 rows (R-350 + HC-3): same pure logic, new /api/v1/demo/ paths.
     from agent_si.backend import k12open2_routes as _k12open2_routes
 
     _k12open2_routes.register_k12open2_routes(app)
@@ -2475,7 +2475,7 @@ def create_app(settings: Any = None,
             return {}
         return body if isinstance(body, dict) else {}
 
-    @app.post("/api/v1/k12open3/contributions/mark")
+    @app.post("/api/v1/demo/contributions/mark")
     async def _k12open3_post_mark(request: Request):
         refused = _k12open3_guard(request)
         if refused is not None:
@@ -2498,13 +2498,13 @@ def create_app(settings: Any = None,
             return _k12open3_refuse(err.status, err.code, err.message)
         return {"contribution": record}
 
-    @app.get("/api/v1/k12open3/contributions")
+    @app.get("/api/v1/demo/contributions")
     def _k12open3_get_contributions():
         return {
             "contributions": list(app.state.k12open3_contributions.values())
         }
 
-    @app.post("/api/v1/k12open3/submission/finalize")
+    @app.post("/api/v1/demo/submission/finalize")
     async def _k12open3_post_finalize(request: Request):
         refused = _k12open3_guard(request)
         if refused is not None:
@@ -2753,7 +2753,7 @@ def create_app(settings: Any = None,
     # K10ST4 M-R-COMPET (MGR-B lane B: competitive audit; MGR-A mounts its
     # own routes elsewhere in this file, untouched): recorded flow-by-flow
     # audit with source plus snippet per claim (loopback TEST data only).
-    @app.get("/k10/compet/audit")
+    @app.get("/api/v1/release/compet/audit")
     def k10_compet_audit() -> dict[str, Any]:
         from agent_si.k10_compet import audit_flows as _k10_compet_flows
 
@@ -2761,7 +2761,7 @@ def create_app(settings: Any = None,
 
     # K10ST4 M-P4-162 (lane A: acceptance; MGR-B block above untouched):
     # final acceptance over Docker plus services plus PowerShell (loopback).
-    @app.get("/k10/accept")
+    @app.get("/api/v1/release/accept")
     def k10_accept() -> dict[str, Any]:
         from agent_si.k10_accept import get_acceptance_status as _k10_status
 
@@ -2769,7 +2769,7 @@ def create_app(settings: Any = None,
 
     # K10ST4 M-P4-166 (lane A: combine on DEFAULT; MGR-B block above
     # untouched): best plus KB plus benchmark plus Watcher (loopback).
-    @app.get("/k10/combine")
+    @app.get("/api/v1/release/combine")
     def k10_combine(package_id: str) -> dict[str, Any]:
         from agent_si.k10_combine import combine_default as _k10_combine
 
@@ -2777,7 +2777,7 @@ def create_app(settings: Any = None,
 
     # K10OPEN4 start path (row 166): human-like end-to-end run record
     # with release evidence including screenshots (loopback TEST only).
-    @app.get("/k10/start/evidence")
+    @app.get("/api/v1/release/start/evidence")
     def k10open4_start_evidence() -> dict[str, Any]:
         from agent_si.k10_start import (
             record_release_evidence as _k10o4_evidence,
@@ -2788,7 +2788,7 @@ def create_app(settings: Any = None,
 
     # K10OPEN4 start path (row R-328): demo project brought to green
     # inside the acceptance drive (loopback TEST data only).
-    @app.post("/k10/start/demo")
+    @app.post("/api/v1/release/start/demo")
     def k10open4_start_demo() -> dict[str, Any]:
         from agent_si.k10_start import drive_demo_to_green as _k10o4_demo
 
@@ -2808,7 +2808,7 @@ def create_app(settings: Any = None,
 
     # K10OPEN4 start path (row M-P4-138, served report): per-file
     # report of the first-start settings plus keys migration.
-    @app.get("/k10/start/migrate")
+    @app.get("/api/v1/release/start/migrate")
     def k10open4_start_migrate() -> dict[str, Any]:
         from agent_si.k10_start import migrate_first_start as _k10o4_mig2
 
@@ -3321,16 +3321,16 @@ def create_app(settings: Any = None,
     # four rows over the lane modules (cards, retry ledger, offline
     # selftest, launch fan-out). Open entries, no token; the launch
     # registry is the only state touched.
-    @app.get("/api/k11rest/health")
+    @app.get("/api/v1/providers/health")
     def k11rest_health() -> dict[str, Any]:
-        """GET /api/k11rest/health -> display-only provider cards."""
+        """GET /api/v1/providers/health -> display-only provider cards."""
         from agent_si.providers.registry import k11rest_cards as _k11_cards
 
         return {"cards": _k11_cards.build_cards()}
 
-    @app.post("/api/k11rest/retry-sim")
+    @app.post("/api/v1/providers/retry-sim")
     async def k11rest_retry_sim(request: Request) -> Any:
-        """POST /api/k11rest/retry-sim -> visible retry ledger."""
+        """POST /api/v1/providers/retry-sim -> visible retry ledger."""
         from agent_si.routing import k11rest_retry as _k11_retry
 
         try:
@@ -3347,16 +3347,16 @@ def create_app(settings: Any = None,
                 detail={"code": "BAD_RETRY_CODE",
                         "detail": str(_k11_err)}) from None
 
-    @app.get("/api/k11rest/prompt-factory/selftest")
+    @app.get("/api/v1/providers/prompt-factory/selftest")
     def k11rest_pf_selftest() -> dict[str, Any]:
-        """GET /api/k11rest/prompt-factory/selftest -> offline verdict."""
+        """GET /api/v1/providers/prompt-factory/selftest -> offline verdict."""
         from agent_si.prompt_factory import selftest as _k11_pf
 
         return _k11_pf.run_selftest()
 
-    @app.post("/api/k11rest/launch")
+    @app.post("/api/v1/providers/launch")
     async def k11rest_launch(request: Request) -> Any:
-        """POST /api/k11rest/launch -> parallel fan-out behind gates."""
+        """POST /api/v1/providers/launch -> parallel fan-out behind gates."""
         from agent_si.automation import templates as _k11_tpl
 
         try:
@@ -3434,9 +3434,9 @@ def create_app(settings: Any = None,
             ))
         return out
 
-    @app.post("/api/v1/k03rest/sourcing_gate")
+    @app.post("/api/v1/qa/sourcing_gate/basic")
     async def k03rest_sourcing_gate(request: Request) -> dict[str, Any]:
-        """POST /api/v1/k03rest/sourcing_gate -> BLOCKED or SOURCED."""
+        """POST /api/v1/qa/sourcing_gate/basic -> BLOCKED or SOURCED."""
         data = await _k03a_body(request)
         registry = _K03restRegistry()
         for candidate in _k03rest_candidates(
@@ -3471,9 +3471,9 @@ def create_app(settings: Any = None,
             },
         }
 
-    @app.post("/api/v1/k03rest/registry_gate")
+    @app.post("/api/v1/qa/registry_gate")
     async def k03rest_registry_gate(request: Request) -> dict[str, Any]:
-        """POST /api/v1/k03rest/registry_gate -> registry lookup verdict."""
+        """POST /api/v1/qa/registry_gate -> registry lookup verdict."""
         data = await _k03a_body(request)
         provider_id = str(data.get("provider_id") or "").strip()
         model = str(data.get("model") or "").strip()
@@ -3521,9 +3521,9 @@ def create_app(settings: Any = None,
             "pass_allowed": True,
         }
 
-    @app.post("/api/v1/k03rest/semantic_security")
+    @app.post("/api/v1/qa/semantic_security/lenient")
     async def k03rest_semantic_security(request: Request) -> dict[str, Any]:
-        """POST /api/v1/k03rest/semantic_security -> SDK-107 verdict."""
+        """POST /api/v1/qa/semantic_security/lenient -> SDK-107 verdict."""
         data = await _k03a_body(request)
         criterion_refs = tuple(
             str(v) for v in _k03a_tuples(data.get("criterion_refs")))
@@ -3537,9 +3537,9 @@ def create_app(settings: Any = None,
             "checked_evidence": len(evidence_refs),
         }
 
-    @app.post("/api/v1/k03rest/evidence_criterion")
+    @app.post("/api/v1/qa/evidence_criterion")
     async def k03rest_evidence_criterion(request: Request) -> dict[str, Any]:
-        """POST /api/v1/k03rest/evidence_criterion -> ARCH-622 verdict."""
+        """POST /api/v1/qa/evidence_criterion -> ARCH-622 verdict."""
         data = await _k03a_body(request)
         criterion_id = str(data.get("criterion_id") or "").strip()
         if not criterion_id:
@@ -3575,9 +3575,9 @@ def create_app(settings: Any = None,
                 str(stored.handling_disposition)),
         }
 
-    @app.post("/api/v1/k03rest/correction_budget")
+    @app.post("/api/v1/qa/correction_budget")
     async def k03rest_correction_budget(request: Request) -> dict[str, Any]:
-        """POST /api/v1/k03rest/correction_budget -> bounded re-audit."""
+        """POST /api/v1/qa/correction_budget -> bounded re-audit."""
         data = await _k03a_body(request)
         project_id = str(data.get("project_id") or "").strip()
         task_id = str(data.get("task_id") or "").strip()
@@ -3662,9 +3662,9 @@ def create_app(settings: Any = None,
                 len(set(sessions)) == len(sessions)),
         }
 
-    @app.post("/api/v1/k03rest/provider_dependency")
+    @app.post("/api/v1/qa/provider_dependency")
     async def k03rest_provider_dependency(request: Request) -> dict[str, Any]:
-        """POST /api/v1/k03rest/provider_dependency -> BLOCKED + options."""
+        """POST /api/v1/qa/provider_dependency -> BLOCKED + options."""
         data = await _k03a_body(request)
         provider_id = str(data.get("provider_id") or "").strip()
         model = str(data.get("model") or "").strip()
@@ -3737,7 +3737,7 @@ def create_app(settings: Any = None,
         except Exception:
             raise HTTPException(
                 status_code=400,
-                detail={"code": "DEMOF13F1_BAD_JSON",
+                detail={"code": "BAD_JSON_BODY",
                         "message": "permissions check needs a JSON body"}
             ) from None
         try:
@@ -3764,7 +3764,7 @@ def create_app(settings: Any = None,
         except Exception:
             raise HTTPException(
                 status_code=400,
-                detail={"code": "DEMOF13F1_BAD_JSON",
+                detail={"code": "BAD_JSON_BODY",
                         "message": "catalog run needs a JSON body"}
             ) from None
         _demof13w_suite = (

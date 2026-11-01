@@ -7,7 +7,7 @@ Rows (kit BUILD_PLAN, this order):
 173 fixture pack ships under checkout, not measured evidence -- the manifest
     plus provenance files under tools/drive/demo with sha256 seals.
 217 TEST FIXTURE rows prove wiring only, never measured evidence --
-    GET /k10/accept plus GET /api/v1/analytics/telemetry via create_app.
+    GET /api/v1/release/accept plus GET /api/v1/analytics/telemetry via create_app.
 225 local demo needs a permission-gated local runtime plus capability
     evidence for the fixture class -- demo_local.py run as a script.
 227 split demo includes real cloud verification over the local draft output
@@ -235,7 +235,7 @@ def test_k10fixt2_173_pack_ships_under_checkout(tmp_path):
         assert digest == _raw_sha(ROOT / script), script
     assert provenance["manifest_sha256"] == _raw_sha(MANIFEST_PATH)
 def test_k10fixt2_217_wiring_only(tmp_path, monkeypatch):
-    """Row 217 served through GET /k10/accept plus the telemetry route."""
+    """Row 217 served through GET /api/v1/release/accept plus the telemetry route."""
     data = _load_json(FIXTURES_REMOTE)
     row = _rows_by_id(data)[ROW_217]
     _assert_labelled_pack_row(row, "tools/drive/demo/demo_split.py")
@@ -243,7 +243,7 @@ def test_k10fixt2_217_wiring_only(tmp_path, monkeypatch):
     assert _canonical_fixture_sha(data) == row["provenance"][
         "fixture_sha256"], row
     client, store_dir = _client(tmp_path, monkeypatch)
-    resp = client.get("/k10/accept")
+    resp = client.get("/api/v1/release/accept")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["testid"] == "k10st4-accept", body

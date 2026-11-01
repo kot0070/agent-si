@@ -1,11 +1,11 @@
 """K10ST4 lane A+B: served acceptance, combine-default, competitive audit.
 
-Row M-P4-162 (acceptance): GET /k10/accept returns the final acceptance
+Row M-P4-162 (acceptance): GET /api/v1/release/accept returns the final acceptance
 status over Docker plus declared services plus PowerShell, with testid.
-Row M-P4-166 (combine): GET /k10/combine?package_id=<id> combines best
+Row M-P4-166 (combine): GET /api/v1/release/combine?package_id=<id> combines best
 plus KB plus benchmark plus Watcher on DEFAULT, with testid.
 Row M-R-COMPET (audit, MGR-B module, frozen F4 API): GET
-/k10/compet/audit returns flow-by-flow claims each with a recorded source
+/api/v1/release/compet/audit returns flow-by-flow claims each with a recorded source
 plus snippet, with testid. Loopback TEST data only.
 """
 import os
@@ -30,7 +30,7 @@ def _client():
 
 def test_k10st4_accept_served():
     client = _client()
-    resp = client.get("/k10/accept")
+    resp = client.get("/api/v1/release/accept")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["testid"] == TESTID, body
@@ -40,7 +40,7 @@ def test_k10st4_accept_served():
 
 def test_k10st4_combine_default_served():
     client = _client()
-    resp = client.get("/k10/combine", params={"package_id": "TEST-PKG-1"})
+    resp = client.get("/api/v1/release/combine", params={"package_id": "TEST-PKG-1"})
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["testid"] == TESTID, body
@@ -52,7 +52,7 @@ def test_k10st4_combine_default_served():
 
 def test_k10st4_compet_audit_served():
     client = _client()
-    resp = client.get("/k10/compet/audit")
+    resp = client.get("/api/v1/release/compet/audit")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["testid"] == TESTID, body

@@ -3,10 +3,10 @@
 testid k11rest-served. One behaviour test per row, each through the
 served K11REST entry (create_app + HTTP client):
 
-- R-329: GET /api/k11rest/health -> display-only provider cards.
-- R-330: POST /api/k11rest/retry-sim -> visible same-model retry ledger.
-- R-331: GET /api/k11rest/prompt-factory/selftest -> offline selftest.
-- R-352: POST /api/k11rest/launch -> parallel fan-out with gates.
+- R-329: GET /api/v1/providers/health -> display-only provider cards.
+- R-330: POST /api/v1/providers/retry-sim -> visible same-model retry ledger.
+- R-331: GET /api/v1/providers/prompt-factory/selftest -> offline selftest.
+- R-352: POST /api/v1/providers/launch -> parallel fan-out with gates.
 """
 
 import os
@@ -37,7 +37,7 @@ def client():
 def test_k11rest_r329_health_served(client):
     """R-329: health cards served display-only through the served entry."""
     assert TESTID == "k11rest-served"
-    resp = client.get("/api/k11rest/health")
+    resp = client.get("/api/v1/providers/health")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     cards = body["cards"]
@@ -63,7 +63,7 @@ def test_k11rest_r330_retry_sim_served(client):
     from agent_si.routing import k11rest_retry as _retry
 
     for code in (429, 503, 529):
-        resp = client.post("/api/k11rest/retry-sim", json={"code": code})
+        resp = client.post("/api/v1/providers/retry-sim", json={"code": code})
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert set(body) == {"attempts", "final_model", "provider_same",
@@ -78,14 +78,14 @@ def test_k11rest_r330_retry_sim_served(client):
         assert body["final_model"] == attempts[-1]["model"]
         assert body["provider_same"] is True
         assert body["role_default_off"] is True
-    refused = client.post("/api/k11rest/retry-sim", json={"code": 418})
+    refused = client.post("/api/v1/providers/retry-sim", json={"code": 418})
     assert refused.status_code == 400, refused.text
 
 
 def test_k11rest_r331_prompt_factory_selftest_served(client):
     """R-331: offline prompt-factory selftest served; client is injected."""
     assert TESTID == "k11rest-served"
-    resp = client.get("/api/k11rest/prompt-factory/selftest")
+    resp = client.get("/api/v1/providers/prompt-factory/selftest")
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"ok": True, "offline": True}
 
@@ -109,7 +109,7 @@ def test_k11rest_r352_launch_served(client):
     parts = [{"action": "service.check", "with": {"service_id": "svc-api"}},
              {"action": "service.watch", "with": {}},
              {"action": "journal.notify", "with": {"kind": "AUTOMATION_RUN"}}]
-    resp = client.post("/api/k11rest/launch", json={"parts": parts})
+    resp = client.post("/api/v1/providers/launch", json={"parts": parts})
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert set(body) == {"fanout", "gates", "run_id", "resume_token"}
@@ -126,5 +126,5 @@ def test_k11rest_r352_launch_served(client):
     assert resumed["fanout"] == 3
     assert resumed["state"] == "RUNNING"
 
-    refused = client.post("/api/k11rest/launch", json={"parts": []})
+    refused = client.post("/api/v1/providers/launch", json={"parts": []})
     assert refused.status_code == 400, refused.text

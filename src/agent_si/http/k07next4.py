@@ -208,19 +208,19 @@ async def turn_triple(request: Request) -> dict[str, Any]:
 
 
 ROUTES: tuple[tuple[str, str, str, RouteFn], ...] = (
-    ("post", "/api/v1/k07next4/session-write", "session_write",
+    ("post", "/api/v1/app/session-write", "session_write",
      session_write),
-    ("post", "/api/v1/k07next4/projects", "projects_create",
+    ("post", "/api/v1/app/projects", "projects_create",
      projects_create),
-    ("get", "/api/v1/k07next4/projects", "projects_list",
+    ("get", "/api/v1/app/projects", "projects_list",
      projects_list),
-    ("get", "/api/v1/k07next4/page-shell", "page_shell",
+    ("get", "/api/v1/app/page-shell", "page_shell",
      page_shell),
-    ("post", "/api/v1/k07next4/chat-task", "chat_task",
+    ("post", "/api/v1/app/chat-task", "chat_task",
      chat_task),
-    ("get", "/api/v1/k07next4/step-turn", "step_turn",
+    ("get", "/api/v1/app/step-turn", "step_turn",
      step_turn),
-    ("get", "/api/v1/k07next4/turn-triple", "turn_triple",
+    ("get", "/api/v1/app/turn-triple", "turn_triple",
      turn_triple),
 )
 

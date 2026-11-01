@@ -63,7 +63,7 @@ def _start(client, project_id=W_PROJ, run_id=RUN_ID, argv=None,
     if headers is None:
         headers = _headers()
     return client.post(
-        "/api/v1/k06/tools/command/start",
+        "/api/v1/tools/tools/command/start",
         json={"project_id": project_id, "run_id": run_id, "argv": argv},
         headers=headers,
     )
@@ -73,7 +73,7 @@ def _status(client, run_id=RUN_ID, headers=None):
     if headers is None:
         headers = _headers()
     return client.get(
-        "/api/v1/k06/tools/command/status",
+        "/api/v1/tools/tools/command/status",
         params={"run_id": run_id},
         headers=headers,
     )

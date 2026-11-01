@@ -1,9 +1,9 @@
 """K12OPEN2 served routes (rows R-350 + HC-3).
 
 register_k12open2_routes(app) mounts exactly two routes on the seam
-app: POST /api/v1/k12open2/public-text/check (USER_WRITE guard,
+app: POST /api/v1/demo/public-text/check (USER_WRITE guard,
 EMPTY_IDEA_TEXT on a blank or omitted idea_text, else {ok, violations}
-from public_text.check_idea) and POST /api/v1/k12open2/submission/scan
+from public_text.check_idea) and POST /api/v1/demo/submission/scan
 (USER_WRITE guard, EMPTY_SUBMISSION when no files and blank notes, else
 {ok, findings} from secretscan.scan_files). Writes keep the frozen
 USER_WRITE guard (401 missing x-actor, 403 bad token); every refusal
@@ -84,7 +84,7 @@ def register_k12open2_routes(app: Any) -> Any:
     if getattr(getattr(app, "state", None), "k12_contributions", None) is None:
         app.state.k12_contributions = {}
 
-    @app.post("/api/v1/k12open2/public-text/check")
+    @app.post("/api/v1/demo/public-text/check")
     async def post_k12open2_public_text_check(request: Request) -> Any:
         refused = _guard(request)
         if refused is not None:
@@ -102,7 +102,7 @@ def register_k12open2_routes(app: Any) -> Any:
         )
         return {"ok": not violations, "violations": violations}
 
-    @app.post("/api/v1/k12open2/submission/scan")
+    @app.post("/api/v1/demo/submission/scan")
     async def post_k12open2_submission_scan(request: Request) -> Any:
         refused = _guard(request)
         if refused is not None:

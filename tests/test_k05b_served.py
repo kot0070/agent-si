@@ -31,7 +31,7 @@ def test_arch_352_served() -> None:
     """B0B-UNCOVERED_ARCH-352: permission gates local contact; refusal is a violation."""
     client = _client()
     permitted = client.post(
-        "/k05next/arch-352/serve",
+        "/api/v1/local/arch-352/serve",
         json={"endpoint": _LOCAL_ENDPOINT, "permission": True},
     )
     assert permitted.status_code == 200, permitted.text
@@ -39,7 +39,7 @@ def test_arch_352_served() -> None:
     assert permitted_body["contacted"] is True
     assert permitted_body["violation"] is False
     refused = client.post(
-        "/k05next/arch-352/serve",
+        "/api/v1/local/arch-352/serve",
         json={"endpoint": _LOCAL_ENDPOINT, "permission": False},
     )
     assert refused.status_code == 200, refused.text
@@ -48,13 +48,13 @@ def test_arch_352_served() -> None:
     assert refused_body["violation"] is True
     assert "UNPERMITTED_CONTACT" in refused_body["reason"]
     bad = client.post(
-        "/k05next/arch-352/serve",
+        "/api/v1/local/arch-352/serve",
         json={"endpoint": "", "permission": True},
     )
     assert bad.status_code == 422, bad.text
     assert "K05NEXT_B_BAD_PAYLOAD" in bad.text
     outside = client.post(
-        "/k05next/arch-352/serve",
+        "/api/v1/local/arch-352/serve",
         json={"endpoint": "http://127.0.0.1:9999", "permission": True},
     )
     assert outside.status_code == 404, outside.text
@@ -65,7 +65,7 @@ def test_bp05_65_served() -> None:
     """B0B-UNCOVERED_BP05-65: unmet preconditions record GATEWAY_BUSY, refuse contact."""
     client = _client()
     met = client.post(
-        "/k05next/bp05-65/serve",
+        "/api/v1/local/bp05-65/serve",
         json={"gateway": "gateway-idle-1", "preconditions_met": True},
     )
     assert met.status_code == 200, met.text
@@ -73,7 +73,7 @@ def test_bp05_65_served() -> None:
     assert met_body["contacted"] is True
     assert met_body["violation_recorded"] is False
     unmet = client.post(
-        "/k05next/bp05-65/serve",
+        "/api/v1/local/bp05-65/serve",
         json={"gateway": "gateway-busy-1", "preconditions_met": False},
     )
     assert unmet.status_code == 200, unmet.text
@@ -82,7 +82,7 @@ def test_bp05_65_served() -> None:
     assert unmet_body["violation_recorded"] is True
     assert unmet_body["violation"] == "GATEWAY_BUSY"
     bad = client.post(
-        "/k05next/bp05-65/serve",
+        "/api/v1/local/bp05-65/serve",
         json={"gateway": "", "preconditions_met": False},
     )
     assert bad.status_code == 422, bad.text
@@ -93,7 +93,7 @@ def test_bp05_92_served() -> None:
     """B0B-UNCOVERED_BP05-92: tiers derive from recorded evidence; bare labels never admit."""
     client = _client()
     measured = client.post(
-        "/k05next/bp05-92/serve",
+        "/api/v1/local/bp05-92/serve",
         json={"evidence": [{"kind": "measured", "ref": "store-ref-measured-1"}]},
     )
     assert measured.status_code == 200, measured.text
@@ -101,22 +101,22 @@ def test_bp05_92_served() -> None:
     assert measured_body["tier"] == "MEASURED"
     assert measured_body["eligible"] is True
     proxy = client.post(
-        "/k05next/bp05-92/serve",
+        "/api/v1/local/bp05-92/serve",
         json={"evidence": [{"kind": "proxy", "ref": "store-ref-proxy-1"}]},
     )
     assert proxy.status_code == 200, proxy.text
     proxy_body = proxy.json()
     assert proxy_body["tier"] == "PROXY"
     assert proxy_body["eligible"] is False
-    unknown = client.post("/k05next/bp05-92/serve", json={"evidence": []})
+    unknown = client.post("/api/v1/local/bp05-92/serve", json={"evidence": []})
     assert unknown.status_code == 200, unknown.text
     unknown_body = unknown.json()
     assert unknown_body["tier"] == "UNKNOWN"
     assert unknown_body["eligible"] is False
-    bare = client.post("/k05next/bp05-92/serve", json={"evidence": ["measured"]})
+    bare = client.post("/api/v1/local/bp05-92/serve", json={"evidence": ["measured"]})
     assert bare.status_code == 200, bare.text
     assert bare.json()["eligible"] is False
-    bad = client.post("/k05next/bp05-92/serve", json={"evidence": "measured"})
+    bad = client.post("/api/v1/local/bp05-92/serve", json={"evidence": "measured"})
     assert bad.status_code == 422, bad.text
     assert "K05NEXT_B_BAD_PAYLOAD" in bad.text
 
@@ -125,7 +125,7 @@ def test_mvp_accept_50_served() -> None:
     """B0B-UNCOVERED_MVP_ACCEPT-50: SPLIT carries draft plus verify with verify before audit."""
     client = _client()
     good = client.post(
-        "/k05next/mvp-accept-50/serve",
+        "/api/v1/local/mvp-accept-50/serve",
         json={
             "local_draft_ref": "draft-ref-k05b-1",
             "cloud_verify_ref": "verify-ref-k05b-1",
@@ -142,7 +142,7 @@ def test_mvp_accept_50_served() -> None:
     assert provenance["cloud_verify_ref"] == "verify-ref-k05b-1"
     assert provenance["draft_hash"] == "draft-hash-k05b-1"
     duplicated = client.post(
-        "/k05next/mvp-accept-50/serve",
+        "/api/v1/local/mvp-accept-50/serve",
         json={
             "local_draft_ref": "same-ref",
             "cloud_verify_ref": "same-ref",
@@ -152,7 +152,7 @@ def test_mvp_accept_50_served() -> None:
     assert duplicated.status_code == 422, duplicated.text
     assert "K05NEXT_B_VALIDATION_FAILED" in duplicated.text
     empty = client.post(
-        "/k05next/mvp-accept-50/serve",
+        "/api/v1/local/mvp-accept-50/serve",
         json={
             "local_draft_ref": "",
             "cloud_verify_ref": "verify-ref-k05b-1",
@@ -167,7 +167,7 @@ def test_mvp_accept_53_served() -> None:
     """B0B-UNCOVERED_MVP_ACCEPT-53: verifier input binds the draft hash."""
     client = _client()
     bound = client.post(
-        "/k05next/mvp-accept-53/serve",
+        "/api/v1/local/mvp-accept-53/serve",
         json={
             "local_draft_ref": "draft-ref-k05b-1",
             "cloud_verify_ref": "verify-ref-k05b-1",
@@ -180,7 +180,7 @@ def test_mvp_accept_53_served() -> None:
     assert bound_body["bound"] is True
     assert bound_body["trace"] == "draft-hash-k05b-1"
     loose = client.post(
-        "/k05next/mvp-accept-53/serve",
+        "/api/v1/local/mvp-accept-53/serve",
         json={
             "local_draft_ref": "draft-ref-k05b-1",
             "cloud_verify_ref": "verify-ref-k05b-1",
@@ -193,7 +193,7 @@ def test_mvp_accept_53_served() -> None:
     assert loose_body["bound"] is False
     assert loose_body["trace"] is None
     bad = client.post(
-        "/k05next/mvp-accept-53/serve",
+        "/api/v1/local/mvp-accept-53/serve",
         json={
             "local_draft_ref": "draft-ref-k05b-1",
             "cloud_verify_ref": "verify-ref-k05b-1",

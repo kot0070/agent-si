@@ -4,7 +4,7 @@
 import { z } from "zod";
 import { requestJson } from "../api/errors";
 
-export const K07NEXT_BASE = "/api/v1/k07next";
+export const K07NEXT_BASE = "/api/v1/app";
 
 export const NewcomerGuideSchema = z.object({
   row: z.literal("R-319"),

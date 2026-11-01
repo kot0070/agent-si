@@ -88,8 +88,8 @@ def _check_wiring(screen_file, suite_file, route_path, quote_token):
 
 def test_row_r319_newcomer_guide_served(served):
     _check_wiring("NewcomerGuide.tsx", "k07next-r319.test.tsx",
-                 "/api/v1/k07next/newcomer-guide", "newcomer_start_guide")
-    status, payload = _get(served, "/api/v1/k07next/newcomer-guide")
+                 "/api/v1/app/newcomer-guide", "newcomer_start_guide")
+    status, payload = _get(served, "/api/v1/app/newcomer-guide")
     assert status == 200, payload
     assert payload == {
         "row": "R-319",
@@ -105,8 +105,8 @@ def test_row_r319_newcomer_guide_served(served):
 
 def test_row_r334_locale_switch_served(served):
     _check_wiring("LocaleSwitch.tsx", "k07next-r334.test.tsx",
-                 "/api/v1/k07next/locale-switch", "agentsi.locale")
-    status, payload = _get(served, "/api/v1/k07next/locale-switch")
+                 "/api/v1/app/locale-switch", "agentsi.locale")
+    status, payload = _get(served, "/api/v1/app/locale-switch")
     assert status == 200, payload
     assert payload == {
         "row": "R-334",
@@ -118,8 +118,8 @@ def test_row_r334_locale_switch_served(served):
 
 def test_row_r342_licence_served(served):
     _check_wiring("LicenceNotice.tsx", "k07next-r342.test.tsx",
-                 "/api/v1/k07next/licence", LICENCE_LINE)
-    status, payload = _get(served, "/api/v1/k07next/licence")
+                 "/api/v1/app/licence", LICENCE_LINE)
+    status, payload = _get(served, "/api/v1/app/licence")
     assert status == 200, payload
     assert payload == {
         "row": "R-342",
@@ -131,8 +131,8 @@ def test_row_r342_licence_served(served):
 
 def test_row_r348_runs_explained_served(served):
     _check_wiring("RunsExplained.tsx", "k07next-r348.test.tsx",
-                 "/api/v1/k07next/runs-explained", "codeTests")
-    status, payload = _get(served, "/api/v1/k07next/runs-explained")
+                 "/api/v1/app/runs-explained", "codeTests")
+    status, payload = _get(served, "/api/v1/app/runs-explained")
     assert status == 200, payload
     assert payload == {
         "row": "R-348",
@@ -146,8 +146,8 @@ def test_row_r348_runs_explained_served(served):
 
 def test_row_r362_locale_coverage_served(served):
     _check_wiring("LocaleCoverage.tsx", "k07next-r362.test.tsx",
-                 "/api/v1/k07next/locale-coverage", "en_leaves")
-    status, payload = _get(served, "/api/v1/k07next/locale-coverage")
+                 "/api/v1/app/locale-coverage", "en_leaves")
+    status, payload = _get(served, "/api/v1/app/locale-coverage")
     assert status == 200, payload
     assert payload == {
         "row": "R-362",
@@ -161,8 +161,8 @@ def test_row_r362_locale_coverage_served(served):
 
 def test_row_mp392_telemetry_themes_served(served):
     _check_wiring("TelemetryThemes.tsx", "k07next-mp392.test.tsx",
-                 "/api/v1/k07next/telemetry-themes", "visual-standard")
-    status, payload = _get(served, "/api/v1/k07next/telemetry-themes")
+                 "/api/v1/app/telemetry-themes", "visual-standard")
+    status, payload = _get(served, "/api/v1/app/telemetry-themes")
     assert status == 200, payload
     assert payload == {
         "row": "M-P3-92",
@@ -176,8 +176,8 @@ def test_row_mp392_telemetry_themes_served(served):
 
 def test_row_mp4139_copyright_served(served):
     _check_wiring("CopyrightLine.tsx", "k07next-mp4139.test.tsx",
-                 "/api/v1/k07next/copyright", "installer-metadata")
-    status, payload = _get(served, "/api/v1/k07next/copyright")
+                 "/api/v1/app/copyright", "installer-metadata")
+    status, payload = _get(served, "/api/v1/app/copyright")
     assert status == 200, payload
     assert payload == {
         "row": "M-P4-139",

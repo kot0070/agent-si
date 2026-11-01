@@ -89,7 +89,7 @@ def test_b0b_bp05_43_validate_reports_code():
 
 def test_live0_06_live_lists_rows():
     _, client = make_client()
-    resp = client.get("/api/v1/k09b/live")
+    resp = client.get("/api/v1/kb/live")
     assert resp.status_code == 200, resp.text
     assert resp.json() == {
         "served": True,

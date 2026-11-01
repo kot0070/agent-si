@@ -50,7 +50,7 @@ beforeEach(() => {
       method: (init?.method ?? "GET").toUpperCase(),
       headers: { ...((init?.headers ?? {}) as Record<string, string>) },
     });
-    if (String(input) === "/api/v1/k07next5/local-ai/decision-update") {
+    if (String(input) === "/api/v1/app/local-ai/decision-update") {
       return jsonBody(SERVED_DECISION);
     }
     throw new Error(`unexpected fetch ${String(input)}`);
@@ -75,7 +75,7 @@ describe("k07next5 111-UI decision record over the real screen", () => {
     await screen.findByTestId("k07next5-decision");
     const posts = seen.filter(
       (request) =>
-        request.url === "/api/v1/k07next5/local-ai/decision-update" &&
+        request.url === "/api/v1/app/local-ai/decision-update" &&
         request.method === "POST",
     );
     expect(posts).toHaveLength(1);

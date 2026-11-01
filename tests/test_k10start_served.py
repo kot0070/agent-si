@@ -58,6 +58,13 @@ def _readme_text():
         return handle.read()
 
 
+def _docs_text():
+    with open(os.path.join(
+            _WS, "docs", "start-accept-notes.md"),
+            encoding="utf-8") as handle:
+        return handle.read()
+
+
 def _section(text, heading):
     for part in re.split(r"(?m)^## ", text)[1:]:
         name, _, body = part.partition("\n")
@@ -136,12 +143,12 @@ def test_k10start_B0B_131_setup_steps_served(tmp_path):
 
 
 def test_k10start_B0B_151_demo_served(tmp_path, monkeypatch):
-    """Row B0B-151: README demo index names POST /k10/start/demo."""
+    """Row B0B-151: README demo index names POST /api/v1/release/start/demo."""
     index = _section(_readme_text(), "Demo and fixture command index")
-    assert "POST /k10/start/demo" in index, index
+    assert "POST /api/v1/release/start/demo" in index, index
     client, data_dir = _client_with_data_dir(
         tmp_path, monkeypatch, "k10start-151-token")
-    resp = client.post("/k10/start/demo")
+    resp = client.post("/api/v1/release/start/demo")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["status"] == "green", body
@@ -155,15 +162,15 @@ def test_k10start_B0B_151_demo_served(tmp_path, monkeypatch):
 
 
 def test_k10start_B0B_152_fixture_served(tmp_path, monkeypatch):
-    """Row B0B-152: README fixture index names the fixture command."""
-    index = _section(_readme_text(), "Demo and fixture command index")
+    """Row B0B-152: docs fixture index names the fixture command."""
+    index = _section(_docs_text(), "Fixture runs")
     commands = re.findall(r"pytest\s+(\S+)", index)
     assert commands, index
     for command in commands:
         assert os.path.isfile(os.path.join(_WS, command)), index
     client, data_dir = _client_with_data_dir(
         tmp_path, monkeypatch, "k10start-152-token")
-    resp = client.get("/k10/start/evidence")
+    resp = client.get("/api/v1/release/start/evidence")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     shots = body["screenshots"]
@@ -201,7 +208,7 @@ def test_k10start_B0B_249_restart_served(tmp_path, monkeypatch):
         monkeypatch.setenv("AGENT_SI_DATA_DIR", str(data_dir))
         client = fastapi.testclient.TestClient(
             create_app(_clean_settings(token + "-token")))
-        resp = client.post("/k10/start/demo")
+        resp = client.post("/api/v1/release/start/demo")
         assert resp.status_code == 200, resp.text
         payloads.append((resp.json(), str(data_dir)))
     first, second = payloads

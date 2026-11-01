@@ -11,7 +11,7 @@ import { resetLocaleForTests, setLocale } from "../../locale/index";
 import en from "../../locale/en.json";
 import { ProviderOutageCard } from "../ProviderOutageCard";
 
-const TRANSITIONS_URL = "/api/v1/k07next5/provider-health/transitions";
+const TRANSITIONS_URL = "/api/v1/app/provider-health/transitions";
 
 const SERVED_TRANSITIONS = {
   row: "B0B-UNCOVERED_MVP_ACCEPT-199",

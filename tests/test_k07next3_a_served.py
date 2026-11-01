@@ -76,7 +76,7 @@ def _get(base, path):
 
 
 def test_row_b0b_bp09_30_policy_lifecycle_served(served):
-    status, payload = _get(served, "/api/v1/k07next3/policy-lifecycle")
+    status, payload = _get(served, "/api/v1/app/policy-lifecycle")
     assert status == 200, payload
     assert payload == {
         "row": "B0B-BP09-30",
@@ -86,7 +86,7 @@ def test_row_b0b_bp09_30_policy_lifecycle_served(served):
 
 
 def test_row_b0b_uncovered_arch_563_gate_verdicts_served(served):
-    status, payload = _get(served, "/api/v1/k07next3/gate-verdicts")
+    status, payload = _get(served, "/api/v1/app/gate-verdicts")
     assert status == 200, payload
     assert payload == {
         "row": "B0B-UNCOVERED_ARCH-563",
@@ -98,7 +98,7 @@ def test_row_b0b_uncovered_arch_563_gate_verdicts_served(served):
 
 
 def test_row_b0b_uncovered_arch_683_ledger_register_served(served):
-    status, payload = _get(served, "/api/v1/k07next3/ledger-register")
+    status, payload = _get(served, "/api/v1/app/ledger-register")
     assert status == 200, payload
     assert payload == {
         "row": "B0B-UNCOVERED_ARCH-683",
@@ -109,7 +109,7 @@ def test_row_b0b_uncovered_arch_683_ledger_register_served(served):
 
 
 def test_row_b0b_uncovered_arch_686_step_limits_served(served):
-    status, payload = _get(served, "/api/v1/k07next3/step-limits")
+    status, payload = _get(served, "/api/v1/app/step-limits")
     assert status == 200, payload
     assert payload == {
         "row": "B0B-UNCOVERED_ARCH-686",
@@ -122,7 +122,7 @@ def test_row_b0b_uncovered_arch_686_step_limits_served(served):
 
 
 def test_row_b0b_uncovered_arch_716_project_defaults_served(served):
-    status, payload = _get(served, "/api/v1/k07next3/project-defaults")
+    status, payload = _get(served, "/api/v1/app/project-defaults")
     assert status == 200, payload
     assert payload == {
         "row": "B0B-UNCOVERED_ARCH-716",
@@ -136,7 +136,7 @@ def test_row_b0b_uncovered_arch_716_project_defaults_served(served):
 
 
 def test_row_b0b_uncovered_arch_718_control_plane_served(served):
-    status, payload = _get(served, "/api/v1/k07next3/control-plane")
+    status, payload = _get(served, "/api/v1/app/control-plane")
     assert status == 200, payload
     assert payload == {
         "row": "B0B-UNCOVERED_ARCH-718",
@@ -153,7 +153,7 @@ def test_row_b0b_uncovered_arch_718_control_plane_served(served):
 
 
 def test_row_b0b_uncovered_arch_720_team_card_served(served):
-    status, payload = _get(served, "/api/v1/k07next3/team-card")
+    status, payload = _get(served, "/api/v1/app/team-card")
     assert status == 200, payload
     assert payload == {
         "row": "B0B-UNCOVERED_ARCH-720",

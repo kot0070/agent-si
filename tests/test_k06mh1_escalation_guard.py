@@ -50,7 +50,7 @@ def test_mh1_exhaustion_parks_escalated_with_card():
     last = None
     for attempt in range(3):
         resp = client.post(
-            "/api/v1/k06/runs/attempt",
+            "/api/v1/tools/runs/attempt",
             json={
                 "run_id": "run-1",
                 "ok": False,
@@ -75,7 +75,7 @@ def test_mh1_card_visible_in_run_view_and_chat():
     client = _client()
     for attempt in range(2):
         resp = client.post(
-            "/api/v1/k06/runs/attempt",
+            "/api/v1/tools/runs/attempt",
             json={
                 "run_id": "run-2",
                 "ok": False,
@@ -85,11 +85,11 @@ def test_mh1_card_visible_in_run_view_and_chat():
             headers=_auth(),
         )
         assert resp.status_code == 200, resp.text
-    view = client.get("/api/v1/k06/runs/run-2")
+    view = client.get("/api/v1/tools/runs/run-2")
     assert view.status_code == 200, view.text
     assert view.json()["state"] == ESCALATED
     assert view.json()["card"]["testid"] == "escalation-card"
-    chat = client.get("/api/v1/k06/chat/cards", params={"run_id": "run-2"})
+    chat = client.get("/api/v1/tools/chat/cards", params={"run_id": "run-2"})
     assert chat.status_code == 200, chat.text
     cards = chat.json()["cards"]
     assert len(cards) == 1
@@ -102,23 +102,23 @@ def test_mh1_resume_and_discard():
     client = _client()
     for _ in range(2):
         client.post(
-            "/api/v1/k06/runs/attempt",
+            "/api/v1/tools/runs/attempt",
             json={"run_id": "run-3", "ok": False,
                   "evidence_ref": "ev", "budget": 0},
             headers=_auth(),
         )
-    assert client.get("/api/v1/k06/runs/run-3").json()["state"] == ESCALATED
-    resumed = client.post("/api/v1/k06/runs/run-3/resume", headers=_auth())
+    assert client.get("/api/v1/tools/runs/run-3").json()["state"] == ESCALATED
+    resumed = client.post("/api/v1/tools/runs/run-3/resume", headers=_auth())
     assert resumed.status_code == 200, resumed.text
     assert resumed.json()["state"] == "RUNNING"
     assert resumed.json()["card"] is None
     client.post(
-        "/api/v1/k06/runs/attempt",
+        "/api/v1/tools/runs/attempt",
         json={"run_id": "run-3", "ok": False,
               "evidence_ref": "ev", "budget": 0},
         headers=_auth(),
     )
-    discarded = client.post("/api/v1/k06/runs/run-3/discard",
+    discarded = client.post("/api/v1/tools/runs/run-3/discard",
                             headers=_auth())
     assert discarded.status_code == 200, discarded.text
     assert discarded.json()["state"] == "DISCARDED"
@@ -127,7 +127,7 @@ def test_mh1_resume_and_discard():
 def test_mh1_passing_attempt_never_parks():
     client = _client()
     resp = client.post(
-        "/api/v1/k06/runs/attempt",
+        "/api/v1/tools/runs/attempt",
         json={"run_id": "run-4", "ok": True,
               "evidence_ref": "ev", "budget": 0},
         headers=_auth(),
@@ -143,7 +143,7 @@ def test_mh1_passing_attempt_never_parks():
 def test_mh3_served_off_list_rejected_with_code_and_record():
     client = _client()
     resp = client.post(
-        "/api/v1/k06/tools/dispatch",
+        "/api/v1/tools/tools/dispatch",
         json={
             "tool": "other",
             "argv": ["other", "run"],
@@ -159,7 +159,7 @@ def test_mh3_served_off_list_rejected_with_code_and_record():
     assert "other" in payload["message"]
     assert payload["guard_record"]["testid"] == "guard-record"
     assert payload["guard_record"]["error_code"] == TOOL_NOT_AUTHORIZED
-    listed = client.get("/api/v1/k06/guard-records")
+    listed = client.get("/api/v1/tools/guard-records")
     assert listed.status_code == 200, listed.text
     records = listed.json()["records"]
     assert any(
@@ -171,7 +171,7 @@ def test_mh3_served_off_list_rejected_with_code_and_record():
 def test_mh3_served_listed_tool_executes():
     client = _client()
     resp = client.post(
-        "/api/v1/k06/tools/dispatch",
+        "/api/v1/tools/tools/dispatch",
         json={
             "tool": "status",
             "argv": ["status"],
@@ -240,7 +240,7 @@ def test_mh3_unit_no_list_keeps_old_unknown_tool_error():
 def test_d8_explicit_task_deny_refuses_first_served():
     client = _client()
     resp = client.post(
-        "/api/v1/k06/tools/dispatch",
+        "/api/v1/tools/tools/dispatch",
         json={
             "tool": "status",
             "argv": ["status"],
@@ -284,7 +284,7 @@ def test_d36_repeat_runs_verified_then_persisted_served():
     client = _client()
     for _ in range(2):
         resp = client.post(
-            "/api/v1/k06/services/acceptance",
+            "/api/v1/tools/services/acceptance",
             json={
                 "service": "status",
                 "argv": ["status"],
@@ -295,7 +295,7 @@ def test_d36_repeat_runs_verified_then_persisted_served():
         )
         assert resp.status_code == 200, resp.text
         assert resp.json()["ok"] is True
-    listed = client.get("/api/v1/k06/services/acceptance")
+    listed = client.get("/api/v1/tools/services/acceptance")
     assert listed.status_code == 200, listed.text
     runs = listed.json()["runs"]
     assert [r["run_id"] for r in runs] == ["acceptance-1", "acceptance-2"]
@@ -309,14 +309,14 @@ def test_d51_parked_attempts_fail_closed_with_escape_served():
     client = _client()
     for attempt in range(2):
         client.post(
-            "/api/v1/k06/runs/attempt",
+            "/api/v1/tools/runs/attempt",
             json={"run_id": "run-d51", "ok": False,
                   "evidence_ref": f"ev-{attempt}", "budget": 1},
             headers=_auth(),
         )
-    assert client.get("/api/v1/k06/runs/run-d51").json()["state"] == ESCALATED
+    assert client.get("/api/v1/tools/runs/run-d51").json()["state"] == ESCALATED
     late = client.post(
-        "/api/v1/k06/runs/attempt",
+        "/api/v1/tools/runs/attempt",
         json={"run_id": "run-d51", "ok": False,
               "evidence_ref": "ev-late", "budget": 1},
         headers=_auth(),
@@ -324,17 +324,17 @@ def test_d51_parked_attempts_fail_closed_with_escape_served():
     assert late.status_code == 200, late.text
     assert late.json()["state"] == ESCALATED
     assert late.json()["card"]["actions"] == ["resume", "discard"]
-    resumed = client.post("/api/v1/k06/runs/run-d51/resume", headers=_auth())
+    resumed = client.post("/api/v1/tools/runs/run-d51/resume", headers=_auth())
     assert resumed.status_code == 200, resumed.text
     assert resumed.json()["state"] == "RUNNING"
     for attempt in range(2):
         client.post(
-            "/api/v1/k06/runs/attempt",
+            "/api/v1/tools/runs/attempt",
             json={"run_id": "run-d51", "ok": False,
                   "evidence_ref": f"ev2-{attempt}", "budget": 1},
             headers=_auth(),
         )
-    discarded = client.post("/api/v1/k06/runs/run-d51/discard",
+    discarded = client.post("/api/v1/tools/runs/run-d51/discard",
                             headers=_auth())
     assert discarded.status_code == 200, discarded.text
     assert discarded.json()["state"] == "DISCARDED"

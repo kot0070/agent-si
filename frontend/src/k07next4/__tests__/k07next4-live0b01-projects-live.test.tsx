@@ -37,7 +37,7 @@ beforeEach(() => {
   (window as unknown as Record<string, unknown>)[WINDOW_TOKEN_KEY] = TOKEN;
   vi.stubGlobal("fetch", async (input: unknown, init?: RequestInit) => {
     seen.push(`${init?.method ?? "GET"} ${String(input)}`);
-    if (String(input) === "/api/v1/k07next4/projects") {
+    if (String(input) === "/api/v1/app/projects") {
       if ((init?.method ?? "GET").toUpperCase() === "POST") {
         return jsonBody({
           row: "LIVE0B-01",
@@ -84,11 +84,11 @@ describe("k07next4 LIVE0B-01 projects list over the real screen", () => {
       </ApiClientProvider>,
     );
     await screen.findByTestId("k07next4-projects-live");
-    expect(seen).toContain("GET /api/v1/k07next4/projects");
+    expect(seen).toContain("GET /api/v1/app/projects");
     expect(screen.getByText(en.projects.list.title)).toBeTruthy();
     fireEvent.click(screen.getByText(en.tasks.creator.create));
     await screen.findByText("k07next4-new");
-    expect(seen).toContain("POST /api/v1/k07next4/projects");
+    expect(seen).toContain("POST /api/v1/app/projects");
     expect(screen.getByText("seed-one")).toBeTruthy();
   });
 });

@@ -74,7 +74,7 @@ def _get(base, path):
 
 
 def test_row163_adopted_decision_served(served):
-    status, payload = _get(served, "/api/v1/k07next/adopted-decision")
+    status, payload = _get(served, "/api/v1/app/adopted-decision")
     assert status == 200, payload
     assert payload == {
         "row": "163",
@@ -87,7 +87,7 @@ def test_row163_adopted_decision_served(served):
 
 
 def test_row162_drive_comfort_served(served):
-    status, payload = _get(served, "/api/v1/k07next/drive-comfort")
+    status, payload = _get(served, "/api/v1/app/drive-comfort")
     assert status == 200, payload
     assert payload == {
         "row": "162",
@@ -99,7 +99,7 @@ def test_row162_drive_comfort_served(served):
 
 
 def test_row168_design_signoff_served(served):
-    status, payload = _get(served, "/api/v1/k07next/design-signoff")
+    status, payload = _get(served, "/api/v1/app/design-signoff")
     assert status == 200, payload
     assert payload == {
         "row": "168",
@@ -110,7 +110,7 @@ def test_row168_design_signoff_served(served):
 
 
 def test_row242_display_labels_served(served):
-    status, payload = _get(served, "/api/v1/k07next/display-labels")
+    status, payload = _get(served, "/api/v1/app/display-labels")
     assert status == 200, payload
     assert payload == {
         "row": "242",
@@ -125,7 +125,7 @@ def test_row242_display_labels_served(served):
 
 
 def test_row248_card_parity_served(served):
-    status, payload = _get(served, "/api/v1/k07next/card-parity")
+    status, payload = _get(served, "/api/v1/app/card-parity")
     assert status == 200, payload
     assert payload == {
         "row": "248",
@@ -141,7 +141,7 @@ def test_row248_card_parity_served(served):
 
 
 def test_row_r316_edit_guard_served(served):
-    status, payload = _get(served, "/api/v1/k07next/edit-guard")
+    status, payload = _get(served, "/api/v1/app/edit-guard")
     assert status == 200, payload
     assert payload == {
         "row": "R-316",
@@ -162,7 +162,7 @@ def test_row_r317_agents_panel_served(served):
             "deliverable": "x",
             "status": "running",
         })
-        status, payload = _get(served, "/api/v1/k07next/agents-panel")
+        status, payload = _get(served, "/api/v1/app/agents-panel")
         assert status == 200, payload
         assert payload["row"] == "R-317"
         assert payload["mapping"] == {
@@ -171,19 +171,27 @@ def test_row_r317_agents_panel_served(served):
             "result": "deliverable",
             "state": "status",
         }
-        assert {
+        frozen = {
             "agent": "worker",
             "scope": "p9",
             "deliverable": "x",
             "status": "running",
-        } in payload["agents"]
+        }
+        matches = [
+            row for row in payload["agents"]
+            if all(row.get(key) == value
+                   for key, value in frozen.items())
+        ]
+        assert matches, payload["agents"]
+        for field in live.LIVE_EXTRA_FIELDS:
+            assert field in matches[0], (field, matches[0])
     finally:
         live.clear_live_rows()
 
 
 def test_row_r318_inspector_panel_state_served(served):
     status, payload = _get(
-        served, "/api/v1/k07next/inspector-panel-state")
+        served, "/api/v1/app/inspector-panel-state")
     assert status == 200, payload
     assert payload == {
         "row": "R-318",

@@ -31,12 +31,12 @@ from agent_si.assurance import audit_records as _chain_records
 from agent_si.assurance import audit_registry as _chain_registry
 from agent_si.assurance.verification import checker as _verify_checker
 
-_GATE_ROUTE = "/api/v1/k03next2/sourcing_gate"
-_CLASSIFY_ROUTE = "/api/v1/k03next2/classify_failure"
-_HANDLERS_ROUTE = "/api/v1/k03next2/turn_handlers"
-_SCHEMA_ROUTE = "/api/v1/k03next2/deliverable_schema"
-_RECOVERY_ROUTE = "/api/v1/k03next2/recovery_confirm"
-_READONLY_ROUTE = "/api/v1/k03next2/verifier_readonly"
+_GATE_ROUTE = "/api/v1/qa/sourcing_gate/scoped"
+_CLASSIFY_ROUTE = "/api/v1/qa/classify_failure"
+_HANDLERS_ROUTE = "/api/v1/qa/turn_handlers"
+_SCHEMA_ROUTE = "/api/v1/qa/deliverable_schema"
+_RECOVERY_ROUTE = "/api/v1/qa/recovery_confirm"
+_READONLY_ROUTE = "/api/v1/qa/verifier_readonly"
 _DEFAULT_TASK_CLASS = "served-turn"
 _DEFAULT_MINIMUM_LEVEL = "L2"
 _DEFAULT_SCOPE = "k03next2/sourcing/default"
@@ -449,7 +449,7 @@ def _readonly_audit(
 def register_mh4_readonly_route(app: Any) -> Any:
     """Mount the MH-4 read-only verifier/auditor proof route.
 
-    Served wiring only: POST /api/v1/k03next2/verifier_readonly drives
+    Served wiring only: POST /api/v1/qa/verifier_readonly drives
     the real verification checker entry (verify_run, which only reads
     the project dir), the real R-304 file-contract entry (judging the
     verifier write set, which must be empty) and the real audit entry

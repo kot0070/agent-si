@@ -617,7 +617,7 @@ def _k03next_gate(client, scope, candidates=None, implementers=None,
             "visible_to_user": True,
             "user_resolution_ref": "resolve-k03next-b0b-%s" % scope,
         }
-    return client.post("/api/v1/k03next/sourcing_gate", json=body)
+    return client.post("/api/v1/qa/sourcing_gate", json=body)
 
 
 def _k03next_candidate(provider, model=AUDITOR_MODEL, evidence=()):
@@ -661,7 +661,7 @@ def test_k03next_b0b_bp07_18(client):
     assert sourced["auditor"]["session_ref"].startswith("auditor-session-")
 
     bad = client.post(
-        "/api/v1/k03next/sourcing_gate",
+        "/api/v1/qa/sourcing_gate",
         json={"scope": scope, "auditor_candidates": ["not-an-object"]},
     )
     assert bad.status_code == 400, bad.text
@@ -712,7 +712,7 @@ def test_k03next_b0b_sdk_107(client):
     ev = "ev-k03next-b0b-107-%s" % tag
 
     resp = client.post(
-        "/api/v1/k03next/semantic_security",
+        "/api/v1/qa/semantic_security",
         json={"criterion_refs": [crit], "evidence_refs": [ev]},
     )
     assert resp.status_code == 200, resp.text
@@ -722,21 +722,21 @@ def test_k03next_b0b_sdk_107(client):
     assert data["checked_evidence"] == 1
 
     shapely_but_empty = client.post(
-        "/api/v1/k03next/semantic_security",
+        "/api/v1/qa/semantic_security",
         json={"criterion_refs": [crit], "evidence_refs": []},
     )
     assert shapely_but_empty.status_code == 200, shapely_but_empty.text
     assert shapely_but_empty.json()["verdict"] == "FAIL"
 
     no_criteria = client.post(
-        "/api/v1/k03next/semantic_security",
+        "/api/v1/qa/semantic_security",
         json={"criterion_refs": [], "evidence_refs": [ev]},
     )
     assert no_criteria.status_code == 200, no_criteria.text
     assert no_criteria.json()["verdict"] == "FAIL"
 
     bad = client.post(
-        "/api/v1/k03next/semantic_security",
+        "/api/v1/qa/semantic_security",
         json={"criterion_refs": "not-a-list", "evidence_refs": []},
     )
     assert bad.status_code == 400, bad.text
@@ -883,7 +883,7 @@ def test_k03next_b0b_uncovered_arch_653(client):
         """Concrete binding of the real sourcing entries; adds nothing."""
 
     with_auditor_class = client.post(
-        "/api/v1/k03next/sourcing_gate",
+        "/api/v1/qa/sourcing_gate",
         json={"scope": scope,
               "implementer_model_ids": [CONTRIBUTOR_MODEL],
               "task_class": "auditor", "minimum_level": "L2",
