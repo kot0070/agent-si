@@ -1,0 +1,83 @@
+/* provenance: authored for FXSHELL1 (app-shell real look); token-only rules. */
+/* Shape: chat-first app shell. The app root becomes a two-column grid with
+   the single top bar on top, the short nav as one left column and the routed
+   content beside it; the inspector takes its own full-width row underneath.
+   :has() keeps the rule on the app root (WebView2 Chromium OK). */
+div[data-testid="app-shell"]:has(> nav[data-testid="sidebar"]) {
+  display: grid;
+  grid-template-columns: 224px minmax(0, 1fr);
+  grid-template-areas:
+    "topbar topbar"
+    "sidebar main"
+    "inspector inspector";
+  column-gap: 16px;
+  align-items: start;
+}
+
+div[data-testid="app-shell"]:has(> nav[data-testid="sidebar"]) > header[data-testid="topbar"] {
+  grid-area: topbar;
+}
+
+/* Sidebar: one vertical column of links, never a wrapped row. */
+nav[data-testid="sidebar"] {
+  grid-area: sidebar;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  min-width: 0;
+  border-right: 1px solid var(--agent-si-card-border);
+  padding-right: 16px;
+}
+
+/* Links restyle stays inside the sidebar nav (link-colours lane stays open). */
+nav[data-testid="sidebar"] a {
+  display: block;
+  color: var(--agent-si-accent);
+  text-decoration: none;
+}
+
+main[data-testid="app-main"] {
+  grid-area: main;
+  min-width: 0;
+}
+
+aside[data-testid="inspector"] {
+  grid-area: inspector;
+  min-width: 0;
+}
+
+/* Top bar: one strip; labels keep at least an 8px gap in both axes. */
+.fx-topbar {
+  gap: 8px 16px;
+  border-bottom: 1px solid var(--agent-si-card-border);
+}
+
+/* Native controls take a token fill so neither theme shows browser defaults. */
+.fx-topbar select,
+.fx-topbar button {
+  background-color: var(--agent-si-card-border);
+  color: var(--agent-si-ink);
+  border: 1px solid var(--agent-si-accent);
+  border-radius: 6px;
+}
+
+/* Narrow viewports (phones): shrink the sidebar track and gaps and let
+   the composer input fill its column, so track + gap + content fit 375px
+   with no horizontal scroll while the nav stays left of the content.
+   Lengths only, no colours. */
+@media (max-width: 640px) {
+  div[data-testid="app-shell"]:has(> nav[data-testid="sidebar"]) {
+    grid-template-columns: 160px minmax(0, 1fr);
+    column-gap: 8px;
+  }
+
+  nav[data-testid="sidebar"] {
+    padding-right: 8px;
+  }
+
+  main[data-testid="app-main"] input {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+}
