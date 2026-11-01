@@ -22,6 +22,8 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Dict, FrozenSet, Iterable, Optional, Tuple
 
+from agent_si.watcher import journal as journal_store
+
 try:
     from iface.frozen_manifest import manifest
 except ImportError:  # alternate layout: the iface/ directory itself on sys.path
@@ -654,6 +656,40 @@ AUDIT_DISPOSITION: Dict[manifest.AuditResult, AuditDisposition] = {
 suspensions: the run holds AUDITING and is never run-terminal."""
 
 
+#: Run lifecycle phases journaled across one served run: planned, verification
+#: started, audit advanced, finalize records bound, terminal reached. The
+#: assurance coordinator routes one row per reached phase; the journal store
+#: stays the only row writer and the watcher interface serves the rows.
+RUN_LIFECYCLE_PHASES: Tuple[str, ...] = (
+    "plan",
+    "start",
+    "advance",
+    "record",
+    "finish",
+)
+
+
+def emit_lifecycle_event(project_id, run_id, phase, status="", note=""):
+    """Append one AUTOMATION_RUN journal row for a run lifecycle phase.
+
+    The row names the run and the status reached; unknown phases refuse
+    with ValueError. Existing transition writers stay pure: they move the
+    run and return it, while this new writer only appends the journal row.
+    """
+    if phase not in RUN_LIFECYCLE_PHASES:
+        raise ValueError("unknown run lifecycle phase %r" % (phase,))
+    summary = "run %s run=%s status=%s" % (phase, run_id, status)
+    if note:
+        summary += " %s" % note
+    return journal_store.append_event(
+        str(project_id),
+        "run_machine",
+        "AUTOMATION_RUN",
+        summary,
+        (str(run_id),),
+    )
+
+
 def apply_audit_disposition(
     run: ExecutionRun, result: object
 ) -> AuditDisposition:
@@ -706,6 +742,8 @@ __all__ = [
     "AuditDisposition",
     "AUDIT_DISPOSITION",
     "is_termination_compatible",
+    "RUN_LIFECYCLE_PHASES",
+    "emit_lifecycle_event",
     "allocate_run_sequence",
     "derive_revision_no",
     "create_run",
