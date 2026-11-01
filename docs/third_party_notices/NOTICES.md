@@ -36,6 +36,25 @@ vendors runtime dependencies, this file must be regenerated from the lockfiles
 before release; an empty table must never ship alongside a bundle that
 contains third-party code.
 
+## Frozen sidecar bundle (INSTALLB)
+
+Five third-party runtime components frozen into `AgentSI.exe`,
+enumerated read-only from the freeze interpreter's installed
+dependency metadata (no installs, no network):
+
+| component | version | licence | source |
+| --------- | ------- | ------- | ------ |
+| pywebview | 6.2.1 | BSD 3-Clause License | installed dist metadata (pywebview-6.2.1.dist-info) |
+| pythonnet | 3.2.1 | MIT | installed dist metadata (pythonnet-3.2.1.dist-info) |
+| clr_loader | 0.3.1 | MIT License | installed dist metadata (clr_loader-0.3.1.dist-info) |
+| bottle | 0.13.4 | MIT | installed dist metadata (bottle-0.13.4.dist-info) |
+| proxy_tools | 0.1.0 | MIT | installed dist metadata (proxy_tools-0.1.0.dist-info) |
+
 ## License texts
 
 - `licenses/MIT_LICENSE.txt` — project license (MIT), identical text to `LICENSE`.
+- `licenses/LICENSE.pywebview` — pywebview 6.2.1 licence text (vendored from the installed dist).
+- `licenses/LICENSE.pythonnet` — pythonnet 3.2.1 licence text (vendored from the installed dist).
+- `licenses/LICENSE.clr_loader` — clr_loader 0.3.1 licence text (vendored from the installed dist).
+- `licenses/LICENSE.bottle` — bottle 0.13.4 licence text (vendored from the installed dist).
+- proxy_tools 0.1.0 — MIT per installed dist METADATA (License: MIT, OSI Approved classifier; no separate licence file ships in the dist).
