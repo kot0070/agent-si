@@ -31,6 +31,9 @@ import json
 import uuid
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
+
+import dataclasses
+from fastapi import HTTPException
 from typing import Any
 
 # Error codes (Manifest 21A pattern: module constant + Exception.code).
@@ -50,6 +53,9 @@ CHAT_DISPATCH_REJECTED = "CHAT_DISPATCH_REJECTED"
 CHAT_ACTOR_MISSING = "CHAT_ACTOR_MISSING"
 CHAT_FORBIDDEN = "CHAT_FORBIDDEN"
 CHAT_RATE_LIMITED = "CHAT_RATE_LIMITED"
+
+#: FXKBCHAT KB-context reason code (unknown kb_id on chat open).
+CHAT_KB_UNKNOWN = "CHAT_KB_UNKNOWN"
 
 #: M-MANAGER-owned runtime entry (lazy import, never defined here).
 MANAGER_MODULE = "agent_si.backend.runtime_manager"
@@ -97,6 +103,8 @@ class ChatStreamRequest:
     actor: str = ""
     profile: str = ""
     pool: str = ""
+    kb_id: str = ""
+    role: str = ""
     secret_refs: tuple = ()
 
     @classmethod
@@ -123,6 +131,8 @@ class ChatStreamRequest:
             actor=str(actor or "").strip(),
             profile=str(body.get("profile", "") or ""),
             pool=str(body.get("pool", "") or ""),
+            kb_id=str(body.get("kb_id", "") or ""),
+            role=str(body.get("role", "") or ""),
             secret_refs=tuple(refs),
         )
 
@@ -203,6 +213,121 @@ def _live_agent_rows(explicit: Any | None) -> list:
     return list(rows) if isinstance(rows, (list, tuple)) else []
 
 
+# -- FXKBCHAT KB-context block (the only KB code in this file) --
+# Chat for a project with an attached KB (or an explicit kb_id)
+# retrieves top sections through the frozen retriever.retrieve
+# (never reimplemented here), passes them as provider context,
+# and cites them in the streamed answer.
+
+
+def _kb_retriever() -> Any:
+    """Lazy KB retriever (real behaviour; never redefined here)."""
+    try:
+        from agent_si.kb import retriever as module
+    except ImportError:
+        from src.agent_si.kb import retriever as module
+    return module
+
+
+def _kb_registry() -> Any:
+    """Lazy KB registry (read-only views; never redefined here)."""
+    try:
+        from agent_si.kb import registry as module
+    except ImportError:
+        from src.agent_si.kb import registry as module
+    return module
+
+
+def _kb_scope_for(request: ChatStreamRequest) -> tuple:
+    """Resolve (project_id, role, only_kb_id) for one chat open.
+
+    An explicit kb_id wins: an unattached kb_id raises an honest
+    404 (CHAT_KB_UNKNOWN) so the route answers it directly; an
+    attached kb_id scopes the retrieve to that KB's own
+    (project_id, role). Otherwise the request (project, role)
+    scopes the retrieve. app.py is lane-frozen, so the 404 is
+    raised here as an HTTPException the route lets through.
+    """
+    only_kb_id = request.kb_id
+    if only_kb_id:
+        registry = _kb_registry()
+        if not registry.is_attached(only_kb_id):
+            raise HTTPException(
+                status_code=404,
+                detail=http_error_detail(
+                    CHAT_KB_UNKNOWN,
+                    "unknown kb_id: %r" % (only_kb_id,)),
+            )
+        source = registry.attached_source(only_kb_id)
+        if source is None:
+            raise HTTPException(
+                status_code=404,
+                detail=http_error_detail(
+                    CHAT_KB_UNKNOWN,
+                    "unknown kb_id: %r" % (only_kb_id,)),
+            )
+        return (source.project_id, source.role or "", only_kb_id)
+    return (request.project, request.role or "", "")
+
+
+def _kb_chunk_field(chunk: Any, name: str) -> str:
+    """Read one text field from a retrieved KB chunk."""
+    value = getattr(chunk, name, "")
+    return value if isinstance(value, str) else ""
+
+
+def _kb_chunk_citation(chunk: Any) -> str:
+    """Citation for one chunk (falls back to kb_id#section_id)."""
+    citation = _kb_chunk_field(chunk, "citation")
+    if citation:
+        return citation
+    return "%s#%s" % (_kb_chunk_field(chunk, "kb_id"),
+                      _kb_chunk_field(chunk, "section_id"))
+
+
+def _kb_chunks_for(request: ChatStreamRequest) -> list:
+    """Retrieve KB chunks for one chat open (never fails chat).
+
+    Calls the frozen retriever.retrieve; an unknown explicit
+    kb_id raises 404 via _kb_scope_for. Any other retrieval
+    failure degrades to no chunks: KB enrichment never fails
+    the chat itself.
+    """
+    project_id, role, only_kb_id = _kb_scope_for(request)
+    if not only_kb_id and not project_id:
+        return []
+    try:
+        chunks, _section_log = _kb_retriever().retrieve(
+            request.message, project_id, role, None)
+    except Exception:
+        return []
+    if only_kb_id:
+        chunks = [chunk for chunk in chunks
+                if _kb_chunk_field(chunk, "kb_id") == only_kb_id]
+    return list(chunks)
+
+
+def _kb_context_prefix(chunks: list) -> str:
+    """Provider input prefix carrying the retrieved sections."""
+    if not chunks:
+        return ""
+    lines = ["[%s]\n%s" % (_kb_chunk_citation(chunk),
+                             _kb_chunk_field(chunk, "text"))
+             for chunk in chunks]
+    return ("KB context:\n" + "\n\n".join(lines)
+            + "\n\nUser message:\n")
+
+
+def _kb_citations_note(chunks: list) -> str:
+    """Answer suffix citing every retrieved section."""
+    if not chunks:
+        return ""
+    lines = ["- %s\n%s" % (_kb_chunk_citation(chunk),
+                             _kb_chunk_field(chunk, "text"))
+             for chunk in chunks]
+    return "\n\nKB sources:\n" + "\n".join(lines)
+
+
 def guard_agent_task(agent_task: Any, graph: Any) -> Any:
     """Reject a subtask-less/unplanned AgentTask BEFORE any provider call.
 
@@ -245,6 +370,12 @@ class ManagerSdkBridge:
         """
         if agent_task is not None:
             guard_agent_task(agent_task, graph)
+        kb_chunks = _kb_chunks_for(request)
+        kb_note = _kb_citations_note(kb_chunks)
+        if kb_chunks:
+            request = dataclasses.replace(
+                request,
+                message=_kb_context_prefix(kb_chunks) + request.message)
         run_task_streamed = self._run_task_streamed
         if run_task_streamed is None:
             run_task_streamed = _load_manager_run_task_streamed()
@@ -266,15 +397,19 @@ class ManagerSdkBridge:
         self._live[stream_id] = state
         if run_task_streamed is not None:
             iterator = self._manager_events(
-                stream_id, run_id, request, state, run_task_streamed)
+                stream_id, run_id, request, state, run_task_streamed,
+                kb_note=kb_note)
         else:
             iterator = self._orchestration_events(
-                stream_id, run_id, request, state)
+                stream_id, run_id, request, state, kb_note=kb_note)
         return stream_id, iterator
 
     def no_provider_run(
         self, request: ChatStreamRequest, reason: Any | None = None
     ) -> tuple[str, Iterator[bytes]]:
+        # FXKBCHAT: unknown kb_id stays an honest 404 even with
+        # no provider bound (input check runs before the stream).
+        _kb_scope_for(request)
         """Start a stream that ends in NO_PROVIDER_BOUND (M-WIRE L0B-12).
 
         No provider adapter is bound, so no engine runs: the stream
@@ -368,6 +503,7 @@ class ManagerSdkBridge:
         request: ChatStreamRequest,
         state: dict[str, Any],
         run_task_streamed: Any,
+        kb_note: str = "",
     ) -> Iterator[bytes]:
         """Stream RunEvents from the owned M-MANAGER entry as SSE.
 
@@ -403,6 +539,11 @@ class ManagerSdkBridge:
                     stream_id, run_id, event)
                 if payload.get("type") == "start":
                     continue
+                if (kb_note and payload.get("type") == "delta"
+                        and isinstance(payload.get("text"), str)
+                        and not state.get("kb_cited")):
+                    payload["text"] = payload["text"] + kb_note
+                    state["kb_cited"] = True
                 yield sse_bytes(payload)
                 if payload.get("type") in self._TERMINAL_TYPES:
                     terminal_emitted = True
@@ -426,6 +567,7 @@ class ManagerSdkBridge:
         run_id: str,
         request: ChatStreamRequest,
         state: dict[str, Any],
+        kb_note: str = "",
     ) -> Iterator[bytes]:
         """Drive one frozen turn (interface -> SDK -> provider) as SSE."""
         from agent_si.sdk_adapter.orchestration_interface import (
@@ -502,7 +644,7 @@ class ManagerSdkBridge:
             "type": "delta",
             "stream_id": stream_id,
             "run_id": run_id,
-            "text": str(captured.get("text", "")),
+            "text": str(captured.get("text", "")) + kb_note,
         })
         if state["cancelled"]:
             self._finish(stream_id)
@@ -1210,6 +1352,7 @@ __all__ = [
     "CHAT_BAD_REQUEST",
     "CHAT_DISPATCH_REJECTED",
     "CHAT_FORBIDDEN",
+    "CHAT_KB_UNKNOWN",
     "CHAT_RATE_LIMITED",
     "MANAGER_FN",
     "MANAGER_MODULE",
