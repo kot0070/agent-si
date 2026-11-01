@@ -141,6 +141,7 @@ export function TopBar(props: TopBarProps): ReactElement {
 
   return (
     <header data-testid="topbar" className="fx-topbar">
+      <span data-testid="topbar-brand">{t("shell.topbar.brand")}</span>
       <button
         type="button"
         data-testid="topbar-panels"
@@ -152,8 +153,8 @@ export function TopBar(props: TopBarProps): ReactElement {
       </button>
       <span data-testid="k07open10-shell" aria-hidden="true" />
       <div data-testid="pairing-strip">
-        <span>{t("shell.topbar.watcher")}</span>
-        <span>
+        <span data-testid="pairing-label">{t("shell.topbar.watcher")}</span>{" "}
+        <span data-testid="pairing-badge">
           {effective === null
             ? t("agents.badge.cloud")
             : t("agents.badge.local")}

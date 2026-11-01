@@ -131,9 +131,10 @@ function renderApp(route: string): ReturnType<typeof createMemoryRouter> {
 
 beforeEach(() => {
   resetLocaleForTests();
-  setLocale("en");
   window.localStorage.clear();
   window.sessionStorage.clear();
+  window.localStorage.setItem("agentsi.locale", "en");
+  setLocale("en");
   mockState.projects = [];
   mockState.providers = [];
   installFetch();

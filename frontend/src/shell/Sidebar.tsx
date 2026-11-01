@@ -20,12 +20,21 @@ export function Sidebar(props: SidebarProps): ReactElement {
       <Link data-testid="menu-new-task" to="/">
         {t("tasks.creator.title")}
       </Link>
+      <span data-testid="menu-new-task-purpose">
+        {t("tasks.creator.subtitle")}
+      </span>
       <Link data-testid="menu-projects" to="/projects">
         {t("shell.sidebar.projects")}
       </Link>
+      <span data-testid="menu-projects-purpose">
+        {t("projects.list.subtitle")}
+      </span>
       <Link data-testid="menu-results" to={resultsTo}>
         {t("projects.reports.title")}
       </Link>
+      <span data-testid="menu-results-purpose">
+        {t("projects.reports.subtitle")}
+      </span>
       {active === null ? (
         <span data-testid="menu-results-hint">
           {t("shell.sidebar.resultsHint")}
@@ -34,6 +43,9 @@ export function Sidebar(props: SidebarProps): ReactElement {
       <Link data-testid="menu-settings" to="/settings">
         {t("shell.sidebar.settings")}
       </Link>
+      <span data-testid="menu-settings-purpose">
+        {t("settings.index.subtitle")}
+      </span>
     </nav>
   );
 }

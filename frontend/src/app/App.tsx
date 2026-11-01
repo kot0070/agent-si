@@ -237,10 +237,10 @@ function useEnsureProjectSelection(): void {
 // creates the first project and starts a task in it, then selects it so the
 // route continues in the regular chat surface. Reuses the chat composer
 // testids so the route stays chat-first before any project exists.
-function ChatStartBox(): ReactElement {
+function ChatStartBox(props: { initialDraft?: string }): ReactElement {
   const client = useApiClient();
   const current = useCurrentProject();
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = useState(props.initialDraft ?? "");
   const [busy, setBusy] = useState(false);
   const [blocking, setBlocking] = useState<{
     errorKey: string;
@@ -284,21 +284,24 @@ function ChatStartBox(): ReactElement {
     <section data-testid="chat-area" aria-label={t("shell.sidebar.chat")}>
       <h1>{t("shell.sidebar.chat")}</h1>
       <div data-testid="chat-composer">
-        <input
-          data-testid="chat-prompt"
-          type="text"
-          placeholder={t("chat.composer.prompt")}
-          aria-label={t("chat.composer.prompt")}
-          value={draft}
-          onChange={(event) => {
-            setDraft(event.target.value);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              void handleSend();
-            }
-          }}
-        />
+        <label>
+          {t("chat.composer.prompt")}
+          <input
+            data-testid="chat-prompt"
+            type="text"
+            placeholder={t("chat.composer.prompt")}
+            aria-label={t("chat.composer.prompt")}
+            value={draft}
+            onChange={(event) => {
+              setDraft(event.target.value);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                void handleSend();
+              }
+            }}
+          />
+        </label>
         <button
           type="button"
           data-testid="chat-send"
@@ -328,12 +331,17 @@ function ChatStartBox(): ReactElement {
   );
 }
 
-function ChatRoute(): ReactElement {
+function ChatRoute(props: { initialDraft: string | null }): ReactElement {
   const current = useCurrentProject();
   if (current.projectId === null) {
-    return <ChatStartBox />;
+    return <ChatStartBox initialDraft={props.initialDraft ?? undefined} />;
   }
-  return <ChatAreaView projectId={current.projectId} />;
+  return (
+    <ChatAreaView
+      projectId={current.projectId}
+      initialDraft={props.initialDraft ?? undefined}
+    />
+  );
 }
 
 function AgentsRoute(): ReactElement {
@@ -554,11 +562,19 @@ function SettingsSectionRoute(): ReactElement {
       purposeKey={route.purposeKey}
       needItNowKey={route.needItNowKey}
     >
-      {route.path === "project" && projectId !== null ? (
+      {route.path === "project" ? (
+        // FXPOINT1 P1: the role editor stays mounted even with no project
+        // selected so its labelled Mode/Role controls always resolve; the
+        // server-backed reads fall back to defaults and a save without a
+        // project surfaces an error instead of unmounting the section.
         <>
-          <RoleProfileEditor projectId={projectId} role="manager" />
-          <ContractDefaultsBar projectId={projectId} role="manager" />
-          <AcceptedRiskSwitch projectId={projectId} />
+          <RoleProfileEditor projectId={projectId ?? ""} role="manager" />
+          {projectId !== null ? (
+            <>
+              <ContractDefaultsBar projectId={projectId} role="manager" />
+              <AcceptedRiskSwitch projectId={projectId} />
+            </>
+          ) : null}
         </>
       ) : route.path === "appearance" ? (
         <span data-testid="settings-section-body">
@@ -590,12 +606,36 @@ function SettingsSectionRoute(): ReactElement {
   );
 }
 
-function FirstRunRoute(): ReactElement {
+// FXPOINT1 PREFILL: completing the last first-run step seeds the chat
+// composer with the first task text. The title is read back from the
+// served tasks so the composer shows what the flow just created; a failed
+// read still lands in chat with an empty composer.
+function FirstRunRoute(props: {
+  onSeedPrefill: (title: string) => void;
+}): ReactElement {
   const navigate = useNavigate();
+  const client = useApiClient();
+  const current = useCurrentProject();
   return (
     <FirstRunFlowView
       onComplete={() => {
-        navigate(ROUTES.chat);
+        const pid = current.projectId;
+        if (pid === null) {
+          navigate(ROUTES.chat);
+          return;
+        }
+        void client.listTasks(pid).then(
+          (tasks) => {
+            const last = tasks[tasks.length - 1];
+            if (last !== undefined) {
+              props.onSeedPrefill(last.title);
+            }
+            navigate(ROUTES.chat);
+          },
+          () => {
+            navigate(ROUTES.chat);
+          },
+        );
       }}
     />
   );
@@ -604,6 +644,7 @@ function FirstRunRoute(): ReactElement {
 function AppShell(): ReactElement {
   const current = useCurrentProject();
   const projectId = current.projectId;
+  const [chatPrefill, setChatPrefill] = useState<string | null>(null);
   useEnsureProjectSelection();
   return (
     <div data-testid="app-shell">
@@ -618,7 +659,10 @@ function AppShell(): ReactElement {
             fallback={<LoadingState loadingKey="ui.loading.more" />}
           >
             <Routes>
-              <Route path={ROUTES.chat} element={<ChatRoute />} />
+              <Route
+                path={ROUTES.chat}
+                element={<ChatRoute initialDraft={chatPrefill} />}
+              />
               <Route path={ROUTES.agentsLive} element={<AgentsRoute />} />
               <Route path="/watcher" element={<WatcherRoute />} />
               <Route path={ROUTES.projects} element={<ProjectsPageView />} />
@@ -687,7 +731,10 @@ function AppShell(): ReactElement {
                 path="/settings/:section"
                 element={<SettingsSectionRoute />}
               />
-              <Route path="/firstrun" element={<FirstRunRoute />} />
+              <Route
+                path="/firstrun"
+                element={<FirstRunRoute onSeedPrefill={setChatPrefill} />}
+              />
               <Route path="/about" element={<AboutRoute />} />
               <Route path="/migration" element={<MigrationRoute />} />
               <Route path="/how-it-works" element={<HowItWorksView />} />

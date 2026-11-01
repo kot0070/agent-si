@@ -57,9 +57,10 @@ function jsonBody(data: unknown, status = 200): Response {
 
 beforeEach(() => {
   resetLocaleForTests();
-  setLocale("en");
   window.localStorage.clear();
   window.sessionStorage.clear();
+  window.localStorage.setItem("agentsi.locale", "en");
+  setLocale("en");
   vi.stubGlobal("fetch", async (input: unknown) => {
     const url = String(input);
     if (url in SERVED) {

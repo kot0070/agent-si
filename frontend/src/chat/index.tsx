@@ -38,6 +38,7 @@ import type { InstallPermissionAsk } from "./permissions";
 
 export interface ChatAreaProps {
   projectId: string;
+  initialDraft?: string;
 }
 
 interface ChatMessage {
@@ -119,7 +120,7 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
   const client = useApiClient();
   const [boundModels, setBoundModels] = useState<unknown[] | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = useState(props.initialDraft ?? "");
   const [streaming, setStreaming] = useState(false);
   const [blocking, setBlocking] = useState<BlockingError | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -537,21 +538,24 @@ ${note}`,
               </a>
             </>
           ) : null}
-          <input
-            data-testid="chat-prompt"
-            type="text"
-            placeholder={t("chat.composer.prompt")}
-            aria-label={t("chat.composer.prompt")}
-            value={draft}
-            onChange={(event) => {
-              setDraft(event.target.value);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                handleSend();
-              }
-            }}
-          />
+          <label>
+            {t("chat.composer.prompt")}
+            <input
+              data-testid="chat-prompt"
+              type="text"
+              placeholder={t("chat.composer.prompt")}
+              aria-label={t("chat.composer.prompt")}
+              value={draft}
+              onChange={(event) => {
+                setDraft(event.target.value);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  handleSend();
+                }
+              }}
+            />
+          </label>
           <button
             type="button"
             data-testid="chat-send"
