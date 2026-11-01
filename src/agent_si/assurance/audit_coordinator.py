@@ -376,6 +376,90 @@ class AuditCoordinator(Protocol):
             handling="BLOCK",
         )
 
+    def record_auditor_verdict(
+        self,
+        *,
+        project_id: str,
+        task_id: str,
+        run_id: str,
+        part_id: str = "",
+        attempt: int = 1,
+        producer_ref: str,
+        auditor_ref: str,
+        result: str,
+        reasons: tuple[str, ...] = (),
+        artifact_refs: tuple[str, ...] = (),
+        evidence_refs: tuple[str, ...] = (),
+        contract_hash: str = "",
+    ) -> dict:
+        """Store one dev-run auditor verdict (FXDEVRUN F-AUDIT).
+
+        The auditor instance behind ``auditor_ref`` judges the
+        producer's part attempt behind ``producer_ref``; both
+        identities ride the stored row. A shared identity is
+        refused: the producer may never audit itself. ``result``
+        is PASS or FAIL only, anything else fails closed.
+        Returns the stored identity row (never the verdict text).
+        """
+        if not str(producer_ref or "").strip():
+            raise ValueError("record_auditor_verdict needs a producer_ref")
+        if not str(auditor_ref or "").strip():
+            raise ValueError("record_auditor_verdict needs an auditor_ref")
+        if str(producer_ref) == str(auditor_ref):
+            raise ContributorInAuditorSetError(
+                f"AUDIT_INDEPENDENCE_REJECTED: producer and auditor "
+                f"share one identity {str(producer_ref)!r}"
+            )
+        verdict = str(result or "").strip().upper()
+        if verdict not in ("PASS", "FAIL"):
+            raise ValueError(
+                f"record_auditor_verdict result must be PASS or FAIL "
+                f"(got {result!r})"
+            )
+        audits = self.__dict__.setdefault("_AUDITS", {})
+        scope_count = self.__dict__.setdefault("_SCOPE_COUNT", {})
+        scope_id = _scope_id_for(
+            str(project_id), str(task_id), str(contract_hash)
+        )
+        sequence = scope_count.get(scope_id, 0) + 1
+        handling = "COMPLETE" if verdict == "PASS" else "FAIL"
+        audit_id = _persist_audit(
+            audits,
+            scope_count,
+            scope_id=scope_id,
+            sequence=sequence,
+            supersedes=None,
+            project_id=str(project_id),
+            task_id=str(task_id),
+            run_id=str(run_id),
+            producer_refs=(str(producer_ref),),
+            artifact_refs=tuple(artifact_refs),
+            evidence_refs=tuple(evidence_refs),
+            contract_hash=str(contract_hash),
+            result=verdict,
+            handling=handling,
+        )
+        try:
+            session_ref = str(
+                (audits.get(audit_id) or {}).get("session_ref", "")
+            )
+        except Exception:
+            session_ref = ""
+        _ground_refs_best_effort(
+            tuple(artifact_refs), str(contract_hash), tuple(evidence_refs)
+        )
+        return {
+            "audit_id": audit_id,
+            "audit_session": session_ref,
+            "auditor_ref": str(auditor_ref),
+            "producer_ref": str(producer_ref),
+            "result": verdict,
+            "reasons": [str(reason) for reason in reasons],
+            "part_id": str(part_id),
+            "attempt": int(attempt),
+            "scope_id": scope_id,
+        }
+
     def reaudit(self, audit_id: str, pair_reuse_ref: Optional[str]) -> str:
         """Re-audit with a new instance; reuse needs a recorded reason."""
         audits = self.__dict__.setdefault("_AUDITS", {})
