@@ -1,13 +1,12 @@
-"""K12OPEN2 served routes (rows R-350 + HC-3).
+"""K12OPEN2 served contributions ledger.
 
 register_k12open2_routes(app) mounts exactly two routes on the seam
-app: POST /api/v1/demo/public-text/check (USER_WRITE guard,
-EMPTY_IDEA_TEXT on a blank or omitted idea_text, else {ok, violations}
-from public_text.check_idea) and POST /api/v1/demo/submission/scan
-(USER_WRITE guard, EMPTY_SUBMISSION when no files and blank notes, else
-{ok, findings} from secretscan.scan_files). Writes keep the frozen
-USER_WRITE guard (401 missing x-actor, 403 bad token); every refusal
-body carries {code, message}.
+app: POST /api/v1/contributions (USER_WRITE guard, EMPTY_PACKAGE_ID on
+a blank or omitted package_id, DUPLICATE_PACKAGE_ID on a repeat, else
+the recorded {contribution}) and GET /api/v1/contributions (open read
+of the recorded contributions). Writes keep the frozen USER_WRITE
+guard (401 missing x-actor, 403 bad token); every refusal body carries
+{code, message}.
 """
 
 from __future__ import annotations
@@ -18,8 +17,6 @@ from typing import Any
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
-from agent_si.backend import public_text as _public_text
-from agent_si.backend import secretscan as _secretscan
 from agent_si.backend.app import USER_WRITE
 
 #: Refusal when the x-actor header is blank.
@@ -27,12 +24,6 @@ ACTOR_MISSING = "ACTOR_MISSING"
 
 #: Refusal when the session token does not verify.
 FORBIDDEN = "FORBIDDEN"
-
-#: Refusal when idea_text is blank or omitted.
-EMPTY_IDEA_TEXT = "EMPTY_IDEA_TEXT"
-
-#: Refusal when the submission carries no files and blank notes.
-EMPTY_SUBMISSION = "EMPTY_SUBMISSION"
 
 #: Refusal when the contribution package_id is already recorded.
 DUPLICATE_PACKAGE_ID = "DUPLICATE_PACKAGE_ID"
@@ -80,45 +71,9 @@ async def _json_body(request: Request) -> dict:
 
 
 def register_k12open2_routes(app: Any) -> Any:
-    """Mount the two K12OPEN2 routes plus the contributions ledger; returns the app."""
+    """Mount the K12OPEN2 contributions POST+GET routes; returns the app."""
     if getattr(getattr(app, "state", None), "k12_contributions", None) is None:
         app.state.k12_contributions = {}
-
-    @app.post("/api/v1/demo/public-text/check")
-    async def post_k12open2_public_text_check(request: Request) -> Any:
-        refused = _guard(request)
-        if refused is not None:
-            return refused
-        body = await _json_body(request)
-        idea_text = body.get("idea_text")
-        if not (isinstance(idea_text, str) and idea_text.strip()):
-            return _refuse(
-                400, EMPTY_IDEA_TEXT, "check needs a non-empty idea_text"
-            )
-        violations = _public_text.check_idea(
-            idea_text,
-            presentation=body.get("presentation"),
-            video_demo=body.get("video_demo"),
-        )
-        return {"ok": not violations, "violations": violations}
-
-    @app.post("/api/v1/demo/submission/scan")
-    async def post_k12open2_submission_scan(request: Request) -> Any:
-        refused = _guard(request)
-        if refused is not None:
-            return refused
-        body = await _json_body(request)
-        raw_files = body.get("files")
-        files = raw_files if isinstance(raw_files, list) else []
-        notes = body.get("notes")
-        has_files = len(files) > 0
-        has_notes = isinstance(notes, str) and bool(notes.strip())
-        if not has_files and not has_notes:
-            return _refuse(
-                400, EMPTY_SUBMISSION, "scan needs files or notes"
-            )
-        findings = _secretscan.scan_files(files, notes)
-        return {"ok": not findings, "findings": findings}
 
     @app.post("/api/v1/contributions")
     async def post_contributions(request: Request) -> Any:

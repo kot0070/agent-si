@@ -96,7 +96,7 @@ def test_routename_k10_release_accept(tmp_path, monkeypatch):
 def test_routename_k12_demo_public_text(tmp_path, monkeypatch):
     client, _ = _client(tmp_path, monkeypatch)
     resp = client.post(
-        "/api/v1/demo/public-text/check",
+        "/api/v1/public-text/check",
         json={"idea_text": "A public demo night showing a garden rota."},
         headers=_headers(),
     )
