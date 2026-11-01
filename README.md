@@ -23,11 +23,15 @@ fixture commands, task commands at the checkout root.
    `frontend/package-lock.json`).
 3. Launch managers plus workers plus UI.
 
+Installs run offline from the checked-in lockfiles against the pre-fetched tarball cache only, never from a registry.
+
 ## Demo and fixture command index
 
 - Setup: `tools/start.py --smoke`
 - Demo (bring the demo project to green): `POST /k10/start/demo`
 - Fixtures: `pytest tests/test_k10ph2d_served.py -q -p no:cacheprovider`
+
+- Data dir: the product start path takes the data dir from consumer-layer env `AGENT_SI_DATA_DIR`, never harness settings; blank fails loud.
 
 See `docs/k10ph2d-start-accept-notes.md` for the startup idempotence
 note, the restart note, the data-dir start path note, and the
