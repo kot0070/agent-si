@@ -320,3 +320,118 @@ def retrieve_handoff(
     """Retrieve through the real KB layer, then package the handoff."""
     chunks, _section_log = retrieve(query, project_id, role, policy)
     return package_handoff(chunks)
+
+# FB2B4 staged-KB-rows consumer + auditor-eligibility seam (F04 re-check).
+#
+# The F04 fresh-audit chain stays NO_ELIGIBLE_AUDITOR with openai as the
+# only other model because the auditor registry only sees its own
+# in-memory candidate evidence store, where the openai candidate carries
+# no capability evidence refs. After B1 the bound model-KB catalog holds
+# staged rows with sourced fields, so eligibility is re-checked against
+# those rows. This consumer bridges the two stores: it reads the live
+# bound model-KB catalog (model_kb.kb.bound_catalog -- a DIFFERENT store
+# from the registry evidence store and from this package's
+# attached-source store) and derives capability evidence refs for one
+# exact provider/model pair. UNKNOWN stays UNKNOWN: a row without
+# sourced capability fields, or with UNKNOWN prices, yields no evidence
+# -- never an invented ref -- and a fail-closed () is returned whenever
+# the store is unreadable.
+
+#: Bound-catalog fields that prove what a model can do (sourced values
+#: only; negatives and UNKNOWN never count as evidence).
+_KB_AUDITOR_CAPABILITY_FIELDS = ("modalities", "tool_calling", "reasoning")
+
+#: Bound-catalog price fields that must be known: an unpriced row is not
+#: a B1-complete row, so it never confers eligibility either.
+_KB_AUDITOR_PRICE_FIELDS = ("input_token_price", "output_token_price")
+
+
+def _kb_field_value(fields, name):
+    """Sourced value of one bound-catalog field, or None when unevidenced.
+
+    None when the field entry is missing, its value is None or the
+    UNKNOWN marker, or its source is missing/UNKNOWN: evidence refs only
+    ever cite per-field sourced evidence, never bare labels.
+    """
+    item = fields.get(name) if isinstance(fields, dict) else None
+    if not isinstance(item, dict):
+        return None
+    value = item.get("value")
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip().lower() in ("", "unknown"):
+        return None
+    source = item.get("source")
+    if not isinstance(source, str) or not source.strip():
+        return None
+    if source.strip().lower() == "unknown":
+        return None
+    return value
+
+
+def _kb_affirmative(value):
+    """True when a sourced KB value affirms a capability (no negatives)."""
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return bool(value.strip()) and value.strip().lower() != "unknown"
+    if isinstance(value, (list, tuple)):
+        return any(
+            str(item).strip() and str(item).strip().lower() != "unknown"
+            for item in value
+        )
+    return True
+
+
+def _kb_price_known(value):
+    """True only for a real numeric price; UNKNOWN is never a price."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def auditor_capability_evidence(provider_id, model):
+    """Capability evidence refs for one pair from staged KB rows.
+
+    Reads the live bound model-KB catalog for the exact
+    (provider_id, model) pair and returns ``kb:<provider>/<model>#<field>``
+    refs -- one per sourced capability field plus both price fields -- or
+    () when the pair is blank, the row is absent, a price is UNKNOWN, or
+    no capability field is affirmed. Prices are never invented and
+    UNKNOWN capabilities stay ineligible downstream.
+    """
+    pid = provider_id.strip() if isinstance(provider_id, str) else ""
+    mid = model.strip() if isinstance(model, str) else ""
+    if not pid or not mid:
+        return ()
+    try:
+        from agent_si.model_kb import kb as _model_kb
+        from agent_si.model_kb import loader as _model_loader
+    except ImportError:
+        try:
+            from src.agent_si.model_kb import kb as _model_kb
+            from src.agent_si.model_kb import loader as _model_loader
+        except ImportError:
+            return ()
+    try:
+        catalog = _model_kb.bound_catalog()
+    except Exception:
+        return ()
+    if not isinstance(catalog, dict):
+        return ()
+    row = _model_loader.find_row(catalog, pid, mid)
+    if not isinstance(row, dict):
+        return ()
+    fields = row.get("fields", {})
+    if not isinstance(fields, dict):
+        return ()
+    prices = [_kb_field_value(fields, name)
+              for name in _KB_AUDITOR_PRICE_FIELDS]
+    if any(value is None or not _kb_price_known(value) for value in prices):
+        return ()
+    caps = [name for name in _KB_AUDITOR_CAPABILITY_FIELDS
+            if _kb_affirmative(_kb_field_value(fields, name))]
+    if not caps:
+        return ()
+    watched = list(caps) + list(_KB_AUDITOR_PRICE_FIELDS)
+    return tuple("kb:%s/%s#%s" % (pid, mid, name) for name in watched)

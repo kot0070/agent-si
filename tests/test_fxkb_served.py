@@ -51,6 +51,8 @@ from agent_si.model_kb import updater as _updater  # noqa: E402
 
 META_PROVIDER = "meta"
 META_MODEL = "muse-spark-1.3-contributor"
+OPENAI_PROVIDER = "openai"
+OPENAI_MODEL = "gpt-4o"
 ENVELOPE = _loader.STAGED_PROVIDER_ENVELOPES[META_PROVIDER]
 RETRIEVED = _loader.STAGED_SECTIONS_RETRIEVED_AT
 PRICING_URL = "https://dev.meta.ai/docs/pricing-rate-limits"
@@ -531,6 +533,110 @@ def test_fxkb_cold_restart_auto_spent_served(tmp_path, monkeypatch):
         assert payload.get("rows") == 1, payload
         assert payload.get("auto") == 200, payload
         assert payload.get("same_project_rows", 0) > 0, payload
+    finally:
+        _kb.bind_catalog(seed)
+        try:
+            _kb.set_persist_dir(prev_persist)
+        except Exception:
+            pass
+
+def _save_and_connect_openai(client):
+    resp = client.post("/api/v1/providers/keys",
+                       json={"preset_id": OPENAI_PROVIDER,
+                             "key_value": BAIT},
+                       headers=HEADERS)
+    assert resp.status_code == 201, resp.text
+    assert BAIT not in resp.text
+    key_ref = resp.json()["key_ref"]
+    conn = client.post("/api/v1/providers/connect",
+                       json={"preset_id": OPENAI_PROVIDER,
+                             "model": OPENAI_MODEL,
+                             "key_ref": key_ref},
+                       headers=HEADERS)
+    assert conn.status_code == 200, conn.text
+    assert BAIT not in conn.text
+    return key_ref
+
+
+def test_fxkb_openai_only_auditor_eligible_served(tmp_path, monkeypatch):
+    """F04 auditor-eligibility re-check on staged B1 KB rows (openai-only).
+
+    RED without B1 rows: the seed bound catalog carries the openai row
+    with every field UNKNOWN, so the staged-rows consumer yields no
+    capability evidence and the real AuditorRegistry stays
+    NO_ELIGIBLE_AUDITOR with openai as the only other model.
+    GREEN with B1 rows: after the served POST /api/v1/kb/update stages
+    the openai row with sourced fields, the same consumer yields
+    evidence refs and the openai candidate selects at L2.
+    Still ineligible afterwards: empty-model pairs and UNKNOWN-price
+    rows never yield evidence (prices are never invented).
+    """
+    from agent_si.assurance import audit_registry as _areg
+    from agent_si.backend.app import create_app
+    from agent_si.backend.orchestration import steplimits as _steplimits
+    from agent_si.kb import retriever as _kbsev
+
+    class _ProofRegistry(_areg.AuditorRegistry):
+        """Concrete binding of the real sourcing entries; adds nothing."""
+
+    def _candidate(refs):
+        return _areg.AuditorCandidate(
+            provider_id=OPENAI_PROVIDER, provider_instance=None,
+            model=OPENAI_MODEL, capability_evidence_refs=tuple(refs),
+            registered_at="")
+
+    monkeypatch.setattr(_urlreq, "urlopen", _fake_chat)
+    seed = _kb.bound_catalog()
+    prev_persist = getattr(_kb, "_PERSIST_DIR", None)
+    try:
+        _steplimits._reset_state()
+        app = create_app(_settings(str(tmp_path / "appdata-fb2b4")))
+        client = _tc.TestClient(app, raise_server_exceptions=False)
+        _create_project(client)
+        _save_and_connect_openai(client)
+        assert _kbsev.auditor_capability_evidence(
+            OPENAI_PROVIDER, OPENAI_MODEL) == ()
+        red = _ProofRegistry()
+        red.register_candidate(_candidate(()))
+        assert red.is_eligible(OPENAI_PROVIDER, OPENAI_MODEL) is False
+        try:
+            red.select_auditor("worker", (_areg.MODEL_ID,), "L2")
+        except _areg.NoEligibleAuditorError as exc:
+            assert exc.code == _areg.NO_ELIGIBLE_AUDITOR
+        else:
+            raise AssertionError("RED leg selected without B1 rows")
+        resp = client.post("/api/v1/kb/update",
+                           json={"approved_by_user": True},
+                           headers=HEADERS)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["applied"] is True, resp.text
+        assert OPENAI_PROVIDER in resp.json()["providers"], resp.text
+        refs = _kbsev.auditor_capability_evidence(
+            OPENAI_PROVIDER, OPENAI_MODEL)
+        assert len(refs) >= 1, refs
+        green = _ProofRegistry()
+        green.register_candidate(_candidate(refs))
+        assert green.is_eligible(OPENAI_PROVIDER, OPENAI_MODEL) is True
+        selection = green.select_auditor("worker", (_areg.MODEL_ID,), "L2")
+        assert selection.auditor.provider_id == OPENAI_PROVIDER
+        assert selection.auditor.model == OPENAI_MODEL
+        assert selection.independence_level == "L2"
+        assert _kbsev.auditor_capability_evidence(OPENAI_PROVIDER, "") == ()
+        assert _kbsev.auditor_capability_evidence("", OPENAI_MODEL) == ()
+        import copy as _copy
+        _no_price = _copy.deepcopy(_kb.bound_catalog())
+        _row = _loader.find_row(_no_price, OPENAI_PROVIDER, OPENAI_MODEL)
+        assert _row is not None
+        for _price_field in ("input_token_price", "output_token_price"):
+            _row["fields"][_price_field] = {"value": "UNKNOWN",
+                                            "source": "UNKNOWN",
+                                            "retrieved_at": "UNKNOWN"}
+        _kb.bind_catalog(_no_price)
+        assert _kbsev.auditor_capability_evidence(
+            OPENAI_PROVIDER, OPENAI_MODEL) == ()
+        _probe = _ProofRegistry()
+        _probe.register_candidate(_candidate(()))
+        assert _probe.is_eligible(OPENAI_PROVIDER, OPENAI_MODEL) is False
     finally:
         _kb.bind_catalog(seed)
         try:
