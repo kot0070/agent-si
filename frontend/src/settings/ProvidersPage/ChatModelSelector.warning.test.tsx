@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import {
   ChatModelSelector,
@@ -10,9 +10,16 @@ import {
   defaultContributorWarnings,
 } from "./ChatModelSelector";
 import type { ProviderState } from "./types";
+import { resetLocaleForTests, setLocale } from "../../locale/index";
+
+beforeEach(() => {
+  resetLocaleForTests();
+  setLocale("en");
+});
 
 afterEach(() => {
   cleanup();
+  resetLocaleForTests();
 });
 
 function metaConnected(): Record<string, ProviderState> {

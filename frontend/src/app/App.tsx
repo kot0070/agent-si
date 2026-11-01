@@ -58,9 +58,7 @@ import { TelemetryThemes } from "../k07next/TelemetryThemes";
 import { BenchGatewayCheck } from "../k07next2/BenchGatewayCheck";
 import { TelemetrySummary } from "../k07next2/TelemetrySummary";
 import { BenchHistoryList } from "../k07next3/BenchHistoryList";
-import { TestsViewBoard } from "../k07next3/TestsViewBoard";
-import { SessionTokenCard } from "../k07next4/SessionTokenCard";
-import { ConsolePageShell } from "../k07next4/ConsolePageShell";
+import { DiagnosticsSection } from "../settings/DiagnosticsSection";
 import { WatcherTab } from "../watcher/WatcherTab";
 import { KbRefreshProposal } from "../k07next2/KbRefreshProposal";
 
@@ -487,6 +485,13 @@ function SettingsIndexRoute(): ReactElement {
             {t(route.titleKey)}
           </Link>
         ))}
+        <Link
+          key="diagnostics"
+          to="/settings/diagnostics"
+          data-testid="settings-link-diagnostics"
+        >
+          {t("diagnostics.title")}
+        </Link>
       </nav>
     </SettingsLayout>
   );
@@ -495,6 +500,17 @@ function SettingsIndexRoute(): ReactElement {
 function SettingsSectionRoute(): ReactElement {
   const params = useParams();
   const current = useCurrentProject();
+  if (params.section === "diagnostics") {
+    return (
+      <SettingsLayout
+        titleKey="diagnostics.title"
+        purposeKey="diagnostics.purpose"
+        needItNowKey="diagnostics.needItNow"
+      >
+        <DiagnosticsSection />
+      </SettingsLayout>
+    );
+  }
   const route = SETTINGS_ROUTES.find((entry) => entry.path === params.section);
   if (route === undefined) {
     return (
@@ -638,14 +654,11 @@ function AppShell(): ReactElement {
               <Route path="/about" element={<AboutRoute />} />
               <Route path="/migration" element={<MigrationRoute />} />
               <Route path="/how-it-works" element={<HowItWorksView />} />
-              <Route path="/k07next/locale-coverage" element={<LocaleCoverage />} />
-              <Route path="/k07next/telemetry-themes" element={<TelemetryThemes />} />
-              <Route path="/k07next2/bench-check" element={<BenchGatewayCheck />} />
-              <Route path="/k07next2/telemetry" element={<TelemetrySummary />} />
-              <Route path="/k07next3/bench-history" element={<BenchHistoryList />} />
-              <Route path="/k07next3/tests-view" element={<TestsViewBoard />} />
-              <Route path="/k07next4/session-token" element={<SessionTokenCard />} />
-              <Route path="/k07next4/page-shell" element={<ConsolePageShell />} />
+              <Route path="/diagnostics/locale-coverage" element={<LocaleCoverage />} />
+              <Route path="/diagnostics/telemetry-themes" element={<TelemetryThemes />} />
+              <Route path="/diagnostics/bench-check" element={<BenchGatewayCheck />} />
+              <Route path="/diagnostics/telemetry" element={<TelemetrySummary />} />
+              <Route path="/diagnostics/bench-history" element={<BenchHistoryList />} />
               <Route
                 path="*"
                 element={<Navigate to={ROUTES.chat} replace />}
