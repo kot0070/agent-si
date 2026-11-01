@@ -3,6 +3,13 @@
 // Closable via Escape, the X button, and Cancel.
 
 import { useEffect, useState } from "react";
+import {
+  connectCloud,
+  connectLocal,
+  failureReason,
+  isNetworkFailure,
+  saveKey,
+} from "./connectApi";
 import { secretIdForProvider } from "./secretStore";
 import type { SecretStorePort } from "./secretStore";
 import type { ProviderPreset, SecretRef } from "./types";
@@ -110,6 +117,34 @@ export function ConnectDialog({
       created_at: new Date().toISOString(),
       last_rotated_at: null,
     };
+    // The typed key travels only in the key-save POST body; the local copy
+    // below is dropped once the route round trip answers.
+    const capturedKey = apiKey;
+    try {
+      if (activePreset.kind === "local") {
+        await connectLocal(activePreset.baseUrl);
+      } else {
+        const firstModel = activePreset.models[0];
+        if (firstModel === undefined) {
+          setResult({ kind: "error", text: `Refused: no model for preset ${preset_id}.` });
+          setSaving(false);
+          return;
+        }
+        const savedRef = await saveKey(preset_id, capturedKey);
+        await connectCloud({ preset_id, model: firstModel.id, key_ref: savedRef ?? ref });
+      }
+      // The route answered: the key leaves component state at once.
+      setApiKey("");
+    } catch (err: unknown) {
+      if (!isNetworkFailure(err)) {
+        setResult({ kind: "error", text: failureReason("Connect", err) });
+        setApiKey("");
+        setSaving(false);
+        return;
+      }
+      // No route answered (offline run): fall through to the local
+      // reference flow below, which keeps the saved behavior.
+    }
     try {
       await saveWithTimeout(store.save(ref), timeoutMs);
       setResult({ kind: "success", text: `Connected ${activePreset.label}. Reference saved.` });

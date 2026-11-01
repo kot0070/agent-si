@@ -4,6 +4,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { setUiToken } from "../../api/errors";
+import { listConnectedProviders } from "./connectApi";
 import { PROVIDER_CATALOG } from "./catalog";
 import { ChatModelSelector } from "./ChatModelSelector";
 import { enabledChatChoices } from "./ChatSelector";
@@ -67,6 +68,32 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
   const [finderKey, setFinderKey] = useState(0);
   const [showWizard, setShowWizard] = useState(false);
   const [wizardDone, setWizardDone] = useState(false);
+
+  // Cards state on open: a background GET marks the providers the routes
+  // already know as connected. It never throws and never disturbs the page
+  // when no route answers.
+  useEffect(() => {
+    let cancelled = false;
+    void listConnectedProviders().then((ids) => {
+      if (cancelled || ids.length === 0) {
+        return;
+      }
+      const known = new Set(ids);
+      setStates((prev) => {
+        const next: Record<string, ProviderState> = { ...prev };
+        for (const id of Object.keys(next)) {
+          if (known.has(id)) {
+            const current = next[id] as ProviderState;
+            next[id] = { ...current, connected: true };
+          }
+        }
+        return next;
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Stable order: the catalog array order, captured once. Never re-sorted,
   // so connecting, toggling or refreshing never reorders or flickers rows.
