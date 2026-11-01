@@ -266,7 +266,7 @@ def test_fxkb_update_adds_meta_row_served(tmp_path, monkeypatch):
         assert status.status_code == 200, status.text
         overall = status.json()["overall"]
         assert overall["kb_version"] == v0 + 1
-        assert overall["updated_at"] == RETRIEVED
+        assert overall["updated_at"] > RETRIEVED and "T" in overall["updated_at"]
         assert overall["last_source"] == ENVELOPE
         persisted = _kb.persist_path()
         assert persisted and os.path.isfile(persisted), persisted

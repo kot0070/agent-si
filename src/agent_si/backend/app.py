@@ -2195,6 +2195,9 @@ def create_app(settings: Any = None,
                 continue
             _pid = str(_rec.get("provider_id") or "")
             _model = str(_rec.get("model") or "")
+            _dup = "%s/" % _pid if _pid else ""
+            if _dup and _model.startswith(_dup):
+                _model = _model[len(_dup):]
             if _pid in _online and _model and _pid not in _wanted:
                 _wanted[_pid] = _model
         _pairs = [(_pid, _wanted[_pid]) for _pid in _online
@@ -2236,9 +2239,12 @@ def create_app(settings: Any = None,
                        "for the connected providers")
         _envelope = _envelopes.get(sorted(_have)[0]) or (
             _fxkb_updater.KB_SOURCE_ALLOWLIST[0])
+        import datetime as _fxkb_datetime
+        _run_at = _fxkb_datetime.datetime.now(
+            _fxkb_datetime.timezone.utc).isoformat()
         _catalog = _fxkb_kb.bound_catalog()
         _proposal = _fxkb_updater.propose_from_field_data(
-            _catalog, _entries, _envelope, _retrieved)
+            _catalog, _entries, _envelope, _run_at)
         _errors = _fxkb_updater.validate_proposal(_catalog, _proposal)
         if _errors:
             raise HTTPException(status_code=400,
