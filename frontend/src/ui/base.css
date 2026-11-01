@@ -104,3 +104,18 @@ pre {
 details {
   margin: 8px 0;
 }
+
+a {
+  color: var(--agent-si-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+a:visited {
+  color: var(--agent-si-accent);
+}
+
+a:focus-visible {
+  outline: 2px solid var(--agent-si-accent);
+  outline-offset: 2px;
+}
