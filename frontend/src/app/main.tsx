@@ -10,6 +10,7 @@ import { LocaleProvider } from "../locale/index";
 import { App } from "./App";
 import "../ui/tokens.css";
 import "../ui/base.css";
+import "../ui/shell.css";
 import { applyTheme, readTheme } from "../shell/theme";
 
 const rootElement = document.getElementById("root");

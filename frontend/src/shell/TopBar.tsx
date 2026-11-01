@@ -100,7 +100,7 @@ export function TopBar(props: TopBarProps): ReactElement {
   }
 
   return (
-    <header data-testid="topbar">
+    <header data-testid="topbar" className="fx-topbar">
       <span data-testid="k07open10-shell" aria-hidden="true" />
       <div data-testid="pairing-strip">
         <span>{t("shell.topbar.watcher")}</span>
