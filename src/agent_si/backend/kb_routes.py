@@ -241,15 +241,14 @@ def _blob_key(handoff: dict) -> Any:
 
 
 _ROUTES = (
-    ("GET", "/kb/list", kb_list),
+    ("GET", "/api/v1/kb/list", kb_list),
     # DEMOF11: versioned attach served by the same handler; the legacy
     # POST /kb/attach below stays bound as an alias (never removed).
     ("POST", "/api/v1/kb/attach", kb_attach),
-    ("POST", "/kb/attach", kb_attach),
-    ("POST", "/kb/detach", kb_detach),
-    ("GET", "/kb/manifest", kb_manifest),
-    ("GET", "/kb/section", kb_section),
-    ("POST", "/kb/retrieve", kb_retrieve),
+    ("POST", "/api/v1/kb/detach", kb_detach),
+    ("GET", "/api/v1/kb/manifest", kb_manifest),
+    ("GET", "/api/v1/kb/section", kb_section),
+    ("POST", "/api/v1/kb/retrieve", kb_retrieve),
 )
 
 

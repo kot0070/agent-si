@@ -1911,14 +1911,14 @@ def create_app(settings: Any = None,
             "title": summary.title,
         }
 
-    @app.get("/sessions")
+    @app.get("/api/v1/sessions")
     def k06_list_sessions() -> dict[str, Any]:
         """GET /sessions -> list_sessions over the real UI session store."""
         sessions = _k06_ui_session.list_sessions(
             store_path=_k06_ui_session._default_store_dir())
         return {"sessions": [_k06_session_payload(s) for s in sessions]}
 
-    @app.post("/asks")
+    @app.post("/api/v1/asks")
     async def k06_create_ask(request: Request) -> dict[str, Any]:
         """POST /asks -> create_ask_card; writes need a live header token."""
         actor = (request.headers.get("x-actor") or "").strip()
@@ -1951,7 +1951,7 @@ def create_app(settings: Any = None,
         except (ValueError, TypeError) as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
-    @app.post("/asks/{ask_id}/approve")
+    @app.post("/api/v1/asks/{ask_id}/approve")
     async def k06open9_approve_ask(
         ask_id: str, request: Request
     ) -> dict[str, Any]:
@@ -1986,7 +1986,7 @@ def create_app(settings: Any = None,
             raise HTTPException(
                 status_code=403, detail=str(exc)) from None
 
-    @app.post("/portability/run")
+    @app.post("/api/v1/portability/run")
     async def k06open9_portable_run(request: Request) -> dict[str, Any]:
         """POST /portability/run -> run_command over the real guard."""
         actor = (request.headers.get("x-actor") or "").strip()
@@ -2021,7 +2021,7 @@ def create_app(settings: Any = None,
             _k06open9_guard_evaluate,
             params=dict(params) if params is not None else None)
 
-    @app.get("/portability/environment")
+    @app.get("/api/v1/portability/environment")
     def k06open9_environment() -> dict[str, Any]:
         """GET /portability/environment -> detected-environment page."""
         return _k06open9_portable.get_environment_page()
@@ -2853,7 +2853,7 @@ def create_app(settings: Any = None,
                 detail="write needs a JSON object body") from None
         return data
 
-    @app.post("/v1/split")
+    @app.post("/api/v1/split")
     async def k14_split(request: Request) -> dict[str, Any]:
         """Director split: one project into parts for tool agents."""
         _k14_write_guard(request)
@@ -2866,7 +2866,7 @@ def create_app(settings: Any = None,
                 detail={"code": _k14_hierarchy.SPLIT_BAD_REQUEST,
                         "message": str(err)}) from None
 
-    @app.post("/v1/integrate")
+    @app.post("/api/v1/integrate")
     async def k14_integrate(request: Request) -> dict[str, Any]:
         """Manager integration: split parts into one result."""
         _k14_write_guard(request)
@@ -2880,7 +2880,7 @@ def create_app(settings: Any = None,
                 detail={"code": _k14_hierarchy.INTEGRATE_BAD_REQUEST,
                         "message": str(err)}) from None
 
-    @app.put("/v1/offload-switch")
+    @app.put("/api/v1/offload-switch")
     async def k14_offload_switch(request: Request) -> dict[str, Any]:
         """Per-project routine-offload switch."""
         _k14_write_guard(request)
@@ -2892,7 +2892,7 @@ def create_app(settings: Any = None,
             raise HTTPException(
                 status_code=400, detail=str(err)) from None
 
-    @app.post("/v1/offload")
+    @app.post("/api/v1/offload")
     async def k14_offload(request: Request) -> dict[str, Any]:
         """Hand one routine over; refused while the switch is off."""
         _k14_write_guard(request)
@@ -2909,14 +2909,14 @@ def create_app(settings: Any = None,
             raise HTTPException(
                 status_code=400, detail=str(err)) from None
 
-    @app.get("/v1/handovers")
+    @app.get("/api/v1/handovers")
     def k14_handovers(project_id: str) -> dict[str, Any]:
         """Recorded routine hand-overs for one project (open read)."""
         return {"project_id": project_id,
                 "handovers": _k14_offload.handovers_for(project_id)}
 
-    @app.put("/v1/step-limits")
-    @app.post("/v1/step-limits")
+    @app.put("/api/v1/step-limits")
+    @app.post("/api/v1/step-limits")
     async def k14_step_limits(request: Request) -> dict[str, Any]:
         """Per-project max agent steps, separate for chat."""
         _k14_write_guard(request)
@@ -2929,7 +2929,7 @@ def create_app(settings: Any = None,
             raise HTTPException(
                 status_code=400, detail=str(err)) from None
 
-    @app.post("/v1/agent-steps")
+    @app.post("/api/v1/agent-steps")
     async def k14_agent_steps(request: Request) -> dict[str, Any]:
         """Take one agent step; 429 once the project budget is spent."""
         _k14_write_guard(request)
@@ -2949,7 +2949,7 @@ def create_app(settings: Any = None,
             raise HTTPException(
                 status_code=400, detail=str(err)) from None
 
-    @app.post("/v1/chat-steps")
+    @app.post("/api/v1/chat-steps")
     async def k14_chat_steps(request: Request) -> dict[str, Any]:
         """Take one chat step; 429 once the project budget is spent."""
         _k14_write_guard(request)
@@ -3054,7 +3054,7 @@ def create_app(settings: Any = None,
                         "message": str(err)}) from None
         return parts
 
-    @app.post("/v1/split-gates/parts")
+    @app.post("/api/v1/split-gates/parts")
     async def k02restb_parts(request: Request) -> dict[str, Any]:
         """Opt-in split into N disjoint parts (row 93)."""
         _k02restb_write_guard(request)
@@ -3068,7 +3068,7 @@ def create_app(settings: Any = None,
                       for index, part in enumerate(parts)],
         }
 
-    @app.post("/v1/split-gates/part-gate")
+    @app.post("/api/v1/split-gates/part-gate")
     async def k02restb_part_gate(request: Request) -> dict[str, Any]:
         """Serve one part's own gate verdict (row 94)."""
         _k02restb_write_guard(request)
@@ -3089,7 +3089,7 @@ def create_app(settings: Any = None,
         return {"gate_id": record.gate_id, "part_id": record.part_id,
                 "verdict": record.verdict, "created_at": record.created_at}
 
-    @app.post("/v1/split-gates/part-audit")
+    @app.post("/api/v1/split-gates/part-audit")
     async def k02restb_part_audit(request: Request) -> dict[str, Any]:
         """Serve one part's fresh audit result (row 94)."""
         _k02restb_write_guard(request)
@@ -3127,7 +3127,7 @@ def create_app(settings: Any = None,
                 "scope_id": record.scope_id, "audit_seq": record.audit_seq,
                 "created_at": record.created_at}
 
-    @app.post("/v1/split-gates/split-bounded")
+    @app.post("/api/v1/split-gates/split-bounded")
     async def k02restb_split_bounded(request: Request) -> dict[str, Any]:
         """Split with bounded context per Manager (row 100)."""
         _k02restb_write_guard(request)
@@ -3160,7 +3160,7 @@ def create_app(settings: Any = None,
                       for index, part in enumerate(parts)],
         }
 
-    @app.post("/v1/split-gates/phase-gate")
+    @app.post("/api/v1/split-gates/phase-gate")
     async def k02restb_phase_gate(request: Request) -> dict[str, Any]:
         """Cross-check open packages plus gates, then evaluate (row 118)."""
         _k02restb_write_guard(request)
@@ -3201,7 +3201,7 @@ def create_app(settings: Any = None,
                         "message": str(err)}) from None
         return {**verdict, "conflicts": []}
 
-    @app.post("/v1/split-gates/manifests")
+    @app.post("/api/v1/split-gates/manifests")
     async def k02restb_manifests(request: Request) -> dict[str, Any]:
         """Build the frozen interface manifest with its hash (row 96)."""
         _k02restb_write_guard(request)
@@ -3234,7 +3234,7 @@ def create_app(settings: Any = None,
                         "message": str(err)}) from None
         return manifest
 
-    @app.post("/v1/split-gates/validate-part")
+    @app.post("/api/v1/split-gates/validate-part")
     async def k02restb_validate_part(request: Request) -> dict[str, Any]:
         """Validate one part ref against the frozen manifest hash (row 96)."""
         _k02restb_write_guard(request)
@@ -3248,7 +3248,7 @@ def create_app(settings: Any = None,
                         "message": "ref plus manifest must be objects"})
         return {"valid": bool(_k02restb_manifest.validate_part_ref(ref, manifest))}
 
-    @app.post("/v1/split-gates/fanout")
+    @app.post("/api/v1/split-gates/fanout")
     async def k02restb_fanout(request: Request) -> dict[str, Any]:
         """Bound Manager fan-out by scheduler caps; excess queues (M-P1-10)."""
         _k02restb_write_guard(request)

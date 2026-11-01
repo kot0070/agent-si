@@ -145,7 +145,7 @@ def test_http_open_read_route_reachable() -> None:
     from fastapi.testclient import TestClient
 
     client = TestClient(create_app())
-    response = client.get("/sessions")
+    response = client.get("/api/v1/sessions")
     assert response.status_code == 200
 
 
@@ -157,7 +157,7 @@ def test_http_write_without_token_refused() -> None:
 
     client = TestClient(create_app())
     response = client.post(
-        "/asks",
+        "/api/v1/asks",
         json={
             "kind": "approval",
             "summary": "Approve the migration plan?",

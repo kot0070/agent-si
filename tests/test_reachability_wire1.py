@@ -234,14 +234,14 @@ def test_wire1_routes_reach_declared_entries(_wire1_clean, monkeypatch,
         cases.append((method, path, payload, None, _local_mod, entry, kind))
     for method, path, handler in kb_declaration:
         name = handler.__name__
-        if method == "GET" and path == "/kb/list":
+        if method == "GET" and path == "/api/v1/kb/list":
             cases.append((method, path + "?project_id=wire1-no-proj", None,
                           None, None, name, 200))
-        elif method == "GET" and path == "/kb/manifest":
+        elif method == "GET" and path == "/api/v1/kb/manifest":
             cases.append((method,
                           path + "?kb_id=wire1-no-kb&query=q", None,
                           None, None, name, 500))
-        elif method == "GET" and path == "/kb/section":
+        elif method == "GET" and path == "/api/v1/kb/section":
             cases.append((method,
                           path + "?kb_id=wire1-no-kb&section_id=wire1-sec",
                           None, None, None, name, 500))

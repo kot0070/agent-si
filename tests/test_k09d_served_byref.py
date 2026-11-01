@@ -99,7 +99,7 @@ def test_k09d_over_limit_retrieve_travels_by_artifactref(client, tmp_path):
     try:
         assert _attach(kb_id, project) == kb_id
         resp = client.post(
-            "/kb/retrieve",
+            "/api/v1/kb/retrieve",
             json={
                 "query": "lorem",
                 "project_id": project,
@@ -136,7 +136,7 @@ def test_k09d_under_limit_retrieve_stays_inline(client, tmp_path):
     try:
         assert _attach(kb_id, project) == kb_id
         resp = client.post(
-            "/kb/retrieve",
+            "/api/v1/kb/retrieve",
             json={
                 "query": "intro notes",
                 "project_id": project,
@@ -161,7 +161,7 @@ def test_k09d_bad_token_403s_and_missing_actor_401s(client, tmp_path):
     try:
         assert _attach(kb_id, project) == kb_id
         bad = client.post(
-            "/kb/retrieve",
+            "/api/v1/kb/retrieve",
             json={
                 "query": "intro notes",
                 "project_id": project,
@@ -174,7 +174,7 @@ def test_k09d_bad_token_403s_and_missing_actor_401s(client, tmp_path):
         )
         assert bad.status_code == 403, bad.text
         missing = client.post(
-            "/kb/retrieve",
+            "/api/v1/kb/retrieve",
             json={
                 "query": "intro notes",
                 "project_id": project,

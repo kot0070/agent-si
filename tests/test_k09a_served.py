@@ -86,7 +86,7 @@ def test_row144_list_serves_attached_kb(client, tmp_path):
     try:
         assert _attach(kb_id, project) == kb_id
         resp = client.get(
-            "/kb/list", params={"project_id": project, "role": "dev"}
+            "/api/v1/kb/list", params={"project_id": project, "role": "dev"}
         )
         assert resp.status_code == 200
         body = resp.json()
@@ -102,7 +102,7 @@ def test_row145_attach_serves_kb_id(client, tmp_path):
     kb_id = _write_kb_dir(tmp_path / "kb-attach")
     try:
         resp = client.post(
-            "/kb/attach",
+            "/api/v1/kb/attach",
             json={
                 "source": {
                     "kb_id": kb_id,
@@ -126,12 +126,12 @@ def test_row146a_detach_serves_null_and_removes(client, tmp_path):
     kb_id = _write_kb_dir(tmp_path / "kb-detach")
     assert _attach(kb_id, project) == kb_id
     resp = client.post(
-        "/kb/detach", json={"kb_id": kb_id}, headers=WRITE_HEADERS
+        "/api/v1/kb/detach", json={"kb_id": kb_id}, headers=WRITE_HEADERS
     )
     assert resp.status_code == 200
     assert resp.json() is None
     listed = client.get(
-        "/kb/list", params={"project_id": project, "role": "dev"}
+        "/api/v1/kb/list", params={"project_id": project, "role": "dev"}
     )
     assert listed.status_code == 200
     assert kb_id not in [s["kb_id"] for s in listed.json()]
@@ -144,7 +144,7 @@ def test_row146c_retrieve_serves_chunks_and_cost(client, tmp_path):
     try:
         assert _attach(kb_id, project) == kb_id
         resp = client.post(
-            "/kb/retrieve",
+            "/api/v1/kb/retrieve",
             json={
                 "query": "intro notes",
                 "project_id": project,
@@ -172,7 +172,7 @@ def test_row209_manifest_serves_section_names(client, tmp_path):
     try:
         assert _attach(kb_id, project) == kb_id
         resp = client.get(
-            "/kb/manifest", params={"kb_id": kb_id, "query": "intro"}
+            "/api/v1/kb/manifest", params={"kb_id": kb_id, "query": "intro"}
         )
         assert resp.status_code == 200
         assert "intro" in resp.json()
@@ -187,7 +187,7 @@ def test_bp05_43_served_retrieve_stays_data_only(client, tmp_path):
     try:
         assert _attach(kb_id, project) == kb_id
         resp = client.post(
-            "/kb/retrieve",
+            "/api/v1/kb/retrieve",
             json={
                 "query": "intro notes",
                 "project_id": project,
@@ -219,7 +219,7 @@ def test_bp05_43_served_retrieve_blocks_instruction_content(client, tmp_path):
     try:
         assert _attach(kb_id, project) == kb_id
         resp = client.post(
-            "/kb/retrieve",
+            "/api/v1/kb/retrieve",
             json={
                 "query": "escalate",
                 "project_id": project,
