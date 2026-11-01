@@ -42,8 +42,8 @@ export function SettingsLayout(props: SettingsLayoutProps): ReactElement {
   return (
     <section>
       <h2>{t(props.titleKey)}</h2>
-      <p>{t(props.purposeKey)}</p>
-      <p>{t(props.needItNowKey)}</p>
+      <p data-testid="settings-purpose">{t(props.purposeKey)}</p>
+      <p data-testid="settings-need-it-now">{t(props.needItNowKey)}</p>
       {inRouter ? (
         <WhyChipWithRouter />
       ) : (
