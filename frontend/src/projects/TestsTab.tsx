@@ -14,6 +14,7 @@
 import { useEffect, useState } from "react";
 import type { ReactElement } from "react";
 import { ApiError, apiErrorLocaleKey } from "../api/errors";
+import { t } from "../locale/index";
 import { EmptyState } from "../ui/EmptyState";
 import { ErrorPanel } from "../ui/ErrorPanel";
 import { LoadingState } from "../ui/LoadingState";
@@ -22,7 +23,6 @@ import {
   readLatestRun,
   readResultOutput,
   readTestsView,
-  testKindLabel,
 } from "./projectsApi";
 import type { TestsView } from "./projectsApi";
 
@@ -46,6 +46,22 @@ function toTestsFailure(error: unknown): TestsFailure {
 
 function isNotFound(error: unknown): boolean {
   return error instanceof ApiError && error.status === 404;
+}
+
+function testKindText(kind: string | undefined): string {
+  if (kind === "CODE") {
+    return t("projects.tests.kind.code");
+  }
+  if (kind === "AI") {
+    return t("projects.tests.kind.ai");
+  }
+  if (kind === "HUMAN") {
+    return t("projects.tests.kind.human");
+  }
+  if (kind !== undefined && kind !== "") {
+    return kind;
+  }
+  return t("projects.tests.kind.unknown");
 }
 
 export function TestsTab(props: TestsTabProps): ReactElement {
@@ -126,13 +142,8 @@ export function TestsTab(props: TestsTabProps): ReactElement {
 
   return (
     <section data-testid="tests-tab">
-      <h2>Tests</h2>
-      <p data-testid="tests-explainer">
-        A run is one agent working on one task; code tests are the
-        project&apos;s own suite; local tests are catalog checks this machine
-        runs before spend. This tab shows the latest run: served counters and
-        one row per test. It never changes settings.
-      </p>
+      <h2>{t("projects.tests.title")}</h2>
+      <p data-testid="tests-explainer">{t("projects.tests.explainer")}</p>
       {phase.kind === "loading" ? (
         <LoadingState loadingKey="ui.loading.more" />
       ) : phase.kind === "empty" ? (
@@ -142,11 +153,7 @@ export function TestsTab(props: TestsTabProps): ReactElement {
             actionKey={null}
             onAction={null}
           />
-          <p data-testid="tests-empty-how">
-            No test run has started for this project yet. A run starts with
-            POST /api/v1/teststage/runs/start for the latest plan, then this
-            tab shows counters and one row per test.
-          </p>
+          <p data-testid="tests-empty-how">{t("projects.tests.emptyHow")}</p>
         </div>
       ) : phase.kind === "failed" ? (
         <div data-testid="tests-error">
@@ -159,11 +166,11 @@ export function TestsTab(props: TestsTabProps): ReactElement {
       ) : (
         <div>
           <div data-testid="tests-counters">
-            <span>active</span>
+            <span>{t("projects.tests.counter.active")}</span>
             <span data-testid="tests-counters-active">{phase.view.active}</span>
-            <span>passed</span>
+            <span>{t("projects.tests.counter.passed")}</span>
             <span data-testid="tests-counters-passed">{phase.view.passed}</span>
-            <span>remaining</span>
+            <span>{t("projects.tests.counter.remaining")}</span>
             <span data-testid="tests-counters-remaining">
               {phase.view.remaining}
             </span>
@@ -175,7 +182,7 @@ export function TestsTab(props: TestsTabProps): ReactElement {
                   {row.test_id}
                 </span>
                 <span data-testid={`tests-kind-${row.test_id}`}>
-                  {testKindLabel(row.kind)}
+                  {testKindText(row.kind)}
                 </span>
                 <span data-testid={`tests-status-${row.test_id}`}>
                   {row.status}
@@ -205,8 +212,8 @@ export function TestsTab(props: TestsTabProps): ReactElement {
                     }}
                   >
                     {outputs[row.test_id] === undefined
-                      ? "Show output"
-                      : "Hide output"}
+                      ? t("projects.tests.showOutput")
+                      : t("projects.tests.hideOutput")}
                   </button>
                 ) : null}
                 {outputs[row.test_id] !== undefined ? (

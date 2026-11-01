@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { t } from "../locale/index";
 import {
   RULE_CARDS,
   RULE_CARD_MODELS,
@@ -117,14 +118,14 @@ export function WatcherTab({ projectId }: { projectId: string }) {
     return <p data-testid="watcher-error">{error}</p>;
   }
   if (status === null || journal === null) {
-    return <p data-testid="watcher-loading">Loading...</p>;
+    return <p data-testid="watcher-loading">{t("watcher.tab.loading")}</p>;
   }
 
   return (
     <section data-testid="watcher-tab">
       <h2 data-testid="watcher-project">{status.project_id}</h2>
       <p data-testid="watcher-integrity">
-        {status.integrity_ok ? "OK" : "FAILED"}
+        {status.integrity_ok ? t("watcher.tab.ok") : t("watcher.tab.failed")}
       </p>
       <p data-testid="watcher-journal-head">{status.journal_head}</p>
       <p data-testid="watcher-generated">{status.generated_at}</p>
@@ -137,9 +138,9 @@ export function WatcherTab({ projectId }: { projectId: string }) {
       </ul>
 
       <fieldset data-testid="watcher-settings">
-        <legend>Watcher settings</legend>
+        <legend>{t("watcher.tab.settings")}</legend>
         <label>
-          Model
+          {t("watcher.tab.model")}
           <select
             data-testid="watcher-model"
             value={settings.model}
@@ -163,7 +164,7 @@ export function WatcherTab({ projectId }: { projectId: string }) {
           </select>
         </label>
         <label>
-          Cloud fallback
+          {t("watcher.tab.cloudFallback")}
           <input
             data-testid="watcher-cloud-fallback"
             type="checkbox"
@@ -188,7 +189,7 @@ export function WatcherTab({ projectId }: { projectId: string }) {
             </h3>
             <p data-testid={`rule-card-${card.cardId}-area`}>{card.area}</p>
             <label>
-              Model
+              {t("watcher.tab.model")}
               <select
                 data-testid={`rule-card-${card.cardId}-model`}
                 value={models[card.cardId] ?? "local"}

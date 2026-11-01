@@ -119,11 +119,8 @@ const VIEW_TITLE_KEYS: Record<ProjectViewName, string> = {
   audits: "projects.audits.title",
   errors: "projects.errors.title",
   reports: "projects.reports.title",
-  // FXTESTSUI named delta: the tests key is staged; the locale files are
-  // owned by FXLAYOUT (never touched here) and t() throws on a missing key,
-  // so the title reuses the nearest staged project key until
-  // `projects.tests.title` lands, then this line flips to it.
-  tests: "projects.reports.title",
+  // FXLOCALE2: `projects.tests.title` landed, so the tests view uses it.
+  tests: "projects.tests.title",
 };
 
 export function projectViewTitleKey(view: ProjectViewName): string {
