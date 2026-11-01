@@ -514,6 +514,24 @@ def run_task_streamed(
             return
         _term_state["done"] = True
         _telemetry_report_terminated(shape, active_run_id, reason)
+        if reason != "cancelled":
+            # FXTESTS1 run-end hook (F4): the local-tests switch decides.
+            # Switch on runs one test stage; switch off records a skip.
+            # Evidence rows only, never a stage failure: the hook must
+            # not break the run it concludes.
+            try:
+                from agent_si.test_runners import run_end as _run_end
+
+                _run_end.run_local_tests_at_run_end(
+                    project_id=str(shape.get("project_id") or ""),
+                    run_id=str(active_run_id or ""),
+                    task_id=str(shape.get("task_id") or ""),
+                    data_root=None,
+                    gateway=None,
+                    timeout_s=60.0,
+                )
+            except Exception:
+                pass
 
     def _emit(event: RunEvent) -> RunEvent:
         try:

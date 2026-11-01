@@ -297,6 +297,72 @@ def register_read_routes(app: Any) -> Any:
             "settings_controls": list(view.settings_controls),
         }
 
+    # FXTESTS1 read routes for the later Tests tab (additions-only):
+    # latest plan/run per project over the real lane indexes plus the
+    # staged result output confined to the project data root.
+    @app.get("/api/v1/teststage/plans/latest")
+    def k03fxtests1_latest_plan(project_id: str) -> dict:
+        from agent_si.test_runners import test_planner as _fxtests1_planner
+
+        plan_id = _fxtests1_planner.latest_plan_for_project(project_id)
+        if not plan_id:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no plan recorded for project {project_id!r}",
+            )
+        return {"project_id": project_id, "plan_id": plan_id}
+
+    @app.get("/api/v1/teststage/runs/latest")
+    def k03fxtests1_latest_run(project_id: str) -> dict:
+        from agent_si.test_runners import stage_runner as _fxtests1_stage
+
+        found = _fxtests1_stage.latest_run_for_project(project_id)
+        if not found:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no stage run recorded for project {project_id!r}",
+            )
+        return {
+            "project_id": project_id,
+            "plan_id": found["plan_id"],
+            "run_id": found["run_id"],
+        }
+
+    @app.get("/api/v1/teststage/result-output")
+    def k03fxtests1_result_output(ref: str) -> dict:
+        from agent_si.test_runners import code_executor as _fxtests1_exec
+
+        root = _store_dir(app)
+        if not root:
+            raise HTTPException(
+                status_code=400,
+                detail="no data root is bound, so refs resolve nowhere",
+            )
+        try:
+            full = _fxtests1_exec.resolve_evidence_ref(ref, root)
+        except _fxtests1_exec.ExecutorError as exc:
+            code = getattr(exc, "code", "") or "EVIDENCE_REF_INVALID"
+            if code == "EVIDENCE_ESCAPE":
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"refused: {exc}",
+                )
+            raise HTTPException(status_code=400, detail=str(exc))
+        if not os.path.isfile(full):
+            raise HTTPException(
+                status_code=404,
+                detail=f"no staged output for ref {ref!r}",
+            )
+        with open(full, encoding="utf-8", errors="replace") as handle:
+            text = handle.read()
+        project_id, _, _rel = ref[len("evidence://"):].partition("/")
+        return {
+            "ref": ref,
+            "project_id": project_id,
+            "output": text,
+            "size": len(text),
+        }
+
     @app.get("/api/v1/analytics/telemetry")
     def read_telemetry_analytics(project_id: Any | None = None) -> dict:
         """Telemetry aggregates FROM the authoritative store file only.

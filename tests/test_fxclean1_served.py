@@ -23,7 +23,7 @@ if _SRC not in sys.path:
 
 from agent_si.backend.app import create_app  # noqa: E402
 
-PRE_REMOVAL_ROUTE_COUNT = 245
+PRE_REMOVAL_ROUTE_COUNT = 248
 
 REMOVED_MODULES = [
     "agent_si.backend.orchestration.hierarchy_routes",

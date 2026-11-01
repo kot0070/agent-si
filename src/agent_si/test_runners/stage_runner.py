@@ -220,6 +220,18 @@ def _store_assurance_status(run_id: str, status: Dict[str, Optional[str]]) -> No
 
 
 
+#: Latest stage run per project: project_id -> {"plan_id", "run_id"}.
+_LATEST_RUN: Dict[str, Dict[str, str]] = {}
+
+
+def latest_run_for_project(project_id: str) -> Optional[Dict[str, str]]:
+    """Return the latest started stage run for one project, if any."""
+    stored = _LATEST_RUN.get(str(project_id))
+    if stored is None:
+        return None
+    return dict(stored)
+
+
 def _journal(project_id, run_id, phase, status, note=""):
     """Append one watcher journal row for a served stage step (never breaks the stage).
 
@@ -244,6 +256,8 @@ def start_stage(project_id: str, plan_id: str, run_id: str) -> StageRun:
     _RUNS[run_id] = run
     _RESULTS[run_id] = []
     _ASSURANCE_STATUS.pop(run_id, None)
+    _LATEST_RUN[str(project_id)] = {
+        "plan_id": plan_id, "run_id": run_id}
     _journal(project_id, run_id, "plan", "PLAN", "stage run opened plan=%s" % plan_id)
     return run
 
@@ -854,6 +868,7 @@ REALIZATION_MAP = {
 
 #: Entry points: logical name -> symbol in this module.
 ENTRY_POINTS = {
+    "latest_run_for_project": "latest_run_for_project",
     "start_stage": "start_stage",
     "advance_stage": "advance_stage",
     "record_result": "record_result",

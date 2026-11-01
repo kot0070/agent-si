@@ -65,8 +65,16 @@ def test_f13_ask_once_survives_rebuild(tmp_path):
 
 
 def test_f1_catalog_run_via_route(client):
+    # FXTESTS1: the bare route stages no project folder, so every test
+    # reports BLOCKED with a reason and ran counts the real runs (0).
     resp = client.post(
         "/api/v1/catalog/run", json={"suite": "catalog-frozen-v1"}
     )
     assert resp.status_code == 200
-    assert resp.json() == {"ok": True, "ran": 6}
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["ran"] == 0, body
+    assert len(body["results"]) == 6, body
+    for row in body["results"]:
+        assert row["status"] == "BLOCKED", row
+        assert row["reason"], row

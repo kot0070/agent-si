@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 #: Exact shipped-preset model id (never retyped, never a second id).
 MODEL_ID = "meta/muse-spark-1.3-contributor"
@@ -101,6 +101,15 @@ def _kind_for(test_id: str) -> str:
     return "CODE"
 
 
+#: Latest derived plan per project: project_id -> plan_id.
+_LATEST_PLAN: Dict[str, str] = {}
+
+
+def latest_plan_for_project(project_id: str) -> Optional[str]:
+    """Return the latest derived plan id for one project, if any."""
+    return _LATEST_PLAN.get(str(project_id))
+
+
 def derive_plan(
     catalog_ids: List[str],
     project_id: str,
@@ -135,7 +144,7 @@ def derive_plan(
     oracle_refs = tuple(
         "oracle://%s/%s" % (catalog_ref, test_id) for test_id in test_ids
     )
-    return TestPlan(
+    planned = TestPlan(
         plan_id="plan-%s-%s" % (project_id, run_id),
         project_id=project_id,
         run_id=run_id,
@@ -144,6 +153,8 @@ def derive_plan(
         priority=priority,
         oracle_refs=oracle_refs,
     )
+    _LATEST_PLAN[str(project_id)] = planned.plan_id
+    return planned
 
 
 def validate_plan_ids(plan: TestPlan, catalog_ids: List[str]) -> None:
