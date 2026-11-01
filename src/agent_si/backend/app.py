@@ -1466,9 +1466,76 @@ def create_app(settings: Any = None,
                         usage = {}
                 return {"usage": dict(usage)}
 
+            def _anthropic_usage_trans(req: dict) -> dict:
+                # FB2B3 F1: the /v1/messages legs (anthropic, claude)
+                # speak the Anthropic messages shape, not the
+                # OpenAI-compatible gateway shape: x-api-key plus the
+                # pinned anthropic-version headers and a
+                # {model, max_tokens, messages} body. The model id passes
+                # through verbatim from configuration, never renamed.
+                # Errors map exactly like the gateway transport so the
+                # PROVCK2 classes below keep their fixed codes.
+                import http.client as _aclient
+                import json as _ajson
+                import urllib.error as _aurlerror
+                import urllib.request as _aurlrequest
+
+                from agent_si.providers.adapters.base import (
+                    TransportHttpError as _ahttp_exc,
+                )
+                from agent_si.providers.adapters.base import (
+                    TransportTimeoutError as _anet_exc,
+                )
+                _value = _cs._read_secret_value(_store, _sid)
+                _url = str(base_url or "").rstrip("/") + _chat_path
+                _payload = _ajson.dumps({
+                    "model": str(model or ""),
+                    "max_tokens": 1,
+                    "messages": [{"role": "user", "content": "ping"}],
+                }).encode("utf-8")
+                _http_request = _aurlrequest.Request(
+                    _url, data=_payload,
+                    headers={"Content-Type": "application/json",
+                             "x-api-key": _value,
+                             "anthropic-version":
+                                 str(_legs.ANTHROPIC_API_VERSION)},
+                    method="POST",
+                )
+                try:
+                    with _aurlrequest.urlopen(
+                            _http_request, timeout=60) as _response:
+                        try:
+                            _raw = _response.read().decode("utf-8")
+                        except (ValueError, _aclient.HTTPException):
+                            raise _anet_exc(
+                                "gateway response unreadable") from None
+                except _aurlerror.HTTPError as _aexc:
+                    raise _ahttp_exc(
+                        getattr(_aexc, "code", 0) or 0,
+                        str(_aexc)) from None
+                except _aurlerror.URLError as _aexc:
+                    raise _anet_exc(str(_aexc)) from None
+                try:
+                    _abody = _ajson.loads(_raw)
+                except ValueError:
+                    raise _ahttp_exc(
+                        502, "gateway answered non-JSON") from None
+                _ausage = (_abody.get("usage", {})
+                           if isinstance(_abody, dict) else {})
+                _out: dict = {}
+                if isinstance(_ausage, dict):
+                    for _key in ("input_tokens", "output_tokens"):
+                        _got = _ausage.get(_key)
+                        if (isinstance(_got, int)
+                                and not isinstance(_got, bool)):
+                            _out[_key] = _got
+                return {"usage": _out}
+
             def _run() -> dict:
+                _trans = (_anthropic_usage_trans
+                          if _chat_path == "/v1/messages" else _usage_trans)
                 return _uprobe.probe_usage(pid, inst or "default",
-                                            _usage_trans)
+                                            _trans)
             import concurrent.futures as _fut
             with _fut.ThreadPoolExecutor(max_workers=1) as _pool:
                 _future = _pool.submit(_run)
