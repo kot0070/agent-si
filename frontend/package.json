@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "test": "node --preserve-symlinks-main node_modules/vitest/vitest.mjs run",
-    "check": "node node_modules/typescript/bin/tsc --noEmit -p ."
+    "check": "node node_modules/typescript/bin/tsc --noEmit -p .",
+    "build": "node node_modules/vite/bin/vite.js build"
   },
   "dependencies": {
     "react": "19.3.1",

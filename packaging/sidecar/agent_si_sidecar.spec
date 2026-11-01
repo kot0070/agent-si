@@ -51,7 +51,6 @@ if not os.path.isfile(ENTRY_SCRIPT):
 #                 + K09 shipped KB (src/agent_si/kb)
 #   watcher    <- K08 watcher engine + standard scripts (src/agent_si/watcher)
 _DATA_CANDIDATES = [
-    ("frontend/dist", "frontend", "K07"),
     ("src/agent_si/adapters/sqlite/migration_scripts", "migrations", "K13"),
     ("frontend/src/locale", "locale", "K07"),
     ("src/agent_si/model_kb", "kb-data/model_kb", "K04"),
@@ -60,6 +59,12 @@ _DATA_CANDIDATES = [
 ]
 
 datas = []
+_FRONTEND_DIST = os.path.join(ROOT, "frontend", "dist")
+if not os.path.isdir(_FRONTEND_DIST):
+    raise SystemExit(
+        "sidecar spec: frontend/dist is required; run the offline web "
+        "build first (npm run build --offline in frontend/)")
+datas.append((_FRONTEND_DIST, "frontend"))
 for _rel, _dest, _owner in _DATA_CANDIDATES:
     _abs = os.path.join(ROOT, _rel.replace("/", os.sep))
     if os.path.isdir(_abs):
