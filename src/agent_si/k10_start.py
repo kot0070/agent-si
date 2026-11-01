@@ -1,21 +1,22 @@
 """K10OPEN4 start path: release evidence, demo-to-green, first-start migrate.
 
-Rows (kit BUILD_PLAN): 166 "human-like end-to-end run with screenshots
-as release evidence"; R-328 "demo project brought to green inside the
-acceptance drive"; M-P4-138 "first start migrates settings plus keys;
-originals kept". Loopback TEST data only: stdlib only, no network, no
-providers, deterministic recorded values. Every function is pure
-besides writing its own records under an explicit data dir passed in
-by the caller; nothing here reads process-wide state except the
-previous per-user home via portable expanduser.
+Rows (kit BUILD_PLAN): 166 "release evidence lists only real files of
+a real run from the named data-root store"; R-328 "demo drive runs the
+real acceptance probes and refuses without writing green unless every
+probe passes"; M-P4-138 "first start migrates settings plus keys;
+originals kept". Stdlib only, no providers; the only network is
+loopback probing inside the acceptance drive. record_release_evidence
+never writes: it lists the real files already under the data dir.
+drive_demo_to_green writes a green demo record only after the live
+probes it just ran all pass, else it refuses with a code and writes
+nothing. Nothing here reads process-wide state except the previous
+per-user home via portable expanduser.
 """
 
 from __future__ import annotations
 
 import os
 import shutil
-import struct
-import zlib
 from typing import Any
 
 #: First-start legacy pair for this lane (copy, never move).
@@ -30,9 +31,6 @@ _DEMO_FILE_NAME = "demo.json"
 
 #: Release-evidence dir name under the data dir.
 _EVIDENCE_DIR_NAME = "release-evidence"
-
-#: Screenshot names recorded by the end-to-end run.
-_SCREENSHOT_NAMES = ("shot-01-start.png", "shot-02-run.png", "shot-03-done.png")
 
 #: Env var carrying the product data dir. The single os.environ read
 #: call-site for it lives HERE so backend/app.py never names os.environ
@@ -51,8 +49,8 @@ def resolve_env_data_dir() -> str | None:
     text = str(raw).strip()
     if not text:
         raise ValueError(
-            "K10ST1-B: %s is set but empty: pass "
-            "a real dir, never a silent fallback" % DATA_DIR_ENV_VAR)
+            f"K10ST1-B: {DATA_DIR_ENV_VAR} is set but empty: pass "
+            "a real dir, never a silent fallback")
     resolved = os.path.abspath(os.path.expanduser(text))
     os.makedirs(resolved, exist_ok=True)
     return resolved
@@ -100,18 +98,51 @@ def migrate_first_start(data_dir: str | None,
 
 
 def drive_demo_to_green(data_dir: str | None = None) -> dict[str, Any]:
-    """Bring the demo project to green and record it under the data dir.
+    """Drive the demo project; green only after real probe work.
 
-    Writes the demo record (status green) when a data dir is given and
-    returns the served payload either way.
+    Runs the live acceptance probes (Docker, declared services,
+    PowerShell) as the acceptance drive. When every probe passes the
+    demo is green: the drive record is written under the data dir (when
+    one is given) and the served payload says green with what was seen.
+    Otherwise the drive refuses with a clear code and writes nothing:
+    green is never written without the work behind it.
     """
+    from agent_si.k10_accept import get_acceptance_status as _probe_status
+
+    _status = _probe_status()
+    _probes = [("docker", _status["docker"]),
+               ("powershell", _status["powershell"])]
+    _failing = [_name for _name, _row in _probes
+                if not _row["available"]]
+    _failing.extend(_svc["name"] for _svc in _status["services"]
+                    if not _svc.get("available"))
+    if _failing:
+        return {
+            "project": "demo",
+            "status": "refused",
+            "code": "drive-refused",
+            "detail": (
+                "seen: acceptance probes failing "
+                f"({', '.join(_failing)}); refusing the demo drive, "
+                "nothing written"
+            ),
+            "stored": False,
+        }
     _payload: dict[str, Any] = {
         "project": "demo",
         "status": "green",
         "detail": (
-            "recorded: demo project brought to green inside the "
-            "acceptance drive on loopback fixture (not run live)"
+            "seen: demo drive ran the live acceptance probes and "
+            "every probe passed"
         ),
+        "drive": {
+            "docker": _status["docker"]["detail"],
+            "services": [
+                {"name": _svc["name"], "detail": _svc["detail"]}
+                for _svc in _status["services"]
+            ],
+            "powershell": _status["powershell"]["detail"],
+        },
         "stored": False,
     }
     if data_dir is not None:
@@ -121,66 +152,71 @@ def drive_demo_to_green(data_dir: str | None = None) -> dict[str, Any]:
         with open(_path, "w", encoding="utf-8", newline="\n") as _handle:
             _handle.write(
                 '{"project": "demo", "status": "green", '
-                '"drive": "acceptance"}\n')
+                '"drive": "acceptance-probes-live-pass"}\n')
         _payload["stored"] = True
     return _payload
 
 
-def _png_bytes(seed: int) -> bytes:
-    """Encode one small deterministic loopback capture as PNG bytes."""
-    _width, _height = 64, 32
-
-    def _chunk(ctype: bytes, data: bytes) -> bytes:
-        return (
-            struct.pack(">I", len(data))
-            + ctype
-            + data
-            + struct.pack(">I", zlib.crc32(ctype + data) & 0xFFFFFFFF)
-        )
-
-    _rows = b"".join(
-        b"\x00"
-        + bytes((((y * 7 + seed) % 256), ((y * 13 + seed) % 256), 200))
-        * _width
-        for y in range(_height)
-    )
-    return (
-        b"\x89PNG\r\n\x1a\n"
-        + _chunk(b"IHDR", struct.pack(">IIBBBBB", _width, _height, 8, 2, 0, 0, 0))
-        + _chunk(b"IDAT", zlib.compress(_rows))
-        + _chunk(b"IEND", b"")
-    )
-
-
 def record_release_evidence(data_dir: str | None = None) -> dict[str, Any]:
-    """Record the end-to-end run release evidence including screenshots.
+    """List the real release-evidence files of a real run; never invent.
 
-    Writes one PNG capture per run step plus an evidence manifest under
-    the data dir when one is given, and returns the served payload
-    either way.
+    Reads only: lists the regular files already present under the
+    release-evidence dir of the named data dir. With no data dir, no
+    evidence store, or no files, answers ok false with an empty list
+    and a reason. Nothing is generated or written here.
     """
-    _names = list(_SCREENSHOT_NAMES)
-    _stored = False
-    if data_dir is not None:
-        _dst = os.path.join(os.path.abspath(data_dir), _EVIDENCE_DIR_NAME)
-        os.makedirs(_dst, exist_ok=True)
-        for _index, _name in enumerate(_names):
-            with open(os.path.join(_dst, _name), "wb") as _handle:
-                _handle.write(_png_bytes(_index + 1))
-        with open(os.path.join(_dst, "evidence.json"),
-                  "w", encoding="utf-8", newline="\n") as _handle:
-            _handle.write(
-                '{"run": "end-to-end", "shots": ' + str(len(_names)) + '}\n')
-        _stored = True
+    if data_dir is None:
+        return {
+            "run": "end-to-end",
+            "ok": False,
+            "detail": (
+                "no data dir named (AGENT_SI_DATA_DIR unset); "
+                "no store to list evidence from"
+            ),
+            "screenshots": [],
+            "stored": False,
+            "reason": "no-data-dir",
+        }
+    _dst = os.path.join(os.path.abspath(data_dir), _EVIDENCE_DIR_NAME)
+    try:
+        _names = sorted(
+            _entry.name for _entry in os.scandir(_dst)
+            if _entry.is_file(follow_symlinks=False)
+        )
+    except OSError as _exc:
+        return {
+            "run": "end-to-end",
+            "ok": False,
+            "detail": (
+                "seen: no readable release-evidence store at "
+                f"{_EVIDENCE_DIR_NAME!r} ({_exc})"
+            ),
+            "screenshots": [],
+            "stored": False,
+            "reason": "no-evidence-store",
+        }
+    if not _names:
+        return {
+            "run": "end-to-end",
+            "ok": False,
+            "detail": (
+                "seen: release-evidence store holds no files; "
+                "no real run stored there"
+            ),
+            "screenshots": [],
+            "stored": True,
+            "reason": "empty-evidence-store",
+        }
     return {
         "run": "end-to-end",
         "ok": True,
         "detail": (
-            "recorded: human-like end-to-end run kept as release "
-            "evidence on loopback fixture (not driven live)"
+            f"seen: {len(_names)} real release-evidence file(s): "
+            f"{', '.join(_names)}"
         ),
         "screenshots": _names,
-        "stored": _stored,
+        "stored": True,
+        "reason": "",
     }
 
 

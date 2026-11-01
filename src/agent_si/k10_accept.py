@@ -1,14 +1,23 @@
-"""K10ST4 M-P4-162: final acceptance status (loopback TEST data only).
+"""K10ST4 M-P4-162: final acceptance status from live probes.
 
 Row: kit BUILD_PLAN M-P4-162 "final acceptance covers Docker, declared
-services, PowerShell". This module carries a small FIXED recorded dataset:
-plain in-code values, stdlib only, no network, no providers, no I/O,
-deterministic. Statuses are recorded strings (never probed live). Pure
-function, no settings or global mutation.
+services, PowerShell". get_acceptance_status probes this host live at
+call time: Docker and PowerShell are resolved on PATH and asked a
+harmless version question, and each declared service gets a loopback
+TCP connect. "ok" is true only when every probe passes; each probe
+names what was seen, and anything not probed reports available false
+with a reason. Stdlib only, no providers; the only I/O is the probes
+themselves, and nothing here mutates settings or globals. The record
+helpers below keep their fixed data rows for other lanes; only the
+acceptance status is probed.
 """
 
 from __future__ import annotations
 
+import os
+import shutil
+import socket
+import subprocess
 
 #: Third-party direct dependencies pinned by this checkout (name plus
 #: pinned version taken from pyproject.toml / frontend/package.json;
@@ -22,42 +31,189 @@ _THIRD_PARTY_NOTICES: tuple[dict[str, str], ...] = (
 )
 
 
-def get_acceptance_status() -> dict:
-    """Return the fixed recorded final acceptance status."""
+#: Default product port probed for the declared backend service
+#: (AGENT_SI_PORT default in env.example and app-config.example.json).
+_DEFAULT_BACKEND_PORT = 8770
+
+#: Harmless per-probe timeouts, in seconds.
+_DOCKER_TIMEOUT_S = 10.0
+_POWERSHELL_TIMEOUT_S = 15.0
+_SERVICE_TIMEOUT_S = 3.0
+
+#: Cap on quoted subprocess output kept inside a probe detail.
+_SEEN_OUTPUT_LIMIT = 200
+
+
+def _shorten(text: object) -> str:
+    """Collapse whitespace and cap quoted probe output."""
+    _clean = " ".join(str(text).split())
+    if len(_clean) > _SEEN_OUTPUT_LIMIT:
+        return _clean[:_SEEN_OUTPUT_LIMIT] + "..."
+    return _clean
+
+
+def _probe_docker() -> dict:
+    """Probe Docker live: on PATH plus a harmless version call."""
+    _exe = shutil.which("docker")
+    if _exe is None:
+        return {
+            "available": False,
+            "detail": "docker not on PATH",
+        }
+    try:
+        _proc = subprocess.run(
+            [_exe, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=_DOCKER_TIMEOUT_S,
+        )
+    except (OSError, subprocess.TimeoutExpired) as _exc:
+        return {
+            "available": False,
+            "detail": (
+                f"seen: 'docker --version' failed ({_shorten(_exc)})"
+            ),
+        }
+    _seen = _shorten((_proc.stdout or "") + (_proc.stderr or ""))
+    if _proc.returncode != 0:
+        return {
+            "available": False,
+            "detail": (
+                f"seen: 'docker --version' exit {_proc.returncode} -> "
+                f"{_seen!r}"
+            ),
+        }
     return {
-        "ok": True,
-        "docker": {
-            "available": True,
+        "available": True,
+        "detail": f"seen: 'docker --version' -> {_seen!r}",
+    }
+
+
+def _probe_powershell() -> dict:
+    """Probe PowerShell live: on PATH plus a harmless version call."""
+    _exe = shutil.which("powershell") or shutil.which("pwsh")
+    if _exe is None:
+        return {
+            "available": False,
+            "detail": "powershell/pwsh not on PATH",
+        }
+    _label = os.path.basename(_exe)
+    try:
+        _proc = subprocess.run(
+            [_exe, "-NoProfile", "-Command",
+             "$PSVersionTable.PSVersion.ToString()"],
+            capture_output=True,
+            text=True,
+            timeout=_POWERSHELL_TIMEOUT_S,
+        )
+    except (OSError, subprocess.TimeoutExpired) as _exc:
+        return {
+            "available": False,
             "detail": (
-                "recorded: Docker endpoint reachable on loopback fixture "
-                "(not probed live)"
+                f"seen: '{_label}' version call failed ({_shorten(_exc)})"
             ),
-        },
-        "services": [
-            {
-                "name": "backend",
-                "declared": True,
-                "detail": (
-                    "recorded: declared service present on loopback "
-                    "fixture (not probed live)"
-                ),
-            },
-            {
-                "name": "frontend",
-                "declared": True,
-                "detail": (
-                    "recorded: declared service present on loopback "
-                    "fixture (not probed live)"
-                ),
-            },
-        ],
-        "powershell": {
-            "available": True,
+        }
+    _seen = _shorten((_proc.stdout or "") + (_proc.stderr or ""))
+    if _proc.returncode != 0:
+        return {
+            "available": False,
             "detail": (
-                "recorded: PowerShell available on loopback fixture "
-                "(not probed live)"
+                f"seen: '{_label}' version call exit "
+                f"{_proc.returncode} -> {_seen!r}"
             ),
-        },
+        }
+    return {
+        "available": True,
+        "detail": f"seen: '{_label}' version -> {_seen!r}",
+    }
+
+
+def _backend_port() -> int | None:
+    """Return the declared backend port, or None when unparsable."""
+    _raw = os.environ.get("AGENT_SI_PORT", "")
+    if not str(_raw).strip():
+        return _DEFAULT_BACKEND_PORT
+    try:
+        _port = int(str(_raw).strip())
+    except ValueError:
+        return None
+    if 1 <= _port <= 65535:
+        return _port
+    return None
+
+
+def _probe_backend_service() -> dict:
+    """Probe the declared backend service: loopback TCP connect."""
+    _port = _backend_port()
+    if _port is None:
+        return {
+            "name": "backend",
+            "declared": True,
+            "available": False,
+            "detail": (
+                "seen: AGENT_SI_PORT="
+                f"{os.environ.get('AGENT_SI_PORT', '')!r} is not a "
+                "valid port; not probed"
+            ),
+        }
+    _target = f"127.0.0.1:{_port}"
+    try:
+        with socket.create_connection(
+                ("127.0.0.1", _port),
+                timeout=_SERVICE_TIMEOUT_S):
+            pass
+    except (OSError, ValueError) as _exc:
+        return {
+            "name": "backend",
+            "declared": True,
+            "available": False,
+            "endpoint": _target,
+            "detail": (
+                f"seen: TCP connect to {_target} failed ({_shorten(_exc)})"
+            ),
+        }
+    return {
+        "name": "backend",
+        "declared": True,
+        "available": True,
+        "endpoint": _target,
+        "detail": f"seen: TCP connect to {_target} open",
+    }
+
+
+def _probe_frontend_service() -> dict:
+    """Report the declared frontend service: no endpoint, not probed."""
+    return {
+        "name": "frontend",
+        "declared": True,
+        "available": False,
+        "detail": (
+            "not probed: no declared frontend endpoint exists in "
+            "product config, so there is nothing to connect to"
+        ),
+    }
+
+
+def get_acceptance_status() -> dict:
+    """Probe Docker, declared services and PowerShell live.
+
+    "ok" is true only when every probe passes; each probe names what
+    was seen, and anything not probed reports available false with a
+    reason.
+    """
+    _docker = _probe_docker()
+    _powershell = _probe_powershell()
+    _services = [_probe_backend_service(), _probe_frontend_service()]
+    _ok = bool(
+        _docker["available"]
+        and _powershell["available"]
+        and all(_svc["available"] for _svc in _services)
+    )
+    return {
+        "ok": _ok,
+        "docker": _docker,
+        "services": _services,
+        "powershell": _powershell,
     }
 
 

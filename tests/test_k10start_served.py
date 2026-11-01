@@ -151,14 +151,19 @@ def test_k10start_B0B_151_demo_served(tmp_path, monkeypatch):
     resp = client.post("/api/v1/release/start/demo")
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["status"] == "green", body
     assert body["project"] == "demo", body
     record_path = os.path.join(data_dir, "demo.json")
-    assert os.path.isfile(record_path), body
-    with open(record_path, encoding="utf-8") as handle:
-        stored = json.loads(handle.read())
-    assert stored["status"] == "green", stored
-    assert stored["project"] == "demo", stored
+    if body.get("status") == "green":
+        assert body.get("drive"), body
+        assert os.path.isfile(record_path), body
+        with open(record_path, encoding="utf-8") as handle:
+            stored = json.loads(handle.read())
+        assert stored["status"] == "green", stored
+        assert stored["project"] == "demo", stored
+    else:
+        assert body["status"] == "refused", body
+        assert body.get("code") == "drive-refused", body
+        assert not os.path.isfile(record_path), body
 
 
 def test_k10start_B0B_152_fixture_served(tmp_path, monkeypatch):
@@ -170,17 +175,19 @@ def test_k10start_B0B_152_fixture_served(tmp_path, monkeypatch):
         assert os.path.isfile(os.path.join(_WS, command)), index
     client, data_dir = _client_with_data_dir(
         tmp_path, monkeypatch, "k10start-152-token")
+    evidence_dir = os.path.join(data_dir, "release-evidence")
+    os.makedirs(evidence_dir, exist_ok=True)
+    with open(os.path.join(evidence_dir, "shot-01-start.png"), "wb") as handle:
+        handle.write(b"\x89PNG-k10start-real-run")
     resp = client.get("/api/v1/release/start/evidence")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     shots = body["screenshots"]
-    assert isinstance(shots, list) and len(shots) >= 1, body
+    assert shots == ["shot-01-start.png"], body
     for name in shots:
         assert str(name).endswith(".png"), body
         assert os.path.isfile(os.path.join(
             data_dir, "release-evidence", str(name))), body
-    assert os.path.isfile(os.path.join(
-        data_dir, "release-evidence", "evidence.json")), body
 
 
 def test_k10start_B0B_153_startup_sequence_served(tmp_path):
@@ -212,17 +219,24 @@ def test_k10start_B0B_249_restart_served(tmp_path, monkeypatch):
         assert resp.status_code == 200, resp.text
         payloads.append((resp.json(), str(data_dir)))
     first, second = payloads
-    assert first[0]["status"] == "green", first[0]
     assert second[0] == first[0], (first[0], second[0])
-    for _, data_dir in payloads:
-        with open(os.path.join(data_dir, "demo.json"),
-                  encoding="utf-8") as handle:
-            stored = json.loads(handle.read())
-        assert stored["status"] == "green", stored
-    with open(os.path.join(payloads[0][1], "demo.json"), "rb") as handle:
-        first_bytes = handle.read()
-    with open(os.path.join(payloads[1][1], "demo.json"), "rb") as handle:
-        assert handle.read() == first_bytes
+    if first[0].get("status") == "green":
+        assert first[0].get("drive"), first[0]
+        for _, data_dir in payloads:
+            with open(os.path.join(data_dir, "demo.json"),
+                      encoding="utf-8") as handle:
+                stored = json.loads(handle.read())
+            assert stored["status"] == "green", stored
+        with open(os.path.join(payloads[0][1], "demo.json"), "rb") as handle:
+            first_bytes = handle.read()
+        with open(os.path.join(payloads[1][1], "demo.json"), "rb") as handle:
+            assert handle.read() == first_bytes
+    else:
+        assert first[0]["status"] == "refused", first[0]
+        assert first[0].get("code") == "drive-refused", first[0]
+        for _, data_dir in payloads:
+            assert not os.path.isfile(
+                os.path.join(data_dir, "demo.json")), data_dir
 
 
 def test_k10start_B0B_211_versioned_deps_served(tmp_path):
