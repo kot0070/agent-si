@@ -9,7 +9,8 @@ kb.bind_catalog), then persists to the KB store and rebinds at startup.
 Case A (firewall): gateway usage {} -> spend unchanged + cost UNAVAILABLE
 (never 0 as if free, never estimated).
 Case B (priced): gateway usage {4,6} + bound priced meta row
-(0.1/0.2 USD) -> spend +1.6 + cost MEASURED; second app from the same
+(0.1/0.2 USD per 1M) -> spend +0.000002 ((4*0.1+6*0.2)/1e6, 6dp)
++ cost MEASURED; second app from the same
 store dir rebinds the persisted catalog at startup and charges again.
 """
 import json
@@ -44,7 +45,7 @@ META_PROVIDER = "meta"
 META_MODEL = "muse-spark-1.3-contributor"
 META_SOURCE_URL = "https://dev.meta.ai/docs/pricing-rate-limits"
 META_RETRIEVED_AT = "2026-10-11"
-EXPECTED_DELTA = Decimal("1.600000")
+EXPECTED_DELTA = Decimal("0.000002")
 
 
 class _FakeResp:
