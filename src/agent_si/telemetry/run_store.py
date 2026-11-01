@@ -312,8 +312,9 @@ def record_provider_usage(
                 or (_t_out is not None and _p_out is None)):
             pass
         else:
+            # KB prices are per 1M tokens (D-K04SPEND3V-01): divide the total.
             _total = (float(_p_in or 0.0) * int(_t_in or 0)
-                      + float(_p_out or 0.0) * int(_t_out or 0))
+                      + float(_p_out or 0.0) * int(_t_out or 0)) / 1_000_000
             _cost_value = _total
             _cost_unit = "USD"
             _cost_state = MetricState.MEASURED

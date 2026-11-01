@@ -134,17 +134,40 @@ def _usage_tokens(usage: Any) -> tuple:
 
 
 def _kb_price_for_manager(provider_id: str, model: str) -> tuple:
-    """KB input plus output price for one pair; Nones when unknown."""
+    """KB input plus output price for one pair; Nones when unknown.
+
+    Logs the exact provider/model pair plus the normalized bare id
+    and the hit/miss outcome, so a live price lookup miss names the
+    pair (K04SPEND2 L3 diagnosis; never raises, never invents a price).
+    """
+    try:
+        import logging as _logging
+        _log = _logging.getLogger(__name__)
+    except Exception:
+        _log = None  # type: ignore[assignment]
+    prov = str(provider_id or "")
     bare = str(model or "")
     if "/" in bare:
         head, _, tail = bare.partition("/")
-        if head == str(provider_id or "") and tail:
+        if head == prov and tail:
             bare = tail
+    try:
+        if _log is not None:
+            _log.debug("kb price lookup: exact pair %s/%s bare %s",
+                       prov, str(model or ""), bare)
+    except Exception:
+        pass
     try:
         from agent_si.model_kb import kb_reader as _kbr
         reader = _kbr.CatalogKbReader()
-        rows = reader.models(str(provider_id or ""))
+        rows = reader.models(prov)
     except Exception:
+        try:
+            if _log is not None:
+                _log.debug("kb price lookup miss (reader error): %s/%s",
+                           prov, str(model or ""))
+        except Exception:
+            pass
         return (None, None)
     for fact in rows or []:
         try:
@@ -172,7 +195,19 @@ def _kb_price_for_manager(provider_id: str, model: str) -> tuple:
                 except (TypeError, ValueError):
                     return None
             return None
+        try:
+            if _log is not None:
+                _log.debug("kb price lookup hit: %s/%s bare %s in=%s out=%s",
+                           prov, str(model or ""), bare, inp, outp)
+        except Exception:
+            pass
         return (_num(inp), _num(outp))
+    try:
+        if _log is not None:
+            _log.debug("kb price lookup miss (no row): %s/%s bare %s",
+                       prov, str(model or ""), bare)
+    except Exception:
+        pass
     return (None, None)
 
 
@@ -187,6 +222,11 @@ def _charge_budget_gate(project_id: str, provider_id: str, model: str,
     let telemetry keep cost UNAVAILABLE (never 0 as if free, never invented).
     A billed turn with a missing price fails loud (log warning, UNAVAILABLE
     marker); usage-absent turns stay UNAVAILABLE by the firewall, never 0.
+    A billed turn whose reserve or settle the gate refuses (for example a
+    live-scale computed cost above the project's hard limit) fails loud
+    the same way: log warning naming the exact provider/model pair plus
+    token counts plus cost, UNAVAILABLE marker; served spend is never
+    silently reported as 0.
     """
     try:
         import logging as _logging
@@ -226,8 +266,11 @@ def _charge_budget_gate(project_id: str, provider_id: str, model: str,
                 pass
             return "UNAVAILABLE"
         from decimal import Decimal as _Dec
-        cost = (_Dec(str(inp_price or "0")) * _Dec(int(inp_tok or 0))
-                + _Dec(str(out_price or "0")) * _Dec(int(out_tok or 0)))
+        # MODEL_KB prices are per 1M tokens (meta.md:96-97: 0.1/0.2 per 1M),
+        # so tokens x price must be divided by 1_000_000 (D-K04SPEND3V-01).
+        cost = ((_Dec(str(inp_price or "0")) * _Dec(int(inp_tok or 0))
+                 + _Dec(str(out_price or "0")) * _Dec(int(out_tok or 0)))
+                / _Dec(1_000_000))
         cost_str = str(cost.quantize(_Dec("0.000001")))
         try:
             gate.get_state(pid)
@@ -244,8 +287,17 @@ def _charge_budget_gate(project_id: str, provider_id: str, model: str,
                 "expires_at": "2026-10-27T00:00:00Z",
                 "provider_id": prov,
             })
-        except Exception:
-            pass
+        except Exception as exc:
+            try:
+                if _log is not None:
+                    _log.warning("spend UNRECORDED: reserve refused for "
+                                 "%s/%s (in=%s out=%s cost=%s) %s: %s "
+                                 "[MEASURED-spent]",
+                                 prov, mod, inp_tok, out_tok, cost_str,
+                                 type(exc).__name__, exc)
+            except Exception:
+                pass
+            return "UNAVAILABLE"
         try:
             gate.settle({
                 "reservation_id": rid,
@@ -255,10 +307,25 @@ def _charge_budget_gate(project_id: str, provider_id: str, model: str,
                 "source": "provider_usage_api",
                 "settled_at": "2026-10-26T01:00:00Z",
             })
-        except Exception:
-            return None
+        except Exception as exc:
+            try:
+                if _log is not None:
+                    _log.warning("spend UNRECORDED: settle failed for %s/%s "
+                                 "(in=%s out=%s cost=%s) %s: %s "
+                                 "[MEASURED-spent]",
+                                 prov, mod, inp_tok, out_tok, cost_str,
+                                 type(exc).__name__, exc)
+            except Exception:
+                pass
+            return "UNAVAILABLE"
         return cost_str
-    except Exception:
+    except Exception as _exc:
+        try:
+            if _log is not None:
+                _log.warning("spend charge failed: %s: %s [MEASURED-absent]",
+                             type(_exc).__name__, _exc)
+        except Exception:
+            pass
         return None
 
 
