@@ -754,58 +754,6 @@ def create_app(settings: Any = None,
                 raise
             _k08_watcher_fail(code, getattr(err, "detail", "") or str(err))
 
-    def register_watcher_routes(app):
-        """Bind the five declared watcher routes to the seam app."""
-
-        @app.get("/api/v1/watcher/status")
-        def _k08_watcher_get_status(project_id: str):
-            """GET /api/v1/watcher/status -> get_status (open)."""
-            return _k08_watcher_call("GET /api/v1/watcher/status", project_id)
-
-        @app.get("/api/v1/watcher/journal")
-        def _k08_watcher_get_journal(project_id: str, kind: str = ""):
-            """GET /api/v1/watcher/journal -> list_events (open)."""
-            return _k08_watcher_call(
-                "GET /api/v1/watcher/journal", project_id, kind
-            )
-
-        @app.post("/api/v1/watcher/integrity-check")
-        async def _k08_watcher_post_integrity(request: Request):
-            """POST /api/v1/watcher/integrity-check -> verify_integrity."""
-            data = await _k08_watcher_body(request)
-            token = _k08_watcher_guard(request, data)
-            return _k08_watcher_call(
-                "POST /api/v1/watcher/integrity-check",
-                str(data.get("project_id", "")),
-                session_token=token,
-            )
-
-        @app.post("/api/v1/watcher/rules/{id}/evaluate")
-        async def _k08_watcher_post_evaluate(id: str, request: Request):
-            """POST /api/v1/watcher/rules/{id}/evaluate -> evaluate_rule."""
-            data = await _k08_watcher_body(request)
-            token = _k08_watcher_guard(request, data)
-            return _k08_watcher_call(
-                "POST /api/v1/watcher/rules/{id}/evaluate",
-                str(data.get("project_id", "")),
-                id,
-                session_token=token,
-            )
-
-        @app.post("/api/v1/stop-all")
-        async def _k08_watcher_post_stop_all(request: Request):
-            """POST /api/v1/stop-all -> stop_all_request_stop (token)."""
-            data = await _k08_watcher_body(request)
-            token = _k08_watcher_guard(request, data)
-            return _k08_watcher_call(
-                "POST /api/v1/stop-all",
-                str(data.get("actor", "")),
-                str(data.get("project_id", "")),
-                grant_ref=str(data.get("grant_ref", "")),
-                session_token=token,
-            )
-
-    register_watcher_routes(app)
 
     # M-WIRE R1: K03 + K09 + K05 routes through their real entry points
     # (function-local imports keep the composition root cycle-free; the
