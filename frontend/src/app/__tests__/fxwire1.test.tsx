@@ -145,7 +145,7 @@ describe("fxwire1 shell reachability over the real app", () => {
       fireEvent.click(await screen.findByTestId("settings-link-diagnostics"));
       expect(screen.getByTestId(row.link)).toBeTruthy();
     }
-    fireEvent.click(screen.getByTestId("menu-chat"));
+    fireEvent.click(screen.getByTestId("menu-new-task"));
     expect(await screen.findByTestId("chat-prompt")).toBeTruthy();
   });
 });

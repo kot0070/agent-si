@@ -63,8 +63,8 @@ describe("app default entry", () => {
     const words = firstScreenWords(view.container);
     expect(words.length).toBeGreaterThan(0);
     expect(words.length).toBeLessThanOrEqual(150);
-    expect(screen.getByTestId("menu-chat").textContent).toBe(
-      t("shell.sidebar.chat"),
+    expect(screen.getByTestId("menu-new-task").textContent).toBe(
+      t("tasks.creator.title"),
     );
     expect(screen.getByTestId("chat-send").textContent).toBe(
       t("chat.composer.send"),
@@ -84,11 +84,11 @@ describe("app journey", () => {
   it("navigates from chat to agents live to projects to a project report", async () => {
     renderApp("/");
     expect(await screen.findByTestId("chat-prompt")).toBeTruthy();
-    fireEvent.click(screen.getByTestId("menu-agents-live"));
+    fireEvent.click(screen.getByTestId("team-open-agents"));
     const badges = await screen.findAllByTestId("agent-badge-LOCAL");
     expect(badges.length).toBeGreaterThanOrEqual(1);
     expect(await within(screen.getByTestId("app-main")).findByTestId("agents-live-rows")).toBeTruthy();
-    fireEvent.click(screen.getByTestId("menu-chat"));
+    fireEvent.click(screen.getByTestId("menu-new-task"));
     expect(await screen.findByTestId("chat-prompt")).toBeTruthy();
     fireEvent.click(screen.getByTestId("menu-projects"));
     expect(await screen.findByTestId("project-row-p-1")).toBeTruthy();
@@ -138,7 +138,7 @@ describe("app journey", () => {
       const menus = document.querySelectorAll(
         '[data-testid^="project-menu-"]',
       );
-      expect(menus.length).toBe(14);
+      expect(menus.length).toBe(15);
       cleanup();
     }
   });
@@ -184,7 +184,7 @@ describe("app lane B routes", () => {
     expect(await screen.findByTestId("settings-link-project")).toBeTruthy();
     expect(await screen.findByTestId("settings-link-localbench")).toBeTruthy();
     const links = document.querySelectorAll('[data-testid^="settings-link-"]');
-    expect(links.length).toBe(9);
+    expect(links.length).toBe(10);
   });
 
   it("mounts the settings project section read-only", async () => {

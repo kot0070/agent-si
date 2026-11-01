@@ -102,6 +102,7 @@ export function TopBar(props: TopBarProps): ReactElement {
       const response = await requestResponse("/api/v1/stop-all", {
         method: "POST",
         kind: "write",
+        body: effective === null ? {} : { project_id: effective },
       });
       setStopStatus(response.status);
     } catch (error) {
@@ -143,13 +144,19 @@ export function TopBar(props: TopBarProps): ReactElement {
           }}
         >
           {options.map((project) => (
-            <option key={project.project_id} value={project.project_id}>
+            <option
+              key={project.project_id}
+              value={project.project_id}
+              title={project.project_id}
+            >
               {project.name}
             </option>
           ))}
           {effective !== null &&
           !options.some((project) => project.project_id === effective) ? (
-            <option value={effective}>{effective}</option>
+            <option value={effective} title={effective}>
+              {effective}
+            </option>
           ) : null}
         </select>
       </label>

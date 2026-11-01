@@ -324,7 +324,7 @@ describe("composer guard", () => {
     );
     expect(await screen.findByTestId("overview-name")).toBeTruthy();
     const menus = document.querySelectorAll('[data-testid^="project-menu-"]');
-    expect(menus.length).toBe(14);
+    expect(menus.length).toBe(15);
     menus.forEach((node) => {
       expect((node.textContent ?? "").trim().length).toBeGreaterThan(0);
     });

@@ -498,13 +498,21 @@ async def route_post_evaluate(id: str, request: Request) -> Any:
 
 @router.post("/api/v1/stop-all")
 async def route_post_stop_all(request: Request) -> Any:
-    """POST /api/v1/stop-all -> stop_all_request_stop (token)."""
+    """POST /api/v1/stop-all -> stop_all_request_stop (token).
+
+    A body carrying ``project_id`` stops only that project; an empty
+    body stops every project's work.
+    """
     data = await _body(request)
     token = _guard_post(request, data)
     project_id = str(data.get("project_id", "") or data.get("project", ""))
     if not project_id:
-        _fail("STOP_REASON_MISSING", "stop-all needs a project_id")
-        raise AssertionError("unreachable")
+        return _serve_owned(
+            _stop_home.request_stop_all,
+            str(data.get("actor", "")),
+            grant_ref=str(data.get("grant_ref", "")),
+            session_token=token,
+        )
     return _call(
         "stop_all_request_stop",
         str(data.get("actor", "")),
