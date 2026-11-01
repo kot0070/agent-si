@@ -298,13 +298,19 @@ def register_read_routes(app: Any) -> Any:
         }
 
     @app.get("/api/v1/analytics/telemetry")
-    def read_telemetry_analytics() -> dict:
+    def read_telemetry_analytics(project_id: Any | None = None) -> dict:
         """Telemetry aggregates FROM the authoritative store file only.
 
         kit row MVP_ACCEPT-161: analytics values read only from authoritative
         TelemetryEvent and MetricRecord stores, never from chat text or live
         rows; this route reads <store_dir>/telemetry_store.json and sums
         metric values by name deterministically, with no invented numbers.
+
+        K10AN: without ?project_id= the legacy totals body is served
+        byte-identical (other lanes pin its exact shape); with ?project_id=
+        the same legacy keys are served plus project + per-model +
+        per-provider aggregates from run_store readers, source and the
+        sorted unavailable flags (unevidenced stays None/"UNAVAILABLE").
         """
         from agent_si.telemetry import run_store as _telemetry_run_store
 
@@ -312,6 +318,38 @@ def register_read_routes(app: Any) -> Any:
                             "telemetry_store_dir", None)
         if directory is None:
             directory = _store_dir(app)
-        return _telemetry_run_store.aggregates(store_dir=directory)
+        base = _telemetry_run_store.aggregates(store_dir=directory)
+        if project_id is None:
+            return base
+        project = _telemetry_run_store.get_project_aggregates(
+            str(project_id), store_dir=directory)
+        models = _telemetry_run_store.get_model_aggregates(
+            store_dir=directory)
+        providers = _telemetry_run_store.get_provider_aggregates(
+            store_dir=directory)
+        unavailable: list = []
+        if project.get("tasks") is None:
+            unavailable.append("project.tasks")
+        if project.get("audits") is None:
+            unavailable.append("project.audits")
+        for row in models:
+            if row.get("tokens") == _telemetry_run_store.UNAVAILABLE:
+                unavailable.append("models.%s.tokens" % row.get("model"))
+            if row.get("cost") == _telemetry_run_store.UNAVAILABLE:
+                unavailable.append("models.%s.cost" % row.get("model"))
+        for row in providers:
+            if row.get("tokens") == _telemetry_run_store.UNAVAILABLE:
+                unavailable.append("providers.%s.tokens" % row.get("provider"))
+            if row.get("cost") == _telemetry_run_store.UNAVAILABLE:
+                unavailable.append("providers.%s.cost" % row.get("provider"))
+        body = dict(base)
+        body.update({
+            "project": project,
+            "models": models,
+            "providers": providers,
+            "source": "telemetry_store",
+            "unavailable": sorted(unavailable),
+        })
+        return body
 
     return app
