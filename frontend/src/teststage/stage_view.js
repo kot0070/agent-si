@@ -8,7 +8,10 @@
 let localTestsOverride = undefined;
 
 async function readSettingsPayload() {
-  const response = await globalThis.fetch("/api/project/settings");
+  // FXWIRE1: the local-tests switch over the real settings defaults
+// (src/agent_si/backend/test_runners/k03wire.py settings defaults;
+// project_id defaults to global on the wire).
+const response = await globalThis.fetch("/api/v1/teststage/settings/defaults");
   return response.json();
 }
 
@@ -22,10 +25,11 @@ export async function localTestsEnabled() {
   if (payload === null || payload === undefined) {
     return true;
   }
-  if (payload.local_tests === undefined) {
+  const flag = payload.local_tests ?? payload.enabled;
+  if (flag === undefined) {
     return true;
   }
-  return Boolean(payload.local_tests);
+  return Boolean(flag);
 }
 
 /** Persist the switch choice as an in-memory override; returns Boolean(v). */

@@ -53,6 +53,14 @@ import { ContractDefaultsBar } from "../settings/ContractDefaultsBar";
 import { Inspector } from "../shell/Inspector";
 import { ClosingGuard } from "../shell/ClosingGuard";
 import type { ProjectViewName } from "../projects/ProjectView";
+import { LocaleCoverage } from "../k07next/LocaleCoverage";
+import { TelemetryThemes } from "../k07next/TelemetryThemes";
+import { BenchGatewayCheck } from "../k07next2/BenchGatewayCheck";
+import { TelemetrySummary } from "../k07next2/TelemetrySummary";
+import { BenchHistoryList } from "../k07next3/BenchHistoryList";
+import { TestsViewBoard } from "../k07next3/TestsViewBoard";
+import { SessionTokenCard } from "../k07next4/SessionTokenCard";
+import { ConsolePageShell } from "../k07next4/ConsolePageShell";
 
 export const ROUTES: RouteTable = {
   chat: "/",
@@ -617,6 +625,14 @@ function AppShell(): ReactElement {
               <Route path="/about" element={<AboutRoute />} />
               <Route path="/migration" element={<MigrationRoute />} />
               <Route path="/how-it-works" element={<HowItWorksView />} />
+              <Route path="/k07next/locale-coverage" element={<LocaleCoverage />} />
+              <Route path="/k07next/telemetry-themes" element={<TelemetryThemes />} />
+              <Route path="/k07next2/bench-check" element={<BenchGatewayCheck />} />
+              <Route path="/k07next2/telemetry" element={<TelemetrySummary />} />
+              <Route path="/k07next3/bench-history" element={<BenchHistoryList />} />
+              <Route path="/k07next3/tests-view" element={<TestsViewBoard />} />
+              <Route path="/k07next4/session-token" element={<SessionTokenCard />} />
+              <Route path="/k07next4/page-shell" element={<ConsolePageShell />} />
               <Route
                 path="*"
                 element={<Navigate to={ROUTES.chat} replace />}

@@ -6,11 +6,16 @@
  * fetch boundary; no hand-built run object is passed as an argument.
  */
 
-const runResponse = await globalThis.fetch("/api/stage/run");
+// FXWIRE1: the seeded run snapshot over the real tests view
+// (src/agent_si/backend/read_routes.py:283 k03ver2_tests_view;
+// plan/run reuse the TestsViewBoard seeded coordinates).
+const runResponse = await globalThis.fetch("/api/v1/teststage/tests-view?plan_id=k07next3&run_id=seed");
 const runPayload = await runResponse.json();
-const cachedResults = Array.isArray(runPayload.results)
-  ? runPayload.results
-  : [];
+const cachedResults = Array.isArray(runPayload.rows)
+  ? runPayload.rows
+  : Array.isArray(runPayload.results)
+    ? runPayload.results
+    : [];
 
 const ACTIVE_STATUSES = new Set(["RUNNING", "ACTIVE", "IN_PROGRESS"]);
 

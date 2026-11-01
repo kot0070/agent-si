@@ -774,6 +774,21 @@ def create_app(settings: Any = None,
 
     _k03mnt1_assurance_mount.register_assurance_routes(app)
 
+    # FXWIRE1-MOUNT-BEGIN: wire the five unmounted k07next boundaries
+    # (RED LIST item 2: mount(app) never called by create_app).
+    from agent_si.http import k07next as _fxwire1_k07next
+    from agent_si.http import k07next2 as _fxwire1_k07next2
+    from agent_si.http import k07next3 as _fxwire1_k07next3
+    from agent_si.http import k07next4 as _fxwire1_k07next4
+    from agent_si.http import k07next5 as _fxwire1_k07next5
+
+    _fxwire1_k07next.mount(app)
+    _fxwire1_k07next2.mount(app)
+    _fxwire1_k07next3.mount(app)
+    _fxwire1_k07next4.mount(app)
+    _fxwire1_k07next5.mount(app)
+    # FXWIRE1-MOUNT-END
+
     # K03NEXT (additions-only): fail-closed auditor-sourcing gate
     # plus semantic/security criteria check over the real assurance
     # entries. Open loopback test ops; no earlier line changes.
