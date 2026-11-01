@@ -7,7 +7,7 @@ export type SupportedLocale = 'en' | 'uk';
 
 export type LocaleErrorCode = 'MISSING_LOCALE_KEY' | 'UNSUPPORTED_LOCALE';
 
-export const DEFAULT_LOCALE: SupportedLocale = 'uk';
+export const DEFAULT_LOCALE: SupportedLocale = 'en';
 
 export const LOCALE_STORAGE_KEY = 'agentsi.locale';
 

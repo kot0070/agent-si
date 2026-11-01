@@ -59,9 +59,9 @@ afterEach(() => {
 });
 
 describe('locale module', () => {
-  it('defaults to uk', () => {
-    expect(DEFAULT_LOCALE).toBe('uk');
-    expect(t('settings.general.title')).toBe(uk.settings.general.title);
+  it('defaults to en', () => {
+    expect(DEFAULT_LOCALE).toBe('en');
+    expect(t('settings.general.title')).toBe(en.settings.general.title);
   });
 
   it('setLocale switches t and persists', () => {
@@ -93,6 +93,7 @@ describe('locale module', () => {
 
   it('unsupported locale raises UNSUPPORTED_LOCALE', () => {
     let code: unknown;
+    setLocale('uk');
     try {
       setLocale('xx' as 'en');
     } catch (error) {
@@ -119,13 +120,13 @@ describe('locale module', () => {
     unmount();
   });
 
-  it('useLocale defaults to uk outside a provider', () => {
+  it('useLocale defaults to en outside a provider', () => {
     function Probe() {
       const { locale } = useLocale();
       return <span>{locale}</span>;
     }
     render(<Probe />);
-    expect(screen.getByText('uk')).toBeTruthy();
+    expect(screen.getByText('en')).toBeTruthy();
   });
 
   it('detectOsLocale follows the OS language', () => {
@@ -141,7 +142,7 @@ describe('locale module', () => {
       setLanguage('en-US');
       expect(detectOsLocale()).toBe('en');
       setLanguage('fr-FR');
-      expect(detectOsLocale()).toBe('uk');
+      expect(detectOsLocale()).toBe('en');
     } finally {
       setLanguage(original);
     }
@@ -161,9 +162,9 @@ describe('locale module', () => {
   });
 
   it('resetLocaleForTests restores the default', () => {
-    setLocale('en');
+    setLocale('uk');
     resetLocaleForTests();
-    expect(t('settings.general.title')).toBe(uk.settings.general.title);
+    expect(t('settings.general.title')).toBe(en.settings.general.title);
     expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBeNull();
   });
 });

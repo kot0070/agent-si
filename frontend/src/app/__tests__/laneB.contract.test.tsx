@@ -31,8 +31,8 @@ afterEach(() => {
 });
 
 describe('lane B behaviour contract (STEP1: every behaviour below fails on throwing product bodies)', () => {
-  it('t returns the uk string for a known key', () => {
-    expect(t('settings.general.title')).toBe(uk.settings.general.title);
+  it('t returns the en string for a known key', () => {
+    expect(t('settings.general.title')).toBe(en.settings.general.title);
   });
 
   it('t returns the en string after setLocale', () => {
@@ -56,7 +56,7 @@ describe('lane B behaviour contract (STEP1: every behaviour below fails on throw
       return <span>{locale}</span>;
     }
     render(<Probe />);
-    expect(screen.getByText('uk')).toBeTruthy();
+    expect(screen.getByText('en')).toBeTruthy();
   });
 
   it('detectOsLocale follows the OS language', () => {
