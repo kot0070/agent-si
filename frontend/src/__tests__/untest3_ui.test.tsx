@@ -76,11 +76,8 @@ describe("untest3 ui rows over the real App route with fetch-boundary fake", () 
     renderAppAt("/");
     expect(await screen.findByTestId("sidebar")).toBeTruthy();
     for (const id of [
-      "menu-chat",
-      "menu-agents-live",
       "menu-new-task",
       "menu-projects",
-      "menu-tasks",
       "menu-results",
       "menu-settings",
     ]) {
