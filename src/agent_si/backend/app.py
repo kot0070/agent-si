@@ -1493,8 +1493,9 @@ def create_app(settings: Any = None,
                 # speak the Anthropic messages shape, not the
                 # OpenAI-compatible gateway shape: x-api-key plus the
                 # pinned anthropic-version headers and a
-                # {model, max_tokens, messages} body. The model id passes
-                # through verbatim from configuration, never renamed.
+                # {model, max_tokens, messages} body. The model id sheds the
+                # own pid prefix (same strip as the gateway transport),
+                # never renamed otherwise.
                 # Errors map exactly like the gateway transport so the
                 # PROVCK2 classes below keep their fixed codes.
                 import http.client as _aclient
@@ -1510,8 +1511,14 @@ def create_app(settings: Any = None,
                 )
                 _value = _cs._read_secret_value(_store, _sid)
                 _url = str(base_url or "").rstrip("/") + _chat_path
+                _raw_model = str(model or "")
+                _wire_model = _raw_model
+                if pid and _wire_model.startswith(pid + "/"):
+                    _wire_model = _wire_model[len(pid) + 1:]
+                elif _wire_model.startswith("meta/"):
+                    _wire_model = _wire_model[len("meta/"):]
                 _payload = _ajson.dumps({
-                    "model": str(model or ""),
+                    "model": _wire_model,
                     "max_tokens": 1,
                     "messages": [{"role": "user", "content": "ping"}],
                 }).encode("utf-8")

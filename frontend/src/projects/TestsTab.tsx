@@ -148,6 +148,14 @@ export function TestsTab(props: TestsTabProps): ReactElement {
         <LoadingState loadingKey="ui.loading.more" />
       ) : phase.kind === "empty" ? (
         <div data-testid="tests-empty">
+          <div data-testid="tests-counters">
+            <span>{t("projects.tests.counter.active")}</span>
+            <span data-testid="tests-counters-active">0</span>
+            <span>{t("projects.tests.counter.passed")}</span>
+            <span data-testid="tests-counters-passed">0</span>
+            <span>{t("projects.tests.counter.remaining")}</span>
+            <span data-testid="tests-counters-remaining">0</span>
+          </div>
           <EmptyState
             stateKey="ui.table.empty"
             actionKey={null}

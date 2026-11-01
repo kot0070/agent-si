@@ -12,6 +12,11 @@ type PresetConfig = {
   keyHint: string;
   keyStartsWith: string;
   modelLabels: string[];
+  // Proven model ids from src/agent_si/model_kb/loader.py, full
+  // "pid/model" form; the first entry is the connect id. Presets without
+  // a KB source keep the legacy model-N ids (openai-compatible has no KB
+  // rows; local presets send no model key on connect).
+  modelIds?: string[];
 };
 
 function buildPreset(config: PresetConfig): ProviderPreset {
@@ -24,7 +29,7 @@ function buildPreset(config: PresetConfig): ProviderPreset {
     keyHint: config.keyHint,
     keyStartsWith: config.keyStartsWith,
     models: config.modelLabels.map((label, index) => ({
-      id: `${config.id}/model-${index + 1}`,
+      id: config.modelIds?.[index] ?? `${config.id}/model-${index + 1}`,
       label,
     })),
   };
@@ -36,10 +41,11 @@ const BASE_PRESETS: PresetConfig[] = [
     label: "Meta",
     kind: "cloud",
     group: "Cloud",
-    baseUrl: "https://api.llama.com/v1",
+    baseUrl: "https://api.meta.ai/v1",
     keyHint: "Key from your Meta dashboard.",
     keyStartsWith: "",
     modelLabels: ["Standard", "Advanced"],
+    modelIds: ["meta/muse-spark-1.3-contributor", "meta/muse-spark-1.3"],
   },
   {
     id: "openai",
@@ -50,6 +56,7 @@ const BASE_PRESETS: PresetConfig[] = [
     keyHint: "Starts with sk-.",
     keyStartsWith: "sk-",
     modelLabels: ["Standard", "Advanced"],
+    modelIds: ["openai/gpt-4o-mini", "openai/gpt-4o"],
   },
   {
     id: "anthropic",
@@ -60,6 +67,7 @@ const BASE_PRESETS: PresetConfig[] = [
     keyHint: "Starts with sk-ant-.",
     keyStartsWith: "sk-ant-",
     modelLabels: ["Standard", "Advanced"],
+    modelIds: ["anthropic/claude-haiku-4-5", "anthropic/claude-haiku-5-5"],
   },
   {
     id: "openai-compatible",
@@ -104,6 +112,7 @@ const HD_PRESET_CONFIGS: PresetConfig[] = [
     keyHint: "Starts with sk-ant-.",
     keyStartsWith: "sk-ant-",
     modelLabels: ["Standard", "Advanced"],
+    modelIds: ["claude/claude-haiku-4-5", "claude/claude-haiku-5-5"],
   },
   {
     id: "gemini",
@@ -114,6 +123,7 @@ const HD_PRESET_CONFIGS: PresetConfig[] = [
     keyHint: "Key from AI Studio (starts with AIza).",
     keyStartsWith: "AIza",
     modelLabels: ["Standard", "Advanced"],
+    modelIds: ["gemini/gemini-3.8-flash", "gemini/gemini-3.6-flash"],
   },
   {
     id: "mistral",
@@ -124,6 +134,7 @@ const HD_PRESET_CONFIGS: PresetConfig[] = [
     keyHint: "Key from the Mistral console.",
     keyStartsWith: "",
     modelLabels: ["Standard", "Advanced"],
+    modelIds: ["mistral/mistral-large-4", "mistral/mistral-medium-3.5"],
   },
   {
     id: "groq",
@@ -134,6 +145,7 @@ const HD_PRESET_CONFIGS: PresetConfig[] = [
     keyHint: "Starts with gsk-.",
     keyStartsWith: "gsk-",
     modelLabels: ["Standard", "Advanced"],
+    modelIds: ["groq/llama-3.3-70b-versatile", "groq/llama-3.1-8b-instant"],
   },
   {
     id: "openrouter",
@@ -144,6 +156,8 @@ const HD_PRESET_CONFIGS: PresetConfig[] = [
     keyHint: "Starts with sk-or-.",
     keyStartsWith: "sk-or-",
     modelLabels: ["Standard", "Advanced"],
+    modelIds: ["openrouter/openrouter-meta-muse-spark-1.3",
+               "openrouter/openrouter-qwen-qwen3.8-27b"],
   },
   {
     id: "deepseek",
@@ -154,6 +168,7 @@ const HD_PRESET_CONFIGS: PresetConfig[] = [
     keyHint: "Starts with sk-.",
     keyStartsWith: "sk-",
     modelLabels: ["Standard", "Advanced"],
+    modelIds: ["deepseek/deepseek-v4-pro", "deepseek/deepseek-v4-flash"],
   },
   {
     id: "xai",
@@ -164,6 +179,7 @@ const HD_PRESET_CONFIGS: PresetConfig[] = [
     keyHint: "Key from the xAI console.",
     keyStartsWith: "",
     modelLabels: ["Standard", "Advanced"],
+    modelIds: ["xai/grok-4.7", "xai/grok-4.6"],
   },
 ];
 

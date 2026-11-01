@@ -86,7 +86,7 @@ def test_cloud_keys_connect_list_models_disconnect_roundtrip(tmp_path,
     key_ref = saved.json()["key_ref"]
     # Exact UI JSON for the connect route, as the handler reads it
     # (provider_routes.connect_provider: preset_id, model, key_ref).
-    ui_connect = {"preset_id": "openai", "model": "openai/model-1",
+    ui_connect = {"preset_id": "openai", "model": "openai/gpt-4o-mini",
                   "key_ref": key_ref}
     conn = client.post("/api/v1/providers/connect", json=ui_connect,
                        headers=HEADERS)
@@ -119,7 +119,7 @@ def test_wrong_token_refused_no_key_leak(tmp_path, monkeypatch):
     assert saved.status_code in (401, 403), saved.text
     assert BAIT not in saved.text
     conn = client.post("/api/v1/providers/connect",
-                       json={"preset_id": "openai", "model": "openai/model-1",
+                       json={"preset_id": "openai", "model": "openai/gpt-4o-mini",
                              "key_ref": {"secret_id": "openai",
                                          "provider_id": "openai"}},
                        headers=WRONG_HEADERS)
