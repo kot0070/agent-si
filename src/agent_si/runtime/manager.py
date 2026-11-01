@@ -21,6 +21,9 @@ executor_attempt_max). Every yielded event is also recorded to the
 live-row sink the agents_live module reads, so SSE consumers and
 GET /api/v1/agents/live see the same run. No provider calls, no
 network, no keys and no token in URL live in this module.
+At run end the local-tests hook runs one test stage with the run's
+data root (explicit, else the executor bind) plus the run's gateway;
+a hook failure is recorded on the run, never dropped.
 """
 
 from __future__ import annotations
@@ -458,6 +461,7 @@ def run_task_streamed(
     assurance_hook: Callable[[Mapping[str, Any]], Any] | None = None,
     secret_refs: Any = None,
     run_id: str | None = None,
+    data_root: str | None = None,
 ) -> Iterator[RunEvent]:
     """Stream a Manager run as RunEvents; a terminal event is always last.
 
@@ -515,23 +519,44 @@ def run_task_streamed(
         _term_state["done"] = True
         _telemetry_report_terminated(shape, active_run_id, reason)
         if reason != "cancelled":
-            # FXTESTS1 run-end hook (F4): the local-tests switch decides.
-            # Switch on runs one test stage; switch off records a skip.
-            # Evidence rows only, never a stage failure: the hook must
-            # not break the run it concludes.
+            # FXTESTS2 run-end hook (F3): the local-tests switch decides.
+            # Switch on runs one test stage with the run's data root plus
+            # the run's gateway; switch off records a skip. A hook
+            # failure is recorded on the run, never dropped; the run
+            # still finishes with its terminal event below.
             try:
-                from agent_si.test_runners import run_end as _run_end
+                from agent_si.test_runners import (
+                    code_executor as _hook_executor,
+                )
+                from agent_si.test_runners import (
+                    run_end as _run_end,
+                )
 
+                root = (
+                    data_root
+                    if data_root
+                    else _hook_executor.executor_data_root()
+                )
                 _run_end.run_local_tests_at_run_end(
                     project_id=str(shape.get("project_id") or ""),
                     run_id=str(active_run_id or ""),
                     task_id=str(shape.get("task_id") or ""),
-                    data_root=None,
-                    gateway=None,
+                    data_root=root,
+                    gateway=provider,
                     timeout_s=60.0,
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                try:
+                    from agent_si.test_runners import run_end as _run_end
+
+                    _run_end.record_hook_error(
+                        str(active_run_id or ""),
+                        str(shape.get("project_id") or ""),
+                        str(shape.get("task_id") or ""),
+                        exc,
+                    )
+                except Exception:
+                    pass
 
     def _emit(event: RunEvent) -> RunEvent:
         try:

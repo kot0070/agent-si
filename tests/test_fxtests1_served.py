@@ -500,7 +500,9 @@ def test_run_end_switch_on_writes_stage_results(
     ))
     assert events, "a streamed run always ends with a terminal event"
     assert events[-1].event == "done", events[-1]
-    assert adapter.turns_served == 1, "the hook makes no provider call"
+    # FXTESTS2 TRACE row T1: the hook AI test uses the run gateway, so the
+    # run serves one chat turn plus one hook AI judgement.
+    assert adapter.turns_served == 2, "the hook AI test uses the run gateway"
 
     latest_run = client.get(
         "/api/v1/teststage/runs/latest", params={"project_id": project_id})
@@ -517,12 +519,17 @@ def test_run_end_switch_on_writes_stage_results(
     assert view.status_code == 200, view.text
     body = view.json()
     assert body["active"] == 6, body
-    assert body["passed"] == 0, body
-    assert body["remaining"] == 6, body
+    # FXTESTS2 TRACE row T2: the hook AI judgement now runs for real, so
+    # t-chat is PASS while the folder-less CODE tests and the unsigned
+    # HUMAN test stay BLOCKED with reasons.
+    assert body["passed"] == 1, body
+    assert body["remaining"] == 5, body
     assert len(body["rows"]) == 6, body
-    for row in body["rows"]:
-        assert row["status"] == "BLOCKED", row
-        assert row["output_ref"], row
+    by_id = {row["test_id"]: row for row in body["rows"]}
+    assert by_id["t-chat"]["status"] == "PASS", by_id
+    for test_id in ("t-boot", "t-login", "t-offline", "t-perf", "t-export"):
+        assert by_id[test_id]["status"] == "BLOCKED", by_id
+        assert by_id[test_id]["output_ref"], by_id
 
 
 def test_run_end_switch_off_records_skip(client, clean_globals):

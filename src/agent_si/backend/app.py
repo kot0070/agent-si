@@ -849,6 +849,13 @@ def create_app(settings: Any = None,
 
     app.state.telemetry_store_dir = app.state.k02r3_store_dir
     _l0c06_telemetry_store.bind_store_dir(app.state.k02r3_store_dir)
+    # FXTESTS2 executor data-root bind (additions-only, one marked block):
+    # the local-tests run-end hook stages CODE evidence under the app
+    # store dir, so bind it as the executor default data root for this
+    # app. No existing line above or below changes.
+    from agent_si.test_runners import code_executor as _fxtests2_executor
+
+    _fxtests2_executor.bind_data_root(app.state.k02r3_store_dir)
     _k02r3_read.register_read_routes(app)
     _k02r3_write.register_console_projects_write_routes(app)
 

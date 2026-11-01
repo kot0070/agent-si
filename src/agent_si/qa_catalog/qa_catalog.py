@@ -281,6 +281,7 @@ def run_suite(
             "status": outcome["status"],
             "evidence_ref": outcome["evidence_ref"],
             "reason": outcome["reason"],
+            "duration_s": outcome.get("duration_s", 0.0),
         })
     return {"ok": True, "ran": ran, "results": rows}
 
