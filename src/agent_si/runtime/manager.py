@@ -643,15 +643,22 @@ def run_task_streamed(
             raise
         if not result.executed:
             _finish("done")
+            # FXASK2: the held tool's id rides the done payload (the
+            # guarded call's tool_name) so the window answers the ask
+            # per tool; holds that name no tool carry no tool_id.
+            held_data: dict[str, Any] = {
+                "turns": turn, "run_id": active_run_id,
+                "output_ref": result.output_ref,
+                "executed": False, "approval_requested": True,
+                "reason": result.reason,
+                "assurance_calls": assurance_calls}
+            if result.tool_id:
+                held_data["tool_id"] = result.tool_id
             yield _emit(RunEvent(
                 event="done", turn=turn,
                 subtask_id=validated.subtask_id,
                 detail=f"run held: {result.reason}",
-                data={"turns": turn, "run_id": active_run_id,
-                      "output_ref": result.output_ref,
-                      "executed": False, "approval_requested": True,
-                      "reason": result.reason,
-                      "assurance_calls": assurance_calls},
+                data=held_data,
             ))
             return
         _task_turns.record_turn(

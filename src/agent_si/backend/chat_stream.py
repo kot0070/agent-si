@@ -633,12 +633,20 @@ class ManagerSdkBridge:
             return
         if not result.executed:
             self._finish(stream_id)
-            yield sse_bytes({
+            # FXASK2: the approval event carries the held tool's id from
+            # the turn result (the guarded call's tool_name at
+            # sdk_adapter/tool_guard.py:152); the frontend answers it
+            # through POST /api/v1/permissions/check, once per tool.
+            # Holds that name no tool (B-001) carry no tool_id field.
+            approval_event: dict[str, Any] = {
                 "type": "approval",
                 "stream_id": stream_id,
                 "run_id": run_id,
                 "reason": result.reason,
-            })
+            }
+            if result.tool_id:
+                approval_event["tool_id"] = result.tool_id
+            yield sse_bytes(approval_event)
             return
         yield sse_bytes({
             "type": "delta",
@@ -687,8 +695,10 @@ def _manager_event_payload(
     text = data.get("text", None)
     if text is not None:
         payload["text"] = str(text)
+    # FXASK2: the held tool's id rides the same payload so the window
+    # answers the ask per tool; forwarded only when the run names one.
     for key in ("output_ref", "mock", "executed", "approval_requested",
-                "reason", "finish_reason"):
+                "reason", "finish_reason", "tool_id"):
         value = data.get(key, None)
         if value is not None:
             payload[key] = value

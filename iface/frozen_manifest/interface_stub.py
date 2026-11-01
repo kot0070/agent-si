@@ -1662,6 +1662,7 @@ class TurnResult:
     treated_as_data: bool = False
     authorization_ref: Any = None
     reason: str = ""
+    tool_id: str = ""
 
 
 @dataclass(frozen=True)
