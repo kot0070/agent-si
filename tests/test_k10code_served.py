@@ -346,10 +346,14 @@ def test_k10code_map_ten_rows():
 
 
 def test_k10code_frozen_served_rows_untouched():
-    """Frozen interface: served_rows() keeps its 34 WAVE entries in order."""
+    """Frozen interface: served_rows() keeps its WAVE entries in order.
+
+    K10BMERGE extension: the total grows 34 to 40 with the 6 K10E rows
+    appended; the first-10 pin below is byte-identical to round 1.
+    """
     rows = k10_compet.served_rows()
     assert [row["row"] for row in rows[:10]] == [
         "R-328", "166", "R-343", "165", "167",
         "M-P3-89", "R-345", "M-P4-134", "M-P4-138", "M-P4-162",
     ], rows
-    assert len(rows) == 34, rows
+    assert len(rows) == 40, rows

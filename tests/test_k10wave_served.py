@@ -797,6 +797,7 @@ def test_k10wave3_bison_prior_entries_untouched():
 
     K10WAVE4 extension: the total grows 16 to 26 with the 10 new rows
     appended; K10WAVE5 extension: 26 to 34 with the 8 new rows
+    appended; K10BMERGE extension: 34 to 40 with the 6 K10E rows
     appended; the first-10 pin below is byte-identical to round 1.
     """
     rows = k10_compet.served_rows()
@@ -804,13 +805,14 @@ def test_k10wave3_bison_prior_entries_untouched():
         "R-328", "166", "R-343", "165", "167",
         "M-P3-89", "R-345", "M-P4-134", "M-P4-138", "M-P4-162",
     ], rows
-    assert len(rows) == 34, rows
+    assert len(rows) == 40, rows
 
 
 def test_k10wave4_bison_entries_untouched():
     """Frozen interface: the 6 K10WAVE3 rows plus 10 WAVE4 rows, in order.
 
     K10WAVE5 extension: the total grows 26 to 34 with the 8 new rows
+    appended; K10BMERGE extension: 34 to 40 with the 6 K10E rows
     appended; the pins below are byte-identical to round 1.
     """
     rows = k10_compet.served_rows()
@@ -828,7 +830,7 @@ def test_k10wave4_bison_entries_untouched():
         "B0B-UNCOVERED_MVP_ACCEPT-160", "B0B-UNCOVERED_MVP_ACCEPT-161",
         "B0B-UNCOVERED_MVP_ACCEPT-172", "B0B-UNCOVERED_MVP_ACCEPT-173",
     ], rows
-    assert len(rows) == 34, rows
+    assert len(rows) == 40, rows
 
 def test_k10wave5_mvp_verdict():
     """Row B0B-UNCOVERED_MVP_ACCEPT-209 served through the recorded seam."""
@@ -1011,12 +1013,19 @@ def test_k10wave5_localhost_doubles():
         assert "labelled localhost mock doubles as TEST FIXTURES" in row["snippet"], row
 
 def test_k10wave5_entries_appended():
-    """Frozen interface: the 8 K10WAVE5 rows appended in order."""
+    """Frozen interface: the 8 K10WAVE5 rows appended in order.
+
+    K10BMERGE extension: the 6 K10E rows appended after them, in K10B
+    order; the WAVE5 pin below is byte-identical to round 1.
+    """
     rows = k10_compet.served_rows()
-    assert [row["row"] for row in rows[26:]] == [
+    assert [row["row"] for row in rows[26:34]] == [
         "B0B-UNCOVERED_MVP_ACCEPT-209", "B0B-UNCOVERED_MVP_ACCEPT-210",
         "B0B-UNCOVERED_MVP_ACCEPT-211", "B0B-UNCOVERED_MVP_ACCEPT-212",
         "B0B-UNCOVERED_MVP_ACCEPT-217", "B0B-UNCOVERED_MVP_ACCEPT-225",
         "B0B-UNCOVERED_MVP_ACCEPT-227", "B0B-UNCOVERED_MVP_ACCEPT-229",
     ], rows
-    assert len(rows) == 34, rows
+    assert [row["row"] for row in rows[34:]] == [
+        "131", "153", "173", "214", "215", "HC-4",
+    ], rows
+    assert len(rows) == 40, rows
