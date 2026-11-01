@@ -72,6 +72,7 @@ export function TaskComposer(props: TaskComposerProps): ReactElement {
   const [posting, setPosting] = useState(false);
   const [created, setCreated] = useState<TaskRecord | null>(null);
   const [blocking, setBlocking] = useState<BlockingError | null>(null);
+  const [titleError, setTitleError] = useState(false);
   const dirtyTitleRef = useRef(false);
   const submitSeqRef = useRef(0);
 
@@ -129,12 +130,13 @@ export function TaskComposer(props: TaskComposerProps): ReactElement {
     }
     const nextTitle = title.trim();
     if (nextTitle === "") {
-      setBlocking({
-        errorKey: "errors.generic",
-        code: "CONTEXT_WRONG_CONTRACT_VERSION",
-      });
+      // W4: empty submit never sends; the inline field error names the
+      // missing title through the locale (no request, no raw codes).
+      setTitleError(true);
+      setBlocking(null);
       return;
     }
+    setTitleError(false);
     const seq = submitSeqRef.current + 1;
     submitSeqRef.current = seq;
     setPosting(true);
@@ -188,6 +190,7 @@ export function TaskComposer(props: TaskComposerProps): ReactElement {
   return (
     <section data-testid="task-composer" aria-label={t("tasks.creator.title")}>
       <h2>{t("tasks.creator.title")}</h2>
+      <p data-testid="task-composer-subtitle">{t("tasks.creator.subtitle")}</p>
       {loading ? <LoadingState loadingKey="tasks.list.title" /> : null}
       <label>
         {t("tasks.creator.title")}
@@ -200,8 +203,14 @@ export function TaskComposer(props: TaskComposerProps): ReactElement {
           onChange={(event) => {
             dirtyTitleRef.current = true;
             setTitle(event.target.value);
+            setTitleError(false);
           }}
         />
+        {titleError ? (
+          <span data-testid="composer-title-error" role="alert">
+            {t("tasks.creator.titleRequired")}
+          </span>
+        ) : null}
       </label>
       <label>
         {t("agents.row.scope")}

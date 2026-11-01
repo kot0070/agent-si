@@ -123,15 +123,14 @@ export function KbRefreshProposal(): ReactElement {
       >
         {t("settings.capabilityDb.update")}
       </button>
+      {updating ? <p>{t("chat.stream.spinner")}</p> : null}
       {result === null ? null : (
         <p data-testid="kb-update-result">{result}</p>
       )}
       {updateError === null ? null : (
         <p data-testid="kb-update-error">{updateError}</p>
       )}
-      {doc === null ? (
-        <p>{t("chat.stream.spinner")}</p>
-      ) : doc.proposals.length === 0 ? (
+      {doc === null ? null : doc.proposals.length === 0 ? (
         <p data-testid="k07next2-kb-proposal-empty">{t("ui.table.empty")}</p>
       ) : (
         <ol>

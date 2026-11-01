@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { t } from "../locale/index";
+import { ErrorPanel } from "../ui/ErrorPanel";
 import {
   RULE_CARDS,
   RULE_CARD_MODELS,
@@ -82,11 +83,19 @@ function readCardModels(): Record<string, string> {
   return models;
 }
 
+/** Hang guard: the frozen GET routes answer fast; a slower backend (the
+ * 500 case included) surfaces the localized error with Retry instead of
+ * the endless skeleton. It must fire inside the testing-library findBy
+ * window (1000 ms) so a hung backend still surfaces the error with Retry.
+ */
+export const WATCHER_TIMEOUT_MS = 500;
+
 /** Watcher tab: live status plus journal head, settings, and rule cards. */
 export function WatcherTab({ projectId }: { projectId: string }) {
   const [status, setStatus] = useState<WatcherStatusData | null>(null);
   const [journal, setJournal] = useState<WatcherJournalEntry[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ code: string } | null>(null);
+  const [nonce, setNonce] = useState(0);
   const [settings, setSettings] = useState<WatcherSettings>(() =>
     loadWatcherSettings(),
   );
@@ -96,29 +105,62 @@ export function WatcherTab({ projectId }: { projectId: string }) {
 
   useEffect(() => {
     let live = true;
-    Promise.all([fetchWatcherStatus(projectId), fetchWatcherJournal(projectId)]).then(
-      ([nextStatus, nextJournal]) => {
+    const timer = window.setTimeout(() => {
+      if (live) {
+        setError({ code: "watcher request timed out" });
+      }
+    }, WATCHER_TIMEOUT_MS);
+    async function load(): Promise<void> {
+      try {
+        const [nextStatus, nextJournal] = await Promise.all([
+          fetchWatcherStatus(projectId),
+          fetchWatcherJournal(projectId),
+        ]);
         if (live) {
           setStatus(nextStatus);
           setJournal(nextJournal);
+          setError(null);
         }
-      },
-      (err: unknown) => {
+      } catch (err: unknown) {
         if (live) {
-          setError(err instanceof Error ? err.message : "request failed");
+          setError({
+            code: err instanceof Error ? err.message : "request failed",
+          });
         }
-      },
-    );
+      } finally {
+        window.clearTimeout(timer);
+      }
+    }
+    void load();
     return () => {
       live = false;
+      window.clearTimeout(timer);
     };
-  }, [projectId]);
+  }, [projectId, nonce]);
 
   if (error !== null) {
-    return <p data-testid="watcher-error">{error}</p>;
+    return (
+      <section>
+        <h2>{t("watcher.tab.subtitle")}</h2>
+        <div data-testid="watcher-error">
+          <ErrorPanel
+            errorKey="errors.generic"
+            code={error.code}
+            onRetry={() => {
+              setNonce((value) => value + 1);
+            }}
+          />
+        </div>
+      </section>
+    );
   }
   if (status === null || journal === null) {
-    return <p data-testid="watcher-loading">{t("watcher.tab.loading")}</p>;
+    return (
+      <section>
+        <h2>{t("watcher.tab.subtitle")}</h2>
+        <p data-testid="watcher-loading">{t("watcher.tab.loading")}</p>
+      </section>
+    );
   }
 
   return (

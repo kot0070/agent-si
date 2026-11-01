@@ -9,7 +9,7 @@
 
 import { useState } from "react";
 import { PROVIDER_CATALOG } from "./catalog";
-import { ChatSelector } from "./ChatSelector";
+import { ChatSelector, withConnectedSeed } from "./ChatSelector";
 import { t } from "../../locale/index";
 import type { ProviderState } from "./types";
 
@@ -83,7 +83,7 @@ export function ChatModelSelector({ project_id = "local", states = {}, onChange,
           {warning}
         </p>
       ) : null}
-      <ChatSelector catalog={catalog} states={states} value={value} onChange={handleChange} />
+      <ChatSelector catalog={catalog} states={withConnectedSeed(catalog, states)} value={value} onChange={handleChange} />
     </div>
   );
 }

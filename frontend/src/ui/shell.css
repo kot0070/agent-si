@@ -62,6 +62,49 @@ aside[data-testid="inspector"] {
   border-bottom: 1px solid var(--agent-si-card-border);
 }
 
+/* W13: inner gaps — the pairing strip and the badge row keep their own
+   even spacing instead of rendering gapless. Lengths only, no colours. */
+div[data-testid="pairing-strip"] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+span[data-testid^="agent-badge-"] + span[data-testid^="agent-badge-"] {
+  margin-left: 8px;
+}
+
+span[data-testid="kit-collapsed-line"] {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* W14: the kit toggle is icon-only (label via aria-label); the chevron
+   is pure CSS so no literal text enters the DOM. */
+.fx-kit-toggle {
+  min-width: 28px;
+  min-height: 24px;
+  line-height: 1;
+}
+
+.fx-kit-toggle::after {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+  vertical-align: middle;
+}
+
+.fx-kit-toggle[aria-expanded="true"]::after {
+  transform: rotate(-135deg);
+}
+
 /* The panels button only matters on narrow viewports. */
 .fx-panels-btn {
   display: none;

@@ -33,6 +33,31 @@ export function enabledChatChoices(
   return out;
 }
 
+// W12: served-connected providers seed the chat select. A provider the
+// routes already know as connected but with no explicit model picks yet
+// contributes its full catalog model list, so the picker is never empty
+// right after connect. Explicit picks are never overridden.
+export function withConnectedSeed(
+  catalog: ProviderPreset[],
+  states: Record<string, ProviderState>,
+): Record<string, ProviderState> {
+  const next: Record<string, ProviderState> = { ...states };
+  for (const preset of catalog) {
+    const current = next[preset.id];
+    if (
+      current !== undefined &&
+      current.connected &&
+      current.enabledModels.length === 0
+    ) {
+      next[preset.id] = {
+        ...current,
+        enabledModels: preset.models.map((model) => model.id),
+      };
+    }
+  }
+  return next;
+}
+
 type ChatSelectorProps = {
   catalog: ProviderPreset[];
   states: Record<string, ProviderState>;

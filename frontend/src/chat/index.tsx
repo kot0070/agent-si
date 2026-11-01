@@ -96,8 +96,28 @@ function readChannelLocale(): string {
   return "uk";
 }
 
+/** Bound chat models for the pre-send hint (GET only, never a token). */
+const CHAT_MODELS_ROUTE = "/api/v1/chat/models";
+
+async function readBoundModels(projectId: string): Promise<unknown[] | null> {
+  try {
+    const response = await fetch(
+      `${CHAT_MODELS_ROUTE}?project_id=${encodeURIComponent(projectId)}`,
+    );
+    if (!response.ok) {
+      return null;
+    }
+    const body = (await response.json()) as { models?: unknown };
+    return Array.isArray(body.models) ? body.models : [];
+  } catch {
+    // Unknown binding: no hint either way, the post-send error still applies.
+    return null;
+  }
+}
+
 export function ChatArea(props: ChatAreaProps): ReactElement {
   const client = useApiClient();
+  const [boundModels, setBoundModels] = useState<unknown[] | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [streaming, setStreaming] = useState(false);
@@ -153,6 +173,18 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
     },
     [],
   );
+
+  useEffect(() => {
+    let alive = true;
+    void readBoundModels(props.projectId).then((models) => {
+      if (alive) {
+        setBoundModels(models);
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, [props.projectId]);
 
   const sendPrompt = (text: string): void => {
     const prompt = text.trim();
@@ -401,6 +433,7 @@ ${note}`,
 
   return (
     <section data-testid="chat-area" aria-label={t("shell.sidebar.chat")}>
+      <h1>{t("shell.sidebar.chat")}</h1>
       <HierarchyRows projectId={props.projectId} />
       <div data-testid="chat-layout">
         <div data-testid="chat-messages">
@@ -495,6 +528,14 @@ ${note}`,
         <div data-testid="chat-composer">
           {draft !== "" ? (
             <span data-testid="chat-draft-chip">{t("chat.composer.draft")}</span>
+          ) : null}
+          {boundModels !== null && boundModels.length === 0 ? (
+            <>
+              <p data-testid="chat-no-model-hint">{t("chat.composer.noModel")}</p>
+              <a data-testid="chat-no-model-connect" href="/settings/models">
+                {t("chat.hierarchy.connect")}
+              </a>
+            </>
           ) : null}
           <input
             data-testid="chat-prompt"

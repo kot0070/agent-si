@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING, Any, List, Optional
 
 import json as _json
 import os as _os
+import sys as _sys
 
 from .provider_api import ProviderAPI, ProviderContracts
 from .registry import ProviderRegistry
@@ -273,6 +274,38 @@ def memory_stack() -> tuple:
     return ephemeral_stack()
 
 
+def default_audit_path() -> str:
+    """Default provider-audit file path (FROZENSCAN R11 frozen-safe).
+
+    Unfrozen dev/test runs keep the historical CWD-anchored file. A
+    frozen bundle (``sys.frozen``, e.g. PyInstaller ``AgentSI.exe``)
+    must NOT default off the CWD — the working directory of a frozen
+    app is not writable or not stable — so it anchors next to the
+    executable, falling back to the user profile when the exe
+    directory is unusable or collapses back onto the CWD.
+    """
+    if not getattr(_sys, "frozen", False):
+        return _os.path.join(_os.getcwd(), "provider_audit.jsonl")
+    exe = getattr(_sys, "executable", "") or ""
+    if exe:
+        # Split on both separators so a frozen Windows exe path never
+        # collapses to the CWD when parsed on another host.
+        head = str(exe).replace("\\", "/")
+        anchor = head.rsplit("/", 1)[0] if "/" in head else ""
+        if anchor:
+            candidate = anchor + "/provider_audit.jsonl"
+            resolved = _os.path.abspath(candidate)
+            wanted = _os.path.join(_os.getcwd(), "provider_audit.jsonl")
+            if resolved != wanted and not resolved.startswith(
+                _os.getcwd() + _os.sep
+            ):
+                return candidate
+    home = _os.path.expanduser("~")
+    if home and _os.path.isdir(home):
+        return _os.path.join(home, "provider_audit.jsonl")
+    return _os.path.join(_os.getcwd(), "provider_audit.jsonl")
+
+
 def os_stack(*, label_suffix: str = "",
              namespace: str | None = None,
              timeout_s: float = 5.0,
@@ -295,7 +328,7 @@ def os_stack(*, label_suffix: str = "",
         timeout_s=float(timeout_s or 5.0),
     )
     if audit_path is None:
-        audit_path = _os.path.join(_os.getcwd(), "provider_audit.jsonl")
+        audit_path = default_audit_path()
     sink = _FileAuditSink(str(audit_path))
     return ProviderAPI(ProviderRegistry(), store, sink), store, sink
 
@@ -330,6 +363,7 @@ def remove_provider(provider_id: str) -> None:
 __all__ = [
     "ProviderContracts",
     "configure",
+    "default_audit_path",
     "ephemeral_stack",
     "memory_stack",
     "os_stack",

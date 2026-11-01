@@ -1025,12 +1025,20 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
               ) : (
                 <div data-testid="report-task-counts">
                   <span>{t("tasks.list.title")}</span>
-                  {statusCounts(tasks).map(({ status, count }) => (
-                    <div key={status} data-testid={`report-task-count-${status}`}>
-                      <span>{taskStatusLabel(status)}</span>
-                      <span>{count}</span>
-                    </div>
-                  ))}
+                  {tasks.length === 0 ? (
+                    <EmptyState
+                      stateKey="tasks.list.empty"
+                      actionKey={null}
+                      onAction={null}
+                    />
+                  ) : (
+                    statusCounts(tasks).map(({ status, count }) => (
+                      <div key={status} data-testid={`report-task-count-${status}`}>
+                        <span>{taskStatusLabel(status)}</span>
+                        <span>{count}</span>
+                      </div>
+                    ))
+                  )}
                 </div>
               )}
               {budgetError !== null ? (
@@ -1065,7 +1073,6 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
               </details>
             )}
             <div data-testid="project-report-derived">
-              <span>{t("projects.derived.label")}</span>
               {tasksError !== null ? (
                 panelError(tasksError)
               ) : ledgerError !== null ? (
@@ -1074,16 +1081,20 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
                 panelError(budgetError)
               ) : tasks === null || ledger === null || budget === null ? (
                 <LoadingState loadingKey="ui.loading.more" />
+              ) : tasks.length === 0 ? (
+                <EmptyState stateKey="ui.table.empty" actionKey={null} onAction={null} />
               ) : (
-                buildReportNarrative({
-                  tasks,
-                  ledger,
-                  budget,
-                }).map((line) => <span key={line}>{line}</span>)
+                <>
+                  <span>{t("projects.derived.label")}</span>
+                  {buildReportNarrative({
+                    tasks,
+                    ledger,
+                    budget,
+                  }).map((line) => <span key={line}>{line}</span>)}
+                </>
               )}
             </div>
             <div data-testid="project-report-derived-split">
-              <span>{t("projects.derived.label")}</span>
               {tasksError !== null ? (
                 panelError(tasksError)
               ) : ledgerError !== null ? (
@@ -1092,6 +1103,8 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
                 panelError(budgetError)
               ) : ledger === null || budget === null ? (
                 <LoadingState loadingKey="ui.loading.more" />
+              ) : tasks === null || tasks.length === 0 ? (
+                <EmptyState stateKey="ui.table.empty" actionKey={null} onAction={null} />
               ) : buildDerivedSplit({ ledger, budget }).length === 0 ? (
                 <EmptyState stateKey="ui.table.empty" actionKey={null} onAction={null} />
               ) : (
@@ -1129,6 +1142,12 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
             data-testid={projectMenuTestId(name)}
             onClick={() => {
               props.onSelect?.(name);
+            }}
+            onKeyDown={(event) => {
+              // W6: keyboard tabs navigate like clicks (App onSelect).
+              if (event.key === "Enter") {
+                props.onSelect?.(name);
+              }
             }}
           >
             {t(projectViewTitleKey(name))}
