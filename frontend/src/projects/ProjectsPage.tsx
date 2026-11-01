@@ -3,17 +3,53 @@
 // open selects the current project; pause and resume are local-only UI state
 // because the served ProjectRecord carries no pause field, so they mutate no
 // record. Mounted by the App route /projects in wave 3.
+// The folder input gains a Choose control that fills the path from the
+// sidecar native folder dialog (POST /api/v1/sidecar/pick-folder); the
+// input stays editable and submits the typed path exactly as before, and
+// the control hides itself when no native dialog exists (409).
 
 import { useEffect, useState } from "react";
 import type { FormEvent, ReactElement } from "react";
 import type { ProjectRecord } from "../api/iface";
-import { ApiError, apiErrorLocaleKey } from "../api/errors";
+import { ApiError, apiErrorLocaleKey, requestResponse } from "../api/errors";
 import { useApiClient, useCurrentProject } from "../app/ApiClientProvider";
 import { formatDate, t } from "../locale/index";
 import { Card } from "../ui/Card";
 import { EmptyState } from "../ui/EmptyState";
 import { ErrorPanel } from "../ui/ErrorPanel";
 import { LoadingState } from "../ui/LoadingState";
+
+const FOLDER_PICK_URL = "/api/v1/sidecar/pick-folder";
+const FOLDER_PICK_UNAVAILABLE = 409;
+
+function folderLabel(key: string, fallback: string): string {
+  try {
+    return t(key);
+  } catch {
+    return fallback;
+  }
+}
+
+async function requestFolderPick(): Promise<string | null> {
+  const response = await requestResponse(FOLDER_PICK_URL, {
+    method: "POST",
+    kind: "write",
+    body: {},
+  });
+  let data: unknown = null;
+  try {
+    data = await response.json();
+  } catch {
+    data = null;
+  }
+  if (typeof data === "object" && data !== null) {
+    const path = (data as { path?: unknown }).path;
+    if (typeof path === "string" && path.length > 0) {
+      return path;
+    }
+  }
+  return null;
+}
 
 function isPaused(paused: ReadonlySet<string>, id: string): boolean {
   return paused.has(id);
@@ -40,6 +76,7 @@ export function ProjectsPage(): ReactElement {
   const [paused, setPaused] = useState<ReadonlySet<string>>(new Set());
   const [name, setName] = useState("");
   const [folder, setFolder] = useState("");
+  const [pickOpen, setPickOpen] = useState(true);
 
   useEffect(() => {
     let alive = true;
@@ -80,6 +117,28 @@ export function ProjectsPage(): ReactElement {
       setNonce((value) => value + 1);
     } catch (error) {
       if (error instanceof ApiError) {
+        setFailure({
+          errorKey: apiErrorLocaleKey(error.code),
+          code: error.code,
+        });
+      } else {
+        setFailure({ errorKey: "errors.generic", code: "CONTEXT_MISSING" });
+      }
+    }
+  }
+
+  async function chooseFolder(): Promise<void> {
+    try {
+      const picked = await requestFolderPick();
+      if (picked !== null) {
+        setFolder(picked);
+      }
+    } catch (error) {
+      if (error instanceof ApiError) {
+        if (error.status === FOLDER_PICK_UNAVAILABLE) {
+          setPickOpen(false);
+          return;
+        }
         setFailure({
           errorKey: apiErrorLocaleKey(error.code),
           code: error.code,
@@ -161,6 +220,17 @@ export function ProjectsPage(): ReactElement {
                 setFolder(event.target.value);
               }}
             />
+            {pickOpen ? (
+              <button
+                type="button"
+                data-testid="project-folder-choose"
+                onClick={() => {
+                  void chooseFolder();
+                }}
+              >
+                {folderLabel("projects.folder.choose", "Choose folder")}
+              </button>
+            ) : null}
             <button type="submit" data-testid="project-add-submit">
               {t("tasks.creator.create")}
             </button>

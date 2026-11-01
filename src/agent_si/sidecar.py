@@ -17,6 +17,14 @@ frozen exe and to ``frontend/dist`` from a source checkout; an empty
 tree answers a clear 503 text body. Every path here tolerates
 ``sys.stdout=None`` and ``sys.stderr=None`` (windowed exe).
 
+POST /api/v1/sidecar/pick-folder opens the native folder dialog on the
+window through ``webview.FOLDER_DIALOG`` and answers the chosen path;
+a cancelled dialog answers ``{"path": null}`` and a context with no
+native window (headless or browser) answers 409 carrying the
+``_PICK_FOLDER_UNAVAILABLE_CODE`` machine code. The route requires the
+session token exactly like the other write routes (401 without
+x-actor, 403 with a bad x-ui-session-token).
+
 Headless fallback: when no native window can be created (no GUI), the
 entry keeps serving on 127.0.0.1 until the process is stopped. Probes
 drive the exe through this path with hidden process control.
@@ -35,6 +43,8 @@ import socket
 import sys
 import threading
 
+from fastapi import HTTPException, Request
+
 VERSION = "0.1.0"
 COPYRIGHT = "Copyright (c) 2026 Ivan Soprun"
 LICENSE_NAME = "MIT"
@@ -50,6 +60,12 @@ _WEBVIEW_DIR_NAME = "webview"
 _UNSTAGED_TEXT = (
     "Agent SI web UI is not staged: the web tree holds no index.html"
 )
+
+#: Machine-readable code carried by the 409 answer of POST
+#: /api/v1/sidecar/pick-folder when no native window can open the
+#: folder dialog (headless or browser context). The answer body keeps
+#: the repo {code, message} refusal shape.
+_PICK_FOLDER_UNAVAILABLE_CODE = "NATIVE_DIALOG_UNAVAILABLE"
 
 
 def pick_free_port() -> int:
@@ -155,12 +171,13 @@ def webview_storage_dir() -> str:
 
 def build_app():
     """Create the product app and attach the sidecar web endpoints."""
-    from agent_si.backend.app import create_app
     from fastapi.responses import (
         FileResponse,
         JSONResponse,
         PlainTextResponse,
     )
+
+    from agent_si.backend.app import create_app
 
     app = create_app()
 
@@ -198,7 +215,71 @@ def build_app():
             return PlainTextResponse(_UNSTAGED_TEXT, status_code=503)
         return FileResponse(index, media_type="text/html")
 
+    def _pick_unavailable():
+        return JSONResponse(
+            status_code=409,
+            content={
+                "code": _PICK_FOLDER_UNAVAILABLE_CODE,
+                "message": (
+                    "native folder dialog is unavailable: "
+                    "no native window"
+                ),
+            },
+        )
+
+    async def sidecar_pick_folder(request: Request):
+        """Open the native folder dialog; answer the chosen path.
+
+        Guarded exactly like the other write routes: 401 without an
+        x-actor header, 403 with a bad x-ui-session-token checked
+        through app.state.auth_hook (falling back to the bound
+        ui_session_token). A dialog choice answers ``{"path": ...}``,
+        a cancelled (or empty) dialog answers ``{"path": null}``, and
+        a context with no native window answers 409.
+        """
+        actor = (request.headers.get("x-actor") or "").strip()
+        if not actor:
+            raise HTTPException(
+                status_code=401, detail="missing x-actor header")
+        token = request.headers.get("x-ui-session-token")
+        check = getattr(app.state, "auth_hook", None)
+        allowed = False
+        if callable(check):
+            try:
+                allowed = bool(check(token, actor, "USER_WRITE"))
+            except Exception:
+                allowed = False
+        else:
+            expected = getattr(app.state, "ui_session_token", None)
+            allowed = expected is not None and token == expected
+        if not allowed:
+            raise HTTPException(status_code=403, detail="forbidden")
+        try:
+            import webview as _webview
+        except Exception:
+            return _pick_unavailable()
+        windows = getattr(_webview, "windows", None) or []
+        if not windows:
+            return _pick_unavailable()
+        dialog_type = getattr(_webview, "FOLDER_DIALOG", None)
+        if dialog_type is None:
+            return _pick_unavailable()
+        try:
+            chosen = windows[0].create_file_dialog(dialog_type)
+        except Exception:
+            return _pick_unavailable()
+        if isinstance(chosen, (list, tuple)):
+            path = chosen[0] if chosen else None
+        else:
+            path = chosen
+        if not isinstance(path, str) or not path:
+            return {"path": None}
+        return {"path": path}
+
     app.get("/api/v1/sidecar/about", include_in_schema=False)(sidecar_about)
+    app.post("/api/v1/sidecar/pick-folder", include_in_schema=False)(
+        sidecar_pick_folder
+    )
     app.get("/", include_in_schema=False)(sidecar_index)
     app.get("/{full_path:path}", include_in_schema=False)(sidecar_page)
     return app

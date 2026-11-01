@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { FormEvent, ReactElement } from 'react';
 import { Link, useInRouterContext } from 'react-router-dom';
 import { t } from '../../locale/index';
-import { ApiError, apiErrorLocaleKey } from '../../api/errors';
+import { ApiError, apiErrorLocaleKey, requestResponse } from '../../api/errors';
 import type { ApiClient, TaskRecord } from '../../api/iface';
 import { useApiClient, useCurrentProject } from '../ApiClientProvider';
 import type { CurrentProject } from '../ApiClientProvider';
@@ -22,6 +22,38 @@ export interface FirstRunFlowProps {
 const REQUIRED_STEPS: FirstRunStep[] = ['connectProvider', 'oneClickTeam', 'projectFolder', 'firstTask'];
 
 const OPTIONAL_STEPS: OptionalFirstRunStep[] = ['localAI', 'watcherPreset', 'automations', 'kbs'];
+
+const FOLDER_PICK_URL = '/api/v1/sidecar/pick-folder';
+const FOLDER_PICK_UNAVAILABLE = 409;
+
+function folderLabel(key: string, fallback: string): string {
+  try {
+    return t(key);
+  } catch {
+    return fallback;
+  }
+}
+
+async function requestFolderPick(): Promise<string | null> {
+  const response = await requestResponse(FOLDER_PICK_URL, {
+    method: 'POST',
+    kind: 'write',
+    body: {},
+  });
+  let data: unknown = null;
+  try {
+    data = await response.json();
+  } catch {
+    data = null;
+  }
+  if (typeof data === 'object' && data !== null) {
+    const path = (data as { path?: unknown }).path;
+    if (typeof path === 'string' && path.length > 0) {
+      return path;
+    }
+  }
+  return null;
+}
 
 interface StepError {
   errorKey: string;
@@ -80,6 +112,7 @@ export function FirstRunFlow(props: FirstRunFlowProps): ReactElement {
   const [folderError, setFolderError] = useState<StepError | null>(null);
   const [taskError, setTaskError] = useState<StepError | null>(null);
   const [created, setCreated] = useState<TaskRecord | null>(null);
+  const [folderPickOpen, setFolderPickOpen] = useState<boolean>(true);
   const current: FirstRunStep = REQUIRED_STEPS[index] ?? 'connectProvider';
   const previous: FirstRunStep | undefined = index > 0 ? REQUIRED_STEPS[index - 1] : undefined;
   const skip = (step: OptionalFirstRunStep): void => {
@@ -156,6 +189,22 @@ export function FirstRunFlow(props: FirstRunFlowProps): ReactElement {
       setFolderError(toStepError(error));
     } finally {
       setFolderBusy(false);
+    }
+  };
+  // Folder picker: fill the folder input from the sidecar native dialog.
+  // Cancel keeps the typed value; 409 (no native dialog) hides the control.
+  const handleChooseFolder = async (): Promise<void> => {
+    try {
+      const picked = await requestFolderPick();
+      if (picked !== null) {
+        setFolder(picked);
+      }
+    } catch (error) {
+      if (error instanceof ApiError && error.status === FOLDER_PICK_UNAVAILABLE) {
+        setFolderPickOpen(false);
+        return;
+      }
+      setFolderError(toStepError(error));
     }
   };
   // First task: without a provider this keeps the legacy synchronous
@@ -281,6 +330,17 @@ export function FirstRunFlow(props: FirstRunFlowProps): ReactElement {
                 }}
               />
             </label>
+            {folderPickOpen ? (
+              <button
+                type="button"
+                data-testid="firstrun-folder-choose"
+                onClick={() => {
+                  void handleChooseFolder();
+                }}
+              >
+                {folderLabel('firstrun.folder.choose', 'Choose folder')}
+              </button>
+            ) : null}
             <button
               type="button"
               disabled={folderBusy}
