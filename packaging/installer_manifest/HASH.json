@@ -1,0 +1,9 @@
+{
+    "sha256":  "530b4b6190e1e6a7c5b70e49b6334d343738a28ce257039586c1066f350de028",
+    "built_from_commit":  "6c017652695808ba90e201d95efa859eea5cbbf6 ",
+    "built_at":  "2026-11-01T05:34:21.7665252Z",
+    "signature":  {
+                      "status":  "UNSIGNED-BLOCKED",
+                      "reason":  "no cert in sandbox"
+                  }
+}

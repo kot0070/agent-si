@@ -1,0 +1,55 @@
+{
+  "exe": "AgentSI.exe",
+  "checks": [
+    {
+      "name": "manifest-parse",
+      "result": "pass",
+      "exit_code": 0
+    },
+    {
+      "name": "exe-present",
+      "result": "pass",
+      "exit_code": 0
+    },
+    {
+      "name": "hash-match",
+      "result": "pass",
+      "exit_code": 0
+    },
+    {
+      "name": "migrations-staged",
+      "result": "pass",
+      "exit_code": 0
+    },
+    {
+      "name": "locale-staged",
+      "result": "pass",
+      "exit_code": 0
+    },
+    {
+      "name": "kb-data-staged",
+      "result": "pass",
+      "exit_code": 0
+    },
+    {
+      "name": "watcher-staged",
+      "result": "pass",
+      "exit_code": 0
+    },
+    {
+      "name": "license-staged",
+      "result": "pass",
+      "exit_code": 0
+    },
+    {
+      "name": "notices-staged",
+      "result": "pass",
+      "exit_code": 0
+    }
+  ],
+  "started_clean": {
+    "projects": 0,
+    "runs": 0,
+    "keys": 0
+  }
+}

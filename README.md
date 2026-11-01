@@ -45,3 +45,14 @@ licence text):
 - react 19.3.1
 - react-router-dom 7.18.4
 - zod 4.6.7
+
+## Portable build (INSTALLB lane)
+
+Windows portable build `AgentSI.exe` 0.1.0 (`dist/AgentSI-portable-0.1.0.zip`):
+UNSIGNED — no certificate in this build, so Windows SmartScreen will warn.
+Verify the SHA256 hashes before running (PowerShell):
+
+- `AgentSI.exe`: `f77114bd78e1ffe62286a5574e2e03eec5013d85fa4b258344098caa1a75de44`
+- `packaging/installer_manifest` MANIFEST/HASH: `530b4b6190e1e6a7c5b70e49b6334d343738a28ce257039586c1066f350de028`
+
+Regenerate and re-verify with `packaging/installer_manifest/gen_smoke.py --root .`.

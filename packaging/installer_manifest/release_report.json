@@ -1,0 +1,72 @@
+{
+  "built_from_commit": "6c017652695808ba90e201d95efa859eea5cbbf6",
+  "bundle": {
+    "dist/AgentSI-portable-0.1.0.zip": {
+      "bytes": 190596229
+    },
+    "dist/portable/app/AgentSI.exe": {
+      "bytes": 96221965
+    },
+    "dist/sidecar/AgentSI.exe": {
+      "bytes": 96221965
+    }
+  },
+  "components": {
+    "bottle": {
+      "licence": "MIT",
+      "version": "0.13.4"
+    },
+    "clr_loader": {
+      "licence": "?",
+      "version": "0.3.1"
+    },
+    "fastapi": {
+      "licence": "MIT",
+      "version": "0.162.0"
+    },
+    "openai-agents": {
+      "licence": "MIT",
+      "version": "0.20.0"
+    },
+    "proxy_tools": {
+      "licence": "MIT",
+      "version": "0.1.0"
+    },
+    "pythonnet": {
+      "licence": "MIT",
+      "version": "3.2.1"
+    },
+    "pywebview": {
+      "licence": "BSD 3-Clause License Copyright (c) 2014-2017, Roman Sirokov All rights reserved. Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met: * Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer. * Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution. * Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission. THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS \"AS IS\" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.",
+      "version": "6.2.1"
+    },
+    "uvicorn": {
+      "licence": "BSD-3-Clause",
+      "version": "0.54.0"
+    }
+  },
+  "exe": "AgentSI.exe",
+  "sha256": "530b4b6190e1e6a7c5b70e49b6334d343738a28ce257039586c1066f350de028",
+  "signature": {
+    "reason": "no cert in sandbox",
+    "status": "UNSIGNED-BLOCKED"
+  },
+  "staged": {
+    "exe-present": "pass",
+    "hash-match": "pass",
+    "kb-data-staged": "pass",
+    "license-staged": "pass",
+    "locale-staged": "pass",
+    "manifest-parse": "pass",
+    "migrations-staged": "pass",
+    "notices-staged": "pass",
+    "watcher-staged": "pass"
+  },
+  "texts": {
+    "LICENSE": true,
+    "MIT_LICENSE.txt": true,
+    "NOTICES.md": true
+  },
+  "tool": "packaging/installer_manifest/gen_release_report.py",
+  "version": "0.1.0"
+}
