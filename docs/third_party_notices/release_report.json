@@ -1,0 +1,132 @@
+{
+  "ab_evidence": {
+    "a_b_runs": [],
+    "note": "No A/B runs recorded in this worktree",
+    "source": "stored-records-enumeration"
+  },
+  "agents": {
+    "count": 0,
+    "source": "stored-records-enumeration (checked data/agents.json, RECORDS/agents.json; no store files in worktree)",
+    "teams": []
+  },
+  "architecture": {
+    "authority": "absent:RECORDS/day0/0C_ARCHITECTURE.md",
+    "composition_root": "absent:RECORDS/day0/0C_ARCHITECTURE.md",
+    "frozen_manifest": "RECORDS/day0/K13_MANIFEST.md",
+    "frozen_manifest_sha256": "absent:RECORDS/day0/K13_MANIFEST.md",
+    "runtime": "absent:RECORDS/day0/0C_ARCHITECTURE.md"
+  },
+  "audits": {
+    "count": 0,
+    "source": "stored-records-enumeration (checked data/audits.json, RECORDS/audits.json; no store files in worktree)",
+    "verdicts": {
+      "BLOCKED": 0,
+      "ESCALATE": 0,
+      "FAIL": 0,
+      "PASS": 0,
+      "REWORK": 0
+    }
+  },
+  "decisions": {
+    "count": 0,
+    "routing_decisions": [],
+    "source": "stored-records-enumeration (checked data/routing_decisions.json, RECORDS/decisions.json; no store files in worktree)"
+  },
+  "demos": [],
+  "fixtures": [],
+  "goal": {
+    "source": "absent:DIRECTOR/GOAL.md",
+    "text": "absent:DIRECTOR/GOAL.md"
+  },
+  "limitations": [
+    "The report dataset is a paper-lane stand-in; no execution telemetry store exists in this worktree yet, so run-level metrics are zero with stated sources, not measurements.",
+    "No acceptance drive has been run on a packaged build yet (lane C).",
+    "Installer metadata and About-screen wiring are pending (lane A)."
+  ],
+  "managers": {
+    "count": 0,
+    "source": "stored-records-enumeration (checked data/managers.json, RECORDS/managers.json; no store files in worktree)",
+    "teams": []
+  },
+  "metrics": {
+    "dependency_manifests_found": 1,
+    "manifest_types_searched": [
+      "package.json",
+      "package-lock.json",
+      "pnpm-lock.yaml",
+      "poetry.lock",
+      "pyproject.toml",
+      "setup.cfg",
+      "setup.py",
+      "uv.lock",
+      "yarn.lock",
+      "requirements*.txt"
+    ],
+    "node_modules_present": false,
+    "packaging_test_files": [],
+    "packaging_tests_passed": 0,
+    "source": "pytest run (MEASURED): no packaging test files under tests/packaging (self lane pattern excluded); workspace enumeration (licence texts differ-or-absent)",
+    "third_party_components_bundled": 0,
+    "vendored_trees_found": 2,
+    "vendored_trees_searched": [
+      "frontend/",
+      "node_modules/",
+      "src/"
+    ]
+  },
+  "models": {
+    "default_manager_model": "absent:RECORDS/day0/K13_MANIFEST.md",
+    "source": "RECORDS/day0/K13_MANIFEST.md sections 0 and 3B + RECORDS/day1/K02_INTERFACE.md section 2 (exact id as written in records)",
+    "used": []
+  },
+  "next_steps": [
+    "Paper-lane stand-in generated from stored records only (see `metrics` sources inside the file) until the K13 `ReportDatasetBuilder` lands; it must then be replaced by builder output, not edited by hand.",
+    "Installer packaging and About-screen wiring (lane A) and the acceptance drive with the evidence table (lane C) are separate lanes and are not part of this bundle.",
+    "When the installer lane vendors runtime dependencies, this file must be regenerated from the lockfiles before release; an empty table must never ship alongside a bundle that contains third-party code."
+  ],
+  "phases": [
+    {
+      "id": "K10-lane-B",
+      "record": "docs/third_party_notices/"
+    }
+  ],
+  "project": {
+    "license": "MIT Copyright (c) 2026 Ivan Soprun",
+    "name": "Agent SI",
+    "source": "README.md + LICENSE"
+  },
+  "providers": {
+    "source": "absent-blocker: AGENT_SI_PROVIDER_SET unset; no provider config under config/providers.json, config/provider-set.json, providers.json",
+    "used": []
+  },
+  "routes": {
+    "CLOUD": 0,
+    "LOCAL": 0,
+    "SPLIT": 0,
+    "source": "stored-records-enumeration (checked data/runs.json, RECORDS/runs.json; no store files in worktree)"
+  },
+  "runs": {
+    "count": 0,
+    "source": "stored-records-enumeration (checked data/runs.json, RECORDS/runs.json; no store files in worktree)"
+  },
+  "scope": {
+    "excluded": [
+      "Installer packaging and About-screen wiring (lane A) and the acceptance drive with the evidence table (lane C) are separate lanes and are not part of this bundle."
+    ],
+    "included": [
+      "LICENSE",
+      "docs/third_party_notices/NOTICES.md",
+      "docs/third_party_notices/RELEASE_NOTES.md"
+    ],
+    "lane": "absent:DIRECTOR/TASK_PACKAGES/K10/TASK.md",
+    "source": "absent:DIRECTOR/TASK_PACKAGES/K10/TASK.md"
+  },
+  "splits": {
+    "count": 0,
+    "source": "stored-records-enumeration (checked data/runs.json, RECORDS/runs.json; no store files in worktree)"
+  },
+  "tasks": {
+    "count": 0,
+    "source": "stored-records-enumeration (checked data/tasks.json, RECORDS/tasks.json; no store files in worktree)"
+  }
+}

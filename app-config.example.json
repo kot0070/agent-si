@@ -1,0 +1,5 @@
+{
+  "_comment": "K10R8 F2 example: copy to app-config.json and point data_dir at a real writable dir. The AGENT_SI_DATA_DIR env key wins over data_dir; AGENT_SI_PORT wins over port. Startup fails loud when no real data dir resolves (never a silent tmp fallback).",
+  "data_dir": "",
+  "port": 8770
+}

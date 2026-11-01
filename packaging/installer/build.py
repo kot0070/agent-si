@@ -26,6 +26,9 @@ ENTRIES = {
     "frontend_lockfile": "frontend/package-lock.json",
     "pyproject": "pyproject.toml",
     "start_tool": "tools/start.py",
+    "license": "LICENSE",
+    "notices": "docs/third_party_notices/NOTICES.md",
+    "license_mit": "licenses/MIT_LICENSE.txt",
 }
 
 
