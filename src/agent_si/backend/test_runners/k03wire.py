@@ -218,7 +218,7 @@ def k03wire_settings_defaults(payload: dict[str, Any]) -> dict[str, Any]:
     """Serve the global default-ON switch with the per-project value."""
     from agent_si.qa_catalog import qa_catalog as _catalog
 
-    project_id = str(payload.get("project_id") or "global")
+    project_id = _need_text(payload, "project_id", "project_id")
     global_default_on = bool(_catalog.local_tests_enabled(
         "k03wire-global-default-probe"))
     return {

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Tuple
 
 from agent_si.budget import gate as _budget_gate
@@ -13,6 +14,12 @@ BUDGET_SESSION_TOKEN_REQUIRED = "BUDGET_SESSION_TOKEN_REQUIRED"
 COMPENSATION_RESERVATION_ID_REQUIRED = "COMPENSATION_RESERVATION_ID_REQUIRED"
 BUDGET_LIMITS_INVALID = "BUDGET_LIMITS_INVALID"
 PROVIDER_SPEND_CAP_BLOCKED = "PROVIDER_SPEND_CAP_BLOCKED"
+BUDGET_TASK_ID_REQUIRED = "BUDGET_TASK_ID_REQUIRED"
+BUDGET_RUN_ID_REQUIRED = "BUDGET_RUN_ID_REQUIRED"
+BUDGET_RESERVATION_ID_REQUIRED = "BUDGET_RESERVATION_ID_REQUIRED"
+
+#: Served reservation lifetime: expires_at = reserved_at + this many seconds.
+RESERVATION_TTL_SECONDS = 86400
 
 
 def _soft_warn(budget):
@@ -336,6 +343,19 @@ def _k04f_enum_value(value):
     return getattr(value, "value", value)
 
 
+def _utcnow_z():
+    """Current UTC time as an ISO-8601 Z string from the real clock."""
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _reservation_window():
+    """(reserved_at, expires_at): real now plus RESERVATION_TTL_SECONDS."""
+    reserved = _utcnow_z()
+    base = datetime.fromisoformat(reserved.replace("Z", "+00:00"))
+    expires = base + timedelta(seconds=RESERVATION_TTL_SECONDS)
+    return reserved, expires.isoformat().replace("+00:00", "Z")
+
+
 def _k04f_gate(ctx):
     """The served BudgetGate, or None when K04 is unconfigured."""
     gate = getattr(ctx, "budget_state", None)
@@ -368,6 +388,14 @@ def k04f_breach(ctx, query, body):
     if not isinstance(project_id, str) or not project_id:
         return 400, {"code": BUDGET_PROJECT_ID_REQUIRED,
                      "message": "project_id required"}
+    task_id = body.get("task_id")
+    if not isinstance(task_id, str) or not task_id:
+        return 400, {"code": BUDGET_TASK_ID_REQUIRED,
+                     "message": "task_id required"}
+    run_id = body.get("run_id")
+    if not isinstance(run_id, str) or not run_id:
+        return 400, {"code": BUDGET_RUN_ID_REQUIRED,
+                     "message": "run_id required"}
     gate = _k04f_gate(ctx)
     if gate is None:
         return 404, {"code": BUDGET_NOT_CONFIGURED,
@@ -375,23 +403,21 @@ def k04f_breach(ctx, query, body):
     currency = body.get("currency") or "USD"
     hard = body.get("hard_limit") or "1.00"
     _k04f_ensure_project(gate, project_id, currency, hard)
-    task_id = body.get("task_id") or "t1"
-    run_id = body.get("run_id") or "r1"
     fill = body.get("fill_amount") or hard
     over = body.get("over_amount") or "0.01"
-    stamp = "2026-10-26T00:00:00Z"
+    stamp, expiry = _reservation_window()
     gate.compare_and_reserve(
         {"project_id": project_id, "task_id": task_id, "run_id": run_id,
          "reservation_id": "k04f-fill-%s" % project_id,
          "estimated_amount": fill, "reserved_at": stamp,
-         "expires_at": "2026-10-27T00:00:00Z"})
+         "expires_at": expiry})
     try:
         gate.compare_and_reserve(
             {"project_id": project_id, "task_id": task_id,
              "run_id": run_id,
              "reservation_id": "k04f-over-%s" % project_id,
              "estimated_amount": over, "reserved_at": stamp,
-             "expires_at": "2026-10-27T00:00:00Z"})
+             "expires_at": expiry})
     except BudgetBlockedError as exc:
         incidents = gate.list_incidents(project_id)
         current = incidents[-1] if incidents else None
@@ -415,19 +441,25 @@ def k04f_blocked_terminate(ctx, query, body):
 
     body = body if isinstance(body, Mapping) else {}
     project_id = body.get("project_id") or "k04f-b34"
-    task_id = body.get("task_id") or "t1"
-    run_id = body.get("run_id") or "r1"
+    task_id = body.get("task_id")
+    if not isinstance(task_id, str) or not task_id:
+        return 400, {"code": BUDGET_TASK_ID_REQUIRED,
+                     "message": "task_id required"}
+    run_id = body.get("run_id")
+    if not isinstance(run_id, str) or not run_id:
+        return 400, {"code": BUDGET_RUN_ID_REQUIRED,
+                     "message": "run_id required"}
     gate = _k04f_gate(ctx)
     if gate is None:
         return 404, {"code": BUDGET_NOT_CONFIGURED,
                      "message": "no budget gate on file"}
     _k04f_ensure_project(gate, project_id, "USD", "10.00")
-    stamp = "2026-10-26T00:00:00Z"
+    stamp, expiry = _reservation_window()
     started = gate.compare_and_reserve(
         {"project_id": project_id, "task_id": task_id, "run_id": run_id,
          "reservation_id": "k04f-started-%s" % run_id,
          "estimated_amount": body.get("start_amount") or "1.00",
-         "reserved_at": stamp, "expires_at": "2026-10-27T00:00:00Z"})
+         "reserved_at": stamp, "expires_at": expiry})
     run = _run_machine.create_run(
         run_id=run_id, project_id=project_id, task_id=task_id,
         contract_hash=body.get("contract_hash") or "k04f-hash",
@@ -499,6 +531,18 @@ def k04f_reserve_tokens(ctx, query, body):
     if gate is None:
         return 404, {"code": BUDGET_NOT_CONFIGURED,
                      "message": "no budget gate on file"}
+    task_id = body.get("task_id")
+    if not isinstance(task_id, str) or not task_id:
+        return 400, {"code": BUDGET_TASK_ID_REQUIRED,
+                     "message": "task_id required"}
+    run_id = body.get("run_id")
+    if not isinstance(run_id, str) or not run_id:
+        return 400, {"code": BUDGET_RUN_ID_REQUIRED,
+                     "message": "run_id required"}
+    reservation_id = body.get("reservation_id")
+    if not isinstance(reservation_id, str) or not reservation_id:
+        return 400, {"code": BUDGET_RESERVATION_ID_REQUIRED,
+                     "message": "reservation_id required"}
     currency = body.get("currency")
     try:
         gate.get_state(project_id)
@@ -508,14 +552,13 @@ def k04f_reserve_tokens(ctx, query, body):
             body.get("hard_limit") or "10.00",
             body.get("hard_limit") or "10.00",
             body.get("hard_limit") or "10.00")
-    stamp = "2026-10-26T00:00:00Z"
+    stamp, expiry = _reservation_window()
     request = {"project_id": project_id,
-               "task_id": body.get("task_id") or "t1",
-               "run_id": body.get("run_id") or "r1",
-               "reservation_id": body.get("reservation_id") or
-               "k04f-rt-%s" % project_id,
+               "task_id": task_id,
+               "run_id": run_id,
+               "reservation_id": reservation_id,
                "estimated_amount": body.get("estimated_amount"),
-               "reserved_at": stamp, "expires_at": "2026-10-27T00:00:00Z"}
+               "reserved_at": stamp, "expires_at": expiry}
     if isinstance(body.get("provider_id"), str) and body.get("provider_id"):
         request["provider_id"] = body.get("provider_id")
     try:
@@ -625,7 +668,7 @@ def k04f_snapshot(ctx, query, body):
     currency = body.get("currency") or "USD"
     input_price = body.get("input_token_price") or "0.001"
     output_price = body.get("output_token_price") or "0.002"
-    stamp = "2026-10-26T00:00:00Z"
+    stamp = _utcnow_z()
     _telemetry.make_snapshot(
         sid, provider_id, model_id, currency, stamp, "k04f-proof",
         stamp, input_token_price=input_price,
@@ -734,17 +777,16 @@ def k04n4_trial_cap(ctx, query, body):
     except (KeyError, LookupError):
         gate.configure_project(
             project_id, currency, monthly_cap, soft, monthly_cap,
-            updated_at="2026-10-26T00:00:00Z")
+            updated_at=_utcnow_z())
     else:
         try:
             gate.update_limits(
                 project_id, budget_limit=monthly_cap,
                 soft_limit=soft, hard_limit=monthly_cap,
-                updated_at="2026-10-26T00:00:00Z")
+                updated_at=_utcnow_z())
         except Exception:
             pass
-    stamp = "2026-10-26T00:00:00Z"
-    expiry = "2026-10-27T00:00:00Z"
+    stamp, expiry = _reservation_window()
     first = gate.compare_and_reserve(
         {"project_id": project_id, "task_id": "t1", "run_id": "r1",
          "reservation_id": "k04n4-p63-r1",

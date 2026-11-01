@@ -1041,6 +1041,10 @@ def post_target_flow(ctx, query, body) -> Tuple[int, Dict]:
     return 200, {"project_id": project_id, "loaded": loaded}
 
 
+#: Refusal code when the L3 audit entry arrives without its decision ids.
+L3_DECISION_IDS_REQUIRED = "L3_DECISION_IDS_REQUIRED"
+
+
 def post_l3_audit(ctx, query, body) -> Tuple[int, Dict]:
     """Run an L3 independent audit on the separate provider path (168).
 
@@ -1068,11 +1072,21 @@ def post_l3_audit(ctx, query, body) -> Tuple[int, Dict]:
             key_ref = None
     if key_ref is None or not key_ref.secret_id:
         key_ref = None
+    missing_ids = [name for name, value in
+                   (("decision_id", body.get("decision_id")),
+                    ("project_id", body.get("project_id")),
+                    ("task_id", body.get("task_id")),
+                    ("run_id", body.get("run_id")))
+                   if not isinstance(value, str) or not value]
+    if missing_ids:
+        return 400, {"code": L3_DECISION_IDS_REQUIRED,
+                     "message": "l3 audit needs %s"
+                                % (", ".join(missing_ids),)}
     decision = _sa.RoutingDecisionBinding(
-        decision_id=str(body.get("decision_id") or ""),
-        project_id=str(body.get("project_id") or "p1"),
-        task_id=str(body.get("task_id") or "t1"),
-        run_id=str(body.get("run_id") or "r1"),
+        decision_id=str(body.get("decision_id")),
+        project_id=str(body.get("project_id")),
+        task_id=str(body.get("task_id")),
+        run_id=str(body.get("run_id")),
         selected_provider=str(body.get("selected_provider") or ""),
         selected_model=str(body.get("selected_model") or ""))
     try:
