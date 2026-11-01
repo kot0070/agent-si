@@ -58,7 +58,7 @@ def test_k02rest_a_staged_rows_to_hierarchy():
     """| M-P2-80 | K02 | governance folder HD-only; staged rows to hierarchy | OPEN | ROWS2: OPEN - no served wiring plus calling test triple proven in int |"""
     client, headers = make_client()
     resp = client.post(
-        "/v1/split",
+        "/api/v1/split",
         json={
             "project_id": "k02rest-a-proj-staged",
             "parts": _parts(),
@@ -85,7 +85,7 @@ def test_k02rest_a_staged_requirement_subset():
     """| M-P2-82 | K02 | staged requirement subset per inputs folder | OPEN | ROWS2: OPEN - no served wiring plus calling test triple proven in int |"""
     client, headers = make_client()
     resp = client.post(
-        "/v1/split",
+        "/api/v1/split",
         json={
             "project_id": "k02rest-a-proj-subset",
             "parts": _parts(),
@@ -106,7 +106,7 @@ def test_k02rest_a_governance_director_only():
     """| M-R-GOV | K02 | governance raw reads Director-only; staged rows to hierarchy | OPEN | ROWS2: OPEN - no served wiring plus calling test triple proven in int |"""
     client, headers = make_client()
     allowed = client.post(
-        "/v1/split",
+        "/api/v1/split",
         json={
             "project_id": "k02rest-a-proj-gov",
             "parts": _parts(),
@@ -121,7 +121,7 @@ def test_k02rest_a_governance_director_only():
         "hierarchy_ref": "ARTIFACT_REF:gov-row-1/hierarchy",
     }
     refused = client.post(
-        "/v1/split",
+        "/api/v1/split",
         json={
             "project_id": "k02rest-a-proj-gov",
             "parts": _parts(),
@@ -132,7 +132,7 @@ def test_k02rest_a_governance_director_only():
     )
     assert refused.status_code == 400
     anonymous = client.post(
-        "/v1/split",
+        "/api/v1/split",
         json={
             "project_id": "k02rest-a-proj-gov",
             "parts": _parts(),
@@ -142,7 +142,7 @@ def test_k02rest_a_governance_director_only():
     )
     assert anonymous.status_code == 400
     no_actor = client.post(
-        "/v1/split",
+        "/api/v1/split",
         json={"project_id": "k02rest-a-proj-gov", "parts": _parts()},
     )
     assert no_actor.status_code == 401
@@ -152,7 +152,7 @@ def test_k02rest_a_settings_persist_decision_row():
     """| 103 | K02 | hierarchy settings changes persist a decision row | OPEN | ROWS2: OPEN - no served wiring plus calling test triple proven in int |"""
     client, headers = make_client()
     first = client.post(
-        "/v1/split",
+        "/api/v1/split",
         json={
             "project_id": "k02rest-a-proj-settings",
             "parts": _parts(),
@@ -167,7 +167,7 @@ def test_k02rest_a_settings_persist_decision_row():
     assert decision["statement"]
     assert decision["created_at"]
     second = client.post(
-        "/v1/split",
+        "/api/v1/split",
         json={
             "project_id": "k02rest-a-proj-settings",
             "parts": _parts(),
@@ -185,13 +185,13 @@ def test_k02rest_a_integration_closes_phase_after_pass():
     client, headers = make_client()
     project_id = "k02rest-a-proj-integrate"
     split = client.post(
-        "/v1/split",
+        "/api/v1/split",
         json={"project_id": project_id, "parts": _parts()},
         headers=headers,
     )
     assert split.status_code == 200
     closed = client.post(
-        "/v1/integrate",
+        "/api/v1/integrate",
         json={
             "project_id": project_id,
             "parts": [
@@ -211,7 +211,7 @@ def test_k02rest_a_integration_closes_phase_after_pass():
     assert body["integration"] == {"by": "manager", "parts": 2}
     assert body["phase"] == "closed"
     open_phase = client.post(
-        "/v1/integrate",
+        "/api/v1/integrate",
         json={
             "project_id": project_id,
             "parts": [
@@ -230,7 +230,7 @@ def test_k02rest_a_parallel_decomposition_cap_queues_rest():
     """| 32 | K02 | largest parallel decomposition up to the cap, rest queued | OPEN | ROWS2: OPEN - no served wiring plus calling test triple proven in int |"""
     client, headers = make_client()
     resp = client.post(
-        "/v1/split",
+        "/api/v1/split",
         json={
             "project_id": "k02rest-a-proj-decompose",
             "parts": _parts(),
@@ -248,7 +248,7 @@ def test_k02rest_a_parallel_decomposition_cap_queues_rest():
     assert resp.json()["parallel"] == ["task-2", "task-3"]
     assert resp.json()["queued"] == ["task-1", "task-4"]
     missing_cap = client.post(
-        "/v1/split",
+        "/api/v1/split",
         json={
             "project_id": "k02rest-a-proj-decompose",
             "parts": _parts(),

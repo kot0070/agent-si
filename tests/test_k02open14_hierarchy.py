@@ -63,7 +63,7 @@ def test_k02open14_hierarchy_row302_director_split_manager_integrate():
     client, headers = make_client()
     project_id = "k02open14-proj-split"
     split = client.post(
-        "/v1/split",
+        "/api/v1/split",
         json={
             "project_id": project_id,
             "parts": [
@@ -80,7 +80,7 @@ def test_k02open14_hierarchy_row302_director_split_manager_integrate():
     ]
     assert split.json()["integration"] == {"by": "manager", "parts": 2}
     integrate = client.post(
-        "/v1/integrate",
+        "/api/v1/integrate",
         json={"project_id": project_id, "parts": split.json()["parts"]},
         headers=headers,
     )
@@ -93,7 +93,7 @@ def test_k02open14_hierarchy_row302_director_split_manager_integrate():
     ]
     assert body["integration"] == {"by": "manager", "parts": 2}
     refused = client.post(
-        "/v1/split",
+        "/api/v1/split",
         json={"project_id": project_id, "parts": []},
         headers=headers,
     )
@@ -105,14 +105,14 @@ def test_k02open14_hierarchy_row333_routine_offload_switch():
     project_id = "k02open14-proj-offload"
     assert offload_mod.routine_offload_enabled(project_id) is False
     refused = client.post(
-        "/v1/offload",
+        "/api/v1/offload",
         json={"project_id": project_id, "routine": "nightly-docs"},
         headers=headers,
     )
     assert refused.status_code == 409
     assert refused.json()["detail"]["code"] == "OFFLOAD_DISABLED"
     switch = client.put(
-        "/v1/offload-switch",
+        "/api/v1/offload-switch",
         json={"project_id": project_id, "enabled": True},
         headers=headers,
     )
@@ -123,7 +123,7 @@ def test_k02open14_hierarchy_row333_routine_offload_switch():
     }
     assert offload_mod.routine_offload_enabled(project_id) is True
     handed = client.post(
-        "/v1/offload",
+        "/api/v1/offload",
         json={"project_id": project_id, "routine": "nightly-docs"},
         headers=headers,
     )
@@ -131,7 +131,7 @@ def test_k02open14_hierarchy_row333_routine_offload_switch():
     assert handed.json()["routine"] == "nightly-docs"
     assert handed.json()["by"] == "manager"
     rows = client.get(
-        "/v1/handovers", params={"project_id": project_id}, headers=headers
+        "/api/v1/handovers", params={"project_id": project_id}, headers=headers
     )
     assert rows.status_code == 200
     assert rows.json()["handovers"] == [
@@ -147,7 +147,7 @@ def test_k02open14_hierarchy_row349_agent_step_limits():
     client, headers = make_client()
     project_id = "k02open14-proj-steps"
     configured = client.put(
-        "/v1/step-limits",
+        "/api/v1/step-limits",
         json={
             "project_id": project_id,
             "max_agent_steps": 1,
@@ -162,7 +162,7 @@ def test_k02open14_hierarchy_row349_agent_step_limits():
         "max_chat_steps": 2,
     }
     first = client.post(
-        "/v1/agent-steps", json={"project_id": project_id}, headers=headers
+        "/api/v1/agent-steps", json={"project_id": project_id}, headers=headers
     )
     assert first.status_code == 200
     assert first.json() == {
@@ -171,27 +171,27 @@ def test_k02open14_hierarchy_row349_agent_step_limits():
         "steps": 1,
     }
     second = client.post(
-        "/v1/agent-steps", json={"project_id": project_id}, headers=headers
+        "/api/v1/agent-steps", json={"project_id": project_id}, headers=headers
     )
     assert second.status_code == 429
     assert second.json()["detail"]["code"] == "STEP_LIMIT_EXCEEDED"
     chat_one = client.post(
-        "/v1/chat-steps", json={"project_id": project_id}, headers=headers
+        "/api/v1/chat-steps", json={"project_id": project_id}, headers=headers
     )
     assert chat_one.status_code == 200
     assert chat_one.json()["steps"] == 1
     chat_two = client.post(
-        "/v1/chat-steps", json={"project_id": project_id}, headers=headers
+        "/api/v1/chat-steps", json={"project_id": project_id}, headers=headers
     )
     assert chat_two.status_code == 200
     assert chat_two.json()["steps"] == 2
     chat_three = client.post(
-        "/v1/chat-steps", json={"project_id": project_id}, headers=headers
+        "/api/v1/chat-steps", json={"project_id": project_id}, headers=headers
     )
     assert chat_three.status_code == 429
     assert chat_three.json()["detail"]["code"] == "STEP_LIMIT_EXCEEDED"
     unknown = client.post(
-        "/v1/agent-steps",
+        "/api/v1/agent-steps",
         json={"project_id": "k02open14-proj-never-set"},
         headers=headers,
     )

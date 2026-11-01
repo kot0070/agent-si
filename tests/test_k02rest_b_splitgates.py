@@ -36,7 +36,7 @@ def refs(n, tag):
 
 def split_parts(client, headers, package_id, total, max_parts):
     resp = client.post(
-        "/v1/split-gates/parts",
+        "/api/v1/split-gates/parts",
         json={
             "package_id": package_id,
             "goal": "serve split gates row for %s" % package_id,
@@ -65,7 +65,7 @@ def test_k02rest_b_opt_in_split_disjoint():
         parts[0]["contract_hash"]
     }
     refused = client.post(
-        "/v1/split-gates/parts",
+        "/api/v1/split-gates/parts",
         json={
             "package_id": package_id,
             "goal": "opt-in refused without flag",
@@ -77,7 +77,7 @@ def test_k02rest_b_opt_in_split_disjoint():
     )
     assert refused.status_code == 400
     raw = client.post(
-        "/v1/split-gates/parts",
+        "/api/v1/split-gates/parts",
         json={
             "package_id": package_id,
             "goal": "raw secrets are never shared refs",
@@ -89,7 +89,7 @@ def test_k02rest_b_opt_in_split_disjoint():
     )
     assert raw.status_code == 400
     no_actor = client.post(
-        "/v1/split-gates/parts",
+        "/api/v1/split-gates/parts",
         json={
             "package_id": package_id,
             "goal": "guard needs an actor",
@@ -100,7 +100,7 @@ def test_k02rest_b_opt_in_split_disjoint():
     )
     assert no_actor.status_code == 401
     bad_token = client.post(
-        "/v1/split-gates/parts",
+        "/api/v1/split-gates/parts",
         json={
             "package_id": package_id,
             "goal": "guard needs a live token",
@@ -118,14 +118,14 @@ def test_k02rest_b_part_gate_fresh_audit():
     client, headers = make_client()
     part_a = "k02rest-b94-part-a"
     gate = client.post(
-        "/v1/split-gates/part-gate",
+        "/api/v1/split-gates/part-gate",
         json={"part_id": part_a, "verdict": "PASS"},
         headers=headers,
     )
     assert gate.status_code == 200, gate.text
     assert gate.json()["gate_id"] == part_a + ":gate-001"
     audit = client.post(
-        "/v1/split-gates/part-audit",
+        "/api/v1/split-gates/part-audit",
         json={
             "part_id": part_a,
             "result": "PASS",
@@ -139,13 +139,13 @@ def test_k02rest_b_part_gate_fresh_audit():
     assert audit.json()["audit_id"] == part_a + ":audit-001"
     part_b = "k02rest-b94-part-b"
     gate_b = client.post(
-        "/v1/split-gates/part-gate",
+        "/api/v1/split-gates/part-gate",
         json={"part_id": part_b, "verdict": "PASS"},
         headers=headers,
     )
     assert gate_b.json()["gate_id"] != gate.json()["gate_id"]
     self_audit = client.post(
-        "/v1/split-gates/part-audit",
+        "/api/v1/split-gates/part-audit",
         json={
             "part_id": part_b,
             "result": "PASS",
@@ -157,7 +157,7 @@ def test_k02rest_b_part_gate_fresh_audit():
     )
     assert self_audit.status_code == 409
     no_integrity = client.post(
-        "/v1/split-gates/part-audit",
+        "/api/v1/split-gates/part-audit",
         json={
             "part_id": part_b,
             "result": "PASS",
@@ -175,7 +175,7 @@ def test_k02rest_b_bounded_context_per_manager():
     client, headers = make_client()
     package_id = "k02rest-b100-pkg"
     resp = client.post(
-        "/v1/split-gates/split-bounded",
+        "/api/v1/split-gates/split-bounded",
         json={
             "package_id": package_id,
             "goal": "bounded context per manager",
@@ -191,7 +191,7 @@ def test_k02rest_b_bounded_context_per_manager():
     assert body["count"] == 3
     assert body["context_per_part"] == [2, 2, 2]
     over = client.post(
-        "/v1/split-gates/split-bounded",
+        "/api/v1/split-gates/split-bounded",
         json={
             "package_id": package_id,
             "goal": "bound too tight for the cap",
@@ -212,13 +212,13 @@ def test_k02rest_b_open_packages_gates_crosschecked():
     package_id = "k02rest-b118-pkg"
     for part_id in (package_id + ":part-a", package_id + ":integration"):
         gate = client.post(
-            "/v1/split-gates/part-gate",
+            "/api/v1/split-gates/part-gate",
             json={"part_id": part_id, "verdict": "PASS"},
             headers=headers,
         )
         assert gate.status_code == 200, gate.text
         audit = client.post(
-            "/v1/split-gates/part-audit",
+            "/api/v1/split-gates/part-audit",
             json={
                 "part_id": part_id,
                 "result": "PASS",
@@ -230,7 +230,7 @@ def test_k02rest_b_open_packages_gates_crosschecked():
         )
         assert audit.status_code == 200, audit.text
     verdict = client.post(
-        "/v1/split-gates/phase-gate",
+        "/api/v1/split-gates/phase-gate",
         json={
             "package_ids": [package_id],
             "open_packages": [package_id],
@@ -244,7 +244,7 @@ def test_k02rest_b_open_packages_gates_crosschecked():
     assert verdict.json()["gate"] == "PASS"
     assert verdict.json()["conflicts"] == []
     conflict = client.post(
-        "/v1/split-gates/phase-gate",
+        "/api/v1/split-gates/phase-gate",
         json={
             "package_ids": [package_id],
             "open_packages": [package_id, "k02rest-b118-still-open"],
@@ -263,7 +263,7 @@ def test_k02rest_b_manifest_hash_part_validation():
     client, headers = make_client()
     manifest_id = "k02rest-b96-manifest"
     frozen = client.post(
-        "/v1/split-gates/manifests",
+        "/api/v1/split-gates/manifests",
         json={
             "manifest_id": manifest_id,
             "version": 1,
@@ -289,7 +289,7 @@ def test_k02rest_b_manifest_hash_part_validation():
         "audit_verdict_ref": "audit:k02rest-b96:part-000",
     }
     valid = client.post(
-        "/v1/split-gates/validate-part",
+        "/api/v1/split-gates/validate-part",
         json={"ref": stamped, "manifest": manifest},
         headers=headers,
     )
@@ -297,7 +297,7 @@ def test_k02rest_b_manifest_hash_part_validation():
     assert valid.json()["valid"] is True
     foreign = dict(stamped, contract_hash="0" * 64)
     invalid = client.post(
-        "/v1/split-gates/validate-part",
+        "/api/v1/split-gates/validate-part",
         json={"ref": foreign, "manifest": manifest},
         headers=headers,
     )
@@ -305,7 +305,7 @@ def test_k02rest_b_manifest_hash_part_validation():
     assert invalid.json()["valid"] is False
     tampered = dict(manifest, parts=[])
     tampered_check = client.post(
-        "/v1/split-gates/validate-part",
+        "/api/v1/split-gates/validate-part",
         json={"ref": stamped, "manifest": tampered},
         headers=headers,
     )
@@ -327,7 +327,7 @@ def test_k02rest_b_fanout_bounded_by_scheduler_caps():
         "model_pool_per_manager": {},
     }
     fanned = client.post(
-        "/v1/split-gates/fanout",
+        "/api/v1/split-gates/fanout",
         json={"parts": parts, "settings": settings, "wall_time_s": 1.0},
         headers=headers,
     )
@@ -348,7 +348,7 @@ def test_k02rest_b_fanout_bounded_by_scheduler_caps():
         2.0,
     ]
     serial = client.post(
-        "/v1/split-gates/fanout",
+        "/api/v1/split-gates/fanout",
         json={
             "parts": parts,
             "settings": dict(settings, multi_manager_mode=False),
@@ -359,7 +359,7 @@ def test_k02rest_b_fanout_bounded_by_scheduler_caps():
     assert len(serial.json()["running"]) == 1
     assert len(serial.json()["queued"]) == 4
     bad_cap = client.post(
-        "/v1/split-gates/fanout",
+        "/api/v1/split-gates/fanout",
         json={
             "parts": parts,
             "settings": dict(settings, max_parallel_managers=0),

@@ -31,7 +31,7 @@ from src.agent_si.backend import kb_routes
 TEST_TOKEN = "k09c-routes-auth-token"
 TEST_SETTINGS = {"testing": True, "ui_session_token": TEST_TOKEN}
 
-WRITE_ROUTES = ("/kb/attach", "/kb/detach", "/kb/retrieve")
+WRITE_ROUTES = ("/api/v1/kb/attach", "/api/v1/kb/detach", "/api/v1/kb/retrieve")
 
 
 # FAKE-OF: src/agent_si/kb/retriever.py attach_kb/detach_kb/retrieve.

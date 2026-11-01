@@ -304,34 +304,33 @@ def test_retrieve_telemetry_calls(tmp_path, monkeypatch):
 def test_register_kb_routes_binds_six_kb_paths():
     app = _FakeApp()
     assert kb_routes.register_kb_routes(app) is app
-    assert len(app.routes) == 7
+    assert len(app.routes) == 6
     paths = [path for _, path in app.routes]
     assert all("kb" in path for path in paths)
     assert sorted(paths) == sorted(
         [
-            "/kb/list",
+            "/api/v1/kb/list",
             "/api/v1/kb/attach",
-            "/kb/attach",
-            "/kb/detach",
-            "/kb/manifest",
-            "/kb/section",
-            "/kb/retrieve",
+            "/api/v1/kb/detach",
+            "/api/v1/kb/manifest",
+            "/api/v1/kb/section",
+            "/api/v1/kb/retrieve",
         ]
     )
     by_path = {path: method for method, path in app.routes}
-    assert by_path["/kb/list"] == "GET"
+    assert by_path["/api/v1/kb/list"] == "GET"
     assert by_path["/api/v1/kb/attach"] == "POST"
-    assert by_path["/kb/attach"] == "POST"
-    assert by_path["/kb/detach"] == "POST"
-    assert by_path["/kb/manifest"] == "GET"
-    assert by_path["/kb/section"] == "GET"
-    assert by_path["/kb/retrieve"] == "POST"
+    assert by_path["/api/v1/kb/attach"] == "POST"
+    assert by_path["/api/v1/kb/detach"] == "POST"
+    assert by_path["/api/v1/kb/manifest"] == "GET"
+    assert by_path["/api/v1/kb/section"] == "GET"
+    assert by_path["/api/v1/kb/retrieve"] == "POST"
 
 
 def test_register_kb_routes_falls_back_to_route():
     app = _RouteOnlyApp()
     kb_routes.register_kb_routes(app)
-    assert len(app.routes) == 7
+    assert len(app.routes) == 6
     for methods, path in app.routes:
         assert "kb" in path
         assert len(methods) == 1 and methods[0] in ("GET", "POST")

@@ -208,7 +208,7 @@ def test_r367_verify_refused_never_audits_served():
 
 def test_r367_detected_environment_unknown_not_alarm_served():
     client = _client()
-    resp = client.get("/portability/environment")
+    resp = client.get("/api/v1/portability/environment")
     assert resp.status_code == 200, resp.text
     page = resp.json()
     assert page["detected"]["alarm"] is False

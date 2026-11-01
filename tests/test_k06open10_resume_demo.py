@@ -87,10 +87,10 @@ def test_k06open10_resume_demo_triple(
         "x-ui-session-token": str(app.state.ui_session_token),
     }
 
-    live = client.get("/sessions")
+    live = client.get("/api/v1/sessions")
     assert live.status_code == 200, live.text
 
-    page = client.get("/portability/environment")
+    page = client.get("/api/v1/portability/environment")
     assert page.status_code == 200, page.text
     body = page.json()
     detected = body["detected"]
@@ -106,7 +106,7 @@ def test_k06open10_resume_demo_triple(
     assert all(v is False for v in _alarms(body))
 
     merged = client.post(
-        "/portability/run",
+        "/api/v1/portability/run",
         json={
             "argv": ["merge", TEST_TASK],
             "action_class": "R0",
@@ -157,7 +157,7 @@ def test_k06open10_resume_demo_triple(
         )
 
     created = client.post(
-        "/asks",
+        "/api/v1/asks",
         json={
             "kind": "approval",
             "summary": TEST_SUMMARY,
@@ -183,7 +183,7 @@ def test_k06open10_resume_demo_triple(
 
     monkeypatch.setattr(ui_session, "resume_ask", _spy)
     decided = client.post(
-        f"/asks/{ask_id}/approve",
+        f"/api/v1/asks/{ask_id}/approve",
         json={"option_id": "yes", "resume_token": resume_token},
         headers=headers,
     )
@@ -201,7 +201,7 @@ def test_k06open10_resume_demo_triple(
     assert [o.option_id for o in resumed.options] == ["yes", "no"]
 
     forged = client.post(
-        f"/asks/{ask_id}/approve",
+        f"/api/v1/asks/{ask_id}/approve",
         json={
             "option_id": "yes",
             "resume_token": "resume-forged-k06open10-test-only",

@@ -461,7 +461,7 @@ def test_k06rest_r313_approval_card_roundtrip_and_restart(
 
     _, client = _k06rest_client(monkeypatch, tmp_path)
     created = client.post(
-        "/asks",
+        "/api/v1/asks",
         json={
             "kind": "approval",
             "summary": "Approve the lane demo plan?",
@@ -475,21 +475,21 @@ def test_k06rest_r313_approval_card_roundtrip_and_restart(
     assert card["kind"] == "approval"
     assert [o["option_id"] for o in card["options"]] == ["yes", "no"]
     decided = client.post(
-        "/asks/" + card["ask_id"] + "/approve",
+        "/api/v1/asks/" + card["ask_id"] + "/approve",
         json={"option_id": "yes", "resume_token": card["resume_token"]},
         headers=_k06rest_headers(),
     )
     assert decided.status_code == 200, decided.text
     assert decided.json()["approved_option_id"] == "yes"
     forged = client.post(
-        "/asks/" + card["ask_id"] + "/approve",
+        "/api/v1/asks/" + card["ask_id"] + "/approve",
         json={"option_id": "yes",
               "resume_token": "resume-forged-k06rest-test-only"},
         headers=_k06rest_headers(),
     )
     assert forged.status_code in (401, 403)
     restarted = TestClient(create_app(_k06rest_settings()))
-    sessions = restarted.get("/sessions")
+    sessions = restarted.get("/api/v1/sessions")
     assert sessions.status_code == 200, sessions.text
     assert card["ask_id"] in [
         s["session_id"] for s in sessions.json()["sessions"]]
@@ -500,7 +500,7 @@ def test_k06rest_r313_secret_ref_card_never_echoes_value(
     """R-313 secretref: approval payload carries refs, never values."""
     _, client = _k06rest_client(monkeypatch, tmp_path)
     created = client.post(
-        "/asks",
+        "/api/v1/asks",
         json={
             "kind": "approval",
             "summary": "Needs a secret?",

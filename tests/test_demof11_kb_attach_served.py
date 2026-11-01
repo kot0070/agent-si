@@ -102,7 +102,7 @@ def test_attach_roundtrip(client, tmp_path):
         assert resp.json() == kb_id
         assert _registry.is_attached(kb_id) is True
         alias = client.post(
-            "/kb/attach",
+            "/api/v1/kb/attach",
             json={"source": _source(kb_id, project)},
             headers=WRITE_HEADERS,
         )
@@ -130,7 +130,7 @@ def test_alias_detached_old_path_404(client, tmp_path):
     kb_id = _write_kb_dir(tmp_path / "kb-demof11-detached")
     try:
         resp = client.post(
-            "/kb/attach",
+            "/api/v1/kb/attach",
             json={"source": _source(kb_id, project)},
             headers=WRITE_HEADERS,
         )

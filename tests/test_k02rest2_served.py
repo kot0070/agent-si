@@ -129,13 +129,13 @@ def test_k02rest2_87():
     package_id = "k02rest2-87-pkg"
     for part_id in (package_id + ":part-a", package_id + ":integration"):
         gate = client.post(
-            "/v1/split-gates/part-gate",
+            "/api/v1/split-gates/part-gate",
             json={"part_id": part_id, "verdict": "PASS"},
             headers=headers,
         )
         assert gate.status_code == 200, gate.text
         audit = client.post(
-            "/v1/split-gates/part-audit",
+            "/api/v1/split-gates/part-audit",
             json={"part_id": part_id, "result": "PASS",
                   "auditor_session_ref": "sess-k02rest2-87-aud",
                   "producer_session_refs": ["sess-k02rest2-87-prod"],
