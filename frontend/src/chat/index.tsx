@@ -20,6 +20,7 @@ import { DEFAULT_LOCALE, formatDate, t } from "../locale/index";
 import enTable from "../locale/en.json";
 import { ErrorPanel } from "../ui/ErrorPanel";
 import { ApprovalCard } from "./ApprovalCard";
+import { HierarchyRows } from "./HierarchyRows";
 import {
   CHAT_FLOOD_WINDOW_MS,
   compactPrompt,
@@ -400,6 +401,7 @@ ${note}`,
 
   return (
     <section data-testid="chat-area" aria-label={t("shell.sidebar.chat")}>
+      <HierarchyRows projectId={props.projectId} />
       <div data-testid="chat-layout">
         <div data-testid="chat-messages">
           {messages.map((message) => (
