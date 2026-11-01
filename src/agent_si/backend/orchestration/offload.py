@@ -363,3 +363,23 @@ def handovers_for(project_id: object) -> list[dict[str, str]]:
         for item in _ROUTINE_HANDOVERS
         if item.project_id == project_id
     ]
+
+
+def serve_routine_handoff(data: dict) -> dict[str, str]:
+    """Serve row M-P1-28: routine hand-over behind the per-project switch.
+
+    Body {"project_id", "routine"}; records the hand-over and returns it
+    with its project, routine, timestamp, and by fields. Raises ValueError
+    on a non-object body or a missing project_id or empty routine
+    (served HTTP 400); raises OffloadDisabled while the project switch
+    is off (served HTTP 409).
+    """
+    if not isinstance(data, dict):
+        raise ValueError("routine hand-over body must be an object")
+    project_id = data.get("project_id")
+    if not isinstance(project_id, str) or not project_id:
+        raise ValueError("project_id must be a non-empty string")
+    routine = data.get("routine")
+    if not isinstance(routine, str) or not routine.strip():
+        raise ValueError("routine must be a non-empty string")
+    return record_routine_offload(project_id, routine)

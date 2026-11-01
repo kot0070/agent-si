@@ -289,3 +289,29 @@ def test_g2_record_attempt_wrong_token_refuses():
     }
     with pytest.raises(PermissionError):
         actions.record_attempt(record=record, status="done")
+
+
+# --- M-D-D36: prior external state verified before repeat ---
+
+
+def test_d36_prior_state_repeat_verified_before_repeat():
+    actions = _load("tg_actions_prior_repeat", "actions.py")
+    record = {
+        "action_id": "a1",
+        "idempotency_key": "k1",
+        "authorization_ref": "svc-token-1",
+        "attempt": 2,
+        "status": "done",
+    }
+    result = actions.verify_provider_or_prior_state(
+        record=record,
+        provider_key=None,
+        prior_state={"svc-token-1": {"status": "done"}},
+    )
+    assert result["ok"] is True
+    with pytest.raises(PermissionError):
+        actions.verify_provider_or_prior_state(
+            record=record,
+            provider_key=None,
+            prior_state={"other-token": {"status": "done"}},
+        )

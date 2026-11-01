@@ -41,6 +41,16 @@ REQUIRED_SECRET_REF_FIELDS = (
     "source",
 )
 
+#: Identity fields of a SecretRef that must carry non-empty values: the
+#: pointer itself. Metadata fields (scope, source) default to "" in the
+#: served SecretRef shape, so an empty metadata value is a valid ref,
+#: never a misconfiguration or raw key material.
+NONEMPTY_SECRET_REF_FIELDS = (
+    "secret_id",
+    "provider_id",
+    "type",
+)
+
 #: Provider capability surface an adapter exposes for the router (SPEC 34).
 CAPABILITY_KEYS = (
     "supports_streaming",
@@ -119,7 +129,7 @@ class TransportUnsupportedError(Exception):
     """Transport-level signal: this capability is not supported."""
 
 
-@dataclass
+@dataclass(frozen=True)
 class AdapterConfig:
     """Transport configuration: base_url + model + SecretRef.
 
@@ -140,6 +150,10 @@ class AdapterConfig:
             raise AdapterConfigError(
                 "provider_id must be a non-empty string",
                 "config:provider-id")
+        if not isinstance(self.instance_id, str) or not self.instance_id:
+            raise AdapterConfigError(
+                "instance_id must be a non-empty string",
+                "%s/config" % self.provider_id)
         if not isinstance(self.model, str) or not self.model:
             raise AdapterConfigError(
                 "model must be a non-empty string",
@@ -154,13 +168,29 @@ class AdapterConfig:
             raise AdapterConfigError(
                 "secret_ref is missing fields: %s" % ",".join(missing),
                 "%s/%s:config" % (self.provider_id, self.instance_id))
+        empty = [key for key in NONEMPTY_SECRET_REF_FIELDS
+                 if not self.secret_ref.get(key)]
+        if empty:
+            raise AdapterConfigError(
+                "secret_ref has empty values for fields: %s" % ",".join(
+                    sorted(empty)),
+                "%s/%s:config" % (self.provider_id, self.instance_id))
         if "value" in self.secret_ref:
             raise AdapterConfigError(
                 "secret_ref must not carry raw secret material",
                 "%s/%s:config" % (self.provider_id, self.instance_id))
-        if not isinstance(self.max_retries, int) or self.max_retries < 0:
+        unknown = [key for key in self.secret_ref
+                   if key not in SECRET_REF_FIELDS]
+        if unknown:
             raise AdapterConfigError(
-                "max_retries must be an int >= 0",
+                "secret_ref carries unknown fields: %s" % ",".join(
+                    sorted(unknown)),
+                "%s/%s:config" % (self.provider_id, self.instance_id))
+        if not isinstance(self.max_retries, int) or self.max_retries != 0:
+            raise AdapterConfigError(
+                "provider clients use max_retries 0: one invocation is one "
+                "authoritative attempt; retries live in the runner; got %r"
+                % (self.max_retries,),
                 "%s/%s:config" % (self.provider_id, self.instance_id))
 
     def ref_base(self):
@@ -272,6 +302,10 @@ class ProviderAdapter:
                 "%s:http-%s" % (self.config.ref_base(), exc.status),
                 exc.status)
         except TransportTimeoutError as exc:
+            raise ProviderTimeoutError(
+                "provider request timed out: %s" % exc,
+                self.config.ref_base() + ":timeout")
+        except OSError as exc:
             raise ProviderTimeoutError(
                 "provider request timed out: %s" % exc,
                 self.config.ref_base() + ":timeout")

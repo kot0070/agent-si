@@ -1107,3 +1107,231 @@ def test_f3_http_corrupt_stored_strategy_blocks_naming_it(tmp_path):
     assert payload["status"] == "BLOCKED"
     assert "unknown pool strategy 'ROUND_ROBIN'" in payload["reason"]
     assert len(ctx.store._load_table("decisions")) == 1
+# ------------------------------------------------- ARCH-681 cost via CostCalculator
+
+def test_a2use2_served_decide_cheapest_fitting_wins_no_leg_cost(tmp_path):
+    # ARCH-681: the served cost path runs via CostCalculator only — no
+    # direct cost arithmetic in pools/adapters legs. Served post_decide
+    # over two fitting candidates picks the cheaper one with a priced
+    # basis in the reason; legs.py carries no cost surface at all.
+    ctx = make_ctx(tmp_path)
+    status, payload = PR.post_decide(ctx, {}, {
+        "project_id": "p1", "task_id": "t1", "run_id": "r1", "role": "worker",
+        "task_class": "coding",
+        "candidates": [{"provider": "pa", "model": "pa/a-1"},
+                       {"provider": "pb", "model": "pb/b-1"}]})
+    assert status == 200, payload
+    assert payload["status"] == "ROUTED", payload
+    assert payload["selected_model"] == "pb/b-1", payload
+    assert "known prices" in payload["reason"], payload
+    leg_src = os.path.join(
+        _SRC, "agent_si", "providers", "adapters", "legs.py")
+    with open(leg_src, "r", encoding="utf-8") as fh:
+        text = fh.read()
+    assert "cost" not in text.lower(), \
+        "legs.py must not do cost arithmetic (cost via CostCalculator only)"
+
+
+# ------------------------------------------------- K04NEXT M1 CODER-1 proofs
+# Rows 208, 256, 67, 255, R-310 (routing/pools part). Served = the served
+# dispatch table (PR._DISPATCH), the same convention as
+# tests/test_k04fresh1_served.py. Row check verdicts live in
+# _task/K04NEXT/M1/CODER1_RETURN.md (all five REAL against live code);
+# these tests pin the behavior through served routes.
+
+def _k04next_ctx(tmp_path, kb):
+    models = [(f.provider, f.model) for f in kb.models()]
+    providers = sorted({p for p, _m in models})
+    return PR.RoutingCtx(
+        store=ST.RoutingStore(str(tmp_path / "data")),
+        role_table=RL.RoleTable(),
+        kb=kb,
+        provider_health={p: T.ProviderHealth(provider=p, status="ONLINE")
+                         for p in providers},
+        model_health={(p, m): T.ModelHealth(provider=p, model=m,
+                                            status="READY")
+                      for (p, m) in models},
+        provider_capabilities={p: ("text", "tools", "coding")
+                               for p in providers},
+        resource_state={"eligible": True, "ref": "rs-1"},
+        budget_state={"eligible": True, "ref": "bs-1"},
+        emitter=TP.TelemetryEmitter(),
+        session_token="k04next-coder1")
+
+
+def test_k04next_208_fit_and_quality_feed_served_scorer(tmp_path):
+    # Row 208: KB task-fit feeds the served scorer; quality bars before cost.
+    decide = dict(PR._DISPATCH)[("post", "/api/v1/routing/decide")]
+    kb = FakeKb({
+        ("pa", "pa/aaa-lose"): make_facts("pa", "pa/aaa-lose",
+                                          fit=0.70, quality=0.90),
+        ("pa", "pa/zzz-win"): make_facts("pa", "pa/zzz-win",
+                                         fit=0.95, quality=0.90),
+        ("pa", "pa/cheap-weak"): make_facts(
+            "pa", "pa/cheap-weak", fit=0.99, quality=0.50,
+            price_in=0.001, price_out=0.003),
+    })
+    ctx = _k04next_ctx(tmp_path, kb)
+
+    def body(*models):
+        return {"project_id": "p1", "task_id": "t1", "run_id": "r1",
+                "role": "worker", "task_class": "coding",
+                "candidates": [{"provider": "pa", "model": m}
+                               for m in models]}
+
+    # fit feeds the scorer: equal price, higher task-fit wins even though
+    # its model id sorts last alphabetically.
+    status, payload = decide(ctx, {}, body("pa/aaa-lose", "pa/zzz-win"))
+    assert status == 200, payload
+    assert payload["status"] == "ROUTED", payload
+    assert payload["selected_model"] == "pa/zzz-win", payload
+    assert "fit=" in payload["reason"], payload
+    assert "price+quality basis=" in payload["reason"], payload
+    # quality bars before cost: higher fit + cheaper still loses below
+    # the required-quality bar.
+    status, payload = decide(ctx, {}, body("pa/cheap-weak", "pa/zzz-win"))
+    assert status == 200, payload
+    assert payload["selected_model"] == "pa/zzz-win", payload
+    assert "rejected: pa/cheap-weak" in payload["reason"], payload
+    assert "QUALITY_THRESHOLD" in payload["reason"], payload
+
+
+def test_k04next_256_auto_never_alphabet_served(tmp_path):
+    # Row 256: AUTO routes on task+price+quality, never alphabetically.
+    decide = dict(PR._DISPATCH)[("post", "/api/v1/routing/decide")]
+    kb = FakeKb({
+        ("pa", "pa/aaa-tie"): make_facts("pa", "pa/aaa-tie",
+                                         fit=0.90, quality=0.90),
+        ("pa", "pa/zzz-tie"): make_facts("pa", "pa/zzz-tie",
+                                         fit=0.90, quality=0.90),
+    })
+    ctx = _k04next_ctx(tmp_path, kb)
+    # identical task-fit, price and quality: the first-listed candidate
+    # wins (stable index tiebreak), never the alphabetical-first one.
+    status, payload = decide(ctx, {}, {
+        "project_id": "p1", "task_id": "t1", "run_id": "r1",
+        "role": "worker", "task_class": "coding",
+        "candidates": [{"provider": "pa", "model": "pa/zzz-tie"},
+                       {"provider": "pa", "model": "pa/aaa-tie"}]})
+    assert status == 200, payload
+    assert payload["status"] == "ROUTED", payload
+    assert payload["selected_model"] == "pa/zzz-tie", payload
+
+
+def test_k04next_67_served_default_multi_model_strategy(tmp_path):
+    # Row 67: the served default matches the stated multi-model strategy
+    # (Director decides per task above one model, else Auto).
+    ctx = make_ctx(tmp_path)
+    ctx.session_token = "k04next-coder1"
+    set_role = dict(PR._DISPATCH)[("post", "/api/v1/routing/role")]
+    decide = dict(PR._DISPATCH)[("post", "/api/v1/routing/decide")]
+    # multi-model pool with no stated strategy: served default is the
+    # stated multi-model strategy (Director decides per task).
+    status, payload = set_role(ctx, {}, {
+        "project_id": "p1", "role": "worker", "mode": "pool",
+        "pool": [{"provider": "pa", "model": "pa/a-1",
+                  "use_mode": "primary"},
+                 {"provider": "pb", "model": "pb/b-1",
+                  "use_mode": "fallback"}]})
+    assert status == 200, payload
+    assert payload["binding"]["strategy"] == "DIRECTOR_PER_TASK", payload
+    status, payload = decide(ctx, {}, {
+        "project_id": "p1", "task_id": "t1", "run_id": "r1",
+        "role": "worker", "task_class": "coding"})
+    assert status == 200, payload
+    assert payload["status"] == "BLOCKED", payload
+    assert T.STRATEGY_LABELS["DIRECTOR_PER_TASK"] in payload["reason"], \
+        payload
+    status, payload = decide(ctx, {}, {
+        "project_id": "p1", "task_id": "t1", "run_id": "r1",
+        "role": "worker", "task_class": "coding",
+        "director_pick_provider": "pa",
+        "director_pick_model": "pa/a-1"})
+    assert status == 200, payload
+    assert payload["selected_model"] == "pa/a-1", payload
+    assert payload["strategy"] == "DIRECTOR_PER_TASK", payload
+    # single-model pool: served default is AUTO.
+    status, payload = set_role(ctx, {}, {
+        "project_id": "p1", "role": "manager", "mode": "pool",
+        "pool": [{"provider": "pc", "model": "pc/c-1",
+                  "use_mode": "primary"}]})
+    assert status == 200, payload
+    assert payload["binding"]["strategy"] == "AUTO", payload
+    status, payload = decide(ctx, {}, {
+        "project_id": "p1", "task_id": "t1", "run_id": "r1",
+        "role": "manager", "task_class": "coding"})
+    assert status == 200, payload
+    assert payload["selected_model"] == "pc/c-1", payload
+    assert payload["strategy"] == "AUTO", payload
+    assert T.STRATEGY_LABELS["AUTO"] in payload["reason"], payload
+
+
+def test_k04next_255_suggest_strongest_served(tmp_path):
+    # Row 255: one click offers the strongest text/tools/coding model.
+    suggest = dict(PR._DISPATCH)[("get", "/api/v1/routing/suggest")]
+    kb = FakeKb({
+        ("pa", "pa/zeta-image"): make_facts(
+            "pa", "pa/zeta-image", fit=0.99, quality=0.99,
+            modalities=("image",)),
+        ("pa", "pa/aaa-coder"): make_facts("pa", "pa/aaa-coder",
+                                           fit=0.80, quality=0.80),
+        ("pa", "pa/zzz-coder"): make_facts("pa", "pa/zzz-coder",
+                                           fit=0.80, quality=0.95),
+    })
+    ctx = _k04next_ctx(tmp_path, kb)
+    status, payload = suggest(ctx, {"provider": "pa",
+                                    "purpose": "coding"}, None)
+    assert status == 200, payload
+    assert payload["model"] == "pa/zzz-coder", payload
+    assert "never alphabetical" in payload["reason"], payload
+
+
+def test_k04next_r310_not_in_base_mark_routing_pools(tmp_path):
+    # Row R-310 (routing/pools part): a model with no KB row is marked
+    # UNKNOWN at every choice point, never silently capable.
+    ctx = make_ctx(tmp_path)
+    ctx.session_token = "k04next-coder1"
+    decide = dict(PR._DISPATCH)[("post", "/api/v1/routing/decide")]
+    picker = dict(PR._DISPATCH)[("get", "/api/v1/routing/picker")]
+    suggest = dict(PR._DISPATCH)[("get", "/api/v1/routing/suggest")]
+    # pool AUTO with a KB-absent member: the healthy member routes and
+    # the KB-absent one is marked rejected/UNKNOWN in the served reason.
+    ctx.role_table.set_profile(T.RoleModelProfile(
+        role="worker", project_id="p1", mode="pool", binding="DEFAULT",
+        version=1, hash="h"))
+    ctx.store.save_pool(P.make_binding("worker", "p1", [
+        P.PoolMember("pa", "pa/ghost", "primary"),
+        P.PoolMember("pb", "pb/b-1", "fallback"),
+    ], strategy="AUTO"))
+    status, payload = decide(ctx, {}, {
+        "project_id": "p1", "task_id": "t1", "run_id": "r1",
+        "role": "worker", "task_class": "coding"})
+    assert status == 200, payload
+    assert payload["status"] == "ROUTED", payload
+    assert payload["selected_model"] == "pb/b-1", payload
+    assert "rejected: pa/ghost" in payload["reason"], payload
+    assert "UNKNOWN" in payload["reason"], payload
+    # generic AUTO with only the KB-absent candidate: BLOCKED with the
+    # same UNKNOWN mark and source NONE.
+    status, payload = decide(ctx, {}, {
+        "project_id": "p1", "task_id": "t1", "run_id": "r1",
+        "role": "auditor", "task_class": "coding",
+        "candidates": [{"provider": "pa", "model": "pa/ghost"}]})
+    assert status == 200, payload
+    assert payload["status"] == "BLOCKED", payload
+    assert payload["capability_state"] == "UNKNOWN", payload
+    assert payload["eligibility_source"] == "NONE", payload
+    assert "no capability data" in payload["reason"], payload
+    # picker: every served option carries its KB evidence mark.
+    status, payload = picker(ctx, {"role": "worker", "project_id": "p1",
+                                   "purpose": "coding"}, None)
+    assert status == 200, payload
+    assert payload["options"], payload
+    for option in payload["options"]:
+        assert "evidence " in option["description"], option
+    # suggest: a provider with no text/tools/coding row is a 404 on
+    # file, never a guessed offer.
+    status, payload = suggest(ctx, {"provider": "nope",
+                                    "purpose": "coding"}, None)
+    assert status == 404, payload
+    assert "on file" in payload["error"], payload

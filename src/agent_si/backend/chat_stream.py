@@ -695,6 +695,7 @@ def _gateway_transport(base_url: str, credential_store: Any,
     endpoint = str(base_url or "").rstrip("/")
 
     def _transport(request: Mapping[str, Any]) -> dict[str, Any]:
+        import http.client as _httpclient
         import json as _json
         import urllib.error as _urlerror
         import urllib.request as _urlrequest
@@ -734,7 +735,13 @@ def _gateway_transport(base_url: str, credential_store: Any,
         )
         try:
             with _urlrequest.urlopen(http_request, timeout=60) as response:
-                raw = response.read().decode("utf-8")
+                try:
+                    raw = response.read().decode("utf-8")
+                except (ValueError, _httpclient.HTTPException):
+                    # Truncated/garbled body: transport-level failure, never
+                    # raw bytes or text (KEYECHO1); fixed message only.
+                    raise TransportTimeoutError(
+                        "gateway response unreadable") from None
         except _urlerror.HTTPError as exc:
             raise TransportHttpError(
                 getattr(exc, "code", 0) or 0, str(exc)) from None

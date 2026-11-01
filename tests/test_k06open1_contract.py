@@ -11,9 +11,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from fastapi.testclient import TestClient  # noqa: E402
+from fastapi.testclient import TestClient
 
-from agent_si.backend.app import create_app  # noqa: E402
+from agent_si.backend.app import create_app
 
 TEST_TOKEN = "k06open1-loopback-token"
 ACTOR = "tester-k06open1"
@@ -139,3 +139,134 @@ def test_254_unknown_tool_named_in_view():
     assert view.status_code == 200, view.text
     assert view.json()["records"] == []
     assert view.json()["unknown_tool"] == "nope"
+
+
+# --- R-367: assurance mount (verify, then audit, then close) ---
+
+
+def test_r367_assurance_finalize_guards_served():
+    client = _client()
+    resp = client.post("/api/v1/assurance/finalize", json={})
+    assert resp.status_code == 401, resp.text
+    resp = client.post("/api/v1/assurance/finalize", json={},
+                       headers=_auth())
+    assert resp.status_code == 400, resp.text
+    resp = client.post(
+        "/api/v1/assurance/finalize",
+        json={
+            "project_id": "p",
+            "task_id": "no-such-task",
+            "run_id": "r",
+            "contract_hash": "h",
+        },
+        headers=_auth(),
+    )
+    assert resp.status_code == 404, resp.text
+    assert "no-such-task" in resp.text
+
+
+def test_r367_verify_refused_never_audits_served():
+    import tempfile
+
+    client = _client()
+    project_id = client.post(
+        "/api/v1/projects",
+        json={"name": "p-r367", "folder_ref": "f-r367"},
+        headers=_auth(),
+    ).json()["project"]["project_id"]
+    task_id = client.post(
+        f"/api/v1/projects/{project_id}/tasks",
+        json={"title": "t-r367", "scope": ["s"]},
+        headers=_auth(),
+    ).json()["task"]["task_id"]
+    with tempfile.TemporaryDirectory(prefix="r367-verify-") as project_dir:
+        resp = client.post(
+            "/api/v1/assurance/finalize",
+            json={
+                "project_id": project_id,
+                "task_id": task_id,
+                "run_id": "run-r367",
+                "contract_hash": "hash-r367",
+                "project_dir": project_dir,
+                "work_refs": ["work-r367"],
+                "criteria": [{"ac_id": "AC-r367"}],
+                "tool_rows": [],
+            },
+            headers=_auth(),
+        )
+    assert resp.status_code == 200, resp.text
+    payload = resp.json()
+    assert payload["ok"] is False
+    assert payload["phase"] == "VERIFY_REFUSED"
+    assert payload["verification_id"]
+    assert payload["audit_id"] is None
+    assert payload["verdict"] is None
+    turns = client.get(f"/api/v1/tasks/{task_id}/turns")
+    assert turns.status_code == 200, turns.text
+    assert turns.json()["turns"][0]["action"] == "no-audit"
+
+
+def test_r367_detected_environment_unknown_not_alarm_served():
+    client = _client()
+    resp = client.get("/portability/environment")
+    assert resp.status_code == 200, resp.text
+    page = resp.json()
+    assert page["detected"]["alarm"] is False
+    assert page["detected"]["state"]["gpu"] == "UNKNOWN"
+    assert page["detected"]["state"]["local-ai"] == "UNKNOWN"
+    assert set(page["states"].values()) == {"UNKNOWN"}
+    check = page["check"]
+    assert check["dry_run"] is True
+    assert check["status"] == "green"
+    assert check["alarm"] is False
+    assert all(entry["alarm"] is False for entry in check["checks"])
+
+
+# --- M-D-D3: port contracts frozen by hash; targets pinned per allow ---
+
+
+def test_d3_contract_frozen_and_targets_pinned_served():
+    client = _client()
+    first = client.get("/api/v1/k06/script-contract")
+    assert first.status_code == 200, first.text
+    second = client.get("/api/v1/k06/script-contract")
+    assert second.json() == first.json()
+    assert "contract_hash" in first.json()["template_text"]
+    refused = client.post(
+        "/api/v1/k06/tools/dispatch",
+        json={
+            "tool": "other",
+            "argv": ["other", "run"],
+            "action_class": "R0",
+            "auth": _auth_r0(),
+            "task_authorized": ["status"],
+        },
+        headers=_auth(),
+    )
+    assert refused.status_code == 403, refused.text
+    assert refused.json()["code"] == "TOOL_NOT_AUTHORIZED"
+
+
+# --- B0B-UNCOVERED_MVP_ACCEPT-141: env example with SecretRef pointers ---
+
+
+def test_141_env_example_secretref_pointers_served():
+    client = _client()
+    payload = client.get("/api/v1/k06/script-contract").json()
+    import json as _json
+
+    template, _ = _json.JSONDecoder().raw_decode(
+        payload["template_text"])
+    pointer = template["env"]["API_KEY"]
+    assert set(pointer) == {"secretRef"}
+    assert isinstance(pointer["secretRef"], str) and pointer["secretRef"]
+    joined = "\n".join(
+        [payload["contract_text"], payload["template_text"],
+         payload["instruction_text"]]
+    )
+    assert "secretRef" in joined
+    assert "AKIA" not in joined and "sk-live-" not in joined
+    seam = client.get("/api/v1/keychain/seam")
+    assert seam.status_code == 200, seam.text
+    ref = seam.json()["secret_ref"]
+    assert isinstance(ref, str) and ref.startswith("secretref:")

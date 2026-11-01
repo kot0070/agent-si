@@ -92,14 +92,18 @@ def register_k06oc_routes(app: Any) -> None:
                 guard_store=app.state.k06oc_guard_records,
             )
         except ToolNotAuthorizedError as exc:
+            records = list_guard_records(app.state.k06oc_guard_records)
+            if not records:
+                return JSONResponse(
+                    status_code=404,
+                    content={"code": "TOOL_NOT_FOUND", "message": str(exc)},
+                )
             return JSONResponse(
                 status_code=403,
                 content={
                     "code": TOOL_NOT_AUTHORIZED,
                     "message": str(exc),
-                    "guard_record": list_guard_records(
-                        app.state.k06oc_guard_records
-                    )[-1],
+                    "guard_record": records[-1],
                 },
             )
         except ToolNotFoundError as exc:

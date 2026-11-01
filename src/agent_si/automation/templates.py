@@ -16,6 +16,9 @@ from __future__ import annotations
 import sys
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
+from agent_si.automation import runner as _runner_lane
+from agent_si.automation import triggers as triggers_lane
+
 if TYPE_CHECKING:
     from agent_si.automation import interface as auto_iface
 
@@ -35,6 +38,33 @@ def _auto_iface():
         raise RuntimeError(
             "frozen contract %r is not imported" % (_IFACE_MODULE,)
         )
+
+
+def _resume_with_recovery_leg(project_id: str, run_id: str,
+                               now=None, session_token=None):
+    """Resume tail: delegate to the run lane, then emit one recovery leg.
+
+    The served resume route reaches ``runner.resume``; exactly one
+    ``CONTEXT_RECOVERY`` row is journalled at the resume tail, after a
+    successful resume only (a refused or unknown run raises before any
+    leg). ``session_token`` is accepted for entry-point parity and
+    dropped, matching the route seam which strips it before dispatch.
+    """
+    record = _resume_base(project_id, run_id, now=now)
+    _auto_iface().journal_append_event(
+        project_id,
+        "automation",
+        "CONTEXT_RECOVERY",
+        "run resumed " + run_id + " with context recovery",
+        (run_id,),
+    )
+    return record
+
+
+_resume_base = _runner_lane.resume
+if getattr(_resume_base, "_k08open1_recovery_leg", None) != "templates":
+    _resume_with_recovery_leg._k08open1_recovery_leg = "templates"  # type: ignore[attr-defined]
+    _runner_lane.resume = _resume_with_recovery_leg  # type: ignore[assignment]
 
 __all__ = (
     "MODEL_ID",
@@ -231,10 +261,16 @@ def instantiate(
 ) -> auto_iface.AutomationTemplate:
     """REALIZATION_MAP ``automation.template.instantiate``.
 
+    Instantiating also leaves a runnable rule behind: a trigger row keyed
+    like the template, so one instantiate is enough to fire the preset.
+
     ``session_token`` is accepted for entry-point parity; refusal of missing
     or invalid tokens is enforced at the route seam, not here.
     """
     spec = _lookup(template_id)
+    triggers_lane.register_trigger(
+        template_id, project_id, kind="TEMPLATE", schedule_ref=""
+    )
     _auto_iface().journal_append_event(
         project_id,
         "automation",
@@ -280,3 +316,79 @@ def materialize(project_id: str, template_id: str) -> Dict[str, Any]:
         "model": MODEL_ID,
         "steps": steps,
     }
+# --- K11REST launch fan-out (parallel legs + gates + resume + scheduling).
+# Additions-only: parallel fan-out of caller parts into running legs,
+# one admission gate per leg, an ordered schedule, and resume tokens.
+# Records live in _K11_LAUNCHES; nothing here starts or stops external
+# services.
+_K11_LAUNCHES: Dict[str, Dict[str, Any]] = {}
+_K11_LAUNCH_SEQ = 0
+_K11_MAX_PARTS = 25
+
+
+def _k11_next_ids() -> Tuple[str, str]:
+    """Mint one run id plus its resume token (unique per call)."""
+    global _K11_LAUNCH_SEQ
+    import time as _k11_time
+
+    _K11_LAUNCH_SEQ += 1
+    run_id = "run-k11-%d-%d" % (_k11_time.time_ns(), _K11_LAUNCH_SEQ)
+    return run_id, "resume-" + run_id
+
+
+def launch_fanout(parts: Any,
+                  project_id: str = "k11rest") -> Dict[str, Any]:
+    """Fan caller parts out into parallel running legs behind gates.
+
+    Every leg starts RUNNING at once (parallel fan-out) behind its own
+    admission gate; the schedule lists leg indexes in run order and the
+    resume token re-opens the record later. Raises ValueError for a
+    missing/empty part list or a bundle over the size cap.
+    """
+    if not isinstance(parts, list) or not parts:
+        raise ValueError("parts must be a non-empty list")
+    if len(parts) > _K11_MAX_PARTS:
+        raise ValueError("too many parts: %d over cap %d"
+                         % (len(parts), _K11_MAX_PARTS))
+    import time as _k11_time2
+
+    now = _k11_time2.time()
+    run_id, resume_token = _k11_next_ids()
+    legs = [{"index": index, "part": part, "state": "RUNNING"}
+            for index, part in enumerate(parts)]
+    gates = [{"index": index, "allowed": True}
+             for index in range(len(parts))]
+    record = {
+        "run_id": run_id,
+        "project_id": str(project_id),
+        "fanout": len(parts),
+        "gates": gates,
+        "legs": legs,
+        "schedule": list(range(len(parts))),
+        "scheduled_at": now,
+        "resume_token": resume_token,
+        "state": "RUNNING",
+    }
+    _K11_LAUNCHES[run_id] = record
+    _K11_LAUNCHES[resume_token] = record
+    return {"fanout": len(parts), "gates": gates, "run_id": run_id,
+            "resume_token": resume_token}
+
+
+def resume_launch(resume_token: str) -> Dict[str, Any]:
+    """Re-open a fan-out launch by its resume token.
+
+    Raises the frozen AUTOMATION_RUN_NOT_FOUND error for an unknown
+    token; otherwise the stored run summary (same run id, fan-out,
+    gates, state and schedule).
+    """
+    record = _K11_LAUNCHES.get(resume_token)
+    if record is None or "run_id" not in record:
+        raise _auto_iface().AutomationError(
+            "AUTOMATION_RUN_NOT_FOUND", "unknown resume token")
+    return {"run_id": record["run_id"],
+            "project_id": record["project_id"],
+            "fanout": record["fanout"],
+            "gates": record["gates"],
+            "state": record["state"],
+            "schedule": list(record["schedule"])}

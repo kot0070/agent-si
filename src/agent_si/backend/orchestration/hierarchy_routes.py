@@ -68,27 +68,6 @@ name and orchestration signature above stays unchanged):
 - POST /hierarchy/rejection-surface (UI_DELTA-62): the real
   offload.apply_offload_config_change with a violating change; the
   refusal reason code is surfaced and no decision row is added.
-
-K02NEXT6 adds 4 routes (additive-only; every path, handler name and
-orchestration signature above stays unchanged):
-
-- POST /hierarchy/project-disk-write (LIVE0B-03): the real
-  hierarchy.save_project_snapshot; a created project is written to
-  disk under the caller-supplied store dir (hot-write, no machine
-  paths in code). A bad dir, id or snapshot refuses with HTTP 400.
-- GET /hierarchy/project-disk-read (LIVE0B-03): the real
-  hierarchy.load_project_snapshot; a project written before a
-  restart reads back from the same store dir. A project with no
-  snapshot answers HTTP 404.
-- POST /hierarchy/gate-threshold (MH-2): the real
-  gates.set_verification_threshold; stores one project's milestone
-  verification threshold param. A bad id or threshold refuses with
-  HTTP 400.
-- POST /hierarchy/gate-verdict (MH-2): the real
-  gates.decide_gated_verdict; a score at or above the threshold
-  records a real gate PASS, while a below-threshold milestone cannot
-  PASS and answers HTTP 409 carrying correction (first attempt) or
-  escalation (repeats).
 """
 
 from __future__ import annotations
@@ -903,108 +882,6 @@ def register_hierarchy_routes(app: Any) -> Any:
                 "decisions_before": before, "decisions_after": after,
                 "surfaced": outcome.reason}
 
-    @app.post("/hierarchy/project-disk-write")
-    async def post_project_disk_write(request: Request) -> dict[str, Any]:
-        """K02NEXT6 LIVE0B-03: write one created project to disk."""
-        from agent_si.backend.orchestration import hierarchy as _k02n6_disk
-
-        _write_guard(request)
-        data = await _json_body(request)
-        try:
-            saved = _k02n6_disk.save_project_snapshot(
-                data.get("store_dir"), data.get("project_id"),
-                data.get("snapshot"))
-        except _k02n6_disk.SnapshotError as err:
-            raise HTTPException(
-                status_code=400,
-                detail={"code": "SNAPSHOT_REFUSED",
-                        "message": str(err)}) from None
-        return {"saved": saved["saved"], "project_id": saved["project_id"],
-                "file": saved["file"], "saved_at": saved["saved_at"]}
-
-    @app.get("/hierarchy/project-disk-read")
-    def get_project_disk_read(
-        project_id: str = "", store_dir: str = ""
-    ) -> dict[str, Any]:
-        """K02NEXT6 LIVE0B-03: read one created project back from disk."""
-        from agent_si.backend.orchestration import hierarchy as _k02n6_disk
-
-        try:
-            found = _k02n6_disk.load_project_snapshot(store_dir, project_id)
-        except _k02n6_disk.SnapshotMissing as err:
-            raise HTTPException(
-                status_code=404,
-                detail={"code": "SNAPSHOT_NOT_FOUND",
-                        "message": str(err)}) from None
-        except _k02n6_disk.SnapshotError as err:
-            raise HTTPException(
-                status_code=400,
-                detail={"code": "SNAPSHOT_REFUSED",
-                        "message": str(err)}) from None
-        return {"project_id": found["project_id"],
-                "snapshot": found["snapshot"],
-                "saved_at": found["saved_at"]}
-
-    @app.post("/hierarchy/gate-threshold")
-    async def post_gate_threshold(request: Request) -> dict[str, Any]:
-        """K02NEXT6 MH-2: store one project's verification threshold."""
-        from agent_si.backend.orchestration import gates as _k02n6_gates
-
-        _write_guard(request)
-        data = await _json_body(request)
-        try:
-            threshold = _k02n6_gates.set_verification_threshold(
-                data.get("project_id"), data.get("threshold"))
-        except _k02n6_gates.ThresholdRefused as err:
-            raise HTTPException(
-                status_code=400,
-                detail={"code": "THRESHOLD_REFUSED",
-                        "message": str(err)}) from None
-        project_id = data.get("project_id")
-        clean_project = (project_id.strip() if isinstance(project_id, str)
-                         else project_id)
-        return {"project_id": clean_project, "threshold": threshold}
-
-    @app.post("/hierarchy/gate-verdict")
-    async def post_gate_verdict(request: Request) -> dict[str, Any]:
-        """K02NEXT6 MH-2: threshold-gated milestone verdict."""
-        from agent_si.backend.orchestration import gates as _k02n6_gates
-
-        _write_guard(request)
-        data = await _json_body(request)
-        try:
-            decided = _k02n6_gates.decide_gated_verdict(
-                data.get("project_id"), data.get("part_id"),
-                data.get("score"))
-        except _k02n6_gates.ThresholdRefused as err:
-            raise HTTPException(
-                status_code=400,
-                detail={"code": "THRESHOLD_REFUSED",
-                        "message": str(err)}) from None
-        if not decided["passed"]:
-            action = decided["action"]
-            part = decided["part_id"]
-            score = decided["score"]
-            threshold = decided["threshold"]
-            raise HTTPException(
-                status_code=409,
-                detail={"code": "VERIFICATION_BELOW_THRESHOLD",
-                        "message": f"score {score} below threshold "
-                                   f"{threshold} for part {part!r}: "
-                                   f"{action}",
-                        "passed": False,
-                        "project_id": decided["project_id"],
-                        "part_id": decided["part_id"],
-                        "score": decided["score"],
-                        "threshold": decided["threshold"],
-                        "action": decided["action"],
-                        "attempt": decided["attempt"]})
-        return {"passed": True, "project_id": decided["project_id"],
-                "part_id": decided["part_id"], "score": decided["score"],
-                "threshold": decided["threshold"],
-                "gate_id": decided["gate_id"],
-                "verdict": decided["verdict"]}
-
     return app
 
 
@@ -1180,7 +1057,6 @@ def register_k02next7_routes(app: Any) -> Any:
                 "loaded": loaded}
 
     return app
-
 
 # K02NEXT8 adds 8 endpoints on 5 rows (additive-only; every path,
 # handler name and orchestration signature above stays unchanged):

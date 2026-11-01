@@ -67,8 +67,14 @@ def register_adapter_transports(adapter_id, usage_transport,
 
 
 def clear_adapter_transports() -> None:
-    """Forget every bound adapter transport (tests and teardown)."""
+    """Forget every bound adapter transport (tests and teardown).
+
+    Tracked default probe-port keys go too: the installed ports are
+    gone, so a later rebind must not mistake a manual registration
+    under one of those keys for a stale default.
+    """
     _TRANSPORTS.clear()
+    _DEFAULT_PROBE_PORT_KEYS.clear()
 
 
 def _default_probe_transport(provider_id, instance_id, chat_transport,
@@ -147,8 +153,9 @@ def probe_usage(adapter_id: str, provider_id: str,
 
     Non-streaming usage is always probed; ``streaming=True`` additionally
     probes the stream channel through the bound stream transport. Unknown
-    adapter ids, or ``streaming=True`` without a bound stream transport,
-    raise ValueError (fail closed).
+    adapter ids, ``streaming=True`` without a bound stream transport, or a
+    provider label that does not match the adapter id raise ValueError
+    (fail closed: probe labels stay exact, never borrowed).
     """
     if not isinstance(adapter_id, str) or not adapter_id:
         raise ValueError("adapter_id must be a non-empty string")
@@ -163,9 +170,16 @@ def probe_usage(adapter_id: str, provider_id: str,
             "streaming probe needs a stream transport for %r" % (adapter_id,)
         )
     if "/" in adapter_id:
+        bound_provider = adapter_id.split("/", 1)[0]
         instance_id = adapter_id.rsplit("/", 1)[-1] or "default"
     else:
+        bound_provider = adapter_id
         instance_id = "default"
+    if bound_provider != provider_id:
+        raise ValueError(
+            "adapter %r is not bound to provider %r "
+            "(probe labels stay exact; bind it server-side first)"
+            % (adapter_id, provider_id))
     return _usage_probe.probe_adapter(
         provider_id,
         instance_id,
@@ -224,8 +238,16 @@ def bind_provider(provider_id, secret_ref, transport, base_url,
 
 
 def clear_provider_bindings() -> None:
-    """Forget every stored provider binding (tests and teardown)."""
+    """Forget every stored provider binding (tests and teardown).
+
+    Installed default probe ports go too: the provider is unbound,
+    so later probes fail closed instead of answering from a stale
+    transport.
+    """
     _BINDINGS.clear()
+    for _key in list(_DEFAULT_PROBE_PORT_KEYS):
+        _TRANSPORTS.pop(_key, None)
+    _DEFAULT_PROBE_PORT_KEYS.clear()
 
 
 def _bound_view(provider_id: str) -> dict:
@@ -306,4 +328,51 @@ __all__ = [
     "clear_provider_bindings",
     "resolve_model",
     "check_provider_health",
+    "bound_provider_ids",
 ]
+
+
+def disconnect_provider(provider_id, instance_id="default"):
+    """Disconnect one provider instance (R-339 Disconnect, adapter side).
+
+    Drops the server-side binding for (provider_id, instance_id) plus
+    the default probe-port entries this module installed for it, so
+    later resolve_model/probe_usage calls fail closed with ValueError.
+    Other bindings and manual probe-port registrations are kept.
+    Disconnecting a never-bound instance is idempotent (removed False).
+    The evidence carries ids only, never secret material.
+    """
+    if not isinstance(provider_id, str) or not provider_id:
+        raise ValueError("provider_id must be a non-empty string")
+    if not isinstance(instance_id, str) or not instance_id:
+        raise ValueError("instance_id must be a non-empty string")
+    removed = _BINDINGS.pop((provider_id, instance_id), None) is not None
+    keys = ["%s/%s" % (provider_id, instance_id)]
+    if instance_id == "default":
+        keys.append(provider_id)
+    removed_ports = []
+    for key in keys:
+        if key in _DEFAULT_PROBE_PORT_KEYS:
+            if _TRANSPORTS.pop(key, None) is not None:
+                removed_ports.append(key)
+            _DEFAULT_PROBE_PORT_KEYS.discard(key)
+    return {
+        "provider_id": provider_id,
+        "instance_id": instance_id,
+        "removed": bool(removed),
+        "probe_ports_removed": removed_ports,
+        "disconnected_at": _utcnow_iso(),
+    }
+
+
+def bound_provider_ids():
+    """List bound provider instances, ids only (HD-PROVIDERS in-lane).
+
+    Read-only view over the server-side bindings: one entry per bound
+    (provider_id, instance_id) pair, sorted, carrying ids only, never
+    secret material or transports. An empty list means nothing is
+    configured and nothing is default; entries appear only through an
+    explicit bind_provider call, never on import.
+    """
+    return [{"provider_id": provider_id, "instance_id": instance_id}
+            for provider_id, instance_id in sorted(_BINDINGS)]

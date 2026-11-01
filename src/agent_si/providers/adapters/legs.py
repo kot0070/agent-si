@@ -156,3 +156,47 @@ def describe_transport(adapter):
             "describe_transport needs a ProviderAdapter",
             "config:adapter")
     return adapter.transport_descriptor()
+
+
+def build_any_api_adapter(model, secret_ref, base_url, transport, *,
+                          instance_id="default", max_retries=0):
+    """Build the generic OpenAI-compatible adapter over a caller base_url.
+
+    [M-R-ANY-API] in-lane route: the one generic adapter takes the
+    caller endpoint explicitly; an empty base_url is refused at build
+    time instead of failing later at invoke. Model and secret-ref rules
+    are enforced by AdapterConfig (the model is never baked in, the ref
+    is mandatory, raw key material is refused). The preset id stays
+    verbatim "openai_compatible": unknown or re-cased ids never reach
+    this builder.
+    """
+    if not isinstance(base_url, str) or not base_url:
+        raise AdapterConfigError(
+            "any-api adapter needs a caller base_url: set base_url "
+            "in configuration",
+            "openai_compatible/%s:config" % (instance_id,))
+    return build_leg("openai_compatible", model, secret_ref,
+                     transport=transport, instance_id=instance_id,
+                     base_url=base_url, max_retries=max_retries)
+
+
+def catalog_providers():
+    """Provider catalog over the generic path: one entry per leg.
+
+    Adapter/service side of the provider catalog (R-339): every
+    provider id the generic adapter layer serves, verbatim, in
+    LEG_IDS order, each with its provider-specific leg mapping
+    (M-P1-23): compat flag, chat path, route params and endpoint
+    hint. Data only: no routing, no secrets, no network.
+    """
+    catalog = []
+    for provider_id in LEG_IDS:
+        descriptor = leg_descriptor(provider_id)
+        catalog.append({
+            "provider_id": descriptor["provider_id"],
+            "openai_compat": descriptor["openai_compat"],
+            "chat_path": descriptor["chat_path"],
+            "route_params": dict(descriptor["route_params"]),
+            "endpoint_hint": descriptor["endpoint_hint"],
+        })
+    return catalog

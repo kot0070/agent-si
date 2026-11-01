@@ -26,7 +26,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Dict, Optional, TYPE_CHECKING, Tuple
 
@@ -545,6 +545,31 @@ def scan_container(service_id: str) -> LeakReport:
     )
 
 
+#: Late-built container verdict row: the frozen ServiceStatus shape plus
+#: the served verdict columns (``verdict``, ``counts``, ``locations``).
+#: Built lazily off the frozen base at call time; the frozen shape itself
+#: never changes. Locations carry names only, never secret values.
+_ContainerCheckStatus = None
+
+
+def _container_status_cls():
+    """Return the container verdict row class (frozen base, plus columns)."""
+    global _ContainerCheckStatus
+    base = _auto_iface().ServiceStatus
+    if _ContainerCheckStatus is None or not issubclass(
+        _ContainerCheckStatus, base
+    ):
+
+        @dataclass(frozen=True)
+        class ContainerCheckStatus(base):
+            verdict: str = ""
+            counts: dict = field(default_factory=dict)
+            locations: tuple = ()
+
+        _ContainerCheckStatus = ContainerCheckStatus
+    return _ContainerCheckStatus
+
+
 def run_check(
     service_id: str,
     check: object,
@@ -614,4 +639,17 @@ def run_check(
         "%s check state %s" % (kind, state),
         (service_id,),
     )
-    return _status_of(service_id)
+    status = _status_of(service_id)
+    if kind == "CONTAINER_READONLY":
+        return _container_status_cls()(
+            service_id=status.service_id,
+            state=status.state,
+            timestamp=status.timestamp,
+            in_use=status.in_use,
+            last_used=status.last_used,
+            last_agent=status.last_agent,
+            verdict=report.verdict,
+            counts={"checked": report.checked, "findings": report.findings},
+            locations=tuple(report.locations),
+        )
+    return status

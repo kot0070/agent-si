@@ -575,3 +575,58 @@ __all__ = [
     "is_compact_english",
     "utc_now",
 ]
+
+
+def serve_team_sizing(data: Mapping[str, Any], actor: str) -> dict[str, Any]:
+    """Serve row R-303: team sized and staffed per block with WHY.
+
+    Sizes the team for block_id through the real hierarchy store and
+    returns the block, member count, roles, and recorded why. Refuses
+    a non-object body, a blank block_id, a missing/non-int
+    subtask_count, or a blank/unknown risk with ValueError (served
+    HTTP 400).
+    """
+    if not isinstance(data, Mapping):
+        raise ValueError("team-sizing body must be an object")
+    block_id = data.get("block_id")
+    if not isinstance(block_id, str) or not block_id.strip():
+        raise ValueError("block_id must be a non-empty string")
+    risk = data.get("risk")
+    if not isinstance(risk, str) or not risk.strip():
+        raise ValueError("risk must be a non-empty string")
+    if "subtask_count" not in data or isinstance(data["subtask_count"], bool):
+        raise ValueError("subtask_count must be an int")
+    subtask_count = data["subtask_count"]
+    if not isinstance(subtask_count, int):
+        raise ValueError("subtask_count must be an int")
+    store = HierarchyConfigStore()
+    sized = store.size_team(block_id.strip(), subtask_count, risk.strip(),
+                            actor if isinstance(actor, str) else "")
+    return {
+        "block_id": sized.block_id,
+        "members": sized.members,
+        "roles": list(sized.roles),
+        "why": sized.why,
+    }
+
+
+def serve_director_control(data: Mapping[str, Any]) -> dict[str, Any]:
+    """Serve row M-P1-42: control-plane-only Director; no live default.
+
+    Body {"director"}; accepts an explicit Director ref and returns it
+    with the control-plane map (every target names serving code) and
+    the live runtime (always None). Raises ValueError on a non-object
+    body or a non-string ref (served HTTP 400); raises
+    DirectorControlOnly for a missing, blank, or provisional ref.
+    """
+    if not isinstance(data, Mapping):
+        raise ValueError("director control body must be an object")
+    ref = data.get("director")
+    if not isinstance(ref, str):
+        raise ValueError("director must be a string ref")
+    accepted = require_explicit_director(ref)
+    return {
+        "director": accepted,
+        "control_plane": control_plane_map(),
+        "live_runtime": DIRECTOR_RUNTIME,
+    }

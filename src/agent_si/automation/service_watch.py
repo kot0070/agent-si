@@ -8,12 +8,13 @@ notification. It never starts or stops external services.
 
 from __future__ import annotations
 
+import importlib
 import os
 import shutil
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from agent_si.automation import service_status
 
@@ -43,7 +44,15 @@ def _utcnow() -> str:
         .replace("+00:00", "Z")
     )
 
-__all__ = ("ServiceWatchSummary", "tick", "reset_baseline", "probe_disk")
+__all__ = (
+    "ServiceWatchSummary",
+    "ServiceUsageItem",
+    "ServiceUsageRecord",
+    "tick",
+    "service_usage_record",
+    "reset_baseline",
+    "probe_disk",
+)
 
 #: Free-bytes floor for the observe-only disk probe: a volume holding fewer
 #: free bytes than this reads as not-ok and journals once per call.
@@ -59,6 +68,7 @@ class ServiceWatchSummary:
     changed: Tuple[str, ...] = ()
     journal_entry_ids: Tuple[str, ...] = ()
     checked_at: str = ""
+    usage: Optional[ServiceUsageRecord] = None
 
 
 #: Last notified state per (project_id, service_id): notification baseline.
@@ -100,6 +110,80 @@ def tick(project_id: str) -> ServiceWatchSummary:
         checked=checked,
         changed=tuple(changed),
         journal_entry_ids=tuple(entry_ids),
+        checked_at=_utcnow(),
+        usage=service_usage_record(project_id),
+    )
+
+
+@dataclass(frozen=True)
+class ServiceUsageItem:
+    """One service usage row: stored dispatch plus egress metadata."""
+
+    service_id: str
+    in_use: bool = False
+    last_used: str = ""
+    last_agent: str = ""
+
+
+@dataclass(frozen=True)
+class ServiceUsageRecord:
+    """Per-service usage plus leak scan plus refusals, facts only."""
+
+    project_id: str
+    services: Tuple[ServiceUsageItem, ...] = ()
+    leak_verdict: str = "CLEAN"
+    leak_checked: int = 0
+    leak_findings: int = 0
+    refused: Tuple[str, ...] = ()
+    checked_at: str = ""
+
+
+def service_usage_record(project_id: str) -> ServiceUsageRecord:
+    """Serve per-service usage with leak scan and refusals, read-only.
+
+    Usage (in_use / last_used / last_agent) comes from stored dispatch
+    plus egress metadata through service_status.get, never from probes.
+    The leak scan runs read-only over each declared container service
+    descriptor; protected services are listed as refused without
+    probing. No probes, no journal writes, no invented numbers.
+    """
+    # Late bind so the frozen contract resolves at call time,
+    # mirroring engine.service_usage.
+    importlib.import_module("agent_si.automation.interface")
+    key = str(project_id)
+    # Same-lane stored-fact read (no probe, no write): the declared
+    # kind plus protected flag set the leak scope and the refused list.
+    registry = getattr(service_status, "_SERVICES", {})
+    if not isinstance(registry, dict):
+        registry = {}
+    items = []
+    refused = []
+    checked = 0
+    findings = 0
+    for service_id in service_status.services_for_project(key):
+        status = service_status.get(service_id)
+        items.append(ServiceUsageItem(
+            service_id=str(service_id),
+            in_use=bool(status.in_use),
+            last_used=str(status.last_used),
+            last_agent=str(status.last_agent),
+        ))
+        declared = registry.get(service_id)
+        if not isinstance(declared, dict):
+            continue
+        if bool(declared.get("protected", False)):
+            refused.append(str(service_id))
+        if str(declared.get("kind", "")) == "container":
+            report = service_status.scan_container(service_id)
+            checked += int(report.checked)
+            findings += int(report.findings)
+    return ServiceUsageRecord(
+        project_id=key,
+        services=tuple(items),
+        leak_verdict="FINDINGS" if findings else "CLEAN",
+        leak_checked=checked,
+        leak_findings=findings,
+        refused=tuple(refused),
         checked_at=_utcnow(),
     )
 

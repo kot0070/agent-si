@@ -728,3 +728,404 @@ def test_w04_bind_without_transport_fails_closed():
         facades_mod.clear_provider_bindings()
 
 
+# K04REST served proofs (CODER-1 Adapters): one served test per row
+# UI_DELTA-33/4/17/30/31/228 over the owned adapter surface (base.py,
+# usage_probe.py). Each proof boots the served app (create_app +
+# TestClient, memory secret store) for the served leg, then drives the
+# owned surface with test-injected fake transports. Fakes live only in
+# these tests (K06 rule); product code carries no fakes.
+
+def _served_client(tmp_path):
+    """Boot the served app for a K04REST adapter proof (served leg)."""
+    import os as _os
+
+    _os.environ["AGENT_SI_SECRET_STORE"] = "memory"
+    from agent_si.backend.app import create_app
+    import fastapi.testclient as _ftc
+
+    app = create_app({"store_dir": str(tmp_path),
+                      "secret_store": "memory"},
+                     auth_hook=None, rate_hook=None, model_factory=None)
+    return _ftc.TestClient(app)
+
+
+def _served_baseline(client):
+    """The served app answers its provider matrix read (served proof leg)."""
+    resp = client.get("/api/v1/providers")
+    assert resp.status_code == 200, resp.text
+    return resp
+
+
+# [UI_DELTA-33]-part: SecretRef exactness + verbatim ids, served.
+def test_k04rest_adapt_33(tmp_path):
+    client = _served_client(tmp_path)
+    _served_baseline(client)
+    ref = make_secret_ref(secret_id="K04R-33", provider_id="OpenAI")
+    assert set(ref) == set(base_mod.SECRET_REF_FIELDS)
+    over = dict(ref)
+    over["nickname"] = "not-a-20A-field"
+    with pytest.raises(AdapterConfigError):
+        AdapterConfig(
+            provider_id="OpenAI", instance_id="I-33", model="MiXeD-33",
+            secret_ref=over, base_url="https://s33.example/v1")
+    config = AdapterConfig(
+        provider_id="OpenAI", instance_id="I-33", model="MiXeD-33",
+        secret_ref=ref, base_url="https://s33.example/v1")
+    seen = []
+
+    # FAKE-OF: agent_si.providers.adapters.base (transport port)
+    def respond(request):
+        seen.append(dict(request))
+        return _stop_response(request)
+
+    response = OpenAICompatAdapter(config, FakeTransport(respond)).invoke(
+        [{"role": "user", "content": "hi"}])
+    assert response.model == "MiXeD-33"
+    assert seen[0]["model"] == "MiXeD-33"
+    assert seen[0]["secret_ref"] == ref
+    assert "value" not in seen[0]["secret_ref"]
+
+
+# [UI_DELTA-4]-part: typed 5xx/timeout failures carry error_ref, served.
+def test_k04rest_adapt_4(tmp_path):
+    client = _served_client(tmp_path)
+    _served_baseline(client)
+
+    # FAKE-OF: agent_si.providers.adapters.base (TransportHttpError signal)
+    def http_5xx(request):
+        raise TransportHttpError(503, "service unavailable")
+
+    with pytest.raises(ProviderHttpError) as http_exc:
+        OpenAICompatAdapter(_config(), FakeTransport(http_5xx)).invoke(
+            [{"role": "user", "content": "hi"}])
+    assert http_exc.value.status == 503
+    assert isinstance(http_exc.value.error_ref, str)
+    assert "openai" in http_exc.value.error_ref
+
+    # FAKE-OF: agent_si.providers.adapters.base (builtin timeout signal)
+    def net_timeout(request):
+        raise TimeoutError("timed out")
+
+    with pytest.raises(ProviderTimeoutError) as timeout_exc:
+        OpenAICompatAdapter(_config(), FakeTransport(net_timeout)).invoke(
+            [{"role": "user", "content": "hi"}])
+    assert isinstance(timeout_exc.value.error_ref, str)
+    assert "openai" in timeout_exc.value.error_ref
+
+
+# [UI_DELTA-17]-part: max_retries=0 single-attempt, served.
+def test_k04rest_adapt_17(tmp_path):
+    client = _served_client(tmp_path)
+    _served_baseline(client)
+    assert AdapterConfig(
+        provider_id="openai", model="m",
+        secret_ref=_secret()).max_retries == 0
+    with pytest.raises(AdapterConfigError):
+        AdapterConfig(
+            provider_id="openai", model="m", secret_ref=_secret(),
+            max_retries=2)
+    calls = []
+
+    # FAKE-OF: agent_si.providers.adapters.base (TransportHttpError signal)
+    def http_5xx(request):
+        calls.append(dict(request))
+        raise TransportHttpError(503, "service unavailable")
+
+    adapter = OpenAICompatAdapter(_config(), FakeTransport(http_5xx))
+    assert adapter.config.max_retries == 0
+    with pytest.raises(ProviderHttpError):
+        adapter.invoke([{"role": "user", "content": "hi"}])
+    assert len(calls) == 1
+
+
+# [UI_DELTA-30]-part: full usage probe reports VERIFIED, served.
+def test_k04rest_adapt_30(tmp_path):
+    client = _served_client(tmp_path)
+    _served_baseline(client)
+    full = {"input_tokens": 10, "output_tokens": 5,
+            "cached_tokens": 2, "reasoning_tokens": 0}
+    capability = probe_mod.probe_adapter(
+        "openai", "test-instance",
+        _usage_transport(full),
+        stream_transport=_usage_transport(full),
+        evidence_ref="ev-30")
+    assert capability["state"] == "VERIFIED"
+    assert capability["input_tokens"] == 10
+    assert capability["output_tokens"] == 5
+    assert capability["cached_tokens"] == 2
+    assert capability["reasoning_tokens"] == 0
+    assert capability["raw_usage"] == full
+    assert capability["stream_usage"] == full
+    assert capability["evidence_ref"] == "ev-30"
+    assert capability["verified_at"]
+    assert set(capability) == set(probe_mod.USAGE_CAPABILITY_FIELDS)
+
+
+# [UI_DELTA-31]-part: partial usage reports PARTIAL + UNAVAILABLE, served.
+def test_k04rest_adapt_31(tmp_path):
+    client = _served_client(tmp_path)
+    _served_baseline(client)
+    capability = probe_mod.probe_usage(
+        "openai", "test-instance", _usage_transport({"input_tokens": 12}))
+    assert capability["state"] == "PARTIAL"
+    assert capability["input_tokens"] == 12
+    assert capability["output_tokens"] == UNAVAILABLE
+    assert capability["cached_tokens"] == UNAVAILABLE
+    assert capability["reasoning_tokens"] == UNAVAILABLE
+    stream = probe_mod.probe_stream_usage(
+        "openai", "test-instance", _usage_transport({"output_tokens": 5}))
+    assert stream["stream_state"] == "PARTIAL"
+    assert stream["stream_usage"]["output_tokens"] == 5
+    assert stream["stream_usage"]["input_tokens"] == UNAVAILABLE
+
+
+# [UI_DELTA-228]-part: streaming usage probed separately, served.
+def test_k04rest_adapt_228(tmp_path):
+    client = _served_client(tmp_path)
+    _served_baseline(client)
+    full = {"input_tokens": 10, "output_tokens": 5,
+            "cached_tokens": 0, "reasoning_tokens": 0}
+    usage_calls = []
+
+    # FAKE-OF: agent_si.providers.adapters.usage_probe (usage transport port)
+    def usage_reply(request):
+        usage_calls.append(dict(request))
+        return {"usage": dict(full), "raw": dict(full), "raw_safe": True}
+
+    stream_calls = []
+
+    # FAKE-OF: agent_si.providers.adapters.usage_probe (stream transport port)
+    def stream_reply(request):
+        stream_calls.append(dict(request))
+        return {"usage": dict(full), "raw": dict(full), "raw_safe": True}
+
+    combined = probe_mod.probe_adapter(
+        "openai", "test-instance", usage_reply,
+        stream_transport=stream_reply)
+    assert combined["state"] == "VERIFIED"
+    assert combined["stream_usage"] == full
+    assert len(usage_calls) == 1 and usage_calls[0]["stream"] is False
+    assert len(stream_calls) == 1 and stream_calls[0]["stream"] is True
+    unstreamed = probe_mod.probe_adapter(
+        "openai", "test-instance", usage_reply)
+    assert unstreamed["stream_usage"] == UNAVAILABLE
+
+
+# K04NEXT M2 CODER-1 Adapters: served proofs for rows 42, 43, R-305, R-306,
+# R-307 over the owned adapter surface. Each boots the served app (served
+# leg) then drives the owned surface with test-injected fakes only (K06
+# rule); product carries no fakes.
+
+# [row-42]-part: no baked-in vendor default; fresh install blocks w/ reason.
+def test_row42_fresh_install_no_default_vendor_blocks_with_reason(tmp_path):
+    client = _served_client(tmp_path)
+    resp = client.get("/api/v1/providers")
+    assert resp.status_code == 200, resp.text
+    rows = resp.json().get("providers", [])
+    assert rows == []
+    models = client.get("/api/v1/providers/openai/models")
+    assert models.status_code == 404, models.text
+    assert "unknown provider" in models.json()["error"]
+    facades_mod.clear_adapter_transports()
+    facades_mod.clear_provider_bindings()
+    try:
+        with pytest.raises(ValueError, match="unbound provider"):
+            facades_mod.resolve_model("openai", "Fresh-Model-1")
+        with pytest.raises(ValueError, match="unbound provider"):
+            facades_mod.check_provider_health("openai", "Fresh-Model-1")
+        empty_secret = dict(_secret("openai"))
+        empty_secret["secret_id"] = ""
+        with pytest.raises(AdapterConfigError):
+            AdapterConfig(
+                provider_id="openai", model="m", secret_ref=empty_secret,
+                base_url="https://row42.example/v1")
+        with pytest.raises(AdapterConfigError):
+            AdapterConfig(
+                provider_id="openai", model="m",
+                secret_ref=_secret("openai"),
+                base_url="https://row42.example/v1", instance_id="")
+    finally:
+        facades_mod.clear_adapter_transports()
+        facades_mod.clear_provider_bindings()
+
+
+# [row-43]-part: pinned config frozen; swaps only via the recorded path.
+def test_row43_pinned_swap_only_through_recorded_path(tmp_path):
+    import dataclasses
+
+    client = _served_client(tmp_path)
+    _served_baseline(client)
+    config = _config()
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        config.model = "Swapped-Model-9"
+    transport = FakeTransport(_stop_response)
+    adapter = OpenAICompatAdapter(config, transport)
+    response = adapter.invoke([{"role": "user", "content": "hi"}],
+                              params={"model": "Override-Model-2"})
+    assert response.model == "Override-Model-2"
+    assert response.to_record()["model"] == "Override-Model-2"
+    assert transport.requests[0]["model"] == "Override-Model-2"
+    assert config.model == "Exact-Model_Id-7"
+    facades_mod.clear_adapter_transports()
+    facades_mod.clear_provider_bindings()
+    try:
+        first = facades_mod.bind_provider(
+            "openai", {"secret_id": "s-43", "provider_id": "openai"},
+            transport, "https://one.example/v1")
+        assert first["evidence_ref"] == "binding:openai/default"
+        assert first["bound_at"]
+        second = facades_mod.bind_provider(
+            "openai", {"secret_id": "s-43", "provider_id": "openai"},
+            transport, "https://two.example/v1")
+        assert second["evidence_ref"] == "binding:openai/default"
+        assert second["bound_at"]
+        resolved = facades_mod.resolve_model("openai", "Pinned-43")
+        assert resolved["provider_id"] == "openai"
+        assert resolved["model_id"] == "Pinned-43"
+        assert resolved["fields"]["endpoint"] == "https://two.example/v1"
+        assert resolved["fields"]["evidence_ref"] == "binding:openai/default"
+        assert "value" not in resolved["fields"]
+    finally:
+        facades_mod.clear_adapter_transports()
+        facades_mod.clear_provider_bindings()
+
+
+# [R-305]-part: exact assigned model id; visible allow-list; labels exact.
+def test_r305_exact_model_visible_allowlist_exact_labels(tmp_path):
+    client = _served_client(tmp_path)
+    _served_baseline(client)
+    with pytest.raises(AdapterConfigError) as excinfo:
+        leg_descriptor("OPENAI")
+    message = str(excinfo.value)
+    for allowed in ("openai", "anthropic", "ollama", "lm_studio"):
+        assert allowed in message
+    facades_mod.clear_adapter_transports()
+    facades_mod.clear_provider_bindings()
+    try:
+        facades_mod.bind_provider(
+            "openai", {"secret_id": "s-305", "provider_id": "openai"},
+            _RecordingChatTransport(_FULL_CHAT_USAGE),
+            "https://api.example/v1")
+        resolved = facades_mod.resolve_model("openai", "MiXeD-305_Model")
+        assert resolved["provider_id"] == "openai"
+        assert resolved["model_id"] == "MiXeD-305_Model"
+        assert resolved["fields"]["instance_id"] == "default"
+        capability = facades_mod.probe_usage("openai/default", "openai",
+                                             False)
+        assert capability["provider_id"] == "openai"
+        assert capability["instance_id"] == "default"
+        assert capability["state"] == "VERIFIED"
+        assert capability["input_tokens"] == 10
+        with pytest.raises(ValueError, match="not bound to provider"):
+            facades_mod.probe_usage("openai/default", "anthropic", False)
+    finally:
+        facades_mod.clear_adapter_transports()
+        facades_mod.clear_provider_bindings()
+
+
+# [R-306]-part: mixed-provider hierarchy acceptance mini-drive.
+def test_r306_mixed_provider_hierarchy_minidrive(tmp_path):
+    import dataclasses
+
+    client = _served_client(tmp_path)
+    _served_baseline(client)
+    facades_mod.clear_adapter_transports()
+    facades_mod.clear_provider_bindings()
+    try:
+        plan = (("openai", True), ("anthropic", False), ("ollama", True))
+        records = []
+        for provider_id, compat in plan:
+            secret = _secret(provider_id)
+            assert secret["secret_id"]
+            kwargs = {}
+            base_url = "https://r306.example/v1"
+            if provider_id == "ollama":
+                base_url = None
+            if compat:
+                kwargs["transport"] = FakeTransport(_stop_response)
+            else:
+                kwargs["litellm_call"] = FakeTransport(_stop_response)
+            adapter = build_leg(provider_id, model="R306-%s" % provider_id,
+                                secret_ref=secret, base_url=base_url,
+                                **kwargs)
+            with pytest.raises(dataclasses.FrozenInstanceError):
+                adapter.config.model = "Swapped"
+            response = adapter.invoke([{"role": "user", "content": "hi"}])
+            record = response.to_record()
+            assert record["provider_id"] == provider_id
+            assert record["model"] == "R306-%s" % provider_id
+            assert record["mock"] is False
+            records.append(record)
+        mock_adapter = MockProviderAdapter(
+            AdapterConfig(provider_id="mock", instance_id="r306",
+                          model="R306-mock", secret_ref=_secret("mock")))
+        assert mock_adapter.serves(key_supplied=False) is True
+        assert mock_adapter.serves(key_supplied=True) is False
+        mock_record = mock_adapter.invoke(
+            [{"role": "user", "content": "hi"}]).to_record()
+        assert mock_record["provider_id"] == "mock"
+        assert mock_record["mock"] is True
+        records.append(mock_record)
+        assert [item["provider_id"] for item in records] == [
+            "openai", "anthropic", "ollama", "mock"]
+        assert [item["model"] for item in records] == [
+            "R306-openai", "R306-anthropic", "R306-ollama", "R306-mock"]
+        for provider_id in ("openai", "anthropic", "ollama"):
+            facades_mod.bind_provider(
+                provider_id,
+                {"secret_id": "s-306", "provider_id": provider_id},
+                FakeTransport(_stop_response),
+                "https://r306.example/v1")
+        resolved = facades_mod.resolve_model("ollama", "R306-ollama")
+        assert resolved["model_id"] == "R306-ollama"
+        assert resolved["fields"]["instance_id"] == "default"
+        assert resolved["fields"]["secret_id"] == "s-306"
+        health = facades_mod.check_provider_health("openai", "R306-openai")
+        assert health["model_id"] == "R306-openai"
+        assert health["usage"]["state"] == "PARTIAL"
+        with pytest.raises(ValueError):
+            facades_mod.check_provider_health("anthropic", "R306-anthropic")
+    finally:
+        facades_mod.clear_adapter_transports()
+        facades_mod.clear_provider_bindings()
+
+
+# [R-307]-part: providers verified on distinct levels, never conflated.
+def test_r307_providers_verified_on_distinct_levels(tmp_path):
+    client = _served_client(tmp_path)
+    _served_baseline(client)
+    facades_mod.clear_adapter_transports()
+    facades_mod.clear_provider_bindings()
+    try:
+        full = {"input_tokens": 10, "output_tokens": 5,
+                "cached_tokens": 2, "reasoning_tokens": 0}
+        facades_mod.bind_provider(
+            "openai", {"secret_id": "s-307", "provider_id": "openai"},
+            _RecordingChatTransport(full), "https://api.example/v1")
+        verified = facades_mod.probe_usage("openai/default", "openai",
+                                           False)
+        assert verified["provider_id"] == "openai"
+        assert verified["instance_id"] == "default"
+        assert verified["state"] == "VERIFIED"
+        assert verified["input_tokens"] == 10
+        assert verified["stream_usage"] == UNAVAILABLE
+        with pytest.raises(ValueError, match="not bound to provider"):
+            facades_mod.probe_usage("openai/default", "groq", False)
+
+        # FAKE-OF: agent_si.providers.adapters.facades (unsupported port)
+        def unsupported(request):
+            raise TransportUnsupportedError("no usage")
+
+        facades_mod.register_adapter_transports(
+            "groq", FakeTransport(unsupported))
+        groq = facades_mod.probe_usage("groq", "groq", False)
+        assert groq["provider_id"] == "groq"
+        assert groq["state"] == "UNSUPPORTED"
+        assert groq["input_tokens"] == UNAVAILABLE
+        with pytest.raises(ValueError):
+            facades_mod.probe_usage("no-such-adapter", "groq", False)
+    finally:
+        facades_mod.clear_adapter_transports()
+        facades_mod.clear_provider_bindings()
+
+

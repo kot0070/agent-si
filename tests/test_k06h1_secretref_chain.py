@@ -299,3 +299,358 @@ def test_20b_secret_ref_outputs_hold_no_raw_bytes():
     )
     assert result["ok"] is True
     assert RAW_SECRET not in repr(result)
+
+
+# --- K06REST CODER-1: chat seam served proofs (loopback TEST data only) ---
+#
+# Row map (lane task): 253/189/254 secretref via secretscan;
+# R-313/R-315 chat adapter; R-365 chat stream guard. Every test below
+# drives a served route (create_app + TestClient) or the real belt seam;
+# every raw value is made inside the test, never a real credential.
+
+K06REST_TOKEN = "k06rest-coder1-loopback-token"
+K06REST_ACTOR = "tester-k06rest-coder1"
+
+# Tests-only raw stand-ins. Never real credentials. K06REST_RAW keeps the
+# documented scanner shape (contiguous key material, no separator inside).
+K06REST_RAW = "sk-K06RESTTESTONLY12345678"
+K06REST_RAW_TWO = "AKIAK06RESTTESTONLY1234"
+
+
+def _k06rest_settings():
+    return {"testing": True, "ui_session_token": K06REST_TOKEN}
+
+
+def _k06rest_headers():
+    return {"x-actor": K06REST_ACTOR, "x-ui-session-token": K06REST_TOKEN}
+
+
+def _k06rest_client(monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+
+    from agent_si.backend.app import create_app
+
+    monkeypatch.setenv(
+        "AGENT_SI_SESSION_STORE", str(tmp_path / "k06rest-sessions"))
+    monkeypatch.setenv("AGENT_SI_SECRET_STORE", "memory")
+    app = create_app(_k06rest_settings())
+    return app, TestClient(app)
+
+
+def test_k06rest_189_contract_texts_served_secretref_only(
+        monkeypatch, tmp_path) -> None:
+    """Row 189 via GET /api/v1/k06/script-contract: texts carry secretRef."""
+    _, client = _k06rest_client(monkeypatch, tmp_path)
+    resp = client.get("/api/v1/k06/script-contract")
+    assert resp.status_code == 200, resp.text
+    payload = resp.json()
+    joined = "\n".join(
+        [payload["contract_text"], payload["template_text"],
+         payload["instruction_text"]])
+    assert "secretRef" in joined
+    assert "AKIA" not in joined and "sk-live-" not in joined
+
+
+def test_k06rest_253_acceptance_run_filed_and_listed(
+        monkeypatch, tmp_path) -> None:
+    """Row 253 via POST+GET /api/v1/k06/services/acceptance: run filed."""
+    _, client = _k06rest_client(monkeypatch, tmp_path)
+    resp = client.post(
+        "/api/v1/k06/services/acceptance",
+        json={
+            "service": "status",
+            "argv": ["status"],
+            "action_class": "R0",
+            "auth": {"subject": "worker", "task": "k06rest-task"},
+        },
+        headers=_k06rest_headers(),
+    )
+    assert resp.status_code == 200, resp.text
+    run = resp.json()
+    assert run["run_id"].startswith("acceptance-")
+    assert run["ok"] is True
+    assert run["evidence_refs"]
+    listed = client.get("/api/v1/k06/services/acceptance")
+    assert listed.status_code == 200, listed.text
+    assert any(
+        r["run_id"] == run["run_id"] for r in listed.json()["runs"])
+
+
+def test_k06rest_253_raw_secret_auth_refused_and_unfiled(
+        monkeypatch, tmp_path) -> None:
+    """Row 253 secretref guard: raw auth refused (400), nothing filed."""
+    _, client = _k06rest_client(monkeypatch, tmp_path)
+    resp = client.post(
+        "/api/v1/k06/services/acceptance",
+        json={
+            "service": "status",
+            "argv": ["status"],
+            "action_class": "R0",
+            "auth": {"subject": "worker", "task": "k06rest-task",
+                     "api_token": K06REST_RAW},
+        },
+        headers=_k06rest_headers(),
+    )
+    assert resp.status_code == 400, resp.text
+    assert K06REST_RAW not in resp.text
+    listed = client.get("/api/v1/k06/services/acceptance")
+    assert listed.json()["runs"] == []
+
+
+def test_k06rest_254_install_record_view_names_unknown(
+        monkeypatch, tmp_path) -> None:
+    """Row 254 via POST+GET /api/v1/k06/installs: view names unknown."""
+    _, client = _k06rest_client(monkeypatch, tmp_path)
+    resp = client.post(
+        "/api/v1/k06/installs",
+        json={
+            "tool": "ruff",
+            "version": "0.8.0",
+            "status": "granted",
+            "source": "install-ask",
+            "verified": True,
+        },
+        headers=_k06rest_headers(),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["tool"] == "ruff"
+    view = client.get("/api/v1/k06/installs", params={"tool": "ruff"})
+    assert view.status_code == 200, view.text
+    assert view.json()["records"][0]["version"] == "0.8.0"
+    unknown = client.get("/api/v1/k06/installs", params={"tool": "nope"})
+    assert unknown.status_code == 200, unknown.text
+    assert unknown.json()["records"] == []
+    assert unknown.json()["unknown_tool"] == "nope"
+
+
+def test_k06rest_secretref_scan_blocks_raw_served(
+        monkeypatch, tmp_path) -> None:
+    """Rows 253/189/254 via POST /api/v1/submission/scan: raw blocked."""
+    from agent_si.backend import secretscan as k06rest_secretscan
+
+    _, client = _k06rest_client(monkeypatch, tmp_path)
+    blocked = client.post(
+        "/api/v1/submission/scan",
+        json={"files": [{"path": "a.txt",
+                         "content": "key " + K06REST_RAW}]},
+        headers=_k06rest_headers(),
+    )
+    assert blocked.status_code == 200, blocked.text
+    body = blocked.json()
+    assert body["ok"] is False
+    assert body["findings"]
+    assert body["findings"][0]["code"] == "SECRET_DETECTED"
+    assert K06REST_RAW not in repr(body["findings"])
+    clean = client.post(
+        "/api/v1/submission/scan",
+        json={"files": [{"path": "a.txt", "content": "nothing here"}]},
+        headers=_k06rest_headers(),
+    )
+    assert clean.status_code == 200, clean.text
+    assert clean.json() == {"ok": True, "findings": []}
+    assert k06rest_secretscan.scan_files(
+        [{"path": "a.txt", "content": "nothing here"}]) == []
+
+
+def test_k06rest_r313_approval_card_roundtrip_and_restart(
+        monkeypatch, tmp_path) -> None:
+    """R-313 via POST /asks + approve + GET /sessions after restart."""
+    from fastapi.testclient import TestClient
+
+    from agent_si.backend.app import create_app
+
+    _, client = _k06rest_client(monkeypatch, tmp_path)
+    created = client.post(
+        "/asks",
+        json={
+            "kind": "approval",
+            "summary": "Approve the lane demo plan?",
+            "options": [{"option_id": "yes", "label": "Yes"},
+                        {"option_id": "no", "label": "No"}],
+        },
+        headers=_k06rest_headers(),
+    )
+    assert created.status_code == 200, created.text
+    card = created.json()
+    assert card["kind"] == "approval"
+    assert [o["option_id"] for o in card["options"]] == ["yes", "no"]
+    decided = client.post(
+        "/asks/" + card["ask_id"] + "/approve",
+        json={"option_id": "yes", "resume_token": card["resume_token"]},
+        headers=_k06rest_headers(),
+    )
+    assert decided.status_code == 200, decided.text
+    assert decided.json()["approved_option_id"] == "yes"
+    forged = client.post(
+        "/asks/" + card["ask_id"] + "/approve",
+        json={"option_id": "yes",
+              "resume_token": "resume-forged-k06rest-test-only"},
+        headers=_k06rest_headers(),
+    )
+    assert forged.status_code in (401, 403)
+    restarted = TestClient(create_app(_k06rest_settings()))
+    sessions = restarted.get("/sessions")
+    assert sessions.status_code == 200, sessions.text
+    assert card["ask_id"] in [
+        s["session_id"] for s in sessions.json()["sessions"]]
+
+
+def test_k06rest_r313_secret_ref_card_never_echoes_value(
+        monkeypatch, tmp_path) -> None:
+    """R-313 secretref: approval payload carries refs, never values."""
+    _, client = _k06rest_client(monkeypatch, tmp_path)
+    created = client.post(
+        "/asks",
+        json={
+            "kind": "approval",
+            "summary": "Needs a secret?",
+            "options": [{"option_id": "y", "label": "Y"}],
+            "secret_ref": "ref-k06rest-only",
+        },
+        headers=_k06rest_headers(),
+    )
+    assert created.status_code == 200, created.text
+    assert set(created.json().keys()) == {
+        "ask_id", "kind", "summary", "options", "resume_token"}
+
+
+def test_k06rest_r315_chat_tool_runs_via_belt_and_refuses_raw() -> None:
+    """R-315 via chat_adapter.run_chat_tool through the real belt.
+
+    Fail-closed refusal for raw-secret auth is the documented
+    E_BAD_AUTH dict (services/commands.py refuses before the guard
+    runs), never a success value and never a tool execution.
+    """
+    import agent_si.backend.chat_adapter as k06rest_chat_adapter
+    from agent_si.worker_tools.registry import ToolRegistry
+
+    calls: list = []
+
+    class _K06RestStatusEntryPoint:
+        name = "status"
+        action_class = "R0"
+
+        def load(self):
+            def _impl(argv, action_class, auth):
+                calls.append((list(argv), action_class, dict(auth)))
+                return {"ok": True, "argv": list(argv),
+                        "action_class": action_class, "pid": 4242,
+                        "output": {"words": list(argv)}}
+
+            return _impl
+
+    registry = ToolRegistry()
+    registry.register(_K06RestStatusEntryPoint())
+    auth = {"subject": "worker", "task": "k06rest-task",
+            "contract": "contract-k06rest"}
+    via = k06rest_chat_adapter.run_chat_tool(
+        ["status"], "R0", auth, registry=registry)
+    assert via["ok"] is True
+    assert isinstance(via["pid"], int) and via["pid"] > 0
+    assert len(calls) == 1
+    raw_auth = dict(auth)
+    raw_auth["api_token"] = K06REST_RAW_TWO
+    refused = k06rest_chat_adapter.run_chat_tool(
+        ["status"], "R0", raw_auth, registry=registry)
+    assert refused == {"error": "E_BAD_AUTH"}
+    assert K06REST_RAW_TWO not in repr(refused)
+    assert len(calls) == 1
+
+
+def test_k06rest_r365_stream_guards_and_dispatch_refused() -> None:
+    """R-365 via POST /api/v1/chat/stream guards plus dispatch guard."""
+    import os as k06rest_os
+
+    import pytest as k06rest_pytest
+
+    from agent_si.backend.chat_stream import build_bridge
+    from agent_si.backend.orchestration.graph import (
+        AgentTask,
+        DispatchRejected,
+        SubtaskGraph,
+    )
+    from agent_si.providers.adapters.base import (
+        AdapterConfig,
+        make_secret_ref,
+    )
+    from agent_si.providers.adapters.mock_provider import (
+        MockProviderAdapter,
+    )
+
+    k06rest_os.environ["AGENT_SI_SECRET_STORE"] = "memory"
+    from fastapi.testclient import TestClient
+
+    from agent_si.backend.app import create_app
+
+    client = TestClient(create_app(_k06rest_settings()))
+    assert client.post(
+        "/api/v1/chat/stream", json={"message": "hi"}).status_code == 401
+    assert client.post(
+        "/api/v1/chat/stream", json={"message": "   "},
+        headers=_k06rest_headers()).status_code == 400
+    absent = client.post(
+        "/api/v1/chat/stream", json={"message": "hi"},
+        headers=_k06rest_headers())
+    assert absent.status_code == 404
+    assert absent.json()["detail"]["code"] == "MANAGER_STREAM_ABSENT"
+    mock = MockProviderAdapter(
+        AdapterConfig(
+            provider_id="mock", instance_id="k06rest-365",
+            model="mock-canned",
+            secret_ref=make_secret_ref(
+                secret_id="mock-secret", provider_id="mock")),
+        transport=None, canned=("Mock reply one.",))
+    bridge = build_bridge(provider_adapter=mock)
+    from agent_si.backend.chat_stream import ChatStreamRequest
+
+    request = ChatStreamRequest.from_body(
+        {"message": "hello"}, K06REST_ACTOR)
+    bare = AgentTask(
+        agent_task_id="agent-task-1", subtask_id="", agent_id="agent-1",
+        contract_hash="hash-1")
+    with k06rest_pytest.raises(DispatchRejected):
+        bridge.run(request, agent_task=bare, graph=SubtaskGraph())
+    assert mock.turns_served == 0
+
+
+def test_k06rest_r365_mock_stream_carries_refs_never_values(
+        monkeypatch, tmp_path) -> None:
+    """R-365 via POST /api/v1/chat/stream: refs in, never values out."""
+    from agent_si.backend.orchestration import steplimits as k06rest_limits
+    from agent_si.providers.adapters.base import (
+        AdapterConfig,
+        make_secret_ref,
+    )
+    from agent_si.providers.adapters.mock_provider import (
+        MockProviderAdapter,
+    )
+
+    k06rest_limits._reset_state()
+    try:
+        k06rest_limits.apply_steplimit_config_change({
+            "project_id": "proj-k06rest-365",
+            "authority": "k06rest-coder1",
+            "reason": "served stream proof",
+            "task_max_steps": 10,
+            "chat_max_steps": 10,
+        })
+        app, client = _k06rest_client(monkeypatch, tmp_path)
+        app.state.chat_provider_adapter = MockProviderAdapter(
+            AdapterConfig(
+                provider_id="mock", instance_id="k06rest-365",
+                model="mock-canned",
+                secret_ref=make_secret_ref(
+                    secret_id="mock-secret", provider_id="mock")),
+            transport=None, canned=("Mock reply one.",))
+        resp = client.post(
+            "/api/v1/chat/stream",
+            json={"project": "proj-k06rest-365", "task": "t-k06rest",
+                  "message": "hello", "secret_refs": [K06REST_RAW]},
+            headers=_k06rest_headers(),
+        )
+        assert resp.status_code == 200, resp.text
+        assert "text/event-stream" in resp.headers.get("content-type", "")
+        assert K06REST_RAW not in resp.text
+        assert '"done"' in resp.text
+    finally:
+        k06rest_limits._reset_state()

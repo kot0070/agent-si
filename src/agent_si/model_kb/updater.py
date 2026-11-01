@@ -27,6 +27,7 @@ KB_SOURCE_ALLOWLIST = (
     "https://docs.x.ai",
     "https://ollama.com/docs",
     "https://lmstudio.ai/docs",
+    "https://dev.meta.ai/docs",
 )
 
 
@@ -217,6 +218,25 @@ def attach_metric_by_usage_ref(store, usage_ref, record):
     return record, True
 
 
+def find_leftover_keys(store):
+    """List credential-store entry names only, never values.
+
+    Safe leftover finder for the key-delete proof: returns the sorted
+    entry names so a caller can show an entry is gone without ever
+    reading a secret value. A store that cannot be listed reads
+    as empty.
+    """
+    try:
+        names = list(store)
+    except Exception:
+        return []
+    found = []
+    for name in names:
+        if isinstance(name, str) and name and name not in found:
+            found.append(name)
+    return sorted(found)
+
+
 def new_snapshot_version(snapshot, pricing_snapshot_id, created_at,
                          **overrides):
     """Corrections arrive as a new immutable snapshot version (ARCH-424).
@@ -341,4 +361,5 @@ __all__ = ["KB_SOURCE_ALLOWLIST", "KBUpdateError",
            "KB_PROPOSAL_NOT_APPROVED", "MetricWriteError", "MetricState",
            "fetch_source", "propose_update", "validate_proposal",
            "write_metric_record", "attach_metric_by_usage_ref",
+           "find_leftover_keys",
            "new_snapshot_version", "compute_cost", "apply_proposal"]

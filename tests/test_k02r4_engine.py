@@ -271,3 +271,125 @@ def test_subtaskless_agent_task_never_executes_at_boundary():
     with pytest.raises(DispatchRejected):
         bridge.run(request, agent_task=bare, graph=planned)
     assert mock.turns_served == 0
+
+
+# -- K02NEXT2 CODER-B served proof (orchestration rows) ----------------------
+
+_K02NEXT2_PROJ = "proj-k02next2-b"
+
+
+def test_k02next2_row_m_p1_28_routine_handoff_switch_and_record():
+    from agent_si.backend.orchestration import offload as offload_mod
+
+    offload_mod._reset_state()
+    try:
+        project = _K02NEXT2_PROJ + "-p1-28"
+        assert offload_mod.routine_offload_enabled(project) is False
+        with pytest.raises(offload_mod.OffloadDisabled):
+            offload_mod.serve_routine_handoff(
+                {"project_id": project, "routine": "nightly-docs"})
+        assert offload_mod.handovers_for(project) == []
+        switched = offload_mod.switch(project, True)
+        assert switched == {
+            "project_id": project, "routine_offload_enabled": True}
+        handed = offload_mod.serve_routine_handoff(
+            {"project_id": project, "routine": "nightly-docs"})
+        assert handed["project_id"] == project
+        assert handed["routine"] == "nightly-docs"
+        assert handed["by"] == "manager"
+        assert offload_mod.handovers_for(project) == [
+            {"routine": "nightly-docs",
+             "at": handed["at"], "by": "manager"}]
+        with pytest.raises(ValueError):
+            offload_mod.serve_routine_handoff(
+                {"project_id": project, "routine": "   "})
+        with pytest.raises(ValueError):
+            offload_mod.serve_routine_handoff({"project_id": project})
+        with pytest.raises(ValueError):
+            offload_mod.serve_routine_handoff(["not-a-mapping"])
+    finally:
+        offload_mod._reset_state()
+
+
+def test_k02next2_row_m_p1_33_audit_model_strong_only_when_needed():
+    from agent_si.backend.orchestration import teamcard as teamcard_mod
+
+    before = len(teamcard_mod.AUDIT_CHOICE_LOG)
+    try:
+        strong = teamcard_mod.serve_audit_model_choice(
+            {"part_id": "part-high", "risk": "high"})
+        assert strong["strength"] == "strong"
+        assert strong["part_id"] == "part-high"
+        assert strong["logged"] == before + 1
+        standard = teamcard_mod.serve_audit_model_choice(
+            {"part_id": "part-low", "risk": "low"})
+        assert standard["strength"] == "standard"
+        assert standard["logged"] == before + 2
+        assert teamcard_mod.AUDIT_CHOICE_LOG[before].part_id == "part-high"
+        assert teamcard_mod.AUDIT_CHOICE_LOG[before].strength == "strong"
+        assert teamcard_mod.AUDIT_CHOICE_LOG[before + 1].strength == "standard"
+        with pytest.raises(ValueError):
+            teamcard_mod.serve_audit_model_choice(
+                {"part_id": "  ", "risk": "high"})
+        with pytest.raises(ValueError):
+            teamcard_mod.serve_audit_model_choice({"part_id": "part-x"})
+        with pytest.raises(ValueError):
+            teamcard_mod.serve_audit_model_choice("not-a-mapping")
+    finally:
+        del teamcard_mod.AUDIT_CHOICE_LOG[before:]
+
+
+def test_k02next2_row_m_p1_42_no_provisional_director_default():
+    from agent_si.backend.orchestration import graph as graph_mod
+
+    assert graph_mod.DIRECTOR_RUNTIME is None
+    served = graph_mod.serve_director_control(
+        {"director": "director:explicit-1"})
+    assert served["director"] == "director:explicit-1"
+    assert served["live_runtime"] is None
+    assert served["control_plane"]["director.route"] == "graph.route_task"
+    for target in served["control_plane"].values():
+        assert "." in target
+    with pytest.raises(graph_mod.DirectorControlOnly):
+        graph_mod.serve_director_control({"director": "provisional"})
+    with pytest.raises(graph_mod.DirectorControlOnly):
+        graph_mod.serve_director_control({"director": "   "})
+    with pytest.raises(ValueError):
+        graph_mod.serve_director_control({"director": 7})
+    with pytest.raises(ValueError):
+        graph_mod.serve_director_control(["not-a-mapping"])
+
+
+def test_k02next2_row_m_d_d13_worker_inputs_shared_and_authorized_only():
+    from agent_si.backend.orchestration import split as split_mod
+    from agent_si.backend.orchestration import teamcard as teamcard_mod
+
+    listed = "ARTIFACT_REF:pkg-d13/shared-a"
+    served = split_mod.serve_worker_inputs({
+        "worker_id": "worker-1",
+        "authorized_refs": [listed, "artifact://pkg-d13/shared-b"],
+        "requested_refs": [
+            listed,
+            "artifact://pkg-d13/shared-b",
+            "artifact://pkg-d13/not-listed",
+        ],
+    })
+    assert served["worker_id"] == "worker-1"
+    assert served["context"] == teamcard_mod.worker_context() == {}
+    assert served["inputs"] == [
+        listed, "artifact://pkg-d13/shared-b"]
+    assert "artifact://pkg-d13/not-listed" not in served["inputs"]
+    with pytest.raises(ValueError):
+        split_mod.serve_worker_inputs({
+            "worker_id": "worker-1",
+            "authorized_refs": [listed],
+            "requested_refs": ["raw-inline-secret"],
+        })
+    with pytest.raises(ValueError):
+        split_mod.serve_worker_inputs({
+            "worker_id": "  ",
+            "authorized_refs": [],
+            "requested_refs": [],
+        })
+    with pytest.raises(ValueError):
+        split_mod.serve_worker_inputs("not-a-mapping")

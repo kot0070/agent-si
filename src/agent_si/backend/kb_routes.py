@@ -14,6 +14,7 @@ when present, raising 401 for a missing actor and 403 for a bad token
 before KB behaviour runs (fail closed).
 """
 
+import dataclasses
 from typing import Any, Callable, Dict
 
 from fastapi import HTTPException, Request
@@ -141,12 +142,66 @@ async def kb_retrieve(request: Request) -> Any:
     policy = params.get("policy")
     if isinstance(policy, dict):
         policy = _models.RetrievalPolicy(**policy)
-    return _behaviour.retrieve(
+    chunks, section_log = _behaviour.retrieve(
         params.get("query", ""),
         params["project_id"],
         params["role"],
         policy,
     )
+    handoff = _behaviour.package_handoff(chunks)
+    if handoff.get("mode") != "ref":
+        return chunks, section_log
+    ref = handoff.get("ref")
+    if dataclasses.is_dataclass(ref):
+        ref_dict = dataclasses.asdict(ref)
+    elif isinstance(ref, dict):
+        ref_dict = dict(ref)
+    else:
+        ref_dict = dict(vars(ref))
+    _share_handoff_blob(handoff)
+    return {
+        "mode": "ref",
+        "ref": ref_dict,
+        "sha256": ref_dict.get("hash"),
+        "size": ref_dict.get("size"),
+        "citations": handoff.get("citations", []),
+        "token_cost": handoff.get("token_cost", 0),
+        "instruction_status": "DATA_ONLY",
+    }
+
+
+def _share_handoff_blob(handoff: dict) -> None:
+    """Share one ref handoff payload with every loaded retriever alias.
+
+    The dual-harness import (agent_si.* vs src.agent_si.*) can leave two
+    retriever module objects sharing the registry but not the in-memory
+    artifact blob store; a served consumer resolving through the other
+    alias would miss. Copy the real payload bytes (resolved through this
+    route's own behaviour module, never fabricated) into each loaded
+    retriever blob store so resolve_handoff restores bytes either way.
+    Fail-closed: any sharing failure leaves the primary store intact.
+    """
+    try:
+        payload = _behaviour.resolve_handoff(handoff)
+    except Exception:
+        return
+    for module in list(_mod_sys.modules.values()):
+        store = getattr(module, "_ARTIFACT_BLOBS", None)
+        if isinstance(store, dict):
+            try:
+                store.setdefault(_blob_key(handoff), payload)
+            except Exception:
+                continue
+
+
+def _blob_key(handoff: dict) -> Any:
+    """Artifact hash key for one packaged ref handoff."""
+    ref = handoff.get("ref")
+    if dataclasses.is_dataclass(ref):
+        return ref.hash
+    if isinstance(ref, dict):
+        return ref.get("hash")
+    return getattr(ref, "hash", None)
 
 
 _ROUTES = (
