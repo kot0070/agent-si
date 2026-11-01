@@ -1,16 +1,17 @@
-/* provenance: authored for FXSHELL1 (app-shell real look); token-only rules. */
-/* Shape: chat-first app shell. The app root becomes a two-column grid with
-   the single top bar on top, the short nav as one left column and the routed
-   content beside it; the inspector takes its own full-width row underneath.
-   :has() keeps the rule on the app root (WebView2 Chromium OK). */
+/* provenance: authored for FXSHELL1 (app-shell real look) + FXLAYOUT (Claude-desktop 3-col); token-only rules. */
+/* Shape: chat-first app shell. The app root becomes a three-column grid
+   with the single top bar on top, the short nav as one left column, the
+   routed content in the centre and the compact cards as one right column;
+   each column scrolls on its own. :has() keeps the rule on the app root
+   (WebView2 Chromium OK). */
 div[data-testid="app-shell"]:has(> nav[data-testid="sidebar"]) {
   display: grid;
-  grid-template-columns: 224px minmax(0, 1fr);
+  grid-template-columns: 240px minmax(0, 1fr) 320px;
   grid-template-areas:
-    "topbar topbar"
-    "sidebar main"
-    "inspector inspector";
+    "topbar topbar topbar"
+    "sidebar main inspector";
   column-gap: 16px;
+  row-gap: 8px;
   align-items: start;
 }
 
@@ -25,6 +26,8 @@ nav[data-testid="sidebar"] {
   flex-wrap: nowrap;
   align-items: stretch;
   min-width: 0;
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
   border-right: 1px solid var(--agent-si-card-border);
   padding-right: 16px;
 }
@@ -39,17 +42,29 @@ nav[data-testid="sidebar"] a {
 main[data-testid="app-main"] {
   grid-area: main;
   min-width: 0;
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
 }
 
 aside[data-testid="inspector"] {
   grid-area: inspector;
   min-width: 0;
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
 }
 
-/* Top bar: one strip; labels keep at least an 8px gap in both axes. */
+/* Top bar: one strip; children share one even gap in both axes. */
 .fx-topbar {
-  gap: 8px 16px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
   border-bottom: 1px solid var(--agent-si-card-border);
+}
+
+/* The panels button only matters on narrow viewports. */
+.fx-panels-btn {
+  display: none;
 }
 
 /* Native controls take a token fill so neither theme shows browser defaults. */
@@ -61,18 +76,52 @@ aside[data-testid="inspector"] {
   border-radius: 6px;
 }
 
-/* Narrow viewports (phones): shrink the sidebar track and gaps and let
-   the composer input fill its column, so track + gap + content fit 375px
-   with no horizontal scroll while the nav stays left of the content.
-   Lengths only, no colours. */
-@media (max-width: 640px) {
+/* Inspector cards: compact sections with a one-line subtitle. */
+div[data-testid^="inspector-card-"] > p[data-testid$="-sub"] {
+  opacity: 0.8;
+  font-size: 12px;
+}
+
+/* Narrower desktops: keep three columns with slimmer side tracks and no
+   page horizontal scroll. Lengths only, no colours. */
+@media (max-width: 1100px) {
   div[data-testid="app-shell"]:has(> nav[data-testid="sidebar"]) {
-    grid-template-columns: 160px minmax(0, 1fr);
-    column-gap: 8px;
+    grid-template-columns: 200px minmax(0, 1fr) 260px;
+    column-gap: 12px;
   }
 
   nav[data-testid="sidebar"] {
-    padding-right: 8px;
+    padding-right: 12px;
+  }
+}
+
+/* Small screens: the main column goes full width; nav and cards collapse
+   behind the top-bar panels button and open as stacked sections. */
+@media (max-width: 800px) {
+  div[data-testid="app-shell"]:has(> nav[data-testid="sidebar"]) {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "topbar"
+      "sidebar"
+      "main"
+      "inspector";
+  }
+
+  .fx-panels-btn {
+    display: inline-block;
+  }
+
+  nav[data-testid="sidebar"],
+  aside[data-testid="inspector"] {
+    display: none;
+    max-height: none;
+    border-right: none;
+    padding-right: 0;
+  }
+
+  div[data-testid="app-shell"].fx-panels-open > nav[data-testid="sidebar"],
+  div[data-testid="app-shell"].fx-panels-open > aside[data-testid="inspector"] {
+    display: block;
   }
 
   main[data-testid="app-main"] input {

@@ -120,34 +120,47 @@ describe("top bar", () => {
       </ApiClientProvider>,
     );
     expect(await screen.findByTestId("chat-prompt")).toBeTruthy();
-    const before = screen.getByTestId("menu-chat").textContent;
+    const before = screen.getByTestId("menu-new-task").textContent;
     fireEvent.change(screen.getByTestId("topbar-language"), {
       target: { value: "uk" },
     });
     await waitFor(() => {
-      expect(screen.getByTestId("menu-chat").textContent).not.toBe(before);
+      expect(screen.getByTestId("menu-new-task").textContent).not.toBe(before);
     });
-    expect(screen.getByTestId("menu-chat").textContent).toBe(
-      t("shell.sidebar.chat"),
+    expect(screen.getByTestId("menu-new-task").textContent).toBe(
+      t("tasks.creator.title"),
     );
     expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBe("uk");
   });
 });
 
 describe("sidebar", () => {
-  it("shows every named menu with locale labels", async () => {
+  it("shows exactly the four Claude-desktop entries with locale labels", async () => {
     renderShell(<Sidebar projectId="p-1" />);
+    const sidebar = screen.getByTestId("sidebar");
+    const anchors = Array.from(sidebar.querySelectorAll("a"));
+    expect(
+      anchors.map((anchor) => anchor.getAttribute("data-testid")).sort(),
+    ).toEqual(
+      ["menu-new-task", "menu-projects", "menu-results", "menu-settings"].sort(),
+    );
     const menus: Array<[string, string]> = [
-      ["menu-chat", "shell.sidebar.chat"],
-      ["menu-agents-live", "shell.sidebar.agents_live"],
+      ["menu-new-task", "tasks.creator.title"],
       ["menu-projects", "shell.sidebar.projects"],
-      ["menu-tasks", "shell.sidebar.tasks"],
       ["menu-results", "projects.reports.title"],
-      ["menu-settings", "settings.general.title"],
+      ["menu-settings", "shell.sidebar.settings"],
     ];
     for (const [testId, key] of menus) {
       expect((await screen.findByTestId(testId)).textContent).toBe(t(key));
     }
+  });
+
+  it("hints at the project list when no project is selected", async () => {
+    renderShell(<Sidebar projectId={null} />);
+    expect(await screen.findByTestId("menu-results-hint")).toBeTruthy();
+    expect(screen.getByTestId("menu-results").getAttribute("href")).toBe(
+      "/projects",
+    );
   });
 
   it("routes results to the current project reports view", async () => {
@@ -169,22 +182,38 @@ describe("sidebar", () => {
 });
 
 describe("inspector", () => {
-  it("renders the live agents tab with the provided content", async () => {
+  it("renders five live cards plus six collapsed cards with the team content", async () => {
     renderShell(
       <Inspector
         projectId="p-1"
         live={<span data-testid="live-probe">live content</span>}
       />,
     );
-    expect(screen.getByTestId("inspector-tab-live").textContent).toBe(
-      t("shell.inspector.live_agents"),
-    );
+    for (const card of [
+      "inspector-card-team",
+      "inspector-card-context",
+      "inspector-card-results",
+      "inspector-card-background",
+      "inspector-card-watcher",
+    ]) {
+      expect(await screen.findByTestId(card)).toBeTruthy();
+    }
     expect(await screen.findByTestId("live-probe")).toBeTruthy();
+    for (const card of [
+      "fx-tokens",
+      "fx-tests",
+      "fx-budget",
+      "fx-providers",
+      "fx-localai",
+      "fx-apps",
+    ]) {
+      expect(await screen.findByTestId(`kit-metric-${card}`)).toBeTruthy();
+    }
     const scroll = screen.getByTestId("inspector-scroll");
     expect(scroll.style.overflowY).toBe("auto");
   });
 
-  it("mounts live agents through the app inspector", async () => {
+  it("mounts live agents through the app inspector team card", async () => {
     const inspectorRouter = createMemoryRouter(
       [{ path: "*", element: <App /> }],
       { initialEntries: ["/"] },
@@ -195,7 +224,7 @@ describe("inspector", () => {
       </ApiClientProvider>,
     );
     expect(await screen.findByTestId("chat-prompt")).toBeTruthy();
-    expect(await screen.findByTestId("inspector-tab-live")).toBeTruthy();
+    expect(await screen.findByTestId("inspector-card-team")).toBeTruthy();
     const badges = await screen.findAllByTestId("agent-badge-LOCAL");
     expect(badges.length).toBeGreaterThanOrEqual(1);
   });

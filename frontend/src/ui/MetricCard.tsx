@@ -1,5 +1,6 @@
-// Lane A MetricCard component: collapsed one-line summary, expanded
-// stacked bar plus legend plus short lists.
+// FXLAYOUT MetricCard component: collapsed one-line summary, expanded
+// stacked bar plus legend plus short lists. The subtitle plus value texts
+// are optional: without them the card renders exactly the kit default.
 
 import type { ReactElement } from "react";
 import type { MetricCardProps } from "./iface";
@@ -12,10 +13,23 @@ const CHART_VARS = [
   "var(--agent-si-chart-c)",
 ];
 
-export function MetricCard(props: MetricCardProps): ReactElement {
+export interface MetricCardExtras {
+  subtitleKey?: string;
+  totalText?: string;
+  segmentTexts?: Record<string, string>;
+}
+
+export function MetricCard(
+  props: MetricCardProps & MetricCardExtras,
+): ReactElement {
   const title = t(props.titleKey);
-  const total = t(props.totalKey);
+  const total = props.totalText ?? t(props.totalKey);
   const [expanded, toggle] = useKitExpanded(props.collapsed, props.onToggle);
+  const segmentLabel = (segmentKey: string): string => {
+    const label = t(segmentKey);
+    const value = props.segmentTexts?.[segmentKey];
+    return value === undefined || value === "" ? label : `${label} ${value}`;
+  };
   return (
     <section
       data-testid={`kit-metric-${props.cardId}`}
@@ -35,6 +49,9 @@ export function MetricCard(props: MetricCardProps): ReactElement {
       >
         {title}
       </button>
+      {props.subtitleKey === undefined ? null : (
+        <p data-testid={`kit-sub-${props.cardId}`}>{t(props.subtitleKey)}</p>
+      )}
       {expanded ? (
         <div>
           <span>{total}</span>
@@ -54,12 +71,16 @@ export function MetricCard(props: MetricCardProps): ReactElement {
           </div>
           <div data-testid="kit-expanded-legend">
             {props.segments.map((segment) => (
-              <span key={segment.segmentKey}>{t(segment.segmentKey)}</span>
+              <span key={segment.segmentKey}>
+                {segmentLabel(segment.segmentKey)}
+              </span>
             ))}
           </div>
           <ul data-testid="kit-expanded-list">
             {props.segments.map((segment) => (
-              <li key={segment.segmentKey}>{t(segment.segmentKey)}</li>
+              <li key={segment.segmentKey}>
+                {segmentLabel(segment.segmentKey)}
+              </li>
             ))}
           </ul>
         </div>
