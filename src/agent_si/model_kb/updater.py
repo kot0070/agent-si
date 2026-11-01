@@ -103,58 +103,157 @@ def _parse_models_document(fetched_text):
     return document["models"], ""
 
 
-def propose_update(catalog, source_url, fetched_text, retrieved_at):
-    """Build a schema-checked proposal diff; the catalog is not touched."""
+def _classify_field(known_rows, entry, provider_id, model_id, name,
+                    value, source, retrieved_at):
+    """Sort one (row, field, value) triple: change, added, skip, reject.
+
+    Pairs outside the base stage as added-row fields (the connected-row
+    update path); unknown field names are rejected; values already on
+    file are skipped. Never raises, never invents a price.
+    """
+    if name not in kb.ROW_FIELD_NAMES:
+        return ("rejected", {"entry": entry,
+                             "reason": "unknown field %r" % (name,)})
+    row = known_rows.get((provider_id, model_id))
+    if row is None:
+        return ("added", {"provider_id": provider_id,
+                          "model_id": model_id,
+                          "field": name,
+                          "new": value,
+                          "source": source,
+                          "retrieved_at": retrieved_at})
+    try:
+        old = row["fields"][name]["value"]
+    except (KeyError, TypeError):
+        old = kb.UNKNOWN
+    if old == value:
+        return ("skipped", None)
+    return ("changed", {"provider_id": provider_id,
+                        "model_id": model_id,
+                        "field": name,
+                        "old": old,
+                        "new": value,
+                        "source": source,
+                        "retrieved_at": retrieved_at})
+
+
+def _build_proposal(catalog, items, source_url, retrieved_at):
+    """Assemble a proposal from normalized field items (data only).
+
+    items carry (entry, provider_id, model_id, field, new, source,
+    retrieved_at) tuples. Unknown pairs group into "added" row drafts
+    (one per pair, full sourced-field mapping); the catalog is untouched.
+    """
     changes = []
     reasons = []
-    entries, problem = _parse_models_document(fetched_text)
-    if entries is None:
-        return {"source_url": source_url, "retrieved_at": retrieved_at,
-                "changes": [], "rejected": [],
-                "reasons": [problem]}
     rejected = []
+    added_by_pair = {}
+    added_order = []
     known_rows = {(row.get("provider_id"), row.get("model_id")): row
                   for row in catalog.get("models", [])
                   if isinstance(row, dict)}
+    for item in items:
+        entry, provider_id, model_id, name, value, source, stamp = item
+        kind, staged = _classify_field(
+            known_rows, entry, provider_id, model_id, name, value,
+            source, stamp)
+        if kind == "changed":
+            changes.append(staged)
+        elif kind == "added":
+            pair = (provider_id, model_id)
+            if pair not in added_by_pair:
+                added_by_pair[pair] = {
+                    "provider_id": provider_id,
+                    "model_id": model_id,
+                    "fields": {},
+                    "source": source_url,
+                    "retrieved_at": retrieved_at}
+                added_order.append(pair)
+            added_by_pair[pair]["fields"][name] = {
+                "value": value,
+                "source": source,
+                "retrieved_at": stamp}
+        elif kind == "rejected":
+            rejected.append(staged)
+    added = [added_by_pair[pair] for pair in added_order]
+    if not changes and not added:
+        reasons.append("no schema-valid field changes in fetched data")
+    for item in rejected:
+        reasons.append(str(item))
+    return {"source_url": source_url, "retrieved_at": retrieved_at,
+            "changes": changes, "added": added,
+            "rejected": rejected, "reasons": reasons}
+
+
+def propose_update(catalog, source_url, fetched_text, retrieved_at):
+    """Build a schema-checked proposal diff; the catalog is not touched.
+
+    Entries for pairs outside the base stage as added rows (the
+    connected-row update path) instead of rejecting; malformed entries
+    and unknown field names are still rejected.
+    """
+    entries, problem = _parse_models_document(fetched_text)
+    if entries is None:
+        return {"source_url": source_url, "retrieved_at": retrieved_at,
+                "changes": [], "added": [], "rejected": [],
+                "reasons": [problem]}
+    items = []
+    pending_rejected = []
     for entry in entries:
         if not isinstance(entry, dict):
-            rejected.append({"entry": entry,
-                             "reason": "entry is not a dict"})
+            pending_rejected.append({"entry": entry,
+                                     "reason": "entry is not a dict"})
             continue
         provider_id = entry.get("provider_id")
         model_id = entry.get("model_id")
         fields = entry.get("fields")
         if not provider_id or not model_id or not isinstance(fields, dict):
-            rejected.append({"entry": entry, "reason":
-                             "entry needs provider_id, model_id, fields"})
-            continue
-        row = known_rows.get((provider_id, model_id))
-        if row is None:
-            rejected.append({"entry": entry, "reason":
-                             "row %s/%s is not in the base"
-                             % (provider_id, model_id)})
+            pending_rejected.append({"entry": entry, "reason":
+                                     "entry needs provider_id, model_id, "
+                                     "fields"})
             continue
         for name, value in fields.items():
-            if name not in kb.ROW_FIELD_NAMES:
-                rejected.append({"entry": entry, "reason":
-                                 "unknown field %r" % (name,)})
-                continue
-            old = row["fields"][name]["value"]
-            if old == value:
-                continue
-            changes.append({"provider_id": provider_id,
-                            "model_id": model_id,
-                            "field": name,
-                            "old": old,
-                            "new": value,
-                            "source": source_url,
-                            "retrieved_at": retrieved_at})
-    if not changes:
-        reasons.append("no schema-valid field changes in fetched data")
-    for item in rejected:
-        reasons.append(str(item))
-    return {"source_url": source_url, "retrieved_at": retrieved_at,
-            "changes": changes, "rejected": rejected, "reasons": reasons}
+            items.append((entry, provider_id, model_id, name, value,
+                          source_url, retrieved_at))
+    proposal = _build_proposal(catalog, items, source_url, retrieved_at)
+    for item in pending_rejected:
+        proposal["rejected"].append(item)
+        proposal["reasons"].append(str(item))
+    return proposal
+
+
+def propose_from_field_data(catalog, entries, source_url, retrieved_at):
+    """Build a proposal from explicit per-field entries (data only).
+
+    entries carry provider_id, model_id and field plus new, with an
+    optional per-entry source plus retrieved_at (each defaulting to the
+    envelope source_url plus retrieved_at). Unknown pairs stage as
+    added rows, so a connected provider missing from the base gains a
+    sourced row; the catalog is not touched.
+    """
+    items = []
+    pending_rejected = []
+    for entry in entries or []:
+        if not isinstance(entry, dict):
+            pending_rejected.append({"entry": entry,
+                                     "reason": "entry is not a dict"})
+            continue
+        provider_id = entry.get("provider_id")
+        model_id = entry.get("model_id")
+        name = entry.get("field")
+        if not provider_id or not model_id or not name:
+            pending_rejected.append({"entry": entry, "reason":
+                                     "entry needs provider_id, model_id, "
+                                     "field"})
+            continue
+        items.append((entry, provider_id, model_id, name, entry.get("new"),
+                      entry.get("source") or source_url,
+                      entry.get("retrieved_at") or retrieved_at))
+    proposal = _build_proposal(catalog, items, source_url, retrieved_at)
+    for item in pending_rejected:
+        proposal["rejected"].append(item)
+        proposal["reasons"].append(str(item))
+    return proposal
 
 
 def validate_proposal(catalog, proposal):
@@ -168,7 +267,10 @@ def validate_proposal(catalog, proposal):
     if not proposal.get("retrieved_at"):
         errors.append("proposal lacks retrieved_at")
     changes = proposal.get("changes")
-    if not isinstance(changes, list) or not changes:
+    added = proposal.get("added", [])
+    if not isinstance(added, list):
+        return errors + ["proposal added rows are not a list"]
+    if (not isinstance(changes, list) or not changes) and not added:
         return errors + ["proposal carries no changes"]
     known_rows = {(row.get("provider_id"), row.get("model_id"))
                   for row in catalog.get("models", [])
@@ -186,6 +288,24 @@ def validate_proposal(catalog, proposal):
                           % (change.get("field"),))
         if not change.get("source") or not change.get("retrieved_at"):
             errors.append("change lacks source or retrieved_at")
+    for item in added:
+        if not isinstance(item, dict):
+            errors.append("added row is not a dict")
+            continue
+        pair = (item.get("provider_id"), item.get("model_id"))
+        if not pair[0] or not pair[1]:
+            errors.append("added row needs provider_id and model_id")
+        fields = item.get("fields")
+        if not isinstance(fields, dict) or not fields:
+            errors.append("added row %s/%s needs a non-empty fields mapping"
+                          % pair)
+            continue
+        for name in fields:
+            if name not in kb.ROW_FIELD_NAMES:
+                errors.append("added row targets unknown field %r" % (name,))
+        if not item.get("source") or not item.get("retrieved_at"):
+            errors.append("added row %s/%s lacks source or retrieved_at"
+                          % pair)
     return errors
 
 
@@ -274,8 +394,85 @@ def compute_cost(cost_calculator, usage, pricing_snapshot):
     return cost_calculator(usage, pricing_snapshot)
 
 
+def _note_source_links(row, source, retrieved_at):
+    """Record one change source on a row's source_links (list-safe).
+
+    Fresh UNKNOWN rows carry a scalar marker, never a list: wrap it
+    instead of splitting it into characters.
+    """
+    if not source:
+        return
+    links = row["fields"]["source_links"]
+    current = links["value"]
+    if isinstance(current, list):
+        values = list(current)
+    elif current == kb.UNKNOWN or current is None:
+        values = []
+    else:
+        values = [current]
+    if source not in values:
+        values.append(source)
+    links["value"] = values
+    links["source"] = source
+    links["retrieved_at"] = retrieved_at
+
+
+def _apply_added(catalog, proposal, providers):
+    """Create (or merge) staged added rows; returns nothing.
+
+    A pair already on file merges its staged fields instead of
+    duplicating the row; staged per-field sources win, falling back to
+    the entry envelope and then the proposal envelope.
+    """
+    index = {}
+    for row in catalog["models"]:
+        if isinstance(row, dict):
+            index[(row.get("provider_id"), row.get("model_id"))] = row
+    for item in proposal.get("added", []) or []:
+        if not isinstance(item, dict):
+            continue
+        provider_id = item.get("provider_id")
+        model_id = item.get("model_id")
+        if not provider_id or not model_id:
+            continue
+        fields = item.get("fields")
+        if not isinstance(fields, dict):
+            fields = {}
+        row = index.get((provider_id, model_id))
+        if row is None:
+            row = kb.make_model_row(provider_id, model_id)
+            catalog["models"].append(row)
+            index[(provider_id, model_id)] = row
+        for name, triple in fields.items():
+            if name not in kb.ROW_FIELD_NAMES:
+                continue
+            if isinstance(triple, dict) and "value" in triple:
+                value = triple.get("value")
+                source = (triple.get("source") or item.get("source")
+                          or proposal.get("source_url"))
+                stamp = (triple.get("retrieved_at")
+                         or item.get("retrieved_at")
+                         or proposal.get("retrieved_at"))
+            else:
+                value = triple
+                source = item.get("source") or proposal.get("source_url")
+                stamp = (item.get("retrieved_at")
+                         or proposal.get("retrieved_at"))
+            row["fields"][name] = {
+                "value": value,
+                "source": source or kb.UNKNOWN,
+                "retrieved_at": stamp or kb.UNKNOWN}
+        _note_source_links(
+            row,
+            item.get("source") or proposal.get("source_url"),
+            item.get("retrieved_at") or proposal.get("retrieved_at"))
+        if provider_id not in providers:
+            providers.append(provider_id)
+
+
 def _apply_changes(catalog, proposal):
     providers = []
+    _apply_added(catalog, proposal, providers)
     for change in proposal["changes"]:
         for row in catalog["models"]:
             if row.get("provider_id") == change["provider_id"] and \
@@ -284,12 +481,8 @@ def _apply_changes(catalog, proposal):
                 field["value"] = change["new"]
                 field["source"] = change["source"]
                 field["retrieved_at"] = change["retrieved_at"]
-                links = row["fields"]["source_links"]
-                if change["source"] not in links["value"]:
-                    links["value"] = list(links["value"]) + [
-                        change["source"]]
-                    links["source"] = change["source"]
-                    links["retrieved_at"] = change["retrieved_at"]
+                _note_source_links(row, change["source"],
+                                   change["retrieved_at"])
         if change["provider_id"] not in providers:
             providers.append(change["provider_id"])
     return sorted(providers)
@@ -337,14 +530,22 @@ def apply_proposal(catalog, proposal, user_confirmed=False,
             metric, _ = attach_metric_by_usage_ref(
                 metric_store, usage_ref, metric)
         cost_state = MetricState.CALCULATED
+    added_rows = [item for item in proposal.get("added", []) or []
+                  if isinstance(item, dict)]
+    if added_rows:
+        summary = ("%d field change(s), %d new row(s)"
+                   % (len(proposal["changes"]), len(added_rows)))
+    else:
+        summary = "%d field change(s)" % len(proposal["changes"])
     updated["version"]["change_log"] = list(
         updated["version"].get("change_log", [])) + [{
             "version": version,
             "at": proposal["retrieved_at"],
-            "summary": "%d field change(s)" % len(proposal["changes"]),
+            "summary": summary,
             "source": proposal["source_url"],
             "providers": providers,
             "changes": copy.deepcopy(proposal["changes"]),
+            "added": copy.deepcopy(added_rows),
             "cost_state": cost_state}]
     check = kb.validate_catalog(updated)
     if check:
@@ -352,7 +553,8 @@ def apply_proposal(catalog, proposal, user_confirmed=False,
             "KB_VALIDATION_FAILED: apply produced an invalid catalog: %s"
             % "; ".join(check))
     return {"catalog": updated, "applied": True, "version": version,
-            "cost_state": cost_state, "metric": metric}
+            "cost_state": cost_state, "metric": metric,
+            "added": len(added_rows)}
 
 
 __all__ = ["KB_SOURCE_ALLOWLIST", "KBUpdateError",
@@ -362,4 +564,5 @@ __all__ = ["KB_SOURCE_ALLOWLIST", "KBUpdateError",
            "fetch_source", "propose_update", "validate_proposal",
            "write_metric_record", "attach_metric_by_usage_ref",
            "find_leftover_keys",
-           "new_snapshot_version", "compute_cost", "apply_proposal"]
+           "new_snapshot_version", "compute_cost", "apply_proposal",
+           "propose_from_field_data"]
