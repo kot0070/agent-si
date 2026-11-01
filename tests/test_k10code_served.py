@@ -356,4 +356,7 @@ def test_k10code_frozen_served_rows_untouched():
         "R-328", "166", "R-343", "165", "167",
         "M-P3-89", "R-345", "M-P4-134", "M-P4-138", "M-P4-162",
     ], rows
-    assert len(rows) == 40, rows
+    assert len(rows) == 42, rows  # K10PH2C appends rows 214 + 215 (advisor decision 31.10, owner-delegated)
+    assert [row["row"] for row in rows[40:]] == [
+        "B0B-UNCOVERED_MVP_ACCEPT-214", "B0B-UNCOVERED_MVP_ACCEPT-215",
+    ], rows
