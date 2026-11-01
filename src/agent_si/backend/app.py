@@ -3545,4 +3545,9 @@ def create_app(settings: Any = None,
             "options": [],
         }
 
+    # --- DEMOF3 auto-hierarchy mount (additions-only) ---
+    from agent_si.backend import routing_auto as _demof3_routing_auto
+
+    _demof3_routing_auto.register_routing_auto_routes(app)
+
     return app
