@@ -304,3 +304,92 @@ def test_bp04_219_rebind_keeps_manual_probe_port():
         assert chat.requests == [], chat.requests
     finally:
         _clear_facades()
+
+
+# D-SPEND-02: live-scale per-1M charge a hard limit refuses fails loud.
+LIVE_SCALE_USAGE = {"input_tokens": 20000000, "output_tokens": 20000000}
+# Per-1M arithmetic at owner 0.1/0.2 prices:
+# (20000000*0.1 + 20000000*0.2)/1e6 = 6000000/1e6 = 6.000000,
+# which exceeds the 5.00 hard limit, so the gate refuses the reserve.
+
+
+def _ok_live_scale_body():
+    return {"choices": [{"message": {"content": CANNED_TEXT},
+                         "finish_reason": "stop"}],
+            "usage": dict(LIVE_SCALE_USAGE)}
+
+
+def _patch_urlopen_live_scale(monkeypatch):
+    def _fake(request, timeout=None):
+        return _FakeResp(_ok_live_scale_body())
+    monkeypatch.setattr(_urlreq, "urlopen", _fake)
+
+
+def test_live_scale_refused_reserve_fails_loud_and_unavailable(
+        tmp_path, monkeypatch, caplog):
+    """D-SPEND-02: live-scale cost above the hard limit fails loud.
+
+    Per-1M arithmetic at owner 0.1/0.2 prices:
+    (20000000*0.1 + 20000000*0.2)/1e6 = 6.000000 > 5.00 hard limit, so
+    compare_and_reserve refuses; the served turn keeps spent unchanged,
+    logs the spend UNRECORDED reserve-refused warning (never a silent
+    0), and the charge marker stays UNAVAILABLE.
+    """
+    import logging as _logging
+
+    _patch_urlopen_live_scale(monkeypatch)
+    from agent_si.model_kb import kb as _kb
+    from agent_si.runtime import manager as _mgr
+    from agent_si.telemetry import run_store as _store
+
+    seed = _kb.bound_catalog()
+    prev_gate = getattr(_mgr, "_BUDGET_GATE", None)
+    prev_dir = _store.bound_store_dir()
+    row = _kb.make_model_row("openai", PRICED_MODEL, fields={
+        "input_token_price": {"value": "0.1", "source": "bind3-test",
+                              "retrieved_at": "2026-10-28"},
+        "output_token_price": {"value": "0.2", "source": "bind3-test",
+                               "retrieved_at": "2026-10-28"},
+    })
+    catalog = _kb.make_catalog([row] + list(seed.get("models", [])),
+                               kb_version=99, updated_at="2026-10-28",
+                               change_log=[], sources=[])
+    _kb.bind_catalog(catalog)
+    try:
+        client, app = _make_client(tmp_path)
+        pid = _create_project(client)
+        _seed_worker(app, pid)
+        _connect(client, "openai", PRICED_MODEL, BAIT)
+        before = _budget_spent(client, pid)
+        caplog.set_level(_logging.WARNING)
+        chat = client.post("/api/v1/chat/stream",
+                           json={"project": pid,
+                                 "message": "hi live scale"},
+                           headers=HEADERS)
+        assert chat.status_code == 200, chat.text
+        assert "NO_PROVIDER_BOUND" not in chat.text, chat.text
+        after = _budget_spent(client, pid)
+        assert after == before, (before, after)
+        refused = [rec for rec in caplog.records
+                   if "UNRECORDED" in rec.getMessage()
+                   and "reserve refused" in rec.getMessage()]
+        assert refused, [rec.getMessage() for rec in caplog.records]
+        marker = _mgr._charge_budget_gate(
+            pid, "openai", PRICED_MODEL, dict(LIVE_SCALE_USAGE),
+            "probe-live-scale")
+        assert marker == "UNAVAILABLE", marker
+        costs = _cost_rows(app)
+        assert costs, "no cost rows recorded"
+        for cost_row in costs:
+            assert cost_row.get("value") != 0, cost_row
+            assert cost_row.get("value") != 0.0, cost_row
+    finally:
+        _kb.bind_catalog(seed)
+        try:
+            _mgr.set_budget_gate(prev_gate)
+        except Exception:
+            pass
+        try:
+            _store.bind_store_dir(prev_dir)
+        except Exception:
+            pass
