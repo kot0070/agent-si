@@ -138,6 +138,30 @@ def _find_pair_reuse(decision_id: str) -> Optional[SourcingDecision]:
     return _PAIR_REUSE.get(decision_id)
 
 
+def _kb_evidence_for(provider_id: str, model: str) -> Tuple[str, ...]:
+    """Staged model-KB capability evidence for one pair, fail-closed.
+
+    FB2B4R (F04): when the candidate store holds no refs for a pair,
+    the bound model-KB catalog is consulted for that exact pair via
+    the kb retriever seam; UNKNOWN-field rows yield no evidence and
+    an unreadable store yields (), never an invented ref.
+    """
+    try:
+        from agent_si.kb import retriever as _kb_retriever
+    except ImportError:
+        try:
+            from src.agent_si.kb import retriever as _kb_retriever
+        except ImportError:
+            return ()
+    try:
+        refs = _kb_retriever.auditor_capability_evidence(
+            provider_id, model
+        )
+    except Exception:
+        return ()
+    return refs if isinstance(refs, tuple) else ()
+
+
 class AuditorRegistry(Protocol):
     """Fail-closed auditor sourcing, independent of implementers (ARCH-740)."""
 
@@ -176,12 +200,19 @@ class AuditorRegistry(Protocol):
         return updated
 
     def is_eligible(self, provider_id: str, model: str) -> bool:
-        """True only with health plus capability evidence on record."""
+        """True only with health plus capability evidence on record.
+
+        FB2B4R (F04): a registered pair with no refs in the candidate
+        store falls back to the staged bound model-KB rows for that
+        exact pair; UNKNOWN rows stay ineligible.
+        """
         candidates = self.__dict__.setdefault("_CANDIDATES", {})
         evidence = self.__dict__.setdefault("_EVIDENCE", {})
         if (provider_id, model) not in candidates:
             return False
-        return len(_evidence_for(provider_id, model, candidates, evidence)) >= 1
+        if _evidence_for(provider_id, model, candidates, evidence):
+            return True
+        return len(_kb_evidence_for(provider_id, model)) >= 1
 
     def check_separate_model(
         self, auditor_model: str, implementer_model_ids: Tuple[str, ...]
@@ -210,7 +241,12 @@ class AuditorRegistry(Protocol):
             raise NoEligibleAuditorError(NO_ELIGIBLE_AUDITOR)
         for key in candidates:
             provider_id, model = key
-            if not _evidence_for(provider_id, model, candidates, evidence):
+            evidenced = _evidence_for(provider_id, model, candidates, evidence)
+            if not evidenced:
+                # FB2B4R (F04): no refs in the candidate store ->
+                # consult the staged bound model-KB rows for the pair.
+                evidenced = _kb_evidence_for(provider_id, model)
+            if not evidenced:
                 continue
             if model in implementer_model_ids:
                 continue
