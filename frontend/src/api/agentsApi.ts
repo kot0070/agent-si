@@ -22,15 +22,50 @@ export const PART_STATUSES: [PartStatus, ...PartStatus[]] = [
 export const PartStatusSchema: z.ZodType<PartStatus> =
   z.enum(PART_STATUSES);
 
-export const PartRowSchema: z.ZodType<PartRow> = z.object({
+const PartRowBase = z.object({
   agent: z.string().min(1),
   scope: z.string().min(1),
   deliverable: z.string().min(1),
   status: PartStatusSchema,
 });
 
+export const PartRowSchema: z.ZodType<PartRow> = PartRowBase;
+
+// FXPANEL append-only live fields: every extra is optional, so rows
+// served before the panel upgrade still parse unchanged.
+export const LiveTokensSchema = z.object({
+  input: z.number().int().nullable().optional(),
+  output: z.number().int().nullable().optional(),
+});
+
+export interface LiveRowExtra {
+  role?: string;
+  model?: string;
+  step?: number;
+  file?: string;
+  cost?: string;
+  tokens?: z.infer<typeof LiveTokensSchema>;
+  context?: string;
+  errors?: string[];
+  waits?: string[];
+}
+
+export type LiveRow = PartRow & LiveRowExtra;
+
+export const LiveRowSchema: z.ZodType<LiveRow> = PartRowBase.extend({
+  role: z.string().optional(),
+  model: z.string().optional(),
+  step: z.number().int().optional(),
+  file: z.string().optional(),
+  cost: z.string().optional(),
+  tokens: LiveTokensSchema.optional(),
+  context: z.string().optional(),
+  errors: z.array(z.string()).optional(),
+  waits: z.array(z.string()).optional(),
+});
+
 const AgentsLiveResponseSchema = z.object({
-  agents: z.array(PartRowSchema),
+  agents: z.array(LiveRowSchema),
 });
 
 export function parseAgentsLive(data: unknown, status = 200): PartRow[] {

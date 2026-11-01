@@ -36,6 +36,39 @@ function readStatusHuman(row: PartRow): unknown {
   return (row as unknown as Record<string, unknown>).status_human;
 }
 
+function readLiveExtra(row: PartRow, name: string): unknown {
+  return (row as unknown as Record<string, unknown>)[name];
+}
+
+function formatLiveText(value: unknown): string {
+  if (value === undefined || value === null || value === "") {
+    return "–";
+  }
+  return String(value);
+}
+
+function formatLiveTokens(value: unknown): string {
+  if (typeof value !== "object" || value === null) {
+    return "–";
+  }
+  const record = value as Record<string, unknown>;
+  const input = record.input;
+  const output = record.output;
+  if (typeof input !== "number" && typeof output !== "number") {
+    return "–";
+  }
+  const left = typeof input === "number" ? String(input) : "–";
+  const right = typeof output === "number" ? String(output) : "–";
+  return `${left}/${right}`;
+}
+
+function formatLiveList(value: unknown): string {
+  if (!Array.isArray(value) || value.length === 0) {
+    return "–";
+  }
+  return value.map((item) => String(item)).join(", ");
+}
+
 export function AgentsLive(props: AgentsLiveProps): ReactElement {
   const client = useApiClient();
   const { locale } = useLocale();
@@ -175,6 +208,45 @@ export function AgentsLive(props: AgentsLiveProps): ReactElement {
                 <span data-testid={`agent-row-place-${row.agent}`}>
                   {t(placementKey(placement))}
                 </span>
+                <div
+                  data-testid={`agent-row-detail-${row.agent}`}
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: "4px 12px",
+                    fontSize: "12px",
+                    opacity: 0.85,
+                  }}
+                >
+                  <span>
+                    {t("settings.roleProfile.roleLabel")}{" "}
+                    {formatLiveText(readLiveExtra(row, "role"))}
+                  </span>
+                  <span>
+                    {t("settings.roleProfile.modelLabel")}{" "}
+                    {formatLiveText(readLiveExtra(row, "model"))}
+                  </span>
+                  <span>step {formatLiveText(readLiveExtra(row, "step"))}</span>
+                  <span>file {formatLiveText(readLiveExtra(row, "file"))}</span>
+                  <span>
+                    {t("telemetry.cost")}{" "}
+                    {formatLiveText(readLiveExtra(row, "cost"))}
+                  </span>
+                  <span>
+                    {t("agents.row.tokens")}{" "}
+                    {formatLiveTokens(readLiveExtra(row, "tokens"))}
+                  </span>
+                  <span>
+                    context {formatLiveText(readLiveExtra(row, "context"))}
+                  </span>
+                  <span>
+                    {t("projects.errors.title")}{" "}
+                    {formatLiveList(readLiveExtra(row, "errors"))}
+                  </span>
+                  <span>
+                    waits {formatLiveList(readLiveExtra(row, "waits"))}
+                  </span>
+                </div>
               </div>
             );
           })}
