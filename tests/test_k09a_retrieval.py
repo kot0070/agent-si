@@ -320,7 +320,6 @@ def test_register_kb_routes_binds_six_kb_paths():
     by_path = {path: method for method, path in app.routes}
     assert by_path["/api/v1/kb/list"] == "GET"
     assert by_path["/api/v1/kb/attach"] == "POST"
-    assert by_path["/api/v1/kb/attach"] == "POST"
     assert by_path["/api/v1/kb/detach"] == "POST"
     assert by_path["/api/v1/kb/manifest"] == "GET"
     assert by_path["/api/v1/kb/section"] == "GET"

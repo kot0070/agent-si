@@ -45,6 +45,7 @@ USER_WRITE = "USER_WRITE"
 KB_ATTACH_BAD_SOURCE = "KB_ATTACH_BAD_SOURCE"
 KB_ATTACH_UNKNOWN_KIND = "KB_ATTACH_UNKNOWN_KIND"
 KB_ATTACH_REJECTED = "KB_ATTACH_REJECTED"
+KB_MISSING_PROJECT_ID = "KB_MISSING_PROJECT_ID"
 
 
 def _params_of(payload: Any) -> Dict[str, Any]:
@@ -115,9 +116,26 @@ def _enforce_user_write(request_or_payload: Any) -> None:
         raise HTTPException(status_code=403, detail="forbidden")
 
 
+def _need_project_id(params: Dict[str, Any], route: str) -> str:
+    """Shared project_id guard for the KB routes that need one.
+
+    A missing or empty project_id answers an honest 400 carrying a
+    reason code, never a 500; no default project is invented.
+    """
+    project_id = params.get("project_id")
+    if not project_id:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": KB_MISSING_PROJECT_ID,
+                    "message": "%s needs a project_id" % (route,)},
+        )
+    return project_id
+
+
 async def kb_list(request: Request) -> Any:
     params = _params_of_request(request)
-    return _behaviour.list_kbs(params["project_id"], params.get("role"))
+    project_id = _need_project_id(params, "kb list")
+    return _behaviour.list_kbs(project_id, params.get("role"))
 
 
 async def kb_attach(request: Request) -> Any:
@@ -178,9 +196,10 @@ async def kb_retrieve(request: Request) -> Any:
     policy = params.get("policy")
     if isinstance(policy, dict):
         policy = _models.RetrievalPolicy(**policy)
+    project_id = _need_project_id(params, "kb retrieve")
     chunks, section_log = _behaviour.retrieve(
         params.get("query", ""),
-        params["project_id"],
+        project_id,
         params["role"],
         policy,
     )
@@ -242,8 +261,6 @@ def _blob_key(handoff: dict) -> Any:
 
 _ROUTES = (
     ("GET", "/api/v1/kb/list", kb_list),
-    # DEMOF11: versioned attach served by the same handler; the legacy
-    # POST /kb/attach below stays bound as an alias (never removed).
     ("POST", "/api/v1/kb/attach", kb_attach),
     ("POST", "/api/v1/kb/detach", kb_detach),
     ("GET", "/api/v1/kb/manifest", kb_manifest),
