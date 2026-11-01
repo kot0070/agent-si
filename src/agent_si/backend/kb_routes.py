@@ -6,6 +6,10 @@ GET routes bind via app.get when present, POST routes via app.post,
 otherwise via app.route with an explicit methods list. No separate app
 object is created here; the passed-in app serves the routes.
 
+DEMOF11: the versioned route POST /api/v1/kb/attach is served by the
+same kb_attach handler; the legacy POST /kb/attach stays bound as an
+alias and is never removed.
+
 GET routes stay open (reads need no token). The three POST write routes
 enforce the frozen USER_WRITE guard themselves: each write handler reads
 the x-actor and x-ui-session-token headers from the incoming request and
@@ -206,6 +210,9 @@ def _blob_key(handoff: dict) -> Any:
 
 _ROUTES = (
     ("GET", "/kb/list", kb_list),
+    # DEMOF11: versioned attach served by the same handler; the legacy
+    # POST /kb/attach below stays bound as an alias (never removed).
+    ("POST", "/api/v1/kb/attach", kb_attach),
     ("POST", "/kb/attach", kb_attach),
     ("POST", "/kb/detach", kb_detach),
     ("GET", "/kb/manifest", kb_manifest),
