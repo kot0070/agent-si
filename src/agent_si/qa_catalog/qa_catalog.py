@@ -226,13 +226,78 @@ def get_catalog_json(suite: str) -> Dict[str, Any]:
     }
 
 
-def run_suite(suite: str) -> Dict[str, Any]:
-    """Run every test of the named suite; report ok plus the ran count."""
+def run_suite(
+    suite: str,
+    *,
+    data_root: Optional[str] = None,
+    project_id: Optional[str] = None,
+    argv_map: Optional[Dict[str, List[str]]] = None,
+    gateway: Any = None,
+    answers: Optional[Dict[str, str]] = None,
+    timeout_s: float = 60.0,
+) -> Dict[str, Any]:
+    """Run every test of the named suite for real; report per-test results.
+
+    Each CODE test starts a real child process (exit code decides
+    PASS/FAIL per its oracle); AI tests judge through the product
+    gateway; HUMAN tests need an operator sign-off and never PASS without
+    one. Unavailable tools, gateways or sign-offs yield BLOCKED plus a
+    reason, never PASS. ``ran`` counts the tests with a real terminal
+    result (PASS or FAIL); ``results`` carries one row per catalog test.
+    """
+    from agent_si.test_runners import code_executor as _executor
+
     catalog = get_catalog_json(suite)
+    pid = project_id if project_id else "suite-%s" % catalog["suite"]
+    rows: List[Dict[str, Any]] = []
     ran = 0
-    for _entry in catalog["tests"]:
-        ran += 1
-    return {"ok": True, "ran": ran}
+    for entry in catalog["tests"]:
+        test_id = entry["test_id"]
+        kind = entry["kind"]
+        argv = None
+        if argv_map is not None:
+            argv = argv_map.get(test_id)
+        sign_off = None
+        if answers is not None:
+            sign_off = answers.get(test_id)
+        outcome = _executor.execute_catalog_test(
+            test_id=test_id,
+            kind=kind,
+            intent=entry.get("intent", test_id),
+            project_id=pid,
+            data_root=data_root,
+            argv=argv,
+            project_dir=None,
+            gateway=gateway,
+            answer=sign_off,
+            assertion_ref=None,
+            timeout_s=timeout_s if timeout_s else 60.0,
+        )
+        if outcome["status"] in ("PASS", "FAIL"):
+            ran += 1
+        rows.append({
+            "test_id": test_id,
+            "kind": outcome["kind"],
+            "status": outcome["status"],
+            "evidence_ref": outcome["evidence_ref"],
+            "reason": outcome["reason"],
+        })
+    return {"ok": True, "ran": ran, "results": rows}
+
+
+def record_status_row(
+    plan_id: str,
+    run_id: str,
+    test_id: str,
+    status: str,
+    output_ref: Optional[str],
+) -> TestStatusRow:
+    """Record one per-test status row for the Tests view."""
+    row = TestStatusRow(
+        test_id=test_id, status=status, output_ref=output_ref)
+    key = (plan_id, run_id)
+    _RUN_ROWS[key] = _RUN_ROWS.get(key, ()) + (row,)
+    return row
 
 
 def derive_plan(

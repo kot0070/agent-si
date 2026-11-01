@@ -205,15 +205,16 @@ def test_1318_runner_contract(client):
     contract = client.get("/api/v1/teststage/runner-contract")
     assert contract.status_code == 200, contract.text
     assert contract.json()["contract_version"] == "runner-contract/1"
+    # FXTESTS1: op=run carries a non-catalog id with no base; unknown
+    # ids are refused, never PASS without a real run.
     builtin = client.get(
         "/api/v1/teststage/runner-contract",
         params={"op": "run", "project_id": "k03wire-p-%s" % tag,
                 "runtime": "python", "test_id": "t-k03wire-%s" % tag,
                 "runner_id": "builtin-k03wire"},
     )
-    assert builtin.status_code == 200, builtin.text
-    assert builtin.json()["status"] == "PASS"
-    assert builtin.json()["evidence_ref"]
+    assert builtin.status_code == 400, builtin.text
+    assert builtin.json()["detail"]["code"] == "UNKNOWN_TEST_ID"
     runner_id = "user-k03wire-%s" % tag
     refused = client.get(
         "/api/v1/teststage/runner-contract",
@@ -236,8 +237,8 @@ def test_1318_runner_contract(client):
                 "runtime": "python", "test_id": "t-k03wire-%s" % tag,
                 "runner_id": runner_id},
     )
-    assert rerun.status_code == 200, rerun.text
-    assert rerun.json()["status"] == "PASS"
+    assert rerun.status_code == 400, rerun.text
+    assert rerun.json()["detail"]["code"] == "UNKNOWN_TEST_ID"
 
 
 def test_1353_verify_run(client, tmp_path):

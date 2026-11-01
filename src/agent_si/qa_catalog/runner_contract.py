@@ -97,6 +97,19 @@ def approve_user_runner(
     )
 
 
+def _catalog_entry(test_id: str) -> Tuple[str, str]:
+    """Kind and intent for one frozen catalog test id ("" when unknown)."""
+    try:
+        from agent_si.qa_catalog.qa_catalog import get_catalog
+
+        for entry in get_catalog("catalog-frozen-v1").tests:
+            if entry.test_id == test_id:
+                return entry.kind, entry.intent
+    except Exception:
+        pass
+    return "", ""
+
+
 def run(
     contract: RunnerContract,
     profile: ProjectProfile,
@@ -106,9 +119,25 @@ def run(
     ladder_asked: bool,
     reason: Optional[str],
     assertion_ref: Optional[str],
+    *,
+    argv=None,
+    data_root: Optional[str] = None,
+    project_dir: Optional[str] = None,
+    gateway=None,
+    answer: Optional[str] = None,
+    timeout_s: float = 60.0,
 ) -> RunnerResult:
     """Execute one catalog test: catalog-only ids, approved user runners
-    only, HUMAN only after the ladder was asked and with a reason."""
+    only, HUMAN only after the ladder was asked and with a reason.
+
+    CODE tests start a real child process and the exit code decides
+    PASS/FAIL; AI tests judge through the product gateway; HUMAN tests
+    need an operator sign-off (answer or assertion ref) and never PASS
+    without one. Unavailable tools, gateways or sign-offs yield BLOCKED,
+    never PASS.
+    """
+    from agent_si.test_runners import code_executor as _executor
+
     if test_id not in catalog_ids:
         raise RunnerContractError(
             "UNKNOWN_TEST_ID",
@@ -135,12 +164,48 @@ def run(
             "HUMAN_REASON_MISSING",
             "HUMAN test %r needs a reason" % test_id,
         )
+    if contract.kind == "HUMAN" and not (answer or assertion_ref):
+        raise RunnerContractError(
+            "HUMAN_REASON_MISSING",
+            "HUMAN test %r needs an operator sign-off; no PASS "
+            "without a real answer" % test_id,
+        )
+    kind, intent = _catalog_entry(test_id)
+    if not kind:
+        kind = contract.kind
+    if kind not in ("CODE", "AI", "HUMAN"):
+        raise RunnerContractError(
+            "UNKNOWN_TEST_ID",
+            "test id %r carries no executable kind" % test_id,
+        )
+    outcome = _executor.execute_catalog_test(
+        test_id=test_id,
+        kind=kind,
+        intent=intent or test_id,
+        project_id=profile.project_id,
+        data_root=data_root,
+        argv=argv,
+        project_dir=project_dir,
+        gateway=gateway,
+        answer=answer,
+        assertion_ref=assertion_ref,
+        runner_id=contract.runner_id,
+        timeout_s=timeout_s if timeout_s else 60.0,
+    )
+    if outcome["evidence_ref"]:
+        return RunnerResult(
+            test_id=test_id,
+            runner_id=contract.runner_id,
+            status=outcome["status"],
+            evidence_refs=(outcome["evidence_ref"],),
+            output_ref=outcome["evidence_ref"],
+        )
     return RunnerResult(
         test_id=test_id,
         runner_id=contract.runner_id,
-        status="PASS",
-        evidence_refs=("ev-%s-%s" % (contract.runner_id, test_id),),
-        output_ref="output-%s-%s" % (contract.runner_id, test_id),
+        status=outcome["status"],
+        evidence_refs=(),
+        output_ref=None,
     )
 
 
