@@ -10,6 +10,7 @@ by mount() onto the real create_app() app with app.py untouched.
 from __future__ import annotations
 
 import json
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -178,10 +179,23 @@ def _leaves(node: Any, prefix: str = "") -> list[str]:
     return []
 
 
+def frozen_locale_dir() -> Path:
+    """Locale tables dir: ``sys._MEIPASS``-anchored when frozen.
+
+    Frozen runs read the ``locale`` datas destination inside the
+    bundle; source runs keep the current source-tree expression.
+    """
+    if getattr(sys, "frozen", False):
+        base = getattr(sys, "_MEIPASS", "")
+        if base:
+            return Path(base) / "locale"
+    return (Path(__file__).resolve().parents[3]
+            / "frontend" / "src" / "locale")
+
+
 def locale_coverage() -> dict[str, Any]:
     """Row R-362: every visible string in both languages (live count)."""
-    root = (Path(__file__).resolve().parents[3]
-            / "frontend" / "src" / "locale")
+    root = frozen_locale_dir()
     try:
         en_table = json.loads(
             (root / "en.json").read_text(encoding="utf-8"))
