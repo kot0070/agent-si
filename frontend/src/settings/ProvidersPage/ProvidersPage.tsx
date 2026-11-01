@@ -3,7 +3,7 @@
 // a chat picker (enabled models only) and the leftover-key finder.
 
 import { useEffect, useMemo, useState } from "react";
-import { setUiToken } from "../../api/errors";
+import { getUiToken } from "../../api/errors";
 import { listConnectedProviders } from "./connectApi";
 import { PROVIDER_CATALOG } from "./catalog";
 import { ChatModelSelector } from "./ChatModelSelector";
@@ -53,12 +53,8 @@ function initialStates(catalog: ProviderPreset[]): Record<string, ProviderState>
 
 export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
   const catalog = PROVIDER_CATALOG;
-  const sessionToken = "local-session";
-  // CODER-2 Sable: sync the page session token into the shared API client
-  // store so pool writes via requestVoid carry it from the first call.
-  useEffect(() => {
-    setUiToken(sessionToken);
-  }, [sessionToken]);
+  // The window's real session token: this page reads it and never replaces it.
+  const sessionToken = getUiToken() ?? "";
   const project = project_id;
   const [storeInstance] = useState<SecretStorePort>(() => createMemorySecretStore(sessionToken));
   const [states, setStates] = useState<Record<string, ProviderState>>(() => initialStates(catalog));
@@ -120,7 +116,6 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
 
   async function handleRolePoolChange(role: string, value: RolePoolValue): Promise<void> {
     try {
-      setUiToken(sessionToken);
       await saveRolePool(project, role, value, poolOptions);
       setPoolSaveMessage(t("providers.page.poolSaved", { role: roleLabel(role) }));
     } catch {

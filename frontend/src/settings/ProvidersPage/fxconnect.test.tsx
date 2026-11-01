@@ -1,9 +1,10 @@
 /**
  * @vitest-environment jsdom
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { clearUiToken, getUiToken, setUiToken } from "../../api/errors";
+import { resetLocaleForTests, setLocale } from "../../locale/index";
 import { ProvidersPage } from "./ProvidersPage";
 
 const FX_TOKEN = "fx-ui-token-01";
@@ -49,10 +50,18 @@ function setFxTokenAfterMount(): void {
   expect(getUiToken()).toBe(FX_TOKEN);
 }
 
+// The default locale is uk; these assertions read the English labels. The
+// page reads the window token, so the suite provides it before mount.
+beforeEach(() => {
+  setLocale("en");
+  setUiToken(FX_TOKEN);
+});
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   clearUiToken();
+  resetLocaleForTests();
 });
 
 describe("fxconnect save posts the connect route with the operator token", () => {
