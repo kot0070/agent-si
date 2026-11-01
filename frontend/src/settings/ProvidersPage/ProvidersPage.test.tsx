@@ -246,11 +246,11 @@ describe("DisconnectDialog", () => {
 describe("ChatSelector", () => {
   it("lists enabled models only, by label", () => {
     const states: Record<string, ProviderState> = {
-      openai: { presetId: "openai", connected: true, enabledModels: ["openai/model-1"] },
+      openai: { presetId: "openai", connected: true, enabledModels: ["openai/gpt-4o-mini"] },
       ollama: { presetId: "ollama", connected: false, enabledModels: ["ollama/model-1"] },
     };
     const choices = enabledChatChoices(PROVIDER_CATALOG, states);
-    expect(choices.map((choice) => choice.modelId)).toEqual(["openai/model-1"]);
+    expect(choices.map((choice) => choice.modelId)).toEqual(["openai/gpt-4o-mini"]);
     render(<ChatSelector catalog={PROVIDER_CATALOG} states={states} value="" onChange={() => {}} />);
     const text = screen
       .getAllByRole("option")
@@ -502,7 +502,7 @@ describe("ProvidersPage role pools wiring (page-level)", () => {
       role: "worker",
       mode: "PINNED",
       provider: "openai",
-      model: "openai/model-1",
+      model: "openai/gpt-4o-mini",
     });
     expect(body["pool"]).toEqual([]);
     expect(JSON.stringify(body)).not.toContain("session_token");
@@ -530,7 +530,7 @@ describe("ProvidersPage role pools wiring (page-level)", () => {
     const { init } = lastFetchCall(fetchMock);
     const body = JSON.parse(init.body as string) as Record<string, unknown>;
     expect(body).toMatchObject({ project_id: "local", role: "worker", mode: "pool" });
-    expect(body["pool"]).toEqual([{ provider_id: "openai", model: "openai/model-1" }]);
+    expect(body["pool"]).toEqual([{ provider_id: "openai", model: "openai/gpt-4o-mini" }]);
     const strategy = within(worker).getByLabelText("Worker pool strategy") as HTMLSelectElement;
     const labels = Array.from(strategy.options)
       .map((option) => option.textContent ?? "")
@@ -707,10 +707,10 @@ describe("ProvidersPage chat model save wiring (page-level)", () => {
       "x-ui-session-token": "local-session",
     });
     const body = JSON.parse(init.body as string) as Record<string, unknown>;
-    expect(body).toEqual({ project_id: "local", model_id: "openai/model-1" });
+    expect(body).toEqual({ project_id: "local", model_id: "openai/gpt-4o-mini" });
     expect(JSON.stringify(body)).not.toContain("session_token");
     expect(JSON.stringify(body)).not.toContain("local-session");
-    expect(select.value).toBe("openai/model-1");
+    expect(select.value).toBe("openai/gpt-4o-mini");
     const selectedLabel =
       Array.from(select.options).find((option) => option.value === select.value)?.textContent ?? "";
     expect(selectedLabel).toContain("Standard");

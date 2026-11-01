@@ -5,11 +5,12 @@
 // row is read-only text resolved from the provider catalog, the same catalog
 // the Settings editor builds its options from, so there is no model override
 // control and no separate auditor provider picker in chat. The collapsed line
-// remembers its state per project in localStorage. Nothing is fetched before
-// the first expand: the pre-load collapsed button carries only the Role pools
-// title from the locale files, so the chat page renders no hard-coded string
-// before data arrives; the Director/Manager/Agents values line takes over
-// once loaded. Label keys live in _task/FXROLES/HITS.md with English
+// remembers its state per project in localStorage. Profiles load on mount
+// even while collapsed, so the collapsed button can name the
+// Director/Manager/Agents values at once; before data arrives it carries only
+// the Role pools title from the locale files, so the chat page renders no
+// hard-coded string before data arrives. Label keys live in
+// _task/FXROLES/HITS.md with English
 // defaults; missing locale keys fall back to English and no locale file is
 // touched here.
 import { useEffect, useState } from "react";
@@ -129,7 +130,7 @@ export function HierarchyRows({
   }, [projectId]);
 
   useEffect(() => {
-    if (projectId === "" || !expanded) {
+    if (projectId === "") {
       return;
     }
     if (connected !== null && profiles !== null) {

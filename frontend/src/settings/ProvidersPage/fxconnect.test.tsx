@@ -103,7 +103,7 @@ describe("fxconnect save posts the connect route with the operator token", () =>
     expect(connectHeaders["x-ui-session-token"]).not.toBe("local-session");
     const connectBody = JSON.parse(connectPosts[0].init.body as string) as Record<string, unknown>;
     expect(connectBody["preset_id"]).toBe("openai");
-    expect(connectBody["model"]).toBe("openai/model-1");
+    expect(connectBody["model"]).toBe("openai/gpt-4o-mini");
     expect(connectBody["key_ref"]).toEqual({ secret_id: "openai", provider_id: "openai" });
     expect(JSON.stringify(connectBody)).not.toContain("session_token");
 
