@@ -133,6 +133,9 @@ def run_assurance(
         status="RUNNING",
     )
     trail = ["RUNNING"]
+    run_machine.emit_lifecycle_event(
+        project_id, run_id, "plan", "RUNNING", "assurance run planned"
+    )
     try:
         checker = importlib.import_module(CHECKER_MODULE)
     except ImportError as exc:
@@ -148,6 +151,9 @@ def run_assurance(
         )
     run = _move(run, "VERIFYING", "NONE")
     trail.append("VERIFYING")
+    run_machine.emit_lifecycle_event(
+        project_id, run_id, "start", "VERIFYING", "verification started"
+    )
     try:
         verification_record = verify_run(
             project_id=project_id,
@@ -165,6 +171,9 @@ def run_assurance(
     except Exception as exc:
         run = _move(run, "FAILED", "VERIFICATION_FAILED")
         trail.append("FAILED")
+        run_machine.emit_lifecycle_event(
+            project_id, run_id, "finish", "FAILED", "verification raised"
+        )
         return AssuranceOutcome(
             phase=VERIFY_REFUSED,
             ok=False,
@@ -208,6 +217,9 @@ def run_assurance(
     if failed:
         run = _move(run, "FAILED", "VERIFICATION_FAILED")
         trail.append("FAILED")
+        run_machine.emit_lifecycle_event(
+            project_id, run_id, "finish", "FAILED", "verification refused"
+        )
         steps.append(
             AssuranceStep(
                 leg="verify",
@@ -233,6 +245,9 @@ def run_assurance(
         )
     run = _move(run, "AUDITING", "NONE")
     trail.append("AUDITING")
+    run_machine.emit_lifecycle_event(
+        project_id, run_id, "advance", "AUDITING", "audit started"
+    )
     turn = audit_coordinator.ServedTurn(
         turn_ref=run_id,
         project_id=project_id,
@@ -249,6 +264,9 @@ def run_assurance(
     except Exception as exc:
         run = _move(run, "FAILED", "AUDIT_FAIL")
         trail.append("FAILED")
+        run_machine.emit_lifecycle_event(
+            project_id, run_id, "finish", "FAILED", "audit raised"
+        )
         steps.append(
             AssuranceStep(
                 leg="audit",
@@ -288,6 +306,9 @@ def run_assurance(
         )
         run = _move(run, "FAILED", "AUDIT_FAIL")
         trail.append("FAILED")
+        run_machine.emit_lifecycle_event(
+            project_id, run_id, "finish", "FAILED", "audit refused"
+        )
         steps.append(
             AssuranceStep(
                 leg="audit",
@@ -322,8 +343,22 @@ def run_assurance(
         budget_settled=budget_settled,
         resources_released=resources_released,
     )
+    run_machine.emit_lifecycle_event(
+        project_id,
+        run_id,
+        "record",
+        "AUDITING",
+        "finalization=%s" % finalization_record.finalization_id,
+    )
     run = _move(run, "SUCCEEDED", "COMPLETED")
     trail.append("SUCCEEDED")
+    run_machine.emit_lifecycle_event(
+        project_id,
+        run_id,
+        "finish",
+        "SUCCEEDED",
+        "finalization=%s" % finalization_record.finalization_id,
+    )
     steps.append(
         AssuranceStep(
             leg="finalize",
