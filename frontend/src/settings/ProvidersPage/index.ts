@@ -10,7 +10,7 @@ export { LeftoverFinder } from "./LeftoverFinder";
 export { ProvidersPage } from "./ProvidersPage";
 export { createMemorySecretStore, secretIdForProvider } from "./secretStore";
 export type { AuditRecord, SecretStorePort } from "./secretStore";
-export { APP_NAMESPACE_PREFIX, AUTO_SENTINEL, ROLE_KEYS, ROLE_LABELS } from "./types";
+export { APP_NAMESPACE_PREFIX, AUTO_SENTINEL, ROLE_KEYS, ROLE_LABELS, roleLabel } from "./types";
 export type {
   ModelOption,
   ProviderKind,

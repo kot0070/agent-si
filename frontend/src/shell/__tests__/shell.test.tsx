@@ -140,7 +140,6 @@ describe("sidebar", () => {
     const menus: Array<[string, string]> = [
       ["menu-chat", "shell.sidebar.chat"],
       ["menu-agents-live", "shell.sidebar.agents_live"],
-      ["menu-new-task", "tasks.creator.title"],
       ["menu-projects", "shell.sidebar.projects"],
       ["menu-tasks", "shell.sidebar.tasks"],
       ["menu-results", "projects.reports.title"],

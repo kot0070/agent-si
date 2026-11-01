@@ -10,6 +10,7 @@
 import { useState } from "react";
 import { PROVIDER_CATALOG } from "./catalog";
 import { ChatSelector } from "./ChatSelector";
+import { t } from "../../locale/index";
 import type { ProviderState } from "./types";
 
 export const CONTRIBUTOR_MODEL_ID = "muse-spark-1.3-contributor";
@@ -58,6 +59,10 @@ function warningForModel(
   return null;
 }
 
+function defaultLocaleWarnings(): Record<string, string> {
+  return { [CONTRIBUTOR_MODEL_ID]: t("providers.chat.contributorWarning") };
+}
+
 export function ChatModelSelector({ project_id = "local", states = {}, onChange, warnings, lang = "en" }: ChatModelSelectorProps) {
   const catalog = PROVIDER_CATALOG;
   const [value, setValue] = useState("");
@@ -67,7 +72,9 @@ export function ChatModelSelector({ project_id = "local", states = {}, onChange,
       onChange(modelId);
     }
   }
-  const table = { ...defaultContributorWarnings(lang), ...(warnings ?? {}) };
+  // Legacy override kept for API compatibility; the default now follows the module locale.
+  void lang;
+  const table = { ...defaultLocaleWarnings(), ...(warnings ?? {}) };
   const warning = warningForModel(table, value);
   return (
     <div data-testid="chat-model-selector" data-project-id={project_id}>

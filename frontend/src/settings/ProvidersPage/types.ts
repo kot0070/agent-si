@@ -1,6 +1,8 @@
 // Shared types for the ProvidersPage lane.
 // No secrets, no credentials, no machine paths in this file.
 
+import { t } from "../../locale/index";
+
 export const APP_NAMESPACE_PREFIX = "agent_si/provider/";
 
 export const AUTO_SENTINEL = "AUTO";
@@ -16,6 +18,16 @@ export const ROLE_LABELS: Record<RoleKey, string> = {
   auditor: "Auditor",
   watcher: "Watcher",
 };
+
+// Locale-facing role name for rendered UI. Unknown roles fall back to the
+// raw role key so a new role never throws a missing-locale-key error.
+export function roleLabel(role: string): string {
+  try {
+    return t(`providers.role.${role}`);
+  } catch {
+    return role;
+  }
+}
 
 export type ProviderKind = "cloud" | "compatible" | "local";
 

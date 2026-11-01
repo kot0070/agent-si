@@ -33,16 +33,14 @@ function renderAppAt(route: string): void {
 }
 
 describe("sidebar menu hrefs with an active project", () => {
-  it("points task entries at the project tasks view and results at reports", async () => {
+  it("points the single task entry at the project tasks view and results at reports", async () => {
     renderAppAt("/");
     await waitFor(() => {
       expect(screen.getByTestId("menu-tasks").getAttribute("href")).toBe(
         "/projects/p-1/tasks",
       );
     });
-    expect(screen.getByTestId("menu-new-task").getAttribute("href")).toBe(
-      "/projects/p-1/tasks",
-    );
+    expect(screen.queryByTestId("menu-new-task")).toBeNull();
     expect(screen.getByTestId("menu-results").getAttribute("href")).toBe(
       "/projects/p-1/reports",
     );

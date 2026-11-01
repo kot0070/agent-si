@@ -23,9 +23,6 @@ export function Sidebar(props: SidebarProps): ReactElement {
       <Link data-testid="menu-agents-live" to="/agents/live">
         {t("shell.sidebar.agents_live")}
       </Link>
-      <Link data-testid="menu-new-task" to={tasksTo}>
-        {t("tasks.creator.title")}
-      </Link>
       <Link data-testid="menu-projects" to="/projects">
         {t("shell.sidebar.projects")}
       </Link>

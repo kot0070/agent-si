@@ -2,6 +2,7 @@
 // connected and the model toggled on. Display shows labels, never raw ids.
 
 import type { ProviderPreset, ProviderState } from "./types";
+import { t } from "../../locale/index";
 
 export type ChatChoice = {
   providerId: string;
@@ -43,9 +44,13 @@ export function ChatSelector({ catalog, states, value, onChange }: ChatSelectorP
   const choices = enabledChatChoices(catalog, states);
   return (
     <label>
-      Chat model
-      <select aria-label="Chat model" value={value} onChange={(event) => onChange(event.target.value)}>
-        <option value="">Select a model</option>
+      {t("providers.chat.label")}
+      <select
+        aria-label={t("providers.chat.label")}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        <option value="">{t("providers.chat.selectOption")}</option>
         {choices.map((choice) => (
           <option key={`${choice.providerId}/${choice.modelId}`} value={choice.modelId}>
             {choice.label}

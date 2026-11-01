@@ -17,7 +17,7 @@ import { SetupWizard } from "./SetupWizard";
 import { saveRolePool } from "./poolsApi";
 import { createMemorySecretStore, secretIdForProvider } from "./secretStore";
 import type { SecretStorePort } from "./secretStore";
-import { ROLE_KEYS } from "./types";
+import { ROLE_KEYS, roleLabel } from "./types";
 import type { ProviderPreset, ProviderState } from "./types";
 import { t } from "../../locale/index";
 
@@ -35,7 +35,7 @@ export async function saveChatModel(
     body: JSON.stringify({ project_id, model_id }),
   });
   if (!response.ok) {
-    throw new Error(`save chat model failed: ${response.status}`);
+    throw new Error(t("providers.page.chatSaveError", { status: String(response.status) }));
   }
 }
 
@@ -122,18 +122,18 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
     try {
       setUiToken(sessionToken);
       await saveRolePool(project, role, value, poolOptions);
-      setPoolSaveMessage(`Saved ${role}.`);
+      setPoolSaveMessage(t("providers.page.poolSaved", { role: roleLabel(role) }));
     } catch {
-      setPoolSaveMessage(`Save failed for ${role}.`);
+      setPoolSaveMessage(t("providers.page.poolSaveFailed", { role: roleLabel(role) }));
     }
   }
 
   async function handleChatModelChange(modelId: string): Promise<void> {
     try {
       await saveChatModel(project, modelId, sessionToken);
-      setChatSaveMessage("Saved chat model.");
+      setChatSaveMessage(t("providers.page.chatSaved"));
     } catch {
-      setChatSaveMessage("Save failed for chat model.");
+      setChatSaveMessage(t("providers.page.chatSaveFailed"));
     }
   }
 
@@ -201,12 +201,12 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
 
   return (
     <div>
-      <h1>Providers</h1>
+      <h1>{t("providers.page.title")}</h1>
       <label>
-        Search models
+        {t("providers.page.searchLabel")}
         <input
           type="search"
-          aria-label="Search models"
+          aria-label={t("providers.page.searchLabel")}
           value={query}
           placeholder={t("settings.providers.searchPlaceholder")}
           onChange={(event) => setQuery(event.target.value)}
@@ -232,18 +232,18 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
                   {state.connected ? (
                     <button
                       type="button"
-                      aria-label={`Disconnect ${preset.label}`}
+                      aria-label={t("providers.page.disconnectCta", { label: preset.label })}
                       onClick={() => setDisconnectId(preset.id)}
                     >
-                      Disconnect
+                      {t("providers.page.disconnectLabel")}
                     </button>
                   ) : (
                     <button
                       type="button"
-                      aria-label={`Connect ${preset.label}`}
+                      aria-label={t("providers.page.connectCta", { label: preset.label })}
                       onClick={() => setConnectId(preset.id)}
                     >
-                      Connect
+                      {t("providers.page.connectLabel")}
                     </button>
                   )}
                   <ul>
@@ -268,24 +268,24 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
           </section>
         );
       })}
-      <section aria-label="Setup">
-        <h2>Setup</h2>
+      <section aria-label={t("providers.page.setupTitle")}>
+        <h2>{t("providers.page.setupTitle")}</h2>
         <button
           type="button"
           aria-expanded={showWizard}
           onClick={() => setShowWizard((open) => !open)}
         >
-          {showWizard ? "Hide setup wizard" : "Show setup wizard"}
+          {showWizard ? t("providers.page.setupHide") : t("providers.page.setupShow")}
         </button>
         {showWizard ? (
           <div>
             <SetupWizard choices={choices} onDone={handleWizardDone} />
-            {wizardDone ? <p role="status">Setup saved.</p> : null}
+            {wizardDone ? <p role="status">{t("providers.page.setupSaved")}</p> : null}
           </div>
         ) : null}
       </section>
-      <section aria-label="Role pools">
-        <h2>Role pools</h2>
+      <section aria-label={t("providers.page.rolePoolsTitle")}>
+        <h2>{t("providers.page.rolePoolsTitle")}</h2>
         {ROLE_KEYS.map((role) => (
           <RolePoolPicker
             key={role}
@@ -297,8 +297,8 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
         ))}
         {poolSaveMessage ? <p role="status">{poolSaveMessage}</p> : null}
       </section>
-      <section aria-label="Chat">
-        <h2>Chat</h2>
+      <section aria-label={t("providers.page.chatTitle")}>
+        <h2>{t("providers.page.chatTitle")}</h2>
         <ChatModelSelector
           project_id={project}
           states={states}
@@ -306,8 +306,8 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
         />
         {chatSaveMessage ? <p role="status">{chatSaveMessage}</p> : null}
       </section>
-      <section aria-label="Leftover keys">
-        <h2>Leftover keys</h2>
+      <section aria-label={t("providers.page.leftoverTitle")}>
+        <h2>{t("providers.page.leftoverTitle")}</h2>
         <LeftoverFinder
           store={storeInstance}
           sessionToken={sessionToken}
