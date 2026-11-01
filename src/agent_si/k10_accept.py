@@ -111,3 +111,39 @@ def frontend_offline_record() -> dict:
             "declared @types set intact'"
         ),
     }
+
+
+#: MVP verdict tokens: binary ACCEPTED / NOT_ACCEPTED (rows 209/210).
+MVP_ACCEPTED = "ACCEPTED"
+MVP_NOT_ACCEPTED = "NOT_ACCEPTED"
+
+#: Host shortfall blockers (rows 214/215): missing local permission, the
+#: auditor provider, and a second real provider. Same order, same spelling.
+HOST_BLOCKER_MISSING_LOCAL_PERMISSION = "missing local permission"
+HOST_BLOCKER_MISSING_AUDITOR_PROVIDER = "auditor provider"
+HOST_BLOCKER_MISSING_SECOND_REAL_PROVIDER = "second real provider"
+
+HOST_BLOCKERS: tuple = (
+    HOST_BLOCKER_MISSING_LOCAL_PERMISSION,
+    HOST_BLOCKER_MISSING_AUDITOR_PROVIDER,
+    HOST_BLOCKER_MISSING_SECOND_REAL_PROVIDER,
+)
+
+
+def mvp_verdict(acceptance_items=None, *, local_permission=False,
+                auditor_provider=False, second_real_provider=False) -> dict:
+    """Return the binary MVP verdict for acceptance items plus host flags.
+
+    Row 209/210: verdict is exactly ACCEPTED iff every acceptance item
+    holds, else exactly NOT_ACCEPTED. Row 212: a shortfall lists each
+    failed item in blockers. Rows 214/215: when any host condition is
+    unmet the blockers also carry the 3 host-blocker constants (missing
+    local permission, auditor provider, second real provider) in frozen
+    order. Pure function, stdlib only, no I/O.
+    """
+    items = dict(acceptance_items) if acceptance_items else {}
+    blockers = [name for name, holds in items.items() if not holds]
+    if not (local_permission and auditor_provider and second_real_provider):
+        blockers.extend(HOST_BLOCKERS)
+    verdict = MVP_ACCEPTED if not blockers else MVP_NOT_ACCEPTED
+    return {"verdict": verdict, "blockers": blockers}
