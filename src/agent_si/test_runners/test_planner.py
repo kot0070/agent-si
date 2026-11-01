@@ -77,8 +77,22 @@ class PlanDerivation:
     derived_by_model: str
 
 
+def _catalog_kinds() -> Dict[str, str]:
+    """test_id -> kind from the frozen catalog; {} when unreachable."""
+    try:
+        from agent_si.qa_catalog.qa_catalog import get_catalog
+
+        catalog = get_catalog("catalog-frozen-v1")
+        return {test.test_id: test.kind for test in catalog.tests}
+    except Exception:
+        return {}
+
+
 def _kind_for(test_id: str) -> str:
-    """Execution kind for one catalog id by vocabulary convention."""
+    """Execution kind for one catalog id from the catalog, not the id."""
+    kind = _catalog_kinds().get(test_id)
+    if kind in EXECUTION_KINDS:
+        return kind
     lowered = test_id.lower()
     if "human" in lowered or "manual" in lowered:
         return "HUMAN"
