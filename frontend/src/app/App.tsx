@@ -32,7 +32,7 @@ import {
   t,
 } from "../locale/index";
 import type { SupportedLocale } from "../locale/index";
-import { SETTINGS_ROUTES, AcceptedRiskSwitch, RoleProfileEditor } from "../settings/index";
+import { SETTINGS_ROUTES, AcceptedRiskSwitch, FirstRunGate, RoleProfileEditor } from "../settings/index";
 import { OptimizationPolicySection } from "../settings/optimizationPolicy";
 import { ProvidersPage } from "../settings/ProvidersPage";
 import {
@@ -582,6 +582,9 @@ function AppShell(): ReactElement {
   useEnsureProjectSelection();
   return (
     <div data-testid="app-shell">
+      {/* FXKITUI-FIRSTRUN-BEGIN */}
+      <FirstRunGate />
+      {/* FXKITUI-FIRSTRUN-END */}
       <TopBar projectId={projectId} />
       <Sidebar projectId={projectId} />
       <main data-testid="app-main">
