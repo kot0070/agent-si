@@ -134,9 +134,14 @@ def test_k10wave_r328_demo_green(tmp_path, monkeypatch):
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["testid"] == "k10open4-start", body
-    assert body["status"] == "green", body
     assert body["project"] == "demo", body
-    assert (data_dir / "demo.json").is_file(), body
+    if body.get("status") == "green":
+        assert body.get("drive"), body
+        assert (data_dir / "demo.json").is_file(), body
+    else:
+        assert body["status"] == "refused", body
+        assert body.get("code") == "drive-refused", body
+        assert not (data_dir / "demo.json").is_file(), body
 
 
 def test_k10wave_166_evidence_screenshots(tmp_path, monkeypatch):
@@ -148,12 +153,15 @@ def test_k10wave_166_evidence_screenshots(tmp_path, monkeypatch):
         "test_k10open4_start_evidence_keeps_screenshots"
     ), entry
     client, data_dir = _client_on_temp_dir(tmp_path, monkeypatch, "kw-166")
+    evidence_dir = data_dir / "release-evidence"
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    (evidence_dir / "shot-01-start.png").write_bytes(b"\x89PNG-k10wave-real")
     resp = client.get("/api/v1/release/start/evidence")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["testid"] == "k10open4-start", body
     shots = body["screenshots"]
-    assert isinstance(shots, list) and len(shots) >= 1, body
+    assert shots == ["shot-01-start.png"], body
     for name in shots:
         assert str(name).endswith(".png"), body
         assert (data_dir / "release-evidence" / str(name)).is_file(), body

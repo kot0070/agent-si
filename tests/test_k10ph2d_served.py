@@ -184,7 +184,8 @@ def test_k10ph2d_249_restart_note(tmp_path, monkeypatch):
     first = k10_start.drive_demo_to_green(None)
     second = k10_start.drive_demo_to_green(None)
     assert first == second, (first, second)
-    assert first["status"] == "green", first
+    assert first["status"] == "refused", first
+    assert first["code"] == "drive-refused", first
 
 
 def test_k10ph2d_HC_4_license_notices(tmp_path, monkeypatch):

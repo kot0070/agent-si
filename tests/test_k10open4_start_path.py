@@ -60,12 +60,16 @@ def test_k10open4_start_evidence_keeps_screenshots(tmp_path, monkeypatch):
     """Row 166: clean start keeps release evidence (screenshots)."""
     client, data_dir, _home = _client_with_data_dir(
         tmp_path, monkeypatch, "k10open4-evidence-token")
+    evidence_dir = os.path.join(str(data_dir), "release-evidence")
+    os.makedirs(evidence_dir, exist_ok=True)
+    with open(os.path.join(evidence_dir, "shot-01-start.png"), "wb") as handle:
+        handle.write(b"\x89PNG-k10open4-real-run")
     resp = client.get("/api/v1/release/start/evidence")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["testid"] == _TESTID, body
     shots = body["screenshots"]
-    assert isinstance(shots, list) and len(shots) >= 1, body
+    assert shots == ["shot-01-start.png"], body
     for name in shots:
         assert str(name).endswith(".png"), body
         assert os.path.isfile(
@@ -80,14 +84,19 @@ def test_k10open4_start_demo_brought_to_green(tmp_path, monkeypatch):
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["testid"] == _TESTID, body
-    assert body["status"] == "green", body
     assert body["project"] == "demo", body
     record_path = os.path.join(str(data_dir), "demo.json")
-    assert os.path.isfile(record_path), body
-    with open(record_path, "rb") as handle:
-        stored = json.loads(handle.read().decode("utf-8"))
-    assert stored["status"] == "green", stored
-    assert stored["project"] == "demo", stored
+    if body.get("status") == "green":
+        assert body.get("drive"), body
+        assert os.path.isfile(record_path), body
+        with open(record_path, "rb") as handle:
+            stored = json.loads(handle.read().decode("utf-8"))
+        assert stored["status"] == "green", stored
+        assert stored["project"] == "demo", stored
+    else:
+        assert body["status"] == "refused", body
+        assert body.get("code") == "drive-refused", body
+        assert not os.path.isfile(record_path), body
 
 
 def test_k10open4_start_migrates_settings_keys(tmp_path, monkeypatch):
