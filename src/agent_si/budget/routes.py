@@ -11,6 +11,8 @@ BUDGET_PROJECT_ID_REQUIRED = "BUDGET_PROJECT_ID_REQUIRED"
 BUDGET_NOT_CONFIGURED = "BUDGET_NOT_CONFIGURED"
 BUDGET_SESSION_TOKEN_REQUIRED = "BUDGET_SESSION_TOKEN_REQUIRED"
 COMPENSATION_RESERVATION_ID_REQUIRED = "COMPENSATION_RESERVATION_ID_REQUIRED"
+BUDGET_LIMITS_INVALID = "BUDGET_LIMITS_INVALID"
+PROVIDER_SPEND_CAP_BLOCKED = "PROVIDER_SPEND_CAP_BLOCKED"
 
 
 def _soft_warn(budget):
@@ -63,6 +65,21 @@ def _state_payload(state):
     return payload
 
 
+def _provider_spending_payload(gate, project_id):
+    """Per-provider spent vs cap for the GET/limits payload, or {}.
+
+    Reads the real BudgetGate.provider_spending; any non-gate shape
+    or unknown project yields no rows (never a 500).
+    """
+    fn = getattr(gate, "provider_spending", None)
+    if not callable(fn):
+        return {}
+    try:
+        return dict(fn(project_id))
+    except (KeyError, LookupError):
+        return {}
+
+
 def get_budget(ctx, query, body) -> Tuple[int, Dict[str, Any]]:
     """Return (status, payload) for GET /api/v1/budget.
 
@@ -87,8 +104,10 @@ def get_budget(ctx, query, body) -> Tuple[int, Dict[str, Any]]:
         except (KeyError, LookupError):
             return 404, {"code": BUDGET_NOT_CONFIGURED, "message": "no budget state on file for %r"
                          % (project_id,)}
-        return 200, {"project_id": project_id,
-                     "budget": _state_payload(state)}
+        payload = _state_payload(state)
+        payload["provider_spending"] = _provider_spending_payload(
+            budget_state, project_id)
+        return 200, {"project_id": project_id, "budget": payload}
     if isinstance(budget_state, Mapping):
         node = dict(budget_state)
         if project_id in node and isinstance(node[project_id], Mapping):
@@ -165,8 +184,107 @@ def post_compensations(ctx, query, body) -> tuple[int, dict[str, Any]]:
                  "project_id": record.project_id}
 
 
+def _limits_decimal(value, name):
+    """Validated non-negative amount string, or raise ValueError."""
+    from decimal import Decimal, InvalidOperation
+
+    if value is None or (isinstance(value, str) and not value.strip()):
+        raise ValueError("%s required" % (name,))
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, ValueError, AttributeError):
+        raise ValueError("%s must be a decimal amount, got %r"
+                         % (name, value))
+    if amount < 0:
+        raise ValueError("%s must not be negative, got %r" % (name, value))
+    return str(amount)
+
+
+def post_limits(ctx, query, body) -> tuple[int, dict[str, Any]]:
+    """Set budget limits plus per-provider spend caps (authed write).
+
+    POST /api/v1/budget/limits with {project_id, budget_limit?,
+    soft_limit?, hard_limit?, currency?, provider_spend_caps?}.
+    Creates the project budget state when missing (then all three
+    limits are required); otherwise updates only the fields present
+    (provider_spend_caps replaces the whole cap map). Drives the real
+    BudgetGate on ctx.budget_state, so caps persist and the reserve /
+    charge paths enforce them at once.
+    """
+    _ = query
+    token = getattr(ctx, "session_token", None)
+    if isinstance(token, list):
+        token = token[0] if token else None
+    if not (isinstance(token, str) and token.strip()):
+        return 401, {"code": BUDGET_SESSION_TOKEN_REQUIRED,
+                     "message": "limits refused: session token missing"}
+    params = body if isinstance(body, Mapping) else {}
+    project_id = params.get("project_id")
+    if not isinstance(project_id, str) or not project_id:
+        return 400, {"code": BUDGET_PROJECT_ID_REQUIRED,
+                     "message": "project_id required"}
+    gate = getattr(ctx, "budget_state", None)
+    if gate is None or not callable(getattr(gate, "get_state", None)) \
+            or not callable(getattr(gate, "configure_project", None)) \
+            or not callable(getattr(gate, "update_limits", None)):
+        return 404, {"code": BUDGET_NOT_CONFIGURED,
+                     "message": "no budget gate on file"}
+    try:
+        current = gate.get_state(project_id)
+    except (KeyError, LookupError):
+        current = None
+    try:
+        amounts = {}
+        for name in ("budget_limit", "soft_limit", "hard_limit"):
+            if params.get(name) is not None:
+                amounts[name] = _limits_decimal(params.get(name), name)
+        caps = params.get("provider_spend_caps")
+        if caps is None:
+            cap_map = None
+        elif not isinstance(caps, Mapping):
+            raise ValueError("provider_spend_caps must be a "
+                             "{provider: amount} mapping")
+        else:
+            cap_map = {}
+            for provider, amount in caps.items():
+                if not isinstance(provider, str) or not provider.strip():
+                    raise ValueError("provider_spend_caps keys must be "
+                                     "non-empty provider ids")
+                cap_map[str(provider)] = _limits_decimal(amount, "cap for %s"
+                                                         % (provider,))
+    except ValueError as exc:
+        return 400, {"code": BUDGET_LIMITS_INVALID, "message": str(exc)}
+    from agent_si.budget.gate import _utcnow_z
+
+    stamp = _utcnow_z()
+    if current is None:
+        missing = [name for name in
+                   ("budget_limit", "soft_limit", "hard_limit")
+                   if name not in amounts]
+        if missing:
+            return 400, {"code": BUDGET_LIMITS_INVALID,
+                         "message": "new project needs %s"
+                                    % (", ".join(missing),)}
+        currency = params.get("currency") or "USD"
+        state = gate.configure_project(
+            project_id, currency, amounts["budget_limit"],
+            amounts["soft_limit"], amounts["hard_limit"],
+            updated_at=stamp, provider_spend_caps=cap_map or {})
+    else:
+        state = gate.update_limits(
+            project_id, updated_at=stamp, provider_spend_caps=cap_map,
+            **amounts)
+    payload = _state_payload(state)
+    payload["provider_spending"] = _provider_spending_payload(
+        gate, project_id)
+    return 200, {"project_id": project_id, "budget": payload,
+                 "provider_spend_caps": dict(state.provider_spend_caps
+                                            or {})}
+
+
 BUDGET_ROUTES = (
     ("get", "/api/v1/budget", "get_budget", get_budget),
+    ("post", "/api/v1/budget/limits", "post_limits", post_limits),
     ("post", "/api/v1/budget/compensations", "post_compensations",
      post_compensations),
 )
@@ -398,6 +516,8 @@ def k04f_reserve_tokens(ctx, query, body):
                "k04f-rt-%s" % project_id,
                "estimated_amount": body.get("estimated_amount"),
                "reserved_at": stamp, "expires_at": "2026-10-27T00:00:00Z"}
+    if isinstance(body.get("provider_id"), str) and body.get("provider_id"):
+        request["provider_id"] = body.get("provider_id")
     try:
         result = _reserve_tokens(gate, request, currency=currency)
     except ReserveTokensError as exc:
@@ -408,6 +528,9 @@ def k04f_reserve_tokens(ctx, query, body):
                      "message": "no budget state on file for %r"
                                 % (project_id,)}
     except BudgetBlockedError as exc:
+        if "PROVIDER_SPEND_CAP_BLOCKED" in str(exc):
+            return 409, {"code": "PROVIDER_SPEND_CAP_BLOCKED",
+                         "message": str(exc)}
         return 409, {"code": "BUDGET_HARD_BLOCKED",
                      "message": str(exc)}
     kept = gate.get_state(project_id)

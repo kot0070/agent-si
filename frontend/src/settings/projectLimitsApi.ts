@@ -23,6 +23,14 @@ const StepLimitsSavedSchema = StepLimitsSchema.extend({
 export type StepLimitsSaved = z.infer<typeof StepLimitsSavedSchema>;
 
 // Real GET /api/v1/budget shape: string amounts, not the client BudgetState.
+// provider_spend_caps and provider_spending ride along when the gate
+// knows them; both stay optional so older payloads still parse.
+const ProviderSpendingSchema = z.object({
+  spent: z.string(),
+  reserved: z.string(),
+  cap: z.string().nullable(),
+});
+
 const BudgetLineSchema = z.object({
   project_id: z.string().min(1),
   budget: z.object({
@@ -30,10 +38,21 @@ const BudgetLineSchema = z.object({
     spent: z.string(),
     reserved: z.string(),
     currency: z.string(),
+    provider_spend_caps: z.record(z.string(), z.string()).optional(),
+    provider_spending: z
+      .record(z.string(), ProviderSpendingSchema)
+      .optional(),
   }),
 });
 
 export type BudgetLine = z.infer<typeof BudgetLineSchema>;
+
+const LimitsSavedSchema = z.object({
+  project_id: z.string().min(1),
+  provider_spend_caps: z.record(z.string(), z.string()),
+});
+
+export type LimitsSaved = z.infer<typeof LimitsSavedSchema>;
 
 export function stepLimitsPath(projectId: string): string {
   return `/api/v1/projects/${encodeURIComponent(projectId)}/step-limits`;
@@ -41,6 +60,10 @@ export function stepLimitsPath(projectId: string): string {
 
 export function budgetLinePath(projectId: string): string {
   return `/api/v1/budget?project_id=${encodeURIComponent(projectId)}`;
+}
+
+export function budgetLimitsPath(): string {
+  return "/api/v1/budget/limits";
 }
 
 export async function readStepLimits(
@@ -60,6 +83,21 @@ export async function readBudgetLine(
     budgetLinePath(projectId),
     { method: "GET", kind: "read" },
     BudgetLineSchema,
+  );
+}
+
+export async function saveBudgetLimits(
+  projectId: string,
+  providerSpendCaps: Record<string, string>,
+): Promise<LimitsSaved> {
+  return requestJson(
+    budgetLimitsPath(),
+    {
+      method: "POST",
+      kind: "write",
+      body: { project_id: projectId, provider_spend_caps: providerSpendCaps },
+    },
+    LimitsSavedSchema,
   );
 }
 

@@ -9,6 +9,7 @@ import { t } from "../locale/index";
 import {
   readBudgetLine,
   readStepLimits,
+  saveBudgetLimits,
   saveStepLimits,
 } from "./projectLimitsApi";
 
@@ -29,10 +30,37 @@ export function ProjectLimitsSection(
   const [taskText, setTaskText] = useState("");
   const [chatText, setChatText] = useState("");
   const [budgetText, setBudgetText] = useState<string | null>(null);
+  const [capsText, setCapsText] = useState("");
+  const [spendingLines, setSpendingLines] = useState<ReadonlyArray<string>>(
+    [],
+  );
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [capsSaving, setCapsSaving] = useState(false);
   const [errorKey, setErrorKey] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
+
+  function parseCapsText(raw: string): Record<string, string> | null {
+    const trimmed = raw.trim();
+    if (trimmed === "") {
+      return {};
+    }
+    const out: Record<string, string> = {};
+    for (const part of trimmed.split(",")) {
+      const cell = part.trim();
+      const sep = cell.indexOf(":");
+      if (sep < 0) {
+        return null;
+      }
+      const provider = cell.slice(0, sep).trim();
+      const amount = cell.slice(sep + 1).trim();
+      if (provider === "" || !/^\d+(\.\d+)?$/.test(amount)) {
+        return null;
+      }
+      out[provider] = amount;
+    }
+    return out;
+  }
 
   useEffect(() => {
     let alive = true;
@@ -49,6 +77,20 @@ export function ProjectLimitsSection(
         setChatText(String(limits.chat_max_steps));
         setBudgetText(
           `${budget.budget.spent} / ${budget.budget.hard_limit} ${budget.budget.currency}`,
+        );
+        const caps = budget.budget.provider_spend_caps ?? {};
+        setCapsText(
+          Object.entries(caps)
+            .map(([provider, amount]) => `${provider}:${amount}`)
+            .join(", "),
+        );
+        const spending = budget.budget.provider_spending ?? {};
+        setSpendingLines(
+          Object.entries(spending).map(([provider, row]) =>
+            row.cap === null
+              ? `${provider}: ${row.spent} (no cap) ${budget.budget.currency}`
+              : `${provider}: ${row.spent} / ${row.cap} ${budget.budget.currency}`,
+          ),
         );
         setErrorKey(null);
         setLoaded(true);
@@ -88,6 +130,28 @@ export function ProjectLimitsSection(
       setErrorKey(errorKeyOf(error));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function onSaveCaps(): Promise<void> {
+    const caps = parseCapsText(capsText);
+    if (caps === null) {
+      setErrorKey("errors.generic");
+      return;
+    }
+    setCapsSaving(true);
+    try {
+      const saved = await saveBudgetLimits(props.projectId, caps);
+      if (saved.project_id !== props.projectId) {
+        setErrorKey("errors.generic");
+        return;
+      }
+      setErrorKey(null);
+      setNonce((value) => value + 1);
+    } catch (error) {
+      setErrorKey(errorKeyOf(error));
+    } finally {
+      setCapsSaving(false);
     }
   }
 
@@ -156,6 +220,31 @@ export function ProjectLimitsSection(
           <span>{budgetText}</span>
         </div>
       ) : null}
+      <div data-testid="project-limits-spending">
+        {spendingLines.map((line) => (
+          <div key={line}>{line}</div>
+        ))}
+      </div>
+      <label htmlFor="project-limits-caps">{t("projects.cost.title")}</label>
+      <input
+        id="project-limits-caps"
+        data-testid="project-limits-caps"
+        type="text"
+        value={capsText}
+        onChange={(event: { target: { value: string } }) => {
+          setCapsText(event.target.value);
+        }}
+      />
+      <button
+        type="button"
+        data-testid="project-limits-caps-save"
+        disabled={capsSaving}
+        onClick={() => {
+          void onSaveCaps();
+        }}
+      >
+        {t("chat.composer.send")}
+      </button>
     </section>
   );
 }
