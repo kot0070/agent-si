@@ -36,6 +36,20 @@ function readStoredLocale(): SupportedLocale {
   return DEFAULT_LOCALE;
 }
 
+export const PANELS_TOGGLE_EVENT = "agentsi:toggle-panels";
+
+export function togglePanels(): void {
+  try {
+    const shell = document.querySelector('[data-testid="app-shell"]');
+    if (shell !== null) {
+      shell.classList.toggle("fx-panels-open");
+    }
+    window.dispatchEvent(new Event(PANELS_TOGGLE_EVENT));
+  } catch {
+    // No document in this probe: the panels stay as rendered.
+  }
+}
+
 export function TopBar(props: TopBarProps): ReactElement {
   const client = useApiClient();
   const current = useCurrentProject();
@@ -101,6 +115,15 @@ export function TopBar(props: TopBarProps): ReactElement {
 
   return (
     <header data-testid="topbar" className="fx-topbar">
+      <button
+        type="button"
+        data-testid="topbar-panels"
+        className="fx-panels-btn"
+        aria-label={t("shell.topbar.panels")}
+        onClick={togglePanels}
+      >
+        {t("shell.topbar.panels")}
+      </button>
       <span data-testid="k07open10-shell" aria-hidden="true" />
       <div data-testid="pairing-strip">
         <span>{t("shell.topbar.watcher")}</span>

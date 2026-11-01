@@ -20,11 +20,11 @@ export function classifyScope(scope: string): ScopeKind {
 // ARCH-679: every named menu and view in the console is MUST presence.
 // The test ids mirror Sidebar data-testids; the views mirror PROJECT_VIEWS
 // in projectsApi (the App route table renders one route per view).
+// FXLAYOUT owner redefinition (kit BUILD_PLAN:850-852): the left nav holds
+// exactly New task / Projects / Results / Settings, nothing else.
 export const NAMED_MENU_TEST_IDS = [
-  "menu-chat",
-  "menu-agents-live",
+  "menu-new-task",
   "menu-projects",
-  "menu-tasks",
   "menu-results",
   "menu-settings",
 ] as const;

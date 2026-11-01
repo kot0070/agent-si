@@ -1,37 +1,641 @@
-// Lane A compact inspector: single default tab with live agents. The tab
-// content arrives as a prop from App, so this module never imports the
-// agents area directly. The body is compact and self-scrolling.
+// FXLAYOUT compact inspector: five live cards (Team now / Context /
+// Results / Background work / Watcher) plus six collapsed-by-default
+// metric cards (Tokens / Tests / Budget / Providers / Local AI /
+// Third-party apps). Every number is a served record or a sum of served
+// records; a missing record renders the shared empty line or UNKNOWN,
+// never an invented value.
 
+import { useEffect, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
+import { Link } from "react-router-dom";
+import type {
+  BudgetState,
+  LedgerRow,
+  PartRow,
+  TaskRecord,
+} from "../api/iface";
 import type { InspectorProps as InspectorBaseProps } from "../app/iface";
-import { t } from "../locale/index";
+import { useApiClient } from "../app/ApiClientProvider";
+import { formatNumber, t } from "../locale/index";
+import { remainingBudget } from "../projects/projectsApi";
+import { MetricCard } from "../ui/MetricCard";
+import { fetchAppsCard } from "../watcher/AppsCard";
+import type { AppsCardData } from "../watcher/AppsCard";
+import {
+  fetchWatcherJournal,
+  fetchWatcherStatus,
+} from "../watcher/WatcherTab";
+import type {
+  WatcherJournalEntry,
+  WatcherStatusData,
+} from "../watcher/WatcherTab";
+import { loadWatcherSettings } from "../watcher/watcherSettings";
+import { useCollapsedCard } from "./collapsed";
 
 export interface InspectorProps extends InspectorBaseProps {
   live: ReactNode;
 }
 
+const LIVE_POLL_MS = 2000;
+const PROJECT_POLL_MS = 15000;
+const DASH = "\u2013";
+
+interface LiveSubscriber {
+  subscribe?: (listener: (rows: PartRow[]) => void) => () => void;
+}
+
+function readExtra(row: PartRow, name: string): unknown {
+  return (row as unknown as Record<string, unknown>)[name];
+}
+
+function readText(value: unknown): string {
+  if (value === undefined || value === null || value === "") {
+    return DASH;
+  }
+  return String(value);
+}
+
+function readTokenSum(rows: PartRow[], kind: string): number {
+  let sum = 0;
+  for (const row of rows) {
+    const tokens = readExtra(row, "tokens");
+    if (typeof tokens === "object" && tokens !== null) {
+      const value = (tokens as Record<string, unknown>)[kind];
+      if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+        sum += value;
+      }
+    }
+  }
+  return sum;
+}
+
+function readSilent(value: unknown): string {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return t("shell.cards.team.silentMin", { minutes: String(value) });
+  }
+  return DASH;
+}
+
+function readWaiting(value: unknown): string {
+  if (Array.isArray(value) && value.length > 0) {
+    return value.map((item) => String(item)).join(", ");
+  }
+  return DASH;
+}
+
+function readTaskStatus(status: string): string {
+  if (status === "RUNNING") {
+    return t("tasks.status.running");
+  }
+  if (status === "QUEUED") {
+    return t("tasks.status.queued");
+  }
+  return status;
+}
+
+function fractionOf(value: number, total: number): number {
+  if (!(total > 0)) {
+    return 0;
+  }
+  return value / total;
+}
+
 export function Inspector(props: InspectorProps): ReactElement {
+  const client = useApiClient();
+  const projectId = props.projectId;
+  const [liveRows, setLiveRows] = useState<PartRow[] | null>(null);
+  const [ledger, setLedger] = useState<LedgerRow[] | null>(null);
+  const [nudge, setNudge] = useState<string | null>(null);
+  const [tasks, setTasks] = useState<TaskRecord[] | null>(null);
+  const [budget, setBudget] = useState<BudgetState | null>(null);
+  const [watcherStatus, setWatcherStatus] =
+    useState<WatcherStatusData | null>(null);
+  const [journal, setJournal] = useState<WatcherJournalEntry[] | null>(null);
+  const [watcherFailed, setWatcherFailed] = useState(false);
+  const [apps, setApps] = useState<AppsCardData | null>(null);
+  const [appsFailed, setAppsFailed] = useState(false);
+
+  const [tokensCollapsed, onTokensToggle] = useCollapsedCard("fx-tokens", true);
+  const [testsCollapsed, onTestsToggle] = useCollapsedCard("fx-tests", true);
+  const [budgetCollapsed, onBudgetToggle] = useCollapsedCard(
+    "fx-budget",
+    true,
+  );
+  const [providersCollapsed, onProvidersToggle] = useCollapsedCard(
+    "fx-providers",
+    true,
+  );
+  const [localAiCollapsed, onLocalAiToggle] = useCollapsedCard(
+    "fx-localai",
+    true,
+  );
+  const [appsCollapsed, onAppsToggle] = useCollapsedCard("fx-apps", true);
+
+  useEffect(() => {
+    let alive = true;
+    let stop: (() => void) | undefined;
+    let timer: ReturnType<typeof setInterval> | undefined;
+    async function load(): Promise<void> {
+      try {
+        const next = await client.listAgentsLive();
+        if (alive) {
+          setLiveRows(next);
+        }
+      } catch {
+        if (alive) {
+          setLiveRows([]);
+        }
+      }
+    }
+    void load();
+    const source = client as unknown as LiveSubscriber;
+    if (typeof source.subscribe === "function") {
+      stop = source.subscribe((next) => {
+        if (alive) {
+          setLiveRows([...next]);
+        }
+      });
+    } else {
+      timer = setInterval(() => {
+        void load();
+      }, LIVE_POLL_MS);
+    }
+    return () => {
+      alive = false;
+      if (stop !== undefined) {
+        stop();
+      }
+      if (timer !== undefined) {
+        clearInterval(timer);
+      }
+    };
+  }, [client]);
+
+  useEffect(() => {
+    let alive = true;
+    async function loadProject(target: string): Promise<void> {
+      try {
+        const rows = await client.readLedger(target);
+        if (!alive) {
+          return;
+        }
+        setLedger(rows);
+        const last = rows[rows.length - 1];
+        if (last === undefined) {
+          setNudge(null);
+        } else {
+          try {
+            const report = await client.readNextPackageNudge(
+              last.package_id,
+            );
+            if (alive) {
+              setNudge(report.nudge);
+            }
+          } catch {
+            if (alive) {
+              setNudge(null);
+            }
+          }
+        }
+      } catch {
+        if (alive) {
+          setLedger([]);
+          setNudge(null);
+        }
+      }
+      try {
+        const next = await client.listTasks(target);
+        if (alive) {
+          setTasks(next);
+        }
+      } catch {
+        if (alive) {
+          setTasks([]);
+        }
+      }
+      try {
+        const next = await client.readBudget(target);
+        if (alive) {
+          setBudget(next);
+        }
+      } catch {
+        if (alive) {
+          setBudget(null);
+        }
+      }
+      try {
+        const [status, entries] = await Promise.all([
+          fetchWatcherStatus(target),
+          fetchWatcherJournal(target),
+        ]);
+        if (alive) {
+          setWatcherStatus(status);
+          setJournal(entries);
+          setWatcherFailed(false);
+        }
+      } catch {
+        if (alive) {
+          setWatcherStatus(null);
+          setJournal(null);
+          setWatcherFailed(true);
+        }
+      }
+      try {
+        const card = await fetchAppsCard(target);
+        if (alive) {
+          setApps(card);
+          setAppsFailed(false);
+        }
+      } catch {
+        if (alive) {
+          setApps(null);
+          setAppsFailed(true);
+        }
+      }
+    }
+    if (projectId === null) {
+      setLedger(null);
+      setNudge(null);
+      setTasks(null);
+      setBudget(null);
+      setWatcherStatus(null);
+      setJournal(null);
+      setWatcherFailed(false);
+      setApps(null);
+      setAppsFailed(false);
+      return () => {
+        alive = false;
+      };
+    }
+    void loadProject(projectId);
+    const timer = setInterval(() => {
+      void loadProject(projectId);
+    }, PROJECT_POLL_MS);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [client, projectId]);
+
+  const rows = liveRows ?? [];
+  const warnings: Array<{ agent: string; error: string }> = [];
+  for (const row of rows) {
+    const errors = readExtra(row, "errors");
+    if (Array.isArray(errors)) {
+      for (const error of errors) {
+        warnings.push({ agent: row.agent, error: String(error) });
+      }
+    }
+  }
+
+  const tokenIn = readTokenSum(rows, "input");
+  const tokenOut = readTokenSum(rows, "output");
+  const tokenTotal = tokenIn + tokenOut;
+  const unknown = t("shell.common.unknown");
+
+  const lastPackages = (ledger ?? []).slice(-3);
+  const activeTasks = (tasks ?? []).filter(
+    (task) => task.status === "RUNNING" || task.status === "QUEUED",
+  );
+  const reportsHref =
+    projectId === null ? "/projects" : `/projects/${projectId}/reports`;
+
+  const watcherModel = loadWatcherSettings().model;
+  const latestJournal = (journal ?? [])[0];
+  const watcherAction =
+    latestJournal === undefined
+      ? (watcherStatus?.journal_head ?? DASH)
+      : `${latestJournal.entry_id} ${latestJournal.timestamp}`;
+
+  const spent = budget?.spent ?? 0;
+  const reserved = budget?.reserved ?? 0;
+  const hard = budget?.hard_limit ?? 0;
+  const remaining = budget === null ? 0 : Math.max(0, remainingBudget(budget));
+  const currency = budget?.currency ?? "";
+  const budgetTotal =
+    budget === null
+      ? unknown
+      : `${formatNumber(spent)} / ${formatNumber(hard)}${currency === "" ? "" : ` ${currency}`}`;
+
+  const appsCount = apps?.service_ids.length ?? 0;
+  const appsTotal =
+    apps === null
+      ? unknown
+      : `${formatNumber(appsCount)} ${t("shell.cards.apps.connected")}, ${t(apps.paused ? "shell.cards.apps.paused" : "shell.cards.apps.active")}`;
+
   return (
     <aside
       data-testid="inspector"
       aria-label={t("shell.inspector.live_agents")}
-      data-project={props.projectId ?? ""}
+      data-project={projectId ?? ""}
     >
-      <div role="tablist" aria-label={t("shell.inspector.live_agents")}>
-        <button
-          type="button"
-          role="tab"
-          aria-selected="true"
-          data-testid="inspector-tab-live"
-        >
-          {t("shell.inspector.live_agents")}
-        </button>
-      </div>
       <div
         data-testid="inspector-scroll"
         style={{ maxHeight: "320px", overflowY: "auto" }}
       >
-        {props.live}
+        <section
+          data-testid="inspector-card-team"
+          aria-label={t("shell.cards.team.title")}
+        >
+          <span>{t("shell.cards.team.title")}</span>
+          <p data-testid="inspector-card-team-sub">
+            {t("shell.cards.team.subtitle")}
+          </p>
+          {warnings.length === 0 ? null : (
+            <div data-testid="team-warnings">
+              <span>{t("shell.cards.team.warnings")}</span>
+              <ul>
+                {warnings.map((warning, index) => (
+                  <li key={`${warning.agent}-${index}`}>
+                    {warning.agent}: {warning.error}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {props.live}
+          {liveRows === null || rows.length === 0 ? (
+            <p data-testid="team-empty">{t("agents.live.empty")}</p>
+          ) : (
+            <ul data-testid="team-rows">
+              {rows.map((row) => (
+                <li key={row.agent} data-testid={`team-row-${row.agent}`}>
+                  <span>{row.agent}</span>
+                  <span>
+                    {t("settings.roleProfile.roleLabel")}{" "}
+                    {readText(readExtra(row, "role"))}
+                  </span>
+                  <span>
+                    {t("settings.roleProfile.providerLabel")}{" "}
+                    {readText(readExtra(row, "provider"))}
+                  </span>
+                  <span>
+                    {t("settings.roleProfile.modelLabel")}{" "}
+                    {readText(readExtra(row, "model"))}
+                  </span>
+                  <span>
+                    {t("shell.cards.team.step")}{" "}
+                    {readText(readExtra(row, "step"))}
+                  </span>
+                  <span>
+                    {t("shell.cards.team.file")}{" "}
+                    {readText(readExtra(row, "file"))}
+                  </span>
+                  <span>
+                    {t("shell.cards.team.lastAction")}{" "}
+                    {readText(readExtra(row, "last_action"))}
+                  </span>
+                  <span>{readSilent(readExtra(row, "silent_min"))}</span>
+                  <span>
+                    {t("shell.cards.team.waiting")}{" "}
+                    {readWaiting(readExtra(row, "waits"))}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <Link data-testid="team-open-agents" to="/agents/live">
+            {t("shell.cards.team.openAgents")}
+          </Link>
+        </section>
+
+        <section
+          data-testid="inspector-card-context"
+          aria-label={t("shell.cards.context.title")}
+        >
+          <span>{t("shell.cards.context.title")}</span>
+          <p data-testid="inspector-card-context-sub">
+            {t("shell.cards.context.subtitle")}
+          </p>
+          {liveRows === null ? (
+            <p data-testid="context-empty">{t("empty.generic")}</p>
+          ) : (
+            <>
+              <p data-testid="ctx-percent">
+                {t("shell.cards.context.percent")} {unknown}
+              </p>
+              <p data-testid="ctx-window">
+                {t("shell.cards.context.window")} {unknown}
+              </p>
+              <p data-testid="ctx-source">
+                {t("shell.cards.context.source")}{" "}
+                {t("shell.cards.context.sourceLive")}
+              </p>
+              <div data-testid="ctx-bar">
+                <div
+                  data-testid="ctx-bar-input"
+                  style={{
+                    width: `${fractionOf(tokenIn, tokenTotal) * 100}%`,
+                  }}
+                />
+                <div
+                  data-testid="ctx-bar-output"
+                  style={{
+                    width: `${fractionOf(tokenOut, tokenTotal) * 100}%`,
+                  }}
+                />
+              </div>
+              <div data-testid="ctx-legend">
+                <span>
+                  {t("shell.cards.context.input")} {formatNumber(tokenIn)}
+                </span>
+                <span>
+                  {t("shell.cards.context.output")} {formatNumber(tokenOut)}
+                </span>
+              </div>
+            </>
+          )}
+        </section>
+
+        <section
+          data-testid="inspector-card-results"
+          aria-label={t("shell.cards.results.title")}
+        >
+          <span>{t("shell.cards.results.title")}</span>
+          <p data-testid="inspector-card-results-sub">
+            {t("shell.cards.results.subtitle")}
+          </p>
+          {projectId === null ||
+          ledger === null ||
+          lastPackages.length === 0 ? (
+            <p data-testid="results-empty">{t("empty.generic")}</p>
+          ) : (
+            <>
+              {nudge === null ? null : (
+                <p data-testid="result-nudge">
+                  {t("shell.cards.results.next")}: {nudge}
+                </p>
+              )}
+              <ul>
+                {lastPackages.map((entry) => (
+                  <li
+                    key={entry.package_id}
+                    data-testid={`result-row-${entry.package_id}`}
+                  >
+                    <span>{entry.package_id}</span>
+                    <span>{formatNumber(entry.agents)}</span>
+                    <span>{formatNumber(entry.wall_time_s)}</span>
+                    <Link
+                      data-testid={`result-open-${entry.package_id}`}
+                      to={reportsHref}
+                    >
+                      {t("shell.cards.results.open")}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </section>
+
+        <section
+          data-testid="inspector-card-background"
+          aria-label={t("shell.cards.background.title")}
+        >
+          <span>{t("shell.cards.background.title")}</span>
+          <p data-testid="inspector-card-background-sub">
+            {t("shell.cards.background.subtitle")}
+          </p>
+          {projectId === null ||
+          tasks === null ||
+          activeTasks.length === 0 ? (
+            <p data-testid="background-empty">{t("empty.generic")}</p>
+          ) : (
+            <ul>
+              {activeTasks.map((task) => (
+                <li key={task.task_id} data-testid={`bg-row-${task.task_id}`}>
+                  <span>{task.title}</span>
+                  <span>{readTaskStatus(task.status)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section
+          data-testid="inspector-card-watcher"
+          aria-label={t("shell.cards.watcher.title")}
+        >
+          <span>{t("shell.cards.watcher.title")}</span>
+          <p data-testid="inspector-card-watcher-sub">
+            {t("shell.cards.watcher.subtitle")}
+          </p>
+          {projectId === null ||
+          watcherFailed ||
+          watcherStatus === null ? (
+            <p data-testid="watcher-empty">{t("empty.generic")}</p>
+          ) : (
+            <>
+              <p data-testid="watcher-state">
+                {t("shell.cards.watcher.state")}{" "}
+                {watcherStatus.integrity_ok
+                  ? t("shell.cards.watcher.ok")
+                  : t("shell.cards.watcher.failed")}
+              </p>
+              <p data-testid="watcher-model">
+                {t("settings.roleProfile.modelLabel")}: {watcherModel}
+              </p>
+              <p data-testid="watcher-action">
+                {t("shell.cards.team.lastAction")} {watcherAction}
+              </p>
+              <Link data-testid="watcher-open" to="/watcher">
+                {t("shell.cards.watcher.open")}
+              </Link>
+            </>
+          )}
+        </section>
+
+        <MetricCard
+          cardId="fx-tokens"
+          titleKey="shell.cards.tokens.title"
+          subtitleKey="shell.cards.tokens.subtitle"
+          totalKey="shell.cards.tokens.total"
+          totalText={liveRows === null ? unknown : formatNumber(tokenTotal)}
+          segments={[
+            {
+              segmentKey: "shell.cards.context.input",
+              fraction: fractionOf(tokenIn, tokenTotal),
+            },
+            {
+              segmentKey: "shell.cards.context.output",
+              fraction: fractionOf(tokenOut, tokenTotal),
+            },
+          ]}
+          segmentTexts={{
+            "shell.cards.context.input": formatNumber(tokenIn),
+            "shell.cards.context.output": formatNumber(tokenOut),
+          }}
+          collapsed={tokensCollapsed}
+          onToggle={onTokensToggle}
+        />
+        <MetricCard
+          cardId="fx-tests"
+          titleKey="shell.cards.tests.title"
+          subtitleKey="shell.cards.tests.subtitle"
+          totalKey="shell.cards.tests.total"
+          totalText={unknown}
+          segments={[]}
+          collapsed={testsCollapsed}
+          onToggle={onTestsToggle}
+        />
+        <MetricCard
+          cardId="fx-budget"
+          titleKey="shell.cards.budget.title"
+          subtitleKey="shell.cards.budget.subtitle"
+          totalKey="shell.cards.budget.total"
+          totalText={budgetTotal}
+          segments={[
+            {
+              segmentKey: "shell.cards.budget.spent",
+              fraction: fractionOf(spent, hard),
+            },
+            {
+              segmentKey: "shell.cards.budget.reserved",
+              fraction: fractionOf(reserved, hard),
+            },
+            {
+              segmentKey: "shell.cards.budget.remaining",
+              fraction: fractionOf(remaining, hard),
+            },
+          ]}
+          segmentTexts={{
+            "shell.cards.budget.spent": formatNumber(spent),
+            "shell.cards.budget.reserved": formatNumber(reserved),
+            "shell.cards.budget.remaining": formatNumber(remaining),
+          }}
+          collapsed={budgetCollapsed}
+          onToggle={onBudgetToggle}
+        />
+        <MetricCard
+          cardId="fx-providers"
+          titleKey="shell.cards.providers.title"
+          subtitleKey="shell.cards.providers.subtitle"
+          totalKey="shell.cards.providers.total"
+          totalText={unknown}
+          segments={[]}
+          collapsed={providersCollapsed}
+          onToggle={onProvidersToggle}
+        />
+        <MetricCard
+          cardId="fx-localai"
+          titleKey="shell.cards.localai.title"
+          subtitleKey="shell.cards.localai.subtitle"
+          totalKey="shell.cards.localai.total"
+          totalText={unknown}
+          segments={[]}
+          collapsed={localAiCollapsed}
+          onToggle={onLocalAiToggle}
+        />
+        <MetricCard
+          cardId="fx-apps"
+          titleKey="shell.cards.apps.title"
+          subtitleKey="shell.cards.apps.subtitle"
+          totalKey="shell.cards.apps.total"
+          totalText={appsTotal}
+          segments={[]}
+          collapsed={appsCollapsed}
+          onToggle={onAppsToggle}
+        />
       </div>
     </aside>
   );
