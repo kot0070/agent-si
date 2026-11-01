@@ -1,9 +1,0 @@
-STATUS: PASS
-scope: WT/OC-K05 branch pkg/K10MERGE, merge of K10 rows onto origin/int 3c3277a per DIRECTOR/RUN/K10MERGE_FACTS.md
-(1) union: exactly ONE `def served_rows()` (k10_compet.py:1635) plus distinct `served_rows_k10code` (:2567); 47 top-level defs = 7 int + 40 K10-only; served_rows()=34 rows: all 16 int rows present first in order (R-328,166,R-343,165,167,M-P3-89,R-345,M-P4-134,M-P4-138,M-P4-162,M-P4-166,M-R-COMPET,-200,-130,-132,-151; missing=[]) + 18 K10 rows (-129,-131,-152,-153,-154,-158,-160,-161,-172,-173,-209,-210,-211,-212,-217,-225,-227,-229); all 6 int non-served defs kept; docstring keeps K10WAVE4+WAVE5 (:24-40)
-(2) wave test: all 17 int tests present in tests/test_k10wave_served.py (cur 37 = 17 + 20 K10-only); 16 verbatim identical, only test_k10wave3_bison_prior_entries_untouched differs (strengthened 16->34, 368 vs 575 bytes) as claimed
-(3) rerun (self): D:\MUSE_TOOLS\venv_agent_si\Scripts\python.exe -m pytest -q -p no:cacheprovider tests/test_k10code_served.py tests/test_k10d_served.py tests/test_k10wave_served.py tests/local/test_iface_m1.py -> "83 passed in 26.29s"
-(4) stub_scan: DIRECTOR/TOOLS/stub_scan.py absent; ran DIRECTOR/TOOLS/muse/stub_scan.py --files src/agent_si/k10_compet.py tests/test_k10wave_served.py -> exit 0 clean
-sha256: k10_compet.py F66D9FBED005B02179318F09DD9FB4F825B509CFAFF95897D1E5201729FB43ED; test_k10wave_served.py 0EE44DA63CF34C618D8A2531AF43B59BEE32379C1D74A64B867BE9DF0EDD949C
-defects: D1 | src/agent_si/k10_compet.py index | git ls-files -u shows 3 stages (UU): content resolved but conflict not marked resolved | cause: missing `git add` after resolution | status OPEN (manager: git add before auto_merge; no content re-audit needed)
-notes: FACTS said "42 new defs" but measured 40 (47 cur - 7 int); coder claim 40 verified correct. No merge, no fixes, no other writes.

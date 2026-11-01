@@ -294,8 +294,39 @@ function Write-OfflineManifests {
 
     # HASH over the CANONICAL bytes (never over raw ConvertTo-Json bytes).
     $sha = Get-Sha256HexOfString -Text $canonical
-    $commit = $env:AGENT_SI_COMMIT
-    if ([string]::IsNullOrEmpty($commit)) { $commit = "unknown" }
+    # PROV-BEGIN (reverse-sync provenance; tests_tools/test_build_commit.py
+    # runs these lines verbatim in a scratch repo with $ManifestDir,
+    # $StageDir and $PortableDir preset): the build stamps the HEAD of the
+    # copy it was built from (no env override: a stale env sha would label
+    # new bytes with an old commit) and REFUSES a dirty source tree. Only
+    # the build's own output files are excepted (this script rewrites them).
+    $commit = (& git -c safe.directory=* rev-parse HEAD 2>$null)
+    if ($LASTEXITCODE -ne 0) { throw "build REFUSED: cannot determine HEAD of the build copy (git rev-parse HEAD failed)" }
+    $commit = ("$commit").Trim()
+    if ($commit -notmatch '^[0-9a-fA-F]{40}$') { throw "build REFUSED: bad HEAD sha '$commit'" }
+    $provPrefixes = @(
+        (($ManifestDir -replace '\\','/').TrimEnd('/') + '/'),
+        (($StageDir -replace '\\','/').TrimEnd('/') + '/'),
+        (($PortableDir -replace '\\','/').TrimEnd('/') + '/'),
+        'dist/', 'frontend/dist/'
+    )
+    $provRaw = @(& git -c safe.directory=* status --porcelain 2>$null)
+    if ($LASTEXITCODE -ne 0) { throw "build REFUSED: cannot check tree cleanliness (git status failed)" }
+    $provDirty = @()
+    foreach ($provLine in $provRaw) {
+        $provT = ("$provLine").Trim()
+        if (-not $provT) { continue }
+        if ($provT.Length -lt 4) { $provDirty += $provLine; continue }
+        $provRel = $provT.Substring(2).Trim().Trim('"') -replace '\\','/'
+        if ($provRel -match '^(.*) -> (.*)$') { $provRel = $Matches[2].Trim() }
+        $provOwn = $false
+        foreach ($provPre in $provPrefixes) {
+            if (($provRel -eq $provPre.TrimEnd('/')) -or $provRel.StartsWith($provPre)) { $provOwn = $true; break }
+        }
+        if (-not $provOwn) { $provDirty += $provLine }
+    }
+    if ($provDirty.Count -gt 0) { throw ("build REFUSED: dirty source tree:`n" + ($provDirty -join "`n")) }
+    # PROV-END
     $hashPath = Join-Path $ManifestDir "HASH.json"
     $hashDoc = [ordered]@{
         sha256            = $sha
