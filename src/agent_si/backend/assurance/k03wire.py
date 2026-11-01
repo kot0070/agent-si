@@ -184,6 +184,22 @@ def k03wire_run(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _record_pins_for_run(run_id: str) -> tuple[str, ...]:
+    """Distinct product-recorded contract_hash pins for one run, oldest first."""
+    from agent_si.assurance import audit_records as _records
+
+    try:
+        rows = _records._records_for_run(run_id)
+    except Exception:
+        return ()
+    pins: list[str] = []
+    for row in rows or ():
+        pinned = getattr(row, "contract_hash", "")
+        if isinstance(pinned, str) and pinned and pinned not in pins:
+            pins.append(pinned)
+    return tuple(pins)
+
+
 def k03wire_fresh_audit(payload: dict[str, Any]) -> dict[str, Any]:
     """Audit through a fresh auditor; contributors in the set are refused."""
     turn = _turn_of(payload)
@@ -196,6 +212,15 @@ def k03wire_fresh_audit(payload: dict[str, Any]) -> dict[str, Any]:
     coordinator = _coordinator()
     if overlap:
         coordinator.refuse_contributor("", tuple(overlap))
+    pins = _record_pins_for_run(turn.run_id)
+    if not pins:
+        raise _WireError(404, "K03WIRE_FRESH_AUDIT_UNKNOWN_HASH",
+                         "fresh-audit needs a product-recorded "
+                         "contract_hash pin for this run: unknown-hash")
+    if turn.contract_hash not in pins:
+        raise _WireError(409, "K03WIRE_FRESH_AUDIT_STALE_HASH",
+                         "fresh-audit contract_hash differs from the "
+                         "product-recorded pin for this run: stale-hash")
     audit_id = coordinator.audit_with_fresh_auditor(turn)
     from agent_si.assurance import audit_records as _records
 
