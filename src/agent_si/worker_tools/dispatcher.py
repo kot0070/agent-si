@@ -24,12 +24,12 @@ import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from . import command_runner as _command_runner
 from .registry import (
     ToolNotAuthorizedError,
     ToolRegistry,
     _checked_argv,
     _checked_auth,
-    _shaped_result,
 )
 from .types import ActionClass, Argv, AuthMapping, ToolResult
 
@@ -103,7 +103,7 @@ class EscalationParkedError(PermissionError):
     def __init__(self, card: EscalationCard) -> None:
         """Carry the stored escalation card on the refusal."""
         super().__init__(
-            "run %r parked as ESCALATED: %s" % (card.run_id, card.reason)
+            f"run {card.run_id!r} parked as ESCALATED: {card.reason}"
         )
         self.card = card
 
@@ -208,8 +208,8 @@ def _note_denial(
             state=ESCALATED,
             reason=reason,
             evidence_refs=refs,
-            resume_action="resume:%s" % (run_id,),
-            discard_action="discard:%s" % (run_id,),
+            resume_action=f"resume:{run_id}",
+            discard_action=f"discard:{run_id}",
         )
         _ESCALATION_CARDS[run_id] = card
         return card
@@ -250,7 +250,7 @@ def guarded_dispatch(
     elif task_authorized is False:
         raise PermissionError("task_authorized denied: task not authorized")
     elif tool not in list(task_authorized):
-        reason = "tool %r is outside the task-authorized list" % (tool,)
+        reason = f"tool {tool!r} is outside the task-authorized list"
         if guard_store is not None:
             from .guard_records import TOOL_NOT_AUTHORIZED
             from .guard_records import record_guard_decision as _record
@@ -260,14 +260,11 @@ def guarded_dispatch(
                 tool=tool,
                 decision="deny",
                 reason=reason,
-                evidence_ref="toolguard:deny:task-list:%s" % (tool[:40],),
+                evidence_ref=f"toolguard:deny:task-list:{tool[:40]}",
                 error_code=TOOL_NOT_AUTHORIZED,
             )
-        raise ToolNotAuthorizedError("TOOL_NOT_AUTHORIZED: %s" % (reason,))
-    if isinstance(auth, collections.abc.Mapping):
-        auth_dict = dict(auth)
-    else:
-        auth_dict = {}
+        raise ToolNotAuthorizedError(f"TOOL_NOT_AUTHORIZED: {reason}")
+    auth_dict = dict(auth) if isinstance(auth, collections.abc.Mapping) else {}
     resolved_run = _resolve_run_id(auth_dict, run_id)
     if parked is not None:
         explicit = _resolve_parked_card(parked, resolved_run)
@@ -287,9 +284,23 @@ def guarded_dispatch(
             )
             if card is not None:
                 raise EscalationParkedError(card)
-        raise PermissionError(
-            "toolguard denied: %s" % (reason,)
-        )
+        raise PermissionError(f"toolguard denied: {reason}")
     _checked_auth(auth)
     target = registry if registry is not None else get_registry()
     return target.dispatch(tool, argv_list, action_class, auth)
+
+
+def dispatch_command(
+    project_id: str,
+    run_id: str,
+    argv: Argv,
+) -> dict[str, Any]:
+    """Start one real OS command through the command runner.
+
+    The single wiring call site of this lane: delegates to
+    :func:`command_runner.start_command`, which enforces the real
+    toolguard allowlist before spawning and then synchronously calls
+    :func:`stop_all.attach_child` so ``POST /api/v1/stop-all`` can
+    stop the child. Returns ``{run_id, pid}``.
+    """
+    return _command_runner.start_command(project_id, run_id, argv)

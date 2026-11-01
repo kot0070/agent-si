@@ -52,9 +52,13 @@ def register_k06oc_routes(app: Any) -> None:
         file_acceptance_run,
         list_acceptance_runs,
     )
+    from agent_si.worker_tools import command_runner as _commands
     from agent_si.worker_tools import escalation as _escalation
     from agent_si.worker_tools import install_records as _installs
-    from agent_si.worker_tools.dispatcher import guarded_dispatch
+    from agent_si.worker_tools.dispatcher import (
+        dispatch_command,
+        guarded_dispatch,
+    )
     from agent_si.worker_tools.guard_records import (
         TOOL_NOT_AUTHORIZED,
         list_guard_records,
@@ -117,6 +121,52 @@ def register_k06oc_routes(app: Any) -> None:
                 content={"code": "TOOLGUARD_DENIED", "message": str(exc)},
             )
         return dict(result)
+
+    @app.post("/api/v1/k06/tools/command/start")
+    async def k06oc_command_start(request: Request) -> Any:
+        """POST command/start -> real spawn via dispatcher, attached."""
+        _write_auth(app, request)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        try:
+            result = dispatch_command(
+                body.get("project_id", ""),
+                body.get("run_id", ""),
+                body.get("argv", []),
+            )
+        except (TypeError, ValueError) as exc:
+            return JSONResponse(
+                status_code=400,
+                content={"code": "COMMAND_REJECTED", "message": str(exc)},
+            )
+        except PermissionError as exc:
+            return JSONResponse(
+                status_code=403,
+                content={"code": "TOOLGUARD_DENIED", "message": str(exc)},
+            )
+        return dict(result)
+
+    @app.get("/api/v1/k06/tools/command/status")
+    def k06oc_command_status(request: Request,
+                             run_id: str = "") -> Any:
+        """GET command/status -> pid plus liveness for one tracked run."""
+        _write_auth(app, request)
+        try:
+            return dict(_commands.command_status(run_id))
+        except (TypeError, ValueError) as exc:
+            return JSONResponse(
+                status_code=400,
+                content={"code": "COMMAND_REJECTED", "message": str(exc)},
+            )
+        except LookupError as exc:
+            return JSONResponse(
+                status_code=404,
+                content={"code": "COMMAND_UNKNOWN", "message": str(exc)},
+            )
 
     @app.get("/api/v1/k06/guard-records")
     def k06oc_guard_records() -> dict[str, Any]:
