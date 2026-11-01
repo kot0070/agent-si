@@ -9,12 +9,27 @@ export type { ApiErrorBody, ApiErrorCode };
 export class ApiError extends Error {
   code: ApiErrorCode;
   status: number;
-  constructor(code: ApiErrorCode, status: number) {
+  // FXASK2: optional served detail carried on the error (addition only:
+  // existing two-arg constructions are unchanged). The chat/task-run
+  // approval hold carries the held tool's id here from the approval
+  // event's tool_id field.
+  readonly details?: ApiErrorDetails;
+  constructor(code: ApiErrorCode, status: number, details?: ApiErrorDetails) {
     super(code);
     this.name = "ApiError";
     this.code = code;
     this.status = status;
+    if (details !== undefined) {
+      this.details = details;
+    }
   }
+  get toolId(): string | undefined {
+    return this.details?.toolId;
+  }
+}
+
+export interface ApiErrorDetails {
+  toolId?: string;
 }
 
 const ERROR_CODES: ReadonlyArray<ApiErrorCode> = [

@@ -66,6 +66,7 @@ class TurnResult:
     treated_as_data: bool
     authorization_ref: Any = None
     reason: str = ""
+    tool_id: str = ""
 
 
 @dataclass

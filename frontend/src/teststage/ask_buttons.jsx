@@ -39,6 +39,11 @@ export const ASK_BUTTON_ENTRY = "frontend/src/teststage/ask_buttons.jsx";
 
 /** DEMOF13F1 F13: install-permission ask-once wiring.
  *
+ * FXASK F4: the canonical product copy lives in
+ * frontend/src/chat/permissions.ts and product screens import it from
+ * there. This fixture keeps a behavior-identical self-contained copy so
+ * the fe_run copy (ask_buttons.jsx alone, no product imports) keeps working.
+ *
  * The ASK buttons call POST /api/v1/permissions/check on click and
  * disable once the reply reports asked_once true: the first reply
  * carries asked_once false and repeats carry true.
@@ -47,6 +52,8 @@ export const ASK_CHECK_ROUTE = "/api/v1/permissions/check";
 
 /**
  * Ask install permission for one tool id.
+ * Teststage-local copy of the canonical frontend/src/chat/permissions.ts
+ * askPermission (kept identical so this file stays import-free).
  * @param {string} toolId
  * @returns {Promise<{ allowed: boolean, askedOnce: boolean }>}
  */

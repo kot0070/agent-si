@@ -1,4 +1,4 @@
-import { createElement, useEffect, useState } from 'react';
+import { createElement, useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import { t } from '../locale/index';
 import { ApiError } from '../api/errors';
@@ -7,6 +7,7 @@ import {
   readRoleProfilesFromServer,
   writeRoleProfileToServer,
 } from './roleProfilesApi';
+import { askPermission, installPermissionToolId } from '../chat/permissions';
 
 export type RoleMode = 'PINNED' | 'pool' | 'AUTO';
 
@@ -59,7 +60,7 @@ function isRoleMode(value: unknown): value is RoleMode {
 
 function readCacheMap(projectId: string): RoleProfileMap {
   try {
-    const raw = window.localStorage.getItem(roleProfilesKey(projectId));
+    const raw = window.sessionStorage.getItem(roleProfilesKey(projectId));
     if (raw === null) {
       return {};
     }
@@ -93,15 +94,16 @@ function readCacheMap(projectId: string): RoleProfileMap {
 
 function writeCacheMap(projectId: string, map: RoleProfileMap): void {
   try {
-    window.localStorage.setItem(roleProfilesKey(projectId), JSON.stringify(map));
+    window.sessionStorage.setItem(roleProfilesKey(projectId), JSON.stringify(map));
   } catch {
     // Storage unavailable: the in-memory edit still re-renders.
   }
 }
 
-// Server value first; the localStorage copy stays only as an offline
-// cache read AFTER the server value (a failed server read falls back to
-// it, never the other way round).
+// Server value first; the session copy stays only as a session-scoped
+// offline mirror read AFTER the server value (a failed server read falls
+// back to it, never the other way round). FXASK F2 keeps this file free of
+// browser persistent storage; the mirror never outlives the tab.
 export async function readRoleProfiles(projectId: string): Promise<RoleProfileMap> {
   try {
     const server = await readRoleProfilesFromServer(projectId);
@@ -304,21 +306,54 @@ export function RoleProfileEditor(props: RoleProfileEditorProps): ReactElement {
   );
 }
 
-function acceptedRiskKey(projectId: string): string {
+// Accepted risk is a server-recorded grant, never a local toggle
+// (PRODUCT_SPEC 18B: accepted_risk_allowed is server-side policy; the F1
+// ask-once ledger is append-only, so a grant cannot be un-recorded and the
+// switch is a latch). The session mirror only seeds first paint; the
+// backend answer stays authoritative on every mount.
+function acceptedRiskMirrorKey(projectId: string): string {
   return `agentsi.acceptedRisk.${projectId}`;
 }
 
-function readAcceptedRisk(projectId: string): boolean {
+function readAcceptedRiskMirror(projectId: string): boolean {
   try {
-    return window.localStorage.getItem(acceptedRiskKey(projectId)) === 'true';
+    const stored = window.sessionStorage.getItem(
+      acceptedRiskMirrorKey(projectId));
+    return stored === 'true';
   } catch {
     return false;
   }
 }
 
+function writeAcceptedRiskMirror(projectId: string, accepted: boolean): void {
+  try {
+    window.sessionStorage.setItem(
+      acceptedRiskMirrorKey(projectId), String(accepted));
+  } catch {
+    // Storage unavailable: the in-memory state still re-renders.
+  }
+}
+
 export function AcceptedRiskSwitch(props: AcceptedRiskSwitchProps): ReactElement {
-  const [accepted, setAccepted] = useState(() => readAcceptedRisk(props.projectId));
-  const key = acceptedRiskKey(props.projectId);
+  const [accepted, setAccepted] = useState(
+    () => readAcceptedRiskMirror(props.projectId));
+  const touchedRef = useRef(false);
+  useEffect(() => {
+    let alive = true;
+    void askPermission(installPermissionToolId(props.projectId)).then(
+      (outcome) => {
+        if (!alive || touchedRef.current) {
+          return;
+        }
+        writeAcceptedRiskMirror(props.projectId, outcome.askedOnce);
+        setAccepted(outcome.askedOnce);
+      },
+      () => undefined,
+    );
+    return () => {
+      alive = false;
+    };
+  }, [props.projectId]);
   return createElement(
     'label',
     null,
@@ -326,13 +361,16 @@ export function AcceptedRiskSwitch(props: AcceptedRiskSwitchProps): ReactElement
       type: 'checkbox',
       checked: accepted,
       onChange: (event: { target: { checked: boolean } }) => {
-        const next = event.target.checked;
-        setAccepted(next);
-        try {
-          window.localStorage.setItem(key, String(next));
-        } catch {
-          // Storage unavailable: the switch still re-renders in memory.
+        if (!event.target.checked) {
+          return;
         }
+        touchedRef.current = true;
+        setAccepted(true);
+        writeAcceptedRiskMirror(props.projectId, true);
+        void askPermission(installPermissionToolId(props.projectId)).then(
+          () => undefined,
+          () => undefined,
+        );
       },
     }),
     t('settings.risk.label'),

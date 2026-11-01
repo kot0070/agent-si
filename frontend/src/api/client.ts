@@ -172,6 +172,15 @@ export class HttpApiClient implements ApiClient {
           }
           case "done":
           case "cancelled": {
+            // FXASK2: the task-run hold arrives as a manager done event
+            // with approval_requested; it raises the same tool-id ask as
+            // the chat approval event so task runs get the same check.
+            if (
+              wire.type === "done" &&
+              wire.approval_requested === true
+            ) {
+              throw approvalRequired(status, wire.tool_id);
+            }
             finished = true;
             yield terminal();
             return;
@@ -180,7 +189,10 @@ export class HttpApiClient implements ApiClient {
             throw apiErrorFromCode(wire.code, status);
           }
           case "approval": {
-            throw new ApiError("APPROVAL_REQUIRED", status);
+            // FXASK2: the approval event carries the held tool's id
+            // (guard tool_name); it rides the error so the dialog and
+            // POST /api/v1/permissions/check use it, once per tool.
+            throw approvalRequired(status, wire.tool_id);
           }
           default: {
             break;
@@ -300,6 +312,16 @@ export class HttpApiClient implements ApiClient {
 
 function invalidInput(): ApiError {
   return new ApiError("CONTEXT_WRONG_CONTRACT_VERSION", 400);
+}
+
+// FXASK2: approval hold as an error carrying the held tool's id from
+// the wire event (guard tool_name). The id travels on the error so the
+// chat dialog and the task-run path run the same per-tool check.
+function approvalRequired(status: number, toolId: unknown): ApiError {
+  if (typeof toolId === "string" && toolId !== "") {
+    return new ApiError("APPROVAL_REQUIRED", status, { toolId });
+  }
+  return new ApiError("APPROVAL_REQUIRED", status);
 }
 
 export function validatePartRow(data: unknown): PartRow {

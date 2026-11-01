@@ -177,6 +177,11 @@ export const ChatStreamEventSchema = z.object({
   code: z.string().optional(),
   message: z.string().optional(),
   reason: z.string().optional(),
+  // FXASK2: the held tool's id on approval holds (guard tool_name),
+  // plus the task-run hold signal on manager done events. Optional:
+  // older events without them parse exactly as before.
+  tool_id: z.string().optional(),
+  approval_requested: z.boolean().optional(),
 });
 
 export type ChatStreamEvent = z.infer<typeof ChatStreamEventSchema>;
