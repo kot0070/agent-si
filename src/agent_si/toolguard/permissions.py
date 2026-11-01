@@ -16,6 +16,9 @@ error code for the failed condition.
 
 from __future__ import annotations
 
+import json
+import os
+import tempfile
 from typing import Any
 
 ACTION_CLASSES: tuple[str, ...] = ("R0", "R1", "R2", "R3")
@@ -143,3 +146,105 @@ def check_permission(
             return {"ok": True, "action_class": "R3"}
         return {"error": ERR_R3_USER_RECORD_REQUIRED}
     return {"error": "ERR_UNKNOWN_ACTION_CLASS: %s" % (action_class,)}
+
+
+#: Frozen F13 route: install-permission ask-once decision.
+PERMISSIONS_CHECK_ROUTE = "/api/v1/permissions/check"
+
+#: Longest accepted tool id; longer values are refused, never truncated.
+TOOL_ID_MAX_LEN = 256
+
+#: File in the app store dir holding the persisted once-flag id list.
+ASKED_ONCE_FILENAME = "demof13w_asked_once.json"
+
+
+class PermissionCheckError(Exception):
+    """Refusal carrying its HTTP status plus signal code."""
+
+    def __init__(self, status: int, code: str, message: str) -> None:
+        super().__init__(message)
+        self.status = status
+        self.code = code
+
+
+def check_install_permission(tool_id: str) -> bool:
+    """Decide whether ``tool_id`` is granted install permission.
+
+    Grants any well-formed id (a string with non-blank content inside
+    the length cap); refuses non-strings, blank ids and oversize ids.
+    """
+    if not isinstance(tool_id, str):
+        return False
+    text = tool_id.strip()
+    if not text or len(text) > TOOL_ID_MAX_LEN:
+        return False
+    return True
+
+
+def require_tool_id(payload: Any) -> str:
+    """Return the required non-blank tool_id, else a loud 400."""
+    value = payload.get("tool_id") if isinstance(payload, dict) else None
+    if not isinstance(value, str) or not value.strip():
+        raise PermissionCheckError(
+            400, "DEMOF13F1_TOOL_ID_MISSING",
+            "permissions check needs a non-empty tool_id string")
+    return value.strip()
+
+
+def _asked_once_path(store_dir: str) -> str:
+    """Path of the persisted once-flag id list inside the store dir."""
+    return os.path.join(store_dir, ASKED_ONCE_FILENAME)
+
+
+def load_asked_once(store_dir: Any) -> set[str]:
+    """Read the persisted once-flag id set; unknown state reads empty."""
+    if not store_dir:
+        return set()
+    try:
+        with open(_asked_once_path(store_dir),
+                  "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return set()
+    if not isinstance(data, list):
+        return set()
+    return {entry for entry in data if isinstance(entry, str)}
+
+
+def save_asked_once(store_dir: Any, asked: set[str]) -> None:
+    """Persist the once-flag id set with a temp file plus os.replace."""
+    if not store_dir:
+        return
+    os.makedirs(store_dir, exist_ok=True)
+    path = _asked_once_path(store_dir)
+    fd, tmp = tempfile.mkstemp(
+        dir=store_dir, prefix="asked_once_", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(sorted(asked), handle)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def record_install_ask(store_dir: Any, memory: set[str],
+                       tool_id: str) -> bool:
+    """Record one install ask; True when the id was already recorded.
+
+    The file in the store dir is the durable record (a rebuild over the
+    same store dir still answers True); ``memory`` keeps the answer
+    right when no store dir is configured.
+    """
+    asked = set(memory)
+    if store_dir:
+        asked |= load_asked_once(store_dir)
+    seen = tool_id in asked
+    asked.add(tool_id)
+    memory.add(tool_id)
+    if store_dir:
+        save_asked_once(store_dir, asked)
+    return seen
