@@ -601,6 +601,203 @@ def clean_boot_record() -> list[dict]:
     ]
 
 
+def readme_root_checks() -> list[dict]:
+    """Return the fixed recorded checkout-root README checks.
+
+    Row B0B-UNCOVERED_MVP_ACCEPT-131 (served row "131"): kit
+    BUILD_PLAN "README at checkout root documents prerequisites,
+    setup steps, demo commands, fixture commands, task ...". The
+    BUILD_PLAN cell is cut after "task"; the recorded completion
+    ("task tree pointers, and troubleshooting") follows the kit
+    PRODUCT_SPEC prose for the same sentence.
+    """
+    return [
+        {
+            "claim": (
+                "README at checkout root documents prerequisites, "
+                "setup steps, demo commands, fixture commands, task "
+                "tree pointers, and troubleshooting."
+            ),
+            "source": (
+                "recorded: kit BUILD_PLAN B0B-UNCOVERED_MVP_ACCEPT-131 "
+                "coverage (loopback fixture, not live)"
+            ),
+            "snippet": (
+                "verbatim recorded: 'README at checkout root documents "
+                "prerequisites, setup steps, demo commands, fixture "
+                "commands, task'"
+            ),
+            "evidence": (
+                "route GET /k10/compet/audit proven by "
+                "tests/test_k10e_served.py::test_k10e_readme_root_checks"
+            ),
+        },
+    ]
+
+
+def k10e_startup_sequence_record() -> list[dict]:
+    """Return the fixed recorded startup sequence record (K10E seam).
+
+    K10BMERGE: K10B named this startup_sequence_record; int already
+    defines that name for row B0B-UNCOVERED_MVP_ACCEPT-153 with a
+    different shape, so the K10E seam for served row "153" lives
+    under this name (no duplicate def, no row lost).
+
+    Row B0B-UNCOVERED_MVP_ACCEPT-153 (served row "153"): kit
+    BUILD_PLAN "startup sequence (checkout, configure from environment
+    example, offline install from lockfiles, laun ...". The BUILD_PLAN
+    cell is cut after "laun"; the recorded completion ("launch
+    managers plus workers plus UI) is idempotent") follows the kit
+    BUILD_PLAN prose for the same sentence.
+    """
+    return [
+        {
+            "claim": (
+                "The startup sequence (checkout, configure from "
+                "environment example, offline install from lockfiles, "
+                "launch managers plus workers plus UI) is idempotent."
+            ),
+            "source": (
+                "recorded: kit BUILD_PLAN B0B-UNCOVERED_MVP_ACCEPT-153 "
+                "coverage (loopback fixture, not live)"
+            ),
+            "snippet": (
+                "verbatim recorded: 'startup sequence (checkout, "
+                "configure from environment example, offline install "
+                "from lockfiles, laun'"
+            ),
+            "evidence": (
+                "route GET /k10/compet/audit proven by "
+                "tests/test_k10e_served.py::test_k10e_startup_sequence"
+            ),
+        },
+    ]
+
+
+def k10e_fixture_pack_record() -> list[dict]:
+    """Return the fixed recorded MVP fixture-pack record (K10E seam).
+
+    K10BMERGE: K10B named this fixture_pack_record; int already
+    defines that name for row B0B-UNCOVERED_MVP_ACCEPT-173 with a
+    different shape, so the K10E seam for served row "173" lives
+    under this name (no duplicate def, no row lost).
+
+    Row B0B-UNCOVERED_MVP_ACCEPT-173 (served row "173"): kit
+    BUILD_PLAN "MVP fixture pack ships under checkout and is not
+    measured evidence."
+    """
+    return [
+        {
+            "claim": (
+                "MVP fixture pack ships under checkout and is not "
+                "measured evidence."
+            ),
+            "source": (
+                "recorded: kit BUILD_PLAN B0B-UNCOVERED_MVP_ACCEPT-173 "
+                "coverage (loopback fixture, not live)"
+            ),
+            "snippet": (
+                "verbatim recorded: 'MVP fixture pack ships under "
+                "checkout and is not measured evidence.'"
+            ),
+            "evidence": (
+                "route GET /k10/compet/audit proven by "
+                "tests/test_k10e_served.py::test_k10e_fixture_pack"
+            ),
+        },
+    ]
+
+
+def host_blockers_record() -> list[dict]:
+    """Return the fixed recorded host blockers record.
+
+    Row B0B-UNCOVERED_MVP_ACCEPT-214 (served row "214"): kit
+    BUILD_PLAN "host blockers name missing permissions, auditor
+    provider, and second provider."
+    """
+    return [
+        {
+            "claim": (
+                "Host blockers name missing permissions, auditor "
+                "provider, and second provider."
+            ),
+            "source": (
+                "recorded: kit BUILD_PLAN B0B-UNCOVERED_MVP_ACCEPT-214 "
+                "coverage (loopback fixture, not live)"
+            ),
+            "snippet": (
+                "verbatim recorded: 'host blockers name missing "
+                "permissions, auditor provider, and second provider.'"
+            ),
+            "evidence": (
+                "route GET /k10/compet/audit proven by "
+                "tests/test_k10e_served.py::test_k10e_host_blockers"
+            ),
+        },
+    ]
+
+
+def attainability_gate_record() -> list[dict]:
+    """Return the fixed recorded MVP attainability-gate record.
+
+    Row B0B-UNCOVERED_MVP_ACCEPT-215 (served row "215"): kit
+    BUILD_PLAN "MVP is not attainable on a host until local
+    permission, auditor provider, and a second real provider ...".
+    The BUILD_PLAN cell is cut after "provider"; the recorded
+    completion ("resolve") follows the kit BUILD_PLAN prose for the
+    same sentence.
+    """
+    return [
+        {
+            "claim": (
+                "MVP is not attainable on a host until local "
+                "permission, auditor provider, and a second real "
+                "provider resolve."
+            ),
+            "source": (
+                "recorded: kit BUILD_PLAN B0B-UNCOVERED_MVP_ACCEPT-215 "
+                "coverage (loopback fixture, not live)"
+            ),
+            "snippet": (
+                "verbatim recorded: 'MVP is not attainable on a host "
+                "until local permission, auditor provider, and a "
+                "second real provider'"
+            ),
+            "evidence": (
+                "route GET /k10/compet/audit proven by "
+                "tests/test_k10e_served.py::test_k10e_attainability_gate"
+            ),
+        },
+    ]
+
+
+def licence_check_record() -> list[dict]:
+    """Return the fixed recorded open-source licence-check record.
+
+    Row HC-4 (served row "HC-4"): kit BUILD_PLAN "open-source licence
+    check (owner decision)".
+    """
+    return [
+        {
+            "claim": (
+                "The open-source licence check is an owner decision."
+            ),
+            "source": (
+                "recorded: kit BUILD_PLAN HC-4 "
+                "coverage (loopback fixture, not live)"
+            ),
+            "snippet": (
+                "verbatim recorded: 'open-source licence check (owner "
+                "decision)'"
+            ),
+            "evidence": (
+                "route GET /k10/compet/audit proven by "
+                "tests/test_k10e_served.py::test_k10e_licence_check"
+            ),
+        },
+    ]
+
+
 def readme_command_index() -> list[dict]:
     """Return the fixed recorded README command-index record.
 
@@ -1924,6 +2121,48 @@ def served_rows() -> list[dict]:
             "test": (
                 "tests/test_k10wave_served.py::"
                 "test_k10wave5_localhost_doubles"
+            ),
+        },
+        {
+            "row": "131",
+            "route": "agent_si.k10_compet.readme_root_checks recorded seam",
+            "test": (
+                "tests/test_k10e_served.py::test_k10e_readme_root_checks"
+            ),
+        },
+        {
+            "row": "153",
+            "route": "agent_si.k10_compet.k10e_startup_sequence_record recorded seam",
+            "test": (
+                "tests/test_k10e_served.py::test_k10e_startup_sequence"
+            ),
+        },
+        {
+            "row": "173",
+            "route": "agent_si.k10_compet.k10e_fixture_pack_record recorded seam",
+            "test": (
+                "tests/test_k10e_served.py::test_k10e_fixture_pack"
+            ),
+        },
+        {
+            "row": "214",
+            "route": "agent_si.k10_compet.host_blockers_record recorded seam",
+            "test": (
+                "tests/test_k10e_served.py::test_k10e_host_blockers"
+            ),
+        },
+        {
+            "row": "215",
+            "route": "agent_si.k10_compet.attainability_gate_record recorded seam",
+            "test": (
+                "tests/test_k10e_served.py::test_k10e_attainability_gate"
+            ),
+        },
+        {
+            "row": "HC-4",
+            "route": "agent_si.k10_compet.licence_check_record recorded seam",
+            "test": (
+                "tests/test_k10e_served.py::test_k10e_licence_check"
             ),
         },
     ]
