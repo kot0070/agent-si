@@ -117,7 +117,9 @@ def register_localbench_routes(app: Any) -> Any:
         try:
             level = _coerce_level((body or {}).get("level", ""))
             model_id = (body or {}).get("model_id", "")
-            run_id = runs_route(model_id, level, True)
+            run_id = runs_route(
+                model_id, level, True, chat_endpoint=_body_chat_endpoint(body)
+            )
         except _RunSkipped as exc:
             return _refusal(503, str(exc))
         except BenchBusyError as exc:
@@ -245,6 +247,9 @@ def register_localbench_routes(app: Any) -> Any:
 
     @router.get("/api/v1/local/bench/check")
     def _get_check(endpoint: str = "") -> JSONResponse:
+        global _LAST_CHECK_ENDPOINT
+        if endpoint.strip():
+            _LAST_CHECK_ENDPOINT = endpoint.strip()
         return JSONResponse(status_code=200, content=asdict(check_route(endpoint)))
 
     include = getattr(app, "include_router", None)
@@ -272,19 +277,58 @@ def estimate_route(model_id: str, level: BenchLevel) -> BenchEstimate:
     return _runner.estimate_run(model_id, lvl, nominal)
 
 
-def runs_route(model_id: str, level: BenchLevel, authorized: bool) -> str:
+#: Last non-empty endpoint passed to GET /api/v1/local/bench/check (served
+#: run-start chain fallback: the POST body endpoint wins, else this, else
+#: the env var).
+_LAST_CHECK_ENDPOINT: str | None = None
+
+
+def _body_chat_endpoint(body: Any) -> str | None:
+    """POST /runs endpoint override: a non-empty string wins, else None.
+
+    Present-but-not-a-string refuses fail-closed (the route maps the
+    ValueError to 400); absent, null or blank falls through to the
+    remembered check endpoint, else the env var.
+    """
+    if not isinstance(body, dict):
+        return None
+    if "endpoint" not in body:
+        return None
+    raw = body["endpoint"]
+    if raw is None:
+        return None
+    if not isinstance(raw, str):
+        raise ValueError(f"endpoint must be a string, got {type(raw).__name__}")
+    return raw.strip() or None
+
+
+def runs_route(
+    model_id: str,
+    level: BenchLevel,
+    authorized: bool,
+    chat_endpoint: str | None = None,
+) -> str:
     """Entry: start a run, returning its run id.
 
     Unauthorized calls raise BenchRefusedError carrying
     SESSION_TOKEN_REFUSED and change nothing. A gateway-unreachable skip
     raises the private _RunSkipped (mapped to HTTP 503 by the route).
+    The executor endpoint follows the run-start chain: the explicit
+    chat_endpoint (served POST body) wins, else the last endpoint passed
+    to GET /api/v1/local/bench/check, else the env var at start.
     """
     if not authorized:
         raise BenchRefusedError(
             f"{_runner.SESSION_TOKEN_REFUSED}: bench runs need a bound UI session "
             "token (x-actor + x-ui-session-token); state unchanged"
         )
-    outcome = _runner.start_run(model_id, _coerce_level(level), True)
+    if isinstance(chat_endpoint, str) and chat_endpoint.strip():
+        endpoint: str | None = chat_endpoint.strip()
+    else:
+        endpoint = _LAST_CHECK_ENDPOINT
+    outcome = _runner.start_run(
+        model_id, _coerce_level(level), True, chat_endpoint=endpoint
+    )
     if isinstance(outcome, RunSkip):
         raise _RunSkipped(outcome.reason)
     assert isinstance(outcome, RunHandle)

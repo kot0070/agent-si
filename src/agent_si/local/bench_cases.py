@@ -126,3 +126,74 @@ def suite_manifest_hash(cases: list[BenchCase]) -> str:
         for case in cases
     )
     return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
+
+
+@dataclass(frozen=True)
+class QuickCaseSpec:
+    """Frozen F10 executor material for one Quick case (new F10 content).
+
+    prompt is the exact text the background executor sends; rule is the
+    expected-answer rule the reply is scored against; expected is the
+    canonical passing reply. These prompts are new F10 material, not
+    owner-original content.
+    """
+
+    case_id: str
+    prompt: str
+    rule: str
+    expected: str
+
+
+#: Frozen F10 Quick prompts + expected-answer rules (q01-q06, one category
+#: each: exact arithmetic; valid JSON with given keys; one-word reply;
+#: capital of a country; reversed string; sorted numbers).
+_QUICK_CASE_SPECS: dict[str, QuickCaseSpec] = {
+    "q01": QuickCaseSpec(
+        case_id="q01",
+        prompt="What is 17 + 25? Reply with only the number.",
+        rule="exact:42",
+        expected="42",
+    ),
+    "q02": QuickCaseSpec(
+        case_id="q02",
+        prompt="Reply with only a valid JSON object containing the keys "
+        '"name" and "score".',
+        rule="json-keys:name,score",
+        expected='{"name": "ada", "score": 1}',
+    ),
+    "q03": QuickCaseSpec(
+        case_id="q03",
+        prompt='Reply with exactly one word: lantern',
+        rule="one-word:lantern",
+        expected="lantern",
+    ),
+    "q04": QuickCaseSpec(
+        case_id="q04",
+        prompt="What is the capital of France? Reply with only the city name.",
+        rule="exact-ci:Paris",
+        expected="Paris",
+    ),
+    "q05": QuickCaseSpec(
+        case_id="q05",
+        prompt='Reverse the string "bench" and reply with only the reversed string.',
+        rule="exact:hcneb",
+        expected="hcneb",
+    ),
+    "q06": QuickCaseSpec(
+        case_id="q06",
+        prompt="Sort these numbers from smallest to largest: 5, 3, 8, 1. "
+        "Reply with only the sorted numbers, comma-separated.",
+        rule="numbers-asc:1,3,5,8",
+        expected="1, 3, 5, 8",
+    ),
+}
+
+
+def quick_case_spec(case_id: str) -> QuickCaseSpec:
+    """Frozen F10 spec for a Quick case; ValueError on anything else."""
+    try:
+        return _QUICK_CASE_SPECS[case_id]
+    except (KeyError, TypeError):
+        raise ValueError(
+            f"no frozen F10 executor spec for case {case_id!r}"
+        ) from None

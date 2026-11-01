@@ -891,3 +891,93 @@ REALIZATION_MAP = {
     "confirm_verifier_link": "agent_si.local.service.LocalAdapter.confirm_verifier_link",
     "route_by_policy": "agent_si.local.service.LocalAdapter.route_by_policy",
 }
+
+#: --- Additive F10 bench MEASURED completion write (FB2B8; new names only). ---
+#: The background executor's completion path records its full-slice
+#: measurement here: one MEASURED row per (model_id, bench task class),
+#: superseding the run-start PROXY row under the same key. Fail-closed
+#: validation mirrors this module's existing guards (a role-config field
+#: is refused as a task class); the capability-store import stays lazy
+#: so this module remains stdlib-only at import time.
+
+
+def record_bench_measured(
+    model_id: str,
+    task_class: str,
+    score: float,
+    sample_count: int,
+    confidence: float,
+    environment_fingerprint: str | None,
+    source: str,
+) -> CapabilityEvidence:
+    """Bench completion write: MEASURED evidence into the capability base.
+
+    Validates every field (non-empty model/task/source, finite 0..1
+    score and confidence, positive integer sample count, no role-config
+    task class) and indexes one MEASURED row under the stable
+    ``cap:<model>:<task>:v1`` ref, returning the adapter evidence shape.
+    Raises ValueError on malformed inputs; store failures propagate.
+    """
+    from datetime import datetime, timezone
+
+    from agent_si.capability_store import store as _store
+
+    if not isinstance(model_id, str) or not model_id:
+        raise ValueError(f"model_id must be a non-empty string, got {model_id!r}")
+    if not isinstance(task_class, str) or not task_class:
+        raise ValueError(f"task_class must be a non-empty string, got {task_class!r}")
+    _reject_role_config_ref(task_class, "bench task class")
+    if (
+        not isinstance(score, float)
+        or isinstance(score, bool)
+        or not 0.0 <= score <= 1.0
+        or score != score
+    ):
+        raise ValueError(f"score must be a finite 0..1 float, got {score!r}")
+    if (
+        not isinstance(sample_count, int)
+        or isinstance(sample_count, bool)
+        or sample_count <= 0
+    ):
+        raise ValueError(
+            f"sample_count must be a positive integer, got {sample_count!r}"
+        )
+    if (
+        not isinstance(confidence, float)
+        or isinstance(confidence, bool)
+        or not 0.0 <= confidence <= 1.0
+        or confidence != confidence
+    ):
+        raise ValueError(
+            f"confidence must be a finite 0..1 float, got {confidence!r}"
+        )
+    if environment_fingerprint is not None and (
+        not isinstance(environment_fingerprint, str) or not environment_fingerprint
+    ):
+        raise ValueError(
+            "environment_fingerprint must be a non-empty string or None, "
+            f"got {environment_fingerprint!r}"
+        )
+    if not isinstance(source, str) or not source:
+        raise ValueError(f"source must be a non-empty string, got {source!r}")
+    evidence_ref = f"cap:{model_id}:{task_class}:v1"
+    _store._register_row(
+        _store.CapabilityEvidenceRecord(
+            model_id=model_id,
+            task_class=task_class,
+            tier=_store.EvidenceTier.MEASURED,
+            score=float(score),
+            score_type="bench_mean_score",
+            sample_count=sample_count,
+            confidence=float(confidence),
+            benchmark_version=None,
+            measured_at=datetime.now(timezone.utc).isoformat(),
+            runtime="localbench",
+            runtime_version=None,
+            environment_fingerprint=environment_fingerprint,
+            freshness_state=_store.FreshnessState.CURRENT.value,
+            evidence_ref=evidence_ref,
+            source=source,
+        )
+    )
+    return CapabilityEvidence(evidence_ref=evidence_ref, tier=EvidenceTier.MEASURED)
