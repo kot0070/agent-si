@@ -2,7 +2,7 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { clearUiToken } from "../../api/errors";
+import { clearUiToken, setUiToken } from "../../api/errors";
 import { ProvidersPage, saveChatModel } from "./ProvidersPage";
 import { saveRolePool } from "./poolsApi";
 import { DisconnectDialog } from "./DisconnectDialog";
@@ -81,6 +81,7 @@ beforeEach(() => {
   window.sessionStorage.clear();
   clearWindowToken();
   clearUiToken();
+  setUiToken(PAGE_TOKEN);
 });
 
 afterEach(() => {

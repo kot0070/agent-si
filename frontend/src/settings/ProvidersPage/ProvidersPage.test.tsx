@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { PROVIDER_CATALOG, getPreset } from "./catalog";
 import { ChatSelector, enabledChatChoices } from "./ChatSelector";
@@ -18,6 +18,18 @@ import type { SecretStorePort } from "./secretStore";
 import { AUTO_SENTINEL, ROLE_KEYS } from "./types";
 import type { ProviderState, SecretRef } from "./types";
 import { resetLocaleForTests, setLocale } from "../../locale/index";
+import { clearUiToken, setUiToken } from "../../api/errors";
+
+// The default locale is uk; these assertions read the English labels. The page
+// reads the window token, so the suite provides one.
+beforeEach(() => {
+  setLocale("en");
+  setUiToken("local-session");
+});
+
+afterEach(() => {
+  clearUiToken();
+});
 
 afterEach(() => {
   cleanup();
@@ -477,7 +489,7 @@ describe("ProvidersPage role pools wiring (page-level)", () => {
     );
     expect(target).toBeTruthy();
     fireEvent.change(select, { target: { value: (target as HTMLOptionElement).value } });
-    expect(await screen.findByText("Saved worker.")).toBeTruthy();
+    expect(await screen.findByText("Saved Worker.")).toBeTruthy();
     expect(fetchMock).toHaveBeenCalled();
     const { url, init } = lastFetchCall(fetchMock);
     expect(init.method).toBe("PUT");
@@ -514,7 +526,7 @@ describe("ProvidersPage role pools wiring (page-level)", () => {
     fireEvent.click(within(worker).getByLabelText("Model pool"));
     fireEvent.click(within(worker).getByLabelText("OpenAI — Standard"));
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    expect(await screen.findByText("Saved worker.")).toBeTruthy();
+    expect(await screen.findByText("Saved Worker.")).toBeTruthy();
     const { init } = lastFetchCall(fetchMock);
     const body = JSON.parse(init.body as string) as Record<string, unknown>;
     expect(body).toMatchObject({ project_id: "local", role: "worker", mode: "pool" });

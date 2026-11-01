@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { PROVIDER_CATALOG, getPreset } from "./catalog";
 import { ConnectDialog } from "./ConnectDialog";
@@ -14,9 +14,16 @@ import type {
   LeftoverKeyFinderProps,
 } from "./k04-iface";
 import type { SecretRef } from "./types";
+import { resetLocaleForTests, setLocale } from "../../locale/index";
+
+// The default locale is uk; these contract assertions read the English labels.
+beforeEach(() => {
+  setLocale("en");
+});
 
 afterEach(() => {
   cleanup();
+  resetLocaleForTests();
 });
 
 function contractOpenaiPreset() {
