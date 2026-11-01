@@ -1057,3 +1057,297 @@ def register_k02next7_routes(app: Any) -> Any:
                 "loaded": loaded}
 
     return app
+
+# K02NEXT8 adds 8 endpoints on 5 rows (additive-only; every path,
+# handler name and orchestration signature above stays unchanged):
+#
+# - POST /hierarchy/k02next8/chain-guard (B0B-UNCOVERED_BP06-30):
+#   establish one valid chain on a fresh HierarchyConfigStore, then
+#   try one attempted chain on the same real store; an invalid shape
+#   refuses with HTTP 400 carrying proof the stored configuration is
+#   unchanged (nothing mutated), a valid shape applies.
+# - GET /hierarchy/k02next8/schema (LIVE0-07): the served OpenAPI
+#   summary plus the docs/openapi URLs; the FastAPI app itself serves
+#   the openapi and docs paths.
+# - POST /hierarchy/k02next8/project + GET
+#   /hierarchy/k02next8/projects (LIVE0B-02): store the chosen folder
+#   on the real K13 project port shared with the console project
+#   routes (repos_for + project_view), GET returns it.
+# - POST /hierarchy/k02next8/project-disk-write + GET
+#   /hierarchy/k02next8/project-disk-read (LIVE0B-03): the real
+#   hierarchy.save_project_snapshot / load_project_snapshot; a
+#   project written before a restart reads back from the same store
+#   dir. A project with no snapshot answers HTTP 404.
+# - POST /hierarchy/k02next8/gate-threshold + POST
+#   /hierarchy/k02next8/gate-verdict (MH-2): the real
+#   gates.set_verification_threshold / decide_gated_verdict; a score
+#   at or above the threshold records a real gate PASS, while a
+#   below-threshold milestone cannot PASS and answers HTTP 409
+#   carrying correction (first attempt) or escalation (repeats).
+
+
+def _k02next8_chain_from(raw: Any) -> Any:
+    """Build a HierarchyChain from a lane request object.
+
+    ValueError when malformed (mirrors the R-302 chain-guard shape:
+    director_id + manager_id strings plus a tool_agent_ids string
+    list); refusal details surface through the served 400.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError(
+            "chain must be an object with director_id, manager_id "
+            "and tool_agent_ids"
+        )
+    director_id = raw.get("director_id")
+    manager_id = raw.get("manager_id")
+    tool_agent_ids = raw.get("tool_agent_ids")
+    if not isinstance(director_id, str) or not isinstance(manager_id, str):
+        raise ValueError("chain needs director_id and manager_id strings")
+    if not isinstance(tool_agent_ids, list) or not all(
+        isinstance(agent, str) for agent in tool_agent_ids
+    ):
+        raise ValueError("chain needs a tool_agent_ids string list")
+    return _graph.HierarchyChain(
+        director_id=director_id,
+        manager_id=manager_id,
+        tool_agent_ids=list(tool_agent_ids),
+    )
+
+
+def register_k02next8_routes(app: Any) -> Any:
+    """Mount the K02NEXT8 served-proof routes; returns the app."""
+
+    @app.post("/hierarchy/k02next8/chain-guard")
+    async def post_k02next8_chain_guard(request: Request) -> dict[str, Any]:
+        """BP06-30: invalid chain shapes blocked, stored unchanged."""
+        from agent_si.backend import (
+            console_projects_write as _k02n8_write,
+        )
+
+        _k02n8_write._enforce_user_write(request)
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(
+                status_code=400,
+                detail="write needs a JSON body",
+            ) from None
+        if not isinstance(body, dict):
+            raise HTTPException(
+                status_code=400,
+                detail="write needs a JSON object body",
+            ) from None
+        try:
+            establish = _k02next8_chain_from(body.get("establish"))
+            attempt = _k02next8_chain_from(body.get("attempt"))
+        except (ValueError, TypeError) as err:
+            raise HTTPException(
+                status_code=400, detail=str(err)
+            ) from None
+        actor = (request.headers.get("x-actor") or "").strip()
+        store = _graph.HierarchyConfigStore()
+        try:
+            store.activate_chain(establish, actor)
+        except (
+            ValueError,
+            _graph.HierarchyRefused,
+        ) as err:
+            raise HTTPException(
+                status_code=400,
+                detail={"establish_refused": str(err)},
+            ) from None
+        established = dict(store.config)
+        try:
+            store.activate_chain(attempt, actor)
+        except (
+            ValueError,
+            _graph.HierarchyRefused,
+        ) as err:
+            current = dict(store.config)
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "blocked": True,
+                    "reason": str(err),
+                    "stored_unchanged": current == established,
+                    "stored": current,
+                },
+            ) from None
+        return {
+            "blocked": False,
+            "reason": "chain activated",
+            "stored": dict(store.config),
+        }
+
+    @app.get("/hierarchy/k02next8/schema")
+    def get_k02next8_schema() -> dict[str, Any]:
+        """LIVE0-07: the OpenAPI and docs schema answer, no 500."""
+        spec = app.openapi()
+        info = spec.get("info", {})
+        if not isinstance(info, dict):
+            info = {}
+        return {
+            "openapi": spec.get("openapi", ""),
+            "title": info.get("title", ""),
+            "paths": len(spec.get("paths", {})),
+            "docs_url": "/docs",
+            "openapi_url": "/openapi.json",
+        }
+
+    @app.post("/hierarchy/k02next8/project")
+    async def post_k02next8_project(request: Request) -> dict[str, Any]:
+        """LIVE0B-02: store the chosen folder on the real project port."""
+        import uuid as _uuid
+        from datetime import UTC as _UTC
+        from datetime import datetime as _datetime
+
+        from agent_si.backend import read_routes as _k02n8_read
+
+        _write_guard(request)
+        data = await _json_body(request)
+        name = data.get("name")
+        folder_ref = data.get("folder_ref")
+        if not (isinstance(name, str) and name.strip()):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "project needs a non-empty name"})
+        if not (isinstance(folder_ref, str) and folder_ref.strip()):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ROW_REFUSED",
+                        "message": "project needs a non-empty folder_ref"})
+        projects, _tasks = _k02n8_read.repos_for(request.app)
+        project_id = _uuid.uuid4().hex
+        record = {
+            "record_id": project_id,
+            "project_id": project_id,
+            "name": name.strip(),
+            "folder_ref": folder_ref.strip(),
+            "created_at": _datetime.now(_UTC).isoformat(),
+            "archived": False,
+        }
+        stored = projects.append(record)
+        _k02n8_read.persist_k02r3_store(request.app)
+        return {"project": _k02n8_read.project_view(stored)}
+
+    @app.get("/hierarchy/k02next8/projects")
+    def get_k02next8_projects() -> dict[str, Any]:
+        """LIVE0B-02: GET returns the stored chosen folders."""
+        from agent_si.backend import read_routes as _k02n8_read
+
+        projects, _tasks = _k02n8_read.repos_for(app)
+        rows = [
+            _k02n8_read.project_view(record)
+            for record in projects.list_by({})
+            if not record.get("archived")
+        ]
+        return {"projects": rows}
+
+    @app.post("/hierarchy/k02next8/project-disk-write")
+    async def post_k02next8_project_disk_write(
+        request: Request,
+    ) -> dict[str, Any]:
+        """LIVE0B-03: write one created project to disk."""
+        from agent_si.backend.orchestration import hierarchy as _k02n8_disk
+
+        _write_guard(request)
+        data = await _json_body(request)
+        try:
+            saved = _k02n8_disk.save_project_snapshot(
+                data.get("store_dir"), data.get("project_id"),
+                data.get("snapshot"))
+        except _k02n8_disk.SnapshotError as err:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "SNAPSHOT_REFUSED",
+                        "message": str(err)}) from None
+        return {"saved": saved["saved"], "project_id": saved["project_id"],
+                "file": saved["file"], "saved_at": saved["saved_at"]}
+
+    @app.get("/hierarchy/k02next8/project-disk-read")
+    def get_k02next8_project_disk_read(
+        project_id: str = "", store_dir: str = ""
+    ) -> dict[str, Any]:
+        """LIVE0B-03: read one created project back from disk."""
+        from agent_si.backend.orchestration import hierarchy as _k02n8_disk
+
+        try:
+            found = _k02n8_disk.load_project_snapshot(store_dir, project_id)
+        except _k02n8_disk.SnapshotMissing as err:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "SNAPSHOT_NOT_FOUND",
+                        "message": str(err)}) from None
+        except _k02n8_disk.SnapshotError as err:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "SNAPSHOT_REFUSED",
+                        "message": str(err)}) from None
+        return {"project_id": found["project_id"],
+                "snapshot": found["snapshot"],
+                "saved_at": found["saved_at"]}
+
+    @app.post("/hierarchy/k02next8/gate-threshold")
+    async def post_k02next8_gate_threshold(
+        request: Request,
+    ) -> dict[str, Any]:
+        """MH-2: store one project's verification threshold."""
+        from agent_si.backend.orchestration import gates as _k02n8_gates
+
+        _write_guard(request)
+        data = await _json_body(request)
+        try:
+            threshold = _k02n8_gates.set_verification_threshold(
+                data.get("project_id"), data.get("threshold"))
+        except _k02n8_gates.ThresholdRefused as err:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "THRESHOLD_REFUSED",
+                        "message": str(err)}) from None
+        project_id = data.get("project_id")
+        clean_project = (project_id.strip() if isinstance(project_id, str)
+                         else project_id)
+        return {"project_id": clean_project, "threshold": threshold}
+
+    @app.post("/hierarchy/k02next8/gate-verdict")
+    async def post_k02next8_gate_verdict(request: Request) -> dict[str, Any]:
+        """MH-2: threshold-gated milestone verdict."""
+        from agent_si.backend.orchestration import gates as _k02n8_gates
+
+        _write_guard(request)
+        data = await _json_body(request)
+        try:
+            decided = _k02n8_gates.decide_gated_verdict(
+                data.get("project_id"), data.get("part_id"),
+                data.get("score"))
+        except _k02n8_gates.ThresholdRefused as err:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "THRESHOLD_REFUSED",
+                        "message": str(err)}) from None
+        if not decided["passed"]:
+            action = decided["action"]
+            part = decided["part_id"]
+            score = decided["score"]
+            threshold = decided["threshold"]
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "VERIFICATION_BELOW_THRESHOLD",
+                        "message": f"score {score} below threshold "
+                                   f"{threshold} for part {part!r}: "
+                                   f"{action}",
+                        "passed": False,
+                        "project_id": decided["project_id"],
+                        "part_id": decided["part_id"],
+                        "score": decided["score"],
+                        "threshold": decided["threshold"],
+                        "action": decided["action"],
+                        "attempt": decided["attempt"]})
+        return {"passed": True, "project_id": decided["project_id"],
+                "part_id": decided["part_id"], "score": decided["score"],
+                "threshold": decided["threshold"],
+                "gate_id": decided["gate_id"],
+                "verdict": decided["verdict"]}
+
+    return app

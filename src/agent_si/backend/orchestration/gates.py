@@ -335,3 +335,94 @@ def check_hierarchy_activation(chain: list[str]) -> None:
             "unique ids (director + manager + tool)"
         )
     return
+
+
+class ThresholdRefused(ValueError):
+    """Refused threshold/verdict request; served route maps this to 400."""
+
+
+_THRESHOLDS: dict[str, float] = {}
+_GATED_ATTEMPTS: dict[tuple[str, str], int] = {}
+_GATED_LOG = GateAuditLog()
+
+_FIRST_BELOW_ACTION = "correction"
+_REPEAT_BELOW_ACTION = "escalation"
+
+
+def set_verification_threshold(
+    project_id: object, threshold: object
+) -> float:
+    """Store one project's milestone verification threshold param.
+
+    The threshold is a number in [0, 1]. Raises ThresholdRefused on a
+    bad project id or threshold (served as HTTP 400). Success returns
+    the stored float threshold.
+    """
+    if not isinstance(project_id, str) or not project_id.strip():
+        raise ThresholdRefused("project_id must be a non-empty string")
+    if isinstance(threshold, bool) or not isinstance(
+        threshold, (int, float)
+    ):
+        raise ThresholdRefused("threshold must be a number in [0, 1]")
+    value = float(threshold)
+    if not 0.0 <= value <= 1.0:
+        raise ThresholdRefused("threshold must be a number in [0, 1]")
+    _THRESHOLDS[project_id.strip()] = value
+    return value
+
+
+def decide_gated_verdict(
+    project_id: object, part_id: object, score: object
+) -> dict:
+    """Serve one threshold-gated milestone verdict (MH-2).
+
+    A score at or above the stored project threshold records a real
+    gate PASS and returns {passed True, project_id, part_id, score,
+    threshold, gate_id, verdict}. A below-threshold milestone cannot
+    PASS: the first attempt returns action "correction", repeats return
+    "escalation" (served as HTTP 409). Raises ThresholdRefused when no
+    threshold is stored or an argument is bad (served as HTTP 400).
+    """
+    if not isinstance(project_id, str) or not project_id.strip():
+        raise ThresholdRefused("project_id must be a non-empty string")
+    if not isinstance(part_id, str) or not part_id.strip():
+        raise ThresholdRefused("part_id must be a non-empty string")
+    if isinstance(score, bool) or not isinstance(score, (int, float)):
+        raise ThresholdRefused("score must be a number in [0, 1]")
+    value = float(score)
+    if not 0.0 <= value <= 1.0:
+        raise ThresholdRefused("score must be a number in [0, 1]")
+    clean_project = project_id.strip()
+    clean_part = part_id.strip()
+    threshold = _THRESHOLDS.get(clean_project)
+    if threshold is None:
+        raise ThresholdRefused(
+            "no verification threshold stored for project "
+            f"{clean_project!r}"
+        )
+    if value >= threshold:
+        record = _GATED_LOG.serve_gate(clean_part, GATE_PASS)
+        return {
+            "passed": True,
+            "project_id": clean_project,
+            "part_id": clean_part,
+            "score": value,
+            "threshold": threshold,
+            "gate_id": record.gate_id,
+            "verdict": GATE_PASS,
+        }
+    key = (clean_project, clean_part)
+    attempt = _GATED_ATTEMPTS.get(key, 0) + 1
+    _GATED_ATTEMPTS[key] = attempt
+    action = (
+        _FIRST_BELOW_ACTION if attempt == 1 else _REPEAT_BELOW_ACTION
+    )
+    return {
+        "passed": False,
+        "project_id": clean_project,
+        "part_id": clean_part,
+        "score": value,
+        "threshold": threshold,
+        "action": action,
+        "attempt": attempt,
+    }
