@@ -41,6 +41,11 @@ imports resolve to this same route module."""
 
 USER_WRITE = "USER_WRITE"
 
+# FXKBCHAT attach reason codes (every attach 4xx carries one).
+KB_ATTACH_BAD_SOURCE = "KB_ATTACH_BAD_SOURCE"
+KB_ATTACH_UNKNOWN_KIND = "KB_ATTACH_UNKNOWN_KIND"
+KB_ATTACH_REJECTED = "KB_ATTACH_REJECTED"
+
 
 def _params_of(payload: Any) -> Dict[str, Any]:
     if payload is None:
@@ -116,12 +121,39 @@ async def kb_list(request: Request) -> Any:
 
 
 async def kb_attach(request: Request) -> Any:
+    # FXKBCHAT attach block: a role-less body is accepted per
+    # spec (role defaults to None, read_only to True). A
+    # malformed source, an unknown kind or a bad KB dir answers
+    # an honest 400 carrying a reason code, never a 500.
     _enforce_user_write(request)
     params = await _write_params(request)
     source = params.get("source", params)
-    if isinstance(source, dict):
-        source = _models.KnowledgeSource(**source)
-    return _behaviour.attach_kb(source)
+    if not isinstance(source, dict):
+        raise HTTPException(
+            status_code=400,
+            detail={"code": KB_ATTACH_BAD_SOURCE,
+                    "message": "kb attach needs a source object"})
+    data = dict(source)
+    data.setdefault("role", None)
+    data.setdefault("read_only", True)
+    try:
+        knowledge = _models.KnowledgeSource(**data)
+    except TypeError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": KB_ATTACH_BAD_SOURCE,
+                    "message": "kb attach source invalid: %s" % (exc,)},
+        ) from None
+    try:
+        return _behaviour.attach_kb(knowledge)
+    except ValueError as exc:
+        text = str(exc) or "kb attach rejected"
+        code = (KB_ATTACH_UNKNOWN_KIND
+                if "unknown kind" in text else KB_ATTACH_REJECTED)
+        raise HTTPException(
+            status_code=400,
+            detail={"code": code, "message": text},
+        ) from None
 
 
 async def kb_detach(request: Request) -> Any:

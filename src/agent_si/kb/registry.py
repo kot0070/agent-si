@@ -80,6 +80,12 @@ def unregister(kb_id: str) -> None:
         del _ENABLED[key]
 
 
+# FXKBCHAT attach block: read-only scope view for explicit-kb chat.
+def attached_source(kb_id: str) -> Optional[KnowledgeSource]:
+    """Return the attached source for kb_id, or None when unattached."""
+    return _SOURCES.get(kb_id)
+
+
 def sources_for(
     project_id: str, role: Optional[str] = None
 ) -> list[KnowledgeSource]:
