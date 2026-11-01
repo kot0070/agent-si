@@ -1,0 +1,1 @@
+{"audit_policy": "REQUIRED_L2", "draft_hash_binding": true, "endpoint": "cloud-verify-endpoint", "fixture_class": "SPLIT-DRAFT-VERIFY"}
