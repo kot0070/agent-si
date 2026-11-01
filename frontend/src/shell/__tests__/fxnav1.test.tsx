@@ -89,13 +89,12 @@ function renderAppAt(route: string): void {
   );
 }
 
+// FXLAYOUT owner redefinition (kit BUILD_PLAN:850-852): the left nav
+// holds exactly New task / Projects / Results / Settings, nothing else.
 const MAIN_LINKS = [
-  "menu-chat",
-  "menu-agents-live",
+  "menu-new-task",
   "menu-projects",
-  "menu-tasks",
   "menu-results",
-  "menu-watcher",
   "menu-settings",
 ];
 

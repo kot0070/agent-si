@@ -165,10 +165,18 @@ describe("fxgaps F06 watcher control", () => {
     ).toBe(true);
   });
 
-  it("opens the watcher tab from the sidebar link", async () => {
+  it("opens the watcher tab from the TopBar link while the sidebar keeps four entries", async () => {
     renderAppAt("/");
     expect(await screen.findByTestId("chat-prompt")).toBeTruthy();
-    fireEvent.click(screen.getByTestId("menu-watcher"));
+    const sidebar = screen.getByTestId("sidebar");
+    const anchors = Array.from(sidebar.querySelectorAll("a"));
+    expect(
+      anchors.map((anchor) => anchor.getAttribute("data-testid")).sort(),
+    ).toEqual(
+      ["menu-new-task", "menu-projects", "menu-results", "menu-settings"].sort(),
+    );
+    expect(screen.queryByTestId("menu-watcher")).toBeNull();
+    fireEvent.click(screen.getByTestId("topbar-watcher"));
     expect(await screen.findByTestId("watcher-tab")).toBeTruthy();
   });
 });

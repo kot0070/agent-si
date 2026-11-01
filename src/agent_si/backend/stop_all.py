@@ -29,6 +29,7 @@ __all__ = (
     "attached",
     "issue_grant",
     "request_stop",
+    "request_stop_all",
     "reset_state",
 )
 
@@ -181,6 +182,64 @@ def request_stop(actor: str, project_id: str, grant_ref: str = "",
     )
     return StopReceipt(
         project_id=key,
+        accepted=True,
+        reason="stop supervised by %s" % who,
+        stopped_count=stopped,
+        journal_entry_id=entry.entry_id,
+        stopped_at=entry.timestamp,
+    )
+
+
+def request_stop_all(actor: str, grant_ref: str = "",
+                     session_token: str = "") -> StopReceipt:
+    """Stop every attached child of every project; journal the outcome.
+
+    The no-project branch of ``POST /api/v1/stop-all``: the same actor
+    rules as :func:`request_stop` (a user is always accepted, a
+    Director needs a live grant, anyone else is refused without
+    stopping anything), then every attached child of every project is
+    stopped and one ``STOP_ALL`` row journals the totals.
+    ``session_token`` is accepted for entry-point parity; refusal of
+    missing or invalid tokens is enforced at the route seam, not here.
+    """
+    who = str(actor)
+    if who == "user":
+        pass
+    elif who == "director":
+        ref = str(grant_ref)
+        if not ref:
+            journal_store.append_event(
+                "", "backend", "STOP_ALL",
+                "stop-all refused: director grant missing", ("",),
+            )
+            raise WatcherError(
+                "STOP_REASON_MISSING",
+                "director stop needs a live grant ref",
+            )
+        expiry = _GRANTS.get(ref)
+        if expiry is None:
+            return _refuse("", "unknown grant %r" % ref)
+        if expiry <= time.time():
+            return _refuse("", "grant expired %r" % ref)
+    else:
+        return _refuse("", "actor refused: %s" % who)
+    keys = sorted(_ATTACHED.keys())
+    owned_total = 0
+    stopped = 0
+    for key in keys:
+        rows = _ATTACHED.pop(key, [])
+        owned_total += len(rows)
+        for row in rows:
+            if _terminate(row.proc):
+                stopped += 1
+    entry = journal_store.append_event(
+        "", "backend", "STOP_ALL",
+        "stop-all by %s: stopped %d of %d across %d projects"
+        % (who, stopped, owned_total, len(keys)),
+        ("",),
+    )
+    return StopReceipt(
+        project_id="",
         accepted=True,
         reason="stop supervised by %s" % who,
         stopped_count=stopped,

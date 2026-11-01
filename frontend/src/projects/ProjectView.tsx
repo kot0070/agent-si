@@ -41,12 +41,15 @@ import {
   exportProjectReport,
   projectMenuTestId,
   projectViewTitleKey,
+  readLocalTests,
   remainingBudget,
+  saveLocalTests,
   splitRowsByPlacement,
   sumLedger,
 } from "./projectsApi";
 import type { ProjectViewName } from "./projectsApi";
 import { RunHistory } from "./RunHistory";
+import { TestsTab } from "./TestsTab";
 import { ProjectLimitsSection } from "../settings/projectLimits";
 import { HealthView } from "./observe/HealthView";
 import { MatrixView } from "./observe/MatrixView";
@@ -214,6 +217,115 @@ class LimitsSectionBoundary extends Component<
     }
     return <>{this.props.children}</>;
   }
+}
+
+// FXTESTSUI: the ONE local-tests switch. Settings area by
+// ProjectLimitsSection (overview only, never in the Tests tab). The
+// checkbox defaults to the GET answer; toggling POSTs once with the UI
+// session token (x-ui-session-token header via kind "write") and reads
+// back the served value. Labels are inline English (FXLAYOUT owns locale
+// files); only staged keys go through t().
+export function LocalTestsSwitch(props: {
+  projectId: string;
+}): ReactElement {
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [nonce, setNonce] = useState(0);
+
+  useEffect(() => {
+    let alive = true;
+    void readLocalTests(props.projectId)
+      .then((state) => {
+        if (alive) {
+          setEnabled(state.enabled);
+          setFailed(false);
+        }
+      })
+      .catch(() => {
+        if (alive) {
+          setEnabled(null);
+          setFailed(true);
+        }
+      });
+    return () => {
+      alive = false;
+    };
+  }, [props.projectId, nonce]);
+
+  async function onToggle(): Promise<void> {
+    if (enabled === null || saving) {
+      return;
+    }
+    const next = !enabled;
+    setSaving(true);
+    try {
+      await saveLocalTests(props.projectId, next);
+      const reread = await readLocalTests(props.projectId);
+      setEnabled(reread.enabled);
+      setFailed(false);
+    } catch {
+      setFailed(true);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (enabled === null) {
+    return (
+      <section data-testid="local-tests-section">
+        {failed ? (
+          <div data-testid="local-tests-error">
+            <span>{t("errors.generic")}</span>
+            <button
+              type="button"
+              data-testid="local-tests-retry"
+              onClick={() => {
+                setNonce((value) => value + 1);
+              }}
+            >
+              {t("ui.error.retry")}
+            </button>
+          </div>
+        ) : (
+          <p>{t("ui.loading.more")}</p>
+        )}
+      </section>
+    );
+  }
+
+  return (
+    <section data-testid="local-tests-section">
+      <h2>{t("projects.tests.local.title")}</h2>
+      <p>{t("projects.tests.local.body")}</p>
+      {failed ? (
+        <div data-testid="local-tests-error">
+          <span>{t("errors.generic")}</span>
+          <button
+            type="button"
+            data-testid="local-tests-retry"
+            onClick={() => {
+              setNonce((value) => value + 1);
+            }}
+          >
+            {t("ui.error.retry")}
+          </button>
+        </div>
+      ) : null}
+      <label htmlFor="local-tests-switch">{t("projects.tests.local.label")}</label>
+      <input
+        id="local-tests-switch"
+        data-testid="local-tests-switch"
+        type="checkbox"
+        checked={enabled}
+        disabled={saving}
+        onChange={() => {
+          void onToggle();
+        }}
+      />
+      <span data-testid="local-tests-value">{enabled ? t("projects.tests.local.on") : t("projects.tests.local.off")}</span>
+    </section>
+  );
 }
 
 export function ProjectView(props: ProjectViewProps): ReactElement {
@@ -542,6 +654,7 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
             )}
             <LimitsSectionBoundary>
               <ProjectLimitsSection projectId={props.projectId} />
+              <LocalTestsSwitch projectId={props.projectId} />
             </LimitsSectionBoundary>
             <AttachControl projectId={props.projectId} />
           </div>
@@ -893,6 +1006,7 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
       case "reports": {
         return (
           <div>
+            <p data-testid="project-reports-subtitle">{t("projects.reports.subtitle")}</p>
             <div data-testid="project-report-readable">
               {projectError !== null ? (
                 panelError(projectError)
@@ -998,6 +1112,9 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
             </div>
           </div>
         );
+      }
+      case "tests": {
+        return <TestsTab projectId={props.projectId} />;
       }
     }
   }

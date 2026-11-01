@@ -18,15 +18,11 @@ import sys
 from dataclasses import asdict
 from typing import Any
 
-_WS_ROOT = os.path.dirname(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-if _WS_ROOT not in sys.path:
-    sys.path.insert(0, _WS_ROOT)
 
 from fastapi import APIRouter, Request  # noqa: E402
 
-from src.agent_si.kb import savings as _savings  # noqa: E402
-from src.agent_si.kb import telemetry as _telemetry  # noqa: E402
+from agent_si.kb import savings as _savings  # noqa: E402
+from agent_si.kb import telemetry as _telemetry  # noqa: E402
 
 #: Dotted name of the frozen KB validator module. Product code keeps no
 #: static import of it (FROZEN-IFACE-K09B-v1: product never imports the

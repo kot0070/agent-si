@@ -32,7 +32,7 @@ import {
   t,
 } from "../locale/index";
 import type { SupportedLocale } from "../locale/index";
-import { SETTINGS_ROUTES, AcceptedRiskSwitch, RoleProfileEditor } from "../settings/index";
+import { SETTINGS_ROUTES, AcceptedRiskSwitch, FirstRunGate, RoleProfileEditor } from "../settings/index";
 import { OptimizationPolicySection } from "../settings/optimizationPolicy";
 import { ProvidersPage } from "../settings/ProvidersPage";
 import {
@@ -81,6 +81,11 @@ export const ROUTES: RouteTable = {
   projectErrors: "/projects/:projectId/errors",
   projectReports: "/projects/:projectId/reports",
 };
+
+// FXTESTSUI: the Tests tab route path. It lives next to ROUTES (not in
+// it) because the frozen RouteTable in app/iface.ts is owned by another
+// lane; the literal path below matches the merged project route shape.
+export const TESTS_ROUTE_PATH = "/projects/:projectId/tests";
 
 const ChatAreaView = lazy(() =>
   import("../chat/index").then((module) => ({ default: module.ChatArea })),
@@ -577,6 +582,9 @@ function AppShell(): ReactElement {
   useEnsureProjectSelection();
   return (
     <div data-testid="app-shell">
+      {/* FXKITUI-FIRSTRUN-BEGIN */}
+      <FirstRunGate />
+      {/* FXKITUI-FIRSTRUN-END */}
       <TopBar projectId={projectId} />
       <Sidebar projectId={projectId} />
       <main data-testid="app-main">
@@ -644,6 +652,10 @@ function AppShell(): ReactElement {
               <Route
                 path={ROUTES.projectReports}
                 element={<ProjectSubview view="reports" />}
+              />
+              <Route
+                path={TESTS_ROUTE_PATH}
+                element={<ProjectSubview view="tests" />}
               />
               <Route path="/settings" element={<SettingsIndexRoute />} />
               <Route

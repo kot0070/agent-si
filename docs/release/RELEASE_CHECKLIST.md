@@ -14,7 +14,7 @@ The trace metric at the end of this file counts those rows.
 Fetch the integration line and confirm this checkout matches it before doing
 any release work. A mismatch blocks the run at once.
 
-| S01 | preflight sync | command: fetch origin, then confirm HEAD equals origin/int | expected: HEAD matches origin/int with empty status output (write-time base int 5e5dfdb) | verdict: lane preflight record |
+| S01 | preflight sync | command: fetch origin, then confirm HEAD equals origin/int | expected: HEAD matches origin/int with empty status output (write-time base int a8b5a57) | verdict: lane preflight record |
 | S02 | preflight tree | command: status check for uncommitted changes | expected: no uncommitted changes; the checklist is the only new file | verdict: lane preflight record |
 | S03 | preflight seams | command: read-only presence check of tools/start.py and SUBMISSION/K12/demo-script.md plus absence check of the build-time packaging manifest folder | expected: seams present unedited; manifest folder absent at run time BLOCKS sign-off | verdict: lane STEP-0 seam check |
 

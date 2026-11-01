@@ -162,6 +162,40 @@ def _node_test_script(project_dir: str) -> bool:
     return isinstance(script, str) and bool(script.strip())
 
 
+def frozen_python() -> str:
+    """Interpreter to spawn under a PyInstaller freeze.
+
+    Source runs return ``sys.executable``. Frozen runs
+    (``getattr(sys, 'frozen', False)``) return the ``AGENT_SI_PYTHON``
+    env path when set, existing and different from the exe, else the
+    first ``shutil.which('python')`` / ``which('python3')`` hit that is
+    not the exe; with no candidate a RuntimeError is raised (the exe
+    itself is windowed and is never returned, and no fake path is
+    either).
+    """
+    exe = sys.executable
+    if not getattr(sys, "frozen", False):
+        return exe
+
+    def _is_exe(path: str) -> bool:
+        try:
+            return (os.path.normcase(os.path.realpath(path))
+                    == os.path.normcase(os.path.realpath(exe)))
+        except OSError:
+            return False
+
+    env = os.environ.get("AGENT_SI_PYTHON", "")
+    if env and not _is_exe(env) and os.path.isfile(env):
+        return env
+    for _name in ("python", "python3"):
+        _hit = shutil.which(_name)
+        if _hit and not _is_exe(_hit):
+            return _hit
+    raise RuntimeError(
+        "no python interpreter for frozen runs: set AGENT_SI_PYTHON "
+        "to a python executable or put python on PATH")
+
+
 def resolve_code_command(
     *,
     project_dir: Optional[str],
@@ -184,7 +218,7 @@ def resolve_code_command(
                     "project but pytest is not installed; "
                     "install pytest to run the suite" % (test_id, folder)
                 )
-            return [sys.executable, "-m", "pytest", folder, "-q"], None
+            return [frozen_python(), "-m", "pytest", folder, "-q"], None
         if _node_test_script(folder):
             npm = shutil.which("npm")
             if not npm:
@@ -196,7 +230,7 @@ def resolve_code_command(
             return [npm, "test"], None
         candidate = os.path.join(folder, "%s.py" % _safe_name(test_id))
         if os.path.isfile(candidate):
-            return [sys.executable, candidate], None
+            return [frozen_python(), candidate], None
     if not folder or not os.path.isdir(folder):
         return None, (
             "CODE test %r has no project folder %r to run in: "
@@ -322,7 +356,7 @@ def execute_code_test(
             "evidence under" % (test_id, project_id),
         )
     items = _check_argv(argv) if argv is not None else [
-        sys.executable, "%s.py" % _safe_name(test_id)]
+        frozen_python(), "%s.py" % _safe_name(test_id)]
     folder = _project_dir(root, project_id)
     workdir = project_dir or folder
     if not os.path.isdir(workdir):

@@ -60,7 +60,7 @@ def test_r350_public_text_check_served(client):
 
     resp = client.post(
         "/api/v1/public-text/check",
-        json={"idea_text": "Demo login with api_key = hunter2-demo-value"},
+        json={"idea_text": "Demo login with api_key = sk-FAKEEXAMPLE0"},
         headers=_auth(),
     )
     assert resp.status_code == 200, resp.text
@@ -124,7 +124,7 @@ def test_hc3_submission_scan_served(client):
             "files": [
                 {
                     "path": "demo/config.env",
-                    "content": "api_key = hunter2-demo-value",
+                    "content": "api_key = sk-FAKEEXAMPLE0",
                 }
             ],
         },

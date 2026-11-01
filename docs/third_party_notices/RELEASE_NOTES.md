@@ -1,40 +1,42 @@
-# Agent SI — K10 release notes (lane B paper)
+# Agent SI 0.1.0 — release notes
 
-License metadata: MIT Copyright (c) 2026 Ivan Soprun. The full license text
-ships as `LICENSE` at the checkout root and is shown by the installer
-About screen (installer wiring is lane A, not this paper lane).
+Licence metadata: MIT Copyright (c) 2026 Ivan Soprun. The full licence text
+ships as [LICENSE](../../LICENSE) at the checkout root and is shown by the
+About screen, which also lists the third-party titles; installer signing is
+out of scope for unsigned 0.1.0.
 
-## What this paper bundle contains
+## What this bundle contains
 
-- `LICENSE` — MIT license text, unchanged.
-- `docs/third_party_notices/NOTICES.md` — aggregated third-party notices,
-  enumerated read-only from the workspace dependency manifests. Five
-  third-party runtime components are enumerated from this checkout's
-  manifests (all MIT-licensed); the `licenses/` folder carries the project's
-  own MIT text until per-component license texts are vendored.
-- `docs/third_party_notices/release_report.json` — release report dataset.
-  Paper-lane stand-in generated from stored records only (see `metrics`
-  sources inside the file) until the K13 `ReportDatasetBuilder` lands; it
-  must then be replaced by builder output, not edited by hand.
+- `LICENSE` — MIT licence text, unchanged.
+- [NOTICES.md](NOTICES.md) — aggregated third-party notices,
+  enumerated read-only from the workspace dependency manifests. Notices cover
+  the 5 manifest components plus the 5 frozen sidecar components; vendored
+  texts live in [licenses/](licenses/) (proxy_tools: MIT per installed
+  METADATA, no separate file).
+- [release_report.json](release_report.json) — release report dataset.
+  Generated from stored records only (see `metrics` sources inside the file).
 
 ## Scope
 
-Lane B paper only: licence, notices, release notes, release report export.
-Installer packaging and About-screen wiring (lane A) and the acceptance drive
-with the evidence table (lane C) are separate lanes and are not part of this
-bundle.
+Scope: licence + notices + report dataset; installer signing and the
+packaged-build acceptance drive are tracked separately in
+[../release/RELEASE_CHECKLIST.md](../release/RELEASE_CHECKLIST.md).
 
 ## Sources
 
-Frozen interface records: `RECORDS/day0/K13_MANIFEST.md`,
-`RECORDS/day1/K02_INTERFACE.md`, `RECORDS/day1/K04_INTERFACE.md`.
+Frozen records: [RECORDS/day0/K13_MANIFEST.md](../../RECORDS/day0/K13_MANIFEST.md)
+and the frozen interface stubs under [iface/](../../iface/): `iface/frozen_k04/K04_INTERFACE_STUB.py`,
+`iface/frozen_k04/K04_INTERFACE_STUB_v2_MAP13.py`,
+`iface/frozen_k04/K04_INTERFACE_STUB_v3_ADD412.py`,
+`iface/frozen_manifest/interface_stub.py`, `iface/frozen_manifest/manifest.py`,
+`iface/frozen_manifest/K13_MANIFEST.md`.
 All counts in the report dataset come from stored records and workspace
-enumeration; no metric was estimated or generated.
+enumeration; no metric was estimated or generated. Every cited file ships
+with the bundle.
 
 ## Known limitations
 
-- The report dataset is a paper-lane stand-in; no execution telemetry store
-  exists in this worktree yet, so run-level metrics are zero with stated
-  sources, not measurements.
-- No acceptance drive has been run on a packaged build yet (lane C).
-- Installer metadata and About-screen wiring are pending (lane A).
+Non-LIVE rows in [../release/RELEASE_CHECKLIST.md](../release/RELEASE_CHECKLIST.md)
+stay PENDING-REDRIVE and carry the same limitation lines here; no claim ships
+as proven without its DEFECTS line. Anything not yet measured is marked
+PENDING-REDRIVE, never shipped as proven.

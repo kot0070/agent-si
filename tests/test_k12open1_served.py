@@ -74,7 +74,7 @@ def test_check_clean_idea_ok(client):
 def test_check_secret_idea_violation(client):
     resp = client.post(
         "/api/v1/public-text/check",
-        json={"idea_text": "Demo login with api_key = sk-live-0123456789abcdef"},
+        json={"idea_text": "Demo login with api_key = sk-FAKEEXAMPLE0"},
         headers=_auth(),
     )
     assert resp.status_code == 200, resp.text
@@ -146,7 +146,7 @@ def test_scan_secret_detected(client):
             "files": [
                 {
                     "path": "demo/config.env",
-                    "content": "api_key = sk-live-0123456789abcdef",
+                    "content": "api_key = sk-FAKEEXAMPLE0",
                 }
             ],
         },

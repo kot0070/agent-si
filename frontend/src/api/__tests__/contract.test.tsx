@@ -134,9 +134,11 @@ describe("lane-a behaviour contract", () => {
     });
     const client = new HttpApiClient();
     render(
-      <ApiClientProvider client={client}>
-        <TopBar projectId="p-1" />
-      </ApiClientProvider>,
+      <MemoryRouter initialEntries={["/"]}>
+        <ApiClientProvider client={client}>
+          <TopBar projectId="p-1" />
+        </ApiClientProvider>
+      </MemoryRouter>,
     );
     await client.listAgentsLive();
     await client.readLedger("p-1");
@@ -265,10 +267,10 @@ describe("lane-a behaviour contract", () => {
       </MemoryRouter>
     );
     for (const id of [
-      "menu-chat",
-      "menu-agents-live",
+      "menu-new-task",
       "menu-projects",
-      "menu-tasks",
+      "menu-results",
+      "menu-settings",
     ]) {
       expect(await screen.findByTestId(id)).toBeTruthy();
     }

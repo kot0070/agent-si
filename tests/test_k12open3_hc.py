@@ -209,7 +209,7 @@ def test_finalize_dirty_blocked_409(setup):
             "files": [
                 {
                     "path": "demo/config.env",
-                    "content": "api_key = hunter2-demo-value",
+                    "content": "api_key = sk-FAKEEXAMPLE0",
                 }
             ],
         },

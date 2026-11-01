@@ -106,6 +106,9 @@ class ChatStreamRequest:
     kb_id: str = ""
     role: str = ""
     secret_refs: tuple = ()
+    # FXDEVRUN entry: the project folder for the autonomous dev
+    # engine. Empty keeps today's path; set drives run_dev_task.
+    folder: str = ""
 
     @classmethod
     def from_body(cls, body: Any, actor: str) -> ChatStreamRequest:
@@ -124,6 +127,11 @@ class ChatStreamRequest:
             refs = ()
         if not isinstance(refs, (tuple, list)):
             raise ChatBadRequest("secret_refs must be a list of refs")
+        folder = body.get("folder", "")
+        if folder is None:
+            folder = ""
+        if not isinstance(folder, str):
+            raise ChatBadRequest("folder must be a project folder string")
         return cls(
             project=str(body.get("project", "") or ""),
             task=str(body.get("task", "") or ""),
@@ -134,6 +142,7 @@ class ChatStreamRequest:
             kb_id=str(body.get("kb_id", "") or ""),
             role=str(body.get("role", "") or ""),
             secret_refs=tuple(refs),
+            folder=folder,
         )
 
 
@@ -395,6 +404,15 @@ class ManagerSdkBridge:
         run_id = uuid.uuid4().hex
         state: dict[str, Any] = {"cancelled": False}
         self._live[stream_id] = state
+        # FXDEVRUN entry: project+folder+bound provider drives the
+        # autonomous dev engine through the same manager-events path
+        # (same RunEvent objects, same SSE rendering); anything else
+        # keeps today's path.
+        devrun_entry = self._devrun_entry(request, state)
+        if devrun_entry is not None:
+            return stream_id, self._manager_events(
+                stream_id, run_id, request, state, devrun_entry,
+                kb_note=kb_note)
         if run_task_streamed is not None:
             iterator = self._manager_events(
                 stream_id, run_id, request, state, run_task_streamed,
@@ -455,6 +473,48 @@ class ManagerSdkBridge:
             "code": NO_PROVIDER_BOUND,
             "message": base,
         })
+
+    def _devrun_entry(
+        self, request: ChatStreamRequest, state: dict[str, Any]
+    ) -> Any | None:
+        """FXDEVRUN entry: run_dev_task when project+folder bound.
+
+        Returns the run-task-streamed-shaped entry the manager path
+        consumes, or None to keep today's path. Never raises.
+        """
+        try:
+            folder = str(getattr(request, "folder", "") or "")
+            project = str(getattr(request, "project", "") or "")
+        except Exception:
+            return None
+        if not folder or not project:
+            return None
+        bound = self._provider_adapter
+        if bound is None:
+            try:
+                bound = _load_manager_bound_provider()
+            except Exception:
+                bound = None
+        if bound is None:
+            return None
+        app = getattr(self, "_app", None)
+        if app is None:
+            return None
+        try:
+            from agent_si.runtime import devrun as _devrun
+        except ImportError:
+            return None
+        try:
+            if not _devrun.wants_devrun(request, bound, app):
+                return None
+        except Exception:
+            return None
+
+        def _entry(dev_request: ChatStreamRequest, **kwargs: Any) -> Any:
+            return _devrun.run_dev_task(
+                dev_request, stream_state=state, app=app, **kwargs)
+
+        return _entry
 
     def cancel(self, stream_id: str) -> bool:
         """End a live stream; False when the id names no live stream."""
@@ -740,6 +800,11 @@ def bridge_for_app(app: Any) -> ManagerSdkBridge:
             provider = bind_routed_provider_adapter(app)
         if provider is not None:
             bridge._provider_adapter = provider
+    # FXDEVRUN entry: the dev engine resolves roles against the app.
+    try:
+        bridge._app = app
+    except Exception:
+        pass
     return bridge
 
 
