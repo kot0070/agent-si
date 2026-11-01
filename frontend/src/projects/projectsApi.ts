@@ -42,6 +42,8 @@ import {
   readProjectTime,
   readWhyThisModel,
 } from "../api/projectsApi";
+import { z } from "zod";
+import { requestJson } from "../api/errors";
 import { ENDPOINTS } from "../api/endpoints";
 import { placementForRow } from "../agents/agentsApi";
 import type { Placement } from "../agents/agentsApi";
@@ -98,6 +100,7 @@ export const PROJECT_VIEWS = [
   "audits",
   "errors",
   "reports",
+  "tests",
 ] as const;
 export type ProjectViewName = (typeof PROJECT_VIEWS)[number];
 
@@ -116,6 +119,11 @@ const VIEW_TITLE_KEYS: Record<ProjectViewName, string> = {
   audits: "projects.audits.title",
   errors: "projects.errors.title",
   reports: "projects.reports.title",
+  // FXTESTSUI named delta: the tests key is staged; the locale files are
+  // owned by FXLAYOUT (never touched here) and t() throws on a missing key,
+  // so the title reuses the nearest staged project key until
+  // `projects.tests.title` lands, then this line flips to it.
+  tests: "projects.reports.title",
 };
 
 export function projectViewTitleKey(view: ProjectViewName): string {
@@ -251,4 +259,181 @@ export function splitRowsByPlacement(rows: PartRow[]): RowsByPlacement {
     out[placementForRow(row)].push(row);
   }
   return out;
+}
+
+// FXTESTSUI merged teststage wire (backend read-only, never edited here).
+// Paths and served shapes mirror the merged backend lanes verbatim:
+// GET+POST /api/v1/teststage/local-tests plus GET plans/latest,
+// runs/latest, tests-view and result-output (read_routes.py k03ver2 +
+// k03fxtests1). No frozen api/* file is touched; session tokens travel in
+// the x-ui-session-token header via kind "write", never the URL or body.
+export const TESTS_LOCAL_TESTS_PATH = "/api/v1/teststage/local-tests";
+export const TESTS_PLANS_LATEST_PATH = "/api/v1/teststage/plans/latest";
+export const TESTS_RUNS_LATEST_PATH = "/api/v1/teststage/runs/latest";
+export const TESTS_VIEW_PATH = "/api/v1/teststage/tests-view";
+export const TEST_RESULT_OUTPUT_PATH = "/api/v1/teststage/result-output";
+
+const LocalTestsStateSchema = z.object({
+  project_id: z.string().min(1),
+  enabled: z.boolean(),
+});
+
+export type LocalTestsState = z.infer<typeof LocalTestsStateSchema>;
+
+const LocalTestsSavedSchema = z.object({
+  project_id: z.string().min(1),
+  enabled: z.boolean(),
+  updated_at: z.string(),
+});
+
+export type LocalTestsSaved = z.infer<typeof LocalTestsSavedSchema>;
+
+const LatestPlanSchema = z.object({
+  project_id: z.string().min(1),
+  plan_id: z.string().min(1),
+});
+
+export type LatestPlan = z.infer<typeof LatestPlanSchema>;
+
+const LatestRunSchema = z.object({
+  project_id: z.string().min(1),
+  plan_id: z.string().min(1),
+  run_id: z.string().min(1),
+});
+
+export type LatestRun = z.infer<typeof LatestRunSchema>;
+
+// Served per-test row: test_id, status and output_ref always; kind and
+// reason ride along only when the serving lane records them (record_result
+// requires a reason for BLOCKED rows). Absent kind reads as UNKNOWN;
+// absent reason renders no reason line (never invented).
+const TestStatusRowSchema = z.object({
+  test_id: z.string().min(1),
+  status: z.string().min(1),
+  output_ref: z.string().nullable(),
+  kind: z.string().optional(),
+  reason: z.string().nullable().optional(),
+});
+
+export type TestStatusRow = z.infer<typeof TestStatusRowSchema>;
+
+const TestsViewSchema = z.object({
+  plan_id: z.string().min(1),
+  run_id: z.string().min(1),
+  active: z.number().int().min(0),
+  passed: z.number().int().min(0),
+  remaining: z.number().int().min(0),
+  rows: z.array(TestStatusRowSchema),
+  settings_controls: z.array(z.string()),
+});
+
+export type TestsView = z.infer<typeof TestsViewSchema>;
+
+const ResultOutputSchema = z.object({
+  ref: z.string().min(1),
+  project_id: z.string().min(1),
+  output: z.string(),
+  size: z.number().min(0),
+});
+
+export type ResultOutput = z.infer<typeof ResultOutputSchema>;
+
+export function localTestsPath(projectId: string): string {
+  return `${TESTS_LOCAL_TESTS_PATH}?project_id=${encodeURIComponent(projectId)}`;
+}
+
+export function latestPlanPath(projectId: string): string {
+  return `${TESTS_PLANS_LATEST_PATH}?project_id=${encodeURIComponent(projectId)}`;
+}
+
+export function latestRunPath(projectId: string): string {
+  return `${TESTS_RUNS_LATEST_PATH}?project_id=${encodeURIComponent(projectId)}`;
+}
+
+export function testsViewPath(planId: string, runId: string): string {
+  return `${TESTS_VIEW_PATH}?plan_id=${encodeURIComponent(planId)}&run_id=${encodeURIComponent(runId)}`;
+}
+
+export function resultOutputPath(ref: string): string {
+  return `${TEST_RESULT_OUTPUT_PATH}?ref=${encodeURIComponent(ref)}`;
+}
+
+// Switch default is the GET answer; the single POST below carries the
+// session token via kind "write" and the caller reads back after it.
+export async function readLocalTests(
+  projectId: string,
+): Promise<LocalTestsState> {
+  return requestJson(
+    localTestsPath(projectId),
+    { method: "GET", kind: "read" },
+    LocalTestsStateSchema,
+  );
+}
+
+export async function saveLocalTests(
+  projectId: string,
+  enabled: boolean,
+): Promise<LocalTestsSaved> {
+  return requestJson(
+    TESTS_LOCAL_TESTS_PATH,
+    {
+      method: "POST",
+      kind: "write",
+      body: { project_id: projectId, enabled },
+    },
+    LocalTestsSavedSchema,
+  );
+}
+
+export async function readLatestPlan(projectId: string): Promise<LatestPlan> {
+  return requestJson(
+    latestPlanPath(projectId),
+    { method: "GET", kind: "read" },
+    LatestPlanSchema,
+  );
+}
+
+export async function readLatestRun(projectId: string): Promise<LatestRun> {
+  return requestJson(
+    latestRunPath(projectId),
+    { method: "GET", kind: "read" },
+    LatestRunSchema,
+  );
+}
+
+export async function readTestsView(
+  planId: string,
+  runId: string,
+): Promise<TestsView> {
+  return requestJson(
+    testsViewPath(planId, runId),
+    { method: "GET", kind: "read" },
+    TestsViewSchema,
+  );
+}
+
+export async function readResultOutput(ref: string): Promise<ResultOutput> {
+  return requestJson(
+    resultOutputPath(ref),
+    { method: "GET", kind: "read" },
+    ResultOutputSchema,
+  );
+}
+
+// Execution kinds (CODE/AI/HUMAN) in plain words; an unserved kind is
+// UNKNOWN (no record), never guessed.
+export function testKindLabel(kind: string | undefined): string {
+  if (kind === "CODE") {
+    return "code";
+  }
+  if (kind === "AI") {
+    return "AI";
+  }
+  if (kind === "HUMAN") {
+    return "human";
+  }
+  if (kind !== undefined && kind !== "") {
+    return kind;
+  }
+  return "unknown";
 }

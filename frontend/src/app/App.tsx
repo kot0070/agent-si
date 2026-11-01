@@ -82,6 +82,11 @@ export const ROUTES: RouteTable = {
   projectReports: "/projects/:projectId/reports",
 };
 
+// FXTESTSUI: the Tests tab route path. It lives next to ROUTES (not in
+// it) because the frozen RouteTable in app/iface.ts is owned by another
+// lane; the literal path below matches the merged project route shape.
+export const TESTS_ROUTE_PATH = "/projects/:projectId/tests";
+
 const ChatAreaView = lazy(() =>
   import("../chat/index").then((module) => ({ default: module.ChatArea })),
 );
@@ -644,6 +649,10 @@ function AppShell(): ReactElement {
               <Route
                 path={ROUTES.projectReports}
                 element={<ProjectSubview view="reports" />}
+              />
+              <Route
+                path={TESTS_ROUTE_PATH}
+                element={<ProjectSubview view="tests" />}
               />
               <Route path="/settings" element={<SettingsIndexRoute />} />
               <Route
