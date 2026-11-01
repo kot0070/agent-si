@@ -400,6 +400,169 @@ def record_run_terminated(
     return event.event_id
 
 
+UNAVAILABLE = "UNAVAILABLE"
+"""K10AN: placeholder for unevidenced analytics values (never 0/invented)."""
+
+_EVIDENCED_COST_STATES = ("MEASURED", "CALCULATED")
+
+
+def _is_number(value: Any) -> bool:
+    """True for real JSON numbers (bool is not a number here)."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _usage_events(
+    store_dir: str | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+    """PROVIDER_USAGE_REPORTED events plus metric rows indexed by id.
+
+    Reads ONLY telemetry_store.json metric_records + telemetry_events.
+    """
+    stored = load_store(store_dir=store_dir)
+    metrics = stored.get("metric_records", [])
+    events = stored.get("telemetry_events", [])
+    by_id = {
+        row.get("metric_id"): row
+        for row in metrics
+        if isinstance(row, dict) and row.get("metric_id")
+    }
+    usage = [
+        event for event in events
+        if isinstance(event, dict)
+        and event.get("event_type") == "PROVIDER_USAGE_REPORTED"
+    ]
+    return usage, by_id
+
+
+def _linked_value(
+    by_id: dict[str, dict[str, Any]],
+    event: dict[str, Any],
+    metric_name: str,
+    states: tuple[str, ...],
+) -> tuple[Any, bool]:
+    """Value of the linked metric row, or (None, False) when unevidenced.
+
+    Links resolve only through the event's own metric_refs ids; a row
+    counts only when its state is evidenced and its value is numeric.
+    """
+    refs = event.get("metric_refs")
+    if not isinstance(refs, (list, tuple)):
+        return None, False
+    for ref in refs:
+        row = by_id.get(ref)
+        if not isinstance(row, dict):
+            continue
+        if row.get("metric_name") != metric_name:
+            continue
+        if row.get("state") not in states:
+            continue
+        value = row.get("value")
+        if _is_number(value):
+            return value, True
+    return None, False
+
+
+def _accumulate_usage(
+    store_dir: str | None = None,
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    """Per-model and per-provider call/token/cost evidence from the store."""
+    usage, by_id = _usage_events(store_dir=store_dir)
+    models: dict[str, dict[str, Any]] = {}
+    providers: dict[str, dict[str, Any]] = {}
+    for event in usage:
+        model = event.get("model")
+        provider = event.get("provider")
+        tokens, tokens_ok = _linked_value(
+            by_id, event, TOKENS_TOTAL_NAME, (MetricState.MEASURED.value,))
+        cost, cost_ok = _linked_value(
+            by_id, event, COST_NAME, _EVIDENCED_COST_STATES)
+        if isinstance(model, str) and model:
+            row = models.setdefault(
+                model, {"calls": 0, "token_values": [], "cost_values": []})
+            row["calls"] += 1
+            if tokens_ok:
+                row["token_values"].append(tokens)
+            if cost_ok:
+                row["cost_values"].append(cost)
+        if isinstance(provider, str) and provider:
+            row = providers.setdefault(
+                provider, {"calls": 0, "token_values": [], "cost_values": []})
+            row["calls"] += 1
+            if tokens_ok:
+                row["token_values"].append(tokens)
+            if cost_ok:
+                row["cost_values"].append(cost)
+    return models, providers
+
+
+def _finish_usage_row(name: str, key: str, acc: dict[str, Any]) -> dict[str, Any]:
+    """One deterministic aggregate row; unevidenced totals stay UNAVAILABLE."""
+    token_values = acc.get("token_values", [])
+    cost_values = acc.get("cost_values", [])
+    return {
+        key: name,
+        "calls": acc.get("calls", 0),
+        "tokens": sum(token_values) if token_values else UNAVAILABLE,
+        "cost": sum(cost_values) if cost_values else UNAVAILABLE,
+    }
+
+
+def get_project_aggregates(
+    project_id: str,
+    store_dir: str | None = None,
+) -> dict[str, Any]:
+    """Task/audit counts for one project from the store events only.
+
+    tasks = distinct task ids across this project's telemetry events;
+    audits = AUDIT_COMPLETED events for this project. Either is None when
+    the store holds no evidence for it, never 0/invented.
+    """
+    stored = load_store(store_dir=store_dir)
+    events = stored.get("telemetry_events", [])
+    pid = str(project_id or "")
+    scoped = [
+        event for event in events
+        if isinstance(event, dict) and event.get("project_id") == pid
+    ]
+    if not scoped:
+        return {"tasks": None, "audits": None}
+    task_ids = sorted(
+        {str(event.get("task_id")) for event in scoped if event.get("task_id")})
+    audits = sum(
+        1 for event in scoped if event.get("event_type") == "AUDIT_COMPLETED")
+    return {
+        "tasks": len(task_ids) if task_ids else None,
+        "audits": audits if audits else None,
+    }
+
+
+def get_model_aggregates(
+    store_dir: str | None = None,
+) -> list[dict[str, Any]]:
+    """Per-model calls/tokens/cost from store usage events, sorted by model.
+
+    calls counts PROVIDER_USAGE_REPORTED events; tokens sums the linked
+    MEASURED tokens_total rows; cost sums the linked MEASURED/CALCULATED
+    cost rows. Unevidenced tokens/cost read "UNAVAILABLE", never 0.
+    """
+    models, _providers = _accumulate_usage(store_dir=store_dir)
+    return [
+        _finish_usage_row(model, "model", models[model])
+        for model in sorted(models)
+    ]
+
+
+def get_provider_aggregates(
+    store_dir: str | None = None,
+) -> list[dict[str, Any]]:
+    """Per-provider calls/tokens/cost from store usage events, sorted."""
+    _models, providers = _accumulate_usage(store_dir=store_dir)
+    return [
+        _finish_usage_row(provider, "provider", providers[provider])
+        for provider in sorted(providers)
+    ]
+
+
 def aggregates(store_dir: str | None = None) -> dict[str, Any]:
     """Totals computed FROM the authoritative store file only.
 
@@ -441,10 +604,14 @@ __all__ = [
     "COST_SOURCE",
     "TELEMETRY_FILENAME",
     "TOKENS_TOTAL_NAME",
+    "UNAVAILABLE",
     "aggregates",
     "append_records",
     "bind_store_dir",
     "bound_store_dir",
+    "get_model_aggregates",
+    "get_project_aggregates",
+    "get_provider_aggregates",
     "load_store",
     "record_provider_usage",
     "record_run_terminated",
