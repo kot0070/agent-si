@@ -40,15 +40,15 @@ export function MetricCard(
         borderColor: "var(--agent-si-card-border)",
       }}
     >
-      <span>{title}</span>
+      <h2>{title}</h2>
       <button
         type="button"
         data-testid={`kit-toggle-${props.cardId}`}
-        aria-label={title}
+        aria-label={t("ui.card.toggle")}
+        aria-expanded={expanded}
+        className="fx-kit-toggle"
         onClick={toggle}
-      >
-        {title}
-      </button>
+      />
       {props.subtitleKey === undefined ? null : (
         <p data-testid={`kit-sub-${props.cardId}`}>{t(props.subtitleKey)}</p>
       )}

@@ -20,6 +20,7 @@ import { HttpApiClient } from "../../api/client";
 import { clearUiToken, setUiToken } from "../../api/errors";
 import { resetLocaleForTests, setLocale } from "../../locale/index";
 import { ChatArea } from "../index";
+import { pt } from "../permissions";
 
 const PROJECT_ID = "fxroles-p1";
 const PROVIDERS_URL = "/api/v1/providers";
@@ -293,12 +294,14 @@ describe("fxroles chat hierarchy rows", () => {
     expect(await screen.findByTestId("hierarchy-collapsed")).toBeTruthy();
     await expandRows();
     const row = await screen.findByTestId("hierarchy-row-director");
-    expect(row.textContent).toContain("Director");
+    expect(row.textContent).toContain(
+      pt("chat.hierarchy.director", "Director"),
+    );
     expect((await screen.findByTestId("hierarchy-row-manager")).textContent).toContain(
-      "Manager",
+      pt("chat.hierarchy.manager", "Manager"),
     );
     expect((await screen.findByTestId("hierarchy-row-agents")).textContent).toContain(
-      "Agents",
+      pt("chat.hierarchy.agents", "Agents"),
     );
   });
 });

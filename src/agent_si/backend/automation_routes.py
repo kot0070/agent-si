@@ -22,6 +22,7 @@ from typing import Any, Callable, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 
+import agent_si.automation.interface as _auto_iface_module
 from agent_si.automation import (
     apps_card,
     launcher,
@@ -33,10 +34,10 @@ from agent_si.automation import (
     triggers,
 )
 
-#: Dotted name of the frozen automation contract module. Product code
-#: keeps no static import of it; the module object is resolved late at
-#: call time, so raised errors, returned rows and cross-lane calls are
-#: the same objects the contract tests use.
+#: Dotted name of the frozen automation contract module. F6 (W19) keeps
+#: a real top-level import of it (never TYPE_CHECKING-only) so the
+#: served routes resolve the same objects the contract tests use, frozen
+#: or not; the late sys.modules lookup below stays as a fallback only.
 _IFACE_MODULE = "agent_si.automation.interface"
 
 
@@ -45,9 +46,7 @@ def _auto_iface():
     try:
         return sys.modules[_IFACE_MODULE]
     except KeyError:
-        raise RuntimeError(
-            "frozen contract %r is not imported" % (_IFACE_MODULE,)
-        )
+        return _auto_iface_module
 
 __all__ = ("router", "configure", "token_live")
 

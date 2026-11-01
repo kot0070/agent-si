@@ -224,6 +224,7 @@ export function ProjectsPage(): ReactElement {
         <LoadingState loadingKey="ui.loading.more" />
       ) : (
         <div>
+          <p data-testid="projects-list-subtitle">{t("projects.list.subtitle")}</p>
           <form
             data-testid="project-add-form"
             onSubmit={(event) => {

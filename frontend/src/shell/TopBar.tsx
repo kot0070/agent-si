@@ -4,7 +4,7 @@
 // locale surface: setLocale updates the module plus persistence, then a
 // window event carries the new locale to App for a full re-render.
 
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useEffect, useState } from "react";
 import type { ReactElement } from "react";
 import type { ProjectRecord } from "../api/iface";
@@ -53,10 +53,35 @@ export function togglePanels(): void {
 export function TopBar(props: TopBarProps): ReactElement {
   const client = useApiClient();
   const current = useCurrentProject();
+  const location = useLocation();
   const [locale, setLocaleUi] = useState<SupportedLocale>(readStoredLocale);
   const [projects, setProjects] = useState<ProjectRecord[] | null>(null);
   const [stopArmed, setStopArmed] = useState(false);
   const [stopStatus, setStopStatus] = useState<number | null>(null);
+
+  // W1: apply the stored locale to the locale module at boot so the
+  // chrome matches the language select on first paint.
+  useEffect(() => {
+    setLocale(readStoredLocale());
+  }, []);
+
+  // W2: Escape disarms the inline stop confirm; any route change disarms
+  // it too so the armed state never persists across screens.
+  useEffect(() => {
+    setStopArmed(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent): void {
+      if (event.key === "Escape") {
+        setStopArmed(false);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -173,7 +198,19 @@ export function TopBar(props: TopBarProps): ReactElement {
         {stopArmed ? t("shell.closing.confirm") : t("shell.topbar.stop_all")}
       </button>
       {stopStatus === null ? null : (
-        <span data-testid="stop-all-result">{stopStatus}</span>
+        <span data-testid="stop-all-result">
+          {t("shell.topbar.stop_result", { status: stopStatus })}
+          <button
+            type="button"
+            data-testid="stop-all-clear"
+            aria-label={t("shell.topbar.stop_clear")}
+            onClick={() => {
+              setStopStatus(null);
+            }}
+          >
+            {t("shell.topbar.stop_clear")}
+          </button>
+        </span>
       )}
       <label>
         {t("shell.topbar.language")}

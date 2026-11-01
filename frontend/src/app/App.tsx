@@ -282,6 +282,7 @@ function ChatStartBox(): ReactElement {
 
   return (
     <section data-testid="chat-area" aria-label={t("shell.sidebar.chat")}>
+      <h1>{t("shell.sidebar.chat")}</h1>
       <div data-testid="chat-composer">
         <input
           data-testid="chat-prompt"
@@ -359,12 +360,26 @@ function WatcherRoute(): ReactElement {
   return <WatcherTab projectId={current.projectId} />;
 }
 
+// W6: every project tab click/Enter navigates through the App router;
+// ProjectView only calls back, so a single onSelect covers all views.
+function useProjectSelect(projectId: string): (view: ProjectViewName) => void {
+  const navigate = useNavigate();
+  return (view: ProjectViewName) => {
+    navigate(`/projects/${projectId}/${view}`);
+  };
+}
+
 function TasksRoute(props: { projectId: string }): ReactElement {
   const [search] = useSearchParams();
   const initialTaskId = search.get("initialTask");
+  const onSelect = useProjectSelect(props.projectId);
   return (
     <>
-      <ProjectViewPage projectId={props.projectId} view="tasks" />
+      <ProjectViewPage
+        projectId={props.projectId}
+        view="tasks"
+        onSelect={onSelect}
+      />
       <TaskComposerView
         projectId={props.projectId}
         initialTaskId={initialTaskId}
@@ -408,12 +423,14 @@ function ModelsRoute(props: {
       alive = false;
     };
   }, [client, decisionId]);
+  const onSelect = useProjectSelect(props.projectId);
   return (
     <>
       <ProjectViewPage
         projectId={props.projectId}
         view="models"
         decisionId={decisionId}
+        onSelect={onSelect}
       />
       {binding !== null && !dismissed ? (
         <TeamModelQuickFixView
@@ -433,9 +450,14 @@ function ModelsRoute(props: {
 }
 
 function LocalAiRoute(props: { projectId: string }): ReactElement {
+  const onSelect = useProjectSelect(props.projectId);
   return (
     <>
-      <ProjectViewPage projectId={props.projectId} view="local-ai" />
+      <ProjectViewPage
+        projectId={props.projectId}
+        view="local-ai"
+        onSelect={onSelect}
+      />
       <LocalAiStoredPanel />
     </>
   );
@@ -445,6 +467,8 @@ function ProjectSubview(props: { view: ProjectViewName }): ReactElement {
   const params = useParams();
   const [search] = useSearchParams();
   const projectId = params.projectId;
+  // Unconditional: hooks never run behind the project guard below.
+  const onSelect = useProjectSelect(projectId ?? "");
   if (projectId === undefined) {
     return <ProjectsPageView />;
   }
@@ -463,6 +487,7 @@ function ProjectSubview(props: { view: ProjectViewName }): ReactElement {
       projectId={projectId}
       view={props.view}
       decisionId={decisionId}
+      onSelect={onSelect}
     />
   );
 }
@@ -681,17 +706,11 @@ function AppShell(): ReactElement {
       </main>
       <Inspector
         projectId={projectId}
-        live={
-          projectId === null ? (
-            <EmptyState
-              stateKey="agents.live.empty"
-              actionKey={null}
-              onAction={null}
-            />
-          ) : (
-            <AgentsLiveView projectId={projectId} />
-          )
-        }
+        // W9: single agents-live source. The route view owns the one
+        // AgentsLive instance; the Inspector team card renders its own
+        // rows, so the second copy (and its skeleton-vs-empty clash)
+        // stays unmounted.
+        live={null}
       />
     </div>
   );
