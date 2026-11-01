@@ -280,7 +280,14 @@ def serve_entries(root: Path, port: int, frontend_port: int):
         server.should_exit = True
         thread.join(timeout=20)
         return None
-    handler = partial(_QuietHandler, directory=str(root / "frontend"))
+    # Root requests gain a trailing slash, which os.path.isdir rejects
+    # on a Win32 extended-path prefix, so serve the plain form here.
+    frontend_dir = str(root / "frontend")
+    if frontend_dir.startswith("\\\\?\\UNC\\"):
+        frontend_dir = "\\\\" + frontend_dir[8:]
+    elif frontend_dir.startswith("\\\\?\\"):
+        frontend_dir = frontend_dir[4:]
+    handler = partial(_QuietHandler, directory=frontend_dir)
     httpd = ThreadingHTTPServer(("127.0.0.1", frontend_port), handler)
     frontend_thread = threading.Thread(target=httpd.serve_forever,
                                        daemon=True)
@@ -330,6 +337,33 @@ def cmd_serve(args: argparse.Namespace) -> int:
     thread.join(timeout=20)
     frontend_thread.join(timeout=20)
     return 0
+
+
+def k10d_command_index() -> dict:
+    """K10D row -129: setup plus demo plus fixture command index.
+
+    Returns the checkout-root commands also recorded in
+    docs/reports/K10D.md. Read-only; no process is started here.
+    """
+    return {
+        "setup": [
+            "python tools/start.py --smoke --tag k10d",
+            "python -m pytest tests/test_k10d_served.py -q "
+            "-p no:cacheprovider",
+        ],
+        "demo": [
+            "python tools/start.py --smoke --tag k10d-demo "
+            "--data-dir DATA",
+            "python tools/start.py --serve --tag k10d-demo "
+            "--data-dir DATA",
+        ],
+        "fixture": [
+            "python -m pytest tests/test_k10d_served.py -q "
+            "-p no:cacheprovider -k fixture",
+            "python -m pytest tests/test_k10d_served.py -q "
+            "-p no:cacheprovider",
+        ],
+    }
 
 
 def build_parser() -> argparse.ArgumentParser:
