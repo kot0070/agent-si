@@ -1,4 +1,4 @@
-# Third-party notices — Agent SI (K10 lane B paper)
+# Third-party notices — Agent SI 0.1.0
 
 Project license: MIT Copyright (c) 2026 Ivan Soprun (see `LICENSE` at checkout root).
 This file aggregates the license notices for third-party components bundled with
@@ -25,16 +25,12 @@ workspace dependency manifests (`pyproject.toml`,
 | react-router-dom | 7.18.4 | MIT | frontend/package.json (license MIT in frontend/node_modules) |
 | zod | 4.6.7 | MIT | frontend/package.json (license MIT in frontend/node_modules) |
 
-Two dependency manifests and two vendored third-party trees (`frontend/`,
-`src/`) were found in the workspace. No per-component license texts are
-reproduced beyond the SPDX identifiers above: every enumerated component is
-MIT-licensed and the project's own MIT text already ships in `licenses/`
-(`MIT_LICENSE.txt`), identical to root `LICENSE`. The `licenses/` directory
-in this folder carries the project's own MIT license text (`MIT_LICENSE.txt`),
-which is the license the paper bundle ships under. When the installer lane
-vendors runtime dependencies, this file must be regenerated from the lockfiles
-before release; an empty table must never ship alongside a bundle that
-contains third-party code.
+Per-component texts are vendored in `licenses/` for pywebview, pythonnet,
+clr_loader, bottle (proxy_tools: MIT per installed METADATA, no separate
+licence file ships in the dist); the tables below are generated read-only
+from installed dist metadata, never by hand. The `licenses/` directory in
+this folder carries the project's own MIT license text (`MIT_LICENSE.txt`),
+identical to root `LICENSE`.
 
 ## Frozen sidecar bundle (INSTALLB)
 

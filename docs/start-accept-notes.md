@@ -1,6 +1,6 @@
 # Start/accept notes
 
-Loopback TEST notes only: recorded prose, no live probing.
+Startup notes: what a clean start guarantees — idempotent settings/keys migration, identical green demo on restart, AGENT_SI_DATA_DIR wins, frontend installs offline from tarballs.
 
 ## Startup idempotence (B0B-UNCOVERED_MVP_ACCEPT-153)
 
