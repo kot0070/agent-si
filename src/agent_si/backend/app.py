@@ -2653,7 +2653,17 @@ def create_app(settings: Any = None,
         """POST /api/v1/assurance/run_assurance -> verify/audit/finalize."""
         data = await _k03a_body(request)
         try:
-            outcome = _k03a_coordinator.run_assurance(
+            for _k03a_field in (
+                "project_id",
+                "task_id",
+                "run_id",
+                "contract_hash",
+            ):
+                if not str(data.get(_k03a_field) or "").strip():
+                    raise ValueError(
+                        "run_assurance needs a non-empty %s" % _k03a_field
+                    )
+            outcome = _k03a_assurance.run_assurance(
                 project_id=str(data.get("project_id") or ""),
                 task_id=str(data.get("task_id") or ""),
                 run_id=str(data.get("run_id") or ""),
