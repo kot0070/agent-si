@@ -2,7 +2,8 @@
 // showing names and dates only (references carry no key material).
 // Deletion is user-click only, needs a per-entry confirm plus a session
 // token, never touches live-provider-linked entries, and is audit-logged
-// by entry name only.
+// by entry name only. Pass deleteEntry to delete through the real route
+// instead of the bound store.
 
 import { useEffect, useState } from "react";
 import { APP_NAMESPACE_PREFIX } from "./types";
@@ -15,6 +16,7 @@ type LeftoverFinderProps = {
   sessionToken: string;
   linkedSecretIds: string[];
   refreshKey?: number;
+  deleteEntry?: (entry: SecretRef) => Promise<void>;
 };
 
 export function LeftoverFinder({
@@ -22,6 +24,7 @@ export function LeftoverFinder({
   sessionToken,
   linkedSecretIds,
   refreshKey = 0,
+  deleteEntry,
 }: LeftoverFinderProps) {
   const [entries, setEntries] = useState<SecretRef[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -60,7 +63,11 @@ export function LeftoverFinder({
     }
     setBusy(true);
     try {
-      await store.remove(entry.secret_id, sessionToken);
+      if (deleteEntry) {
+        await deleteEntry(entry);
+      } else {
+        await store.remove(entry.secret_id, sessionToken);
+      }
       setArmedId(null);
       setNotice(t("providers.leftover.deleted", { id: entry.secret_id }));
       setEntries((prev) => prev.filter((row) => row.secret_id !== entry.secret_id));

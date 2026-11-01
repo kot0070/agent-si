@@ -2,23 +2,23 @@
 // a search box on top, per-model checkboxes, connect/disconnect dialogs,
 // a chat picker (enabled models only) and the leftover-key finder.
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { getUiToken } from "../../api/errors";
-import { listConnectedProviders } from "./connectApi";
+import { deleteLeftoverKey, listConnectedProviders, listLeftoverKeys } from "./connectApi";
 import { PROVIDER_CATALOG } from "./catalog";
 import { ChatModelSelector } from "./ChatModelSelector";
 import { enabledChatChoices } from "./ChatSelector";
 import { ConnectDialog } from "./ConnectDialog";
 import { DisconnectDialog } from "./DisconnectDialog";
-import { LeftoverFinder } from "./LeftoverFinder";
+import { LeftoverKeyFinder } from "./LeftoverKeyFinder";
 import { RolePoolPicker, choicesToPoolOptions } from "./RolePoolPicker";
 import type { RolePoolValue } from "./RolePoolPicker";
 import { SetupWizard } from "./SetupWizard";
 import { saveRolePool } from "./poolsApi";
 import { createMemorySecretStore, secretIdForProvider } from "./secretStore";
 import type { SecretStorePort } from "./secretStore";
-import { ROLE_KEYS, roleLabel } from "./types";
-import type { ProviderPreset, ProviderState } from "./types";
+import { APP_NAMESPACE_PREFIX, ROLE_KEYS, roleLabel } from "./types";
+import type { ProviderPreset, ProviderState, SecretRef } from "./types";
 import { t } from "../../locale/index";
 
 // Save helper for the project chat model.
@@ -194,6 +194,21 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
     .filter((preset) => states[preset.id]?.connected === true)
     .map((preset) => secretIdForProvider(preset.id));
 
+  // Leftover keys come from the real leftover-keys route (names plus
+  // dates only) and deletes go to the real leftover-delete route with
+  // a per-entry confirm plus the session token. Both callbacks stay
+  // stable so the finder never refetches in a loop; the token is read
+  // late, so a login that completes after mount still deletes.
+  const loadLeftoverEntries = useCallback(
+    (): Promise<SecretRef[]> => listLeftoverKeys(APP_NAMESPACE_PREFIX),
+    [],
+  );
+  const deleteLeftoverEntry = useCallback(
+    (entry: SecretRef): Promise<void> =>
+      deleteLeftoverKey(APP_NAMESPACE_PREFIX, entry.secret_id, getUiToken() ?? ""),
+    [],
+  );
+
   return (
     <div>
       <h1>{t("providers.page.title")}</h1>
@@ -303,11 +318,13 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
       </section>
       <section aria-label={t("providers.page.leftoverTitle")}>
         <h2>{t("providers.page.leftoverTitle")}</h2>
-        <LeftoverFinder
+        <LeftoverKeyFinder
           store={storeInstance}
           sessionToken={sessionToken}
           linkedSecretIds={linkedSecretIds}
           refreshKey={finderKey}
+          loadEntries={loadLeftoverEntries}
+          deleteEntry={deleteLeftoverEntry}
         />
       </section>
       <ConnectDialog

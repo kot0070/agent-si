@@ -165,6 +165,31 @@ def _stop_all(actor: str, project_id: str, grant_ref: str = "",
     return _stop_home.request_stop(actor, project_id, grant_ref)
 
 
+def _list_journal(project_id: str, kind: str = "",
+                  session_token: str = ""):
+    """Entry wrapper: journal rows carry stored facts, not receipts only.
+
+    FXLEFTOVER L2: every served row keeps its receipt names (entry_id,
+    timestamp, hash) and adds the stored kind, source, summary and refs
+    from stored_rows, so a stop-all row reads kind STOP_ALL over HTTP.
+    """
+    _ = session_token
+    receipts = _journal_home.list_events(project_id, kind)
+    facts = {row.entry_id: row
+             for row in _journal_home.stored_rows(project_id, kind)}
+    served = []
+    for receipt in receipts:
+        item = _dump(receipt)
+        row = facts.get(receipt.entry_id)
+        if row is not None:
+            item["kind"] = row.kind
+            item["source"] = row.source
+            item["summary"] = row.summary
+            item["refs"] = list(row.refs)
+        served.append(item)
+    return served
+
+
 def _list_alerts(project_id: str, session_token: str = ""):
     """Entry wrapper: alerts list tolerates the route kwarg."""
     return _alerts_home.list_alerts(project_id)
@@ -430,7 +455,7 @@ def _guard_post(request: Request, data: Dict[str, Any]) -> str:
 #: Entry-name dispatch: every entry calls its 0C-named owning module.
 _DISPATCH: Dict[str, Callable[..., Any]] = {
     "get_status": _status_home.get,
-    "list_events": _journal_home.list_events,
+    "list_events": _list_journal,
     "verify_integrity": _verify_integrity,
     "evaluate_rule": _evaluate_rule,
     "stop_all_request_stop": _stop_all,
