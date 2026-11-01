@@ -580,6 +580,37 @@ def _fmt(value) -> str:
     return str(value)
 
 
+def _kb_read_fit(row) -> str:
+    """Served fit read for one evaluated candidate; unknown stays unknown."""
+    fit = row.get("fit")
+    return _fmt(fit) if fit is not None else "unknown"
+
+
+def _kb_read_price(row) -> str:
+    """Served price read for one evaluated candidate (M-P3-124).
+
+    Known KB prices read as known per-1k cost; unknown prices stay
+    unknown-expensive, never zero.
+    """
+    if row.get("cost_known") and row.get("cost_per_1k") is not None:
+        return "known %s/1k" % (_fmt(row.get("cost_per_1k")))
+    return "unknown-expensive"
+
+
+def _kb_read_quality(row) -> str:
+    """Served quality read for one evaluated candidate; none stays none."""
+    quality = row.get("quality")
+    return _fmt(quality) if quality is not None else "none"
+
+
+def _kb_read_line(row) -> str:
+    """One candidate's shipped-KB fit-price-quality read as evidence text."""
+    return ("kb_read: %s/%s fit=%s price=%s quality=%s"
+            % (row.get("provider"), row.get("model"),
+               _kb_read_fit(row), _kb_read_price(row),
+               _kb_read_quality(row)))
+
+
 def _build_reason(route: str, request: RoutingRequest, winner: Optional[_Eval],
                   ranked: List[_Eval], removed: List[str],
                   rejected: List[_Eval], extra: str = "") -> str:
@@ -857,6 +888,43 @@ def _select_parallel(request, deps, survivors, rejected, removed, traces) -> Rou
                    reason, first.branch, first, second)
 
 
+def _budget_state_snapshot(budget_state, project_id):
+    """Plain-data budget view for the evidence snapshot (M-P2-63/M-P3-124).
+
+    Mappings pass through as plain dicts. A live BudgetGate (its lock
+    can never persist) snapshots as the bound project's plain state
+    dict, so save_decision stays plain JSON data; anything else records
+    as a ref string. Never raises: the snapshot is evidence only.
+    """
+    if isinstance(budget_state, Mapping):
+        return dict(budget_state)
+    get_state = getattr(budget_state, "get_state", None)
+    if callable(get_state):
+        try:
+            state = get_state(project_id)
+        except (KeyError, LookupError):
+            return {"project_id": project_id, "configured": False}
+        to_dict = getattr(state, "to_dict", None)
+        if callable(to_dict):
+            try:
+                return dict(to_dict())
+            except Exception:
+                pass
+        try:
+            return {"project_id": project_id, "state": str(state)}
+        except Exception:
+            return {"project_id": project_id}
+    ref = getattr(budget_state, "ref", None)
+    if isinstance(ref, str) and ref:
+        return {"project_id": project_id, "ref": ref}
+    if budget_state is None:
+        return {"project_id": project_id, "configured": False}
+    try:
+        return {"project_id": project_id, "state": str(budget_state)}
+    except Exception:
+        return {"project_id": project_id}
+
+
 def _finish(request: RoutingRequest, deps: RoutingDeps,
             traces: List[T.GateTrace], ranked: List[_Eval], winner: _Eval,
             runners: List[_Eval], route: str, strategy: str, reason: str,
@@ -948,9 +1016,8 @@ def _finish(request: RoutingRequest, deps: RoutingDeps,
         resource_state_snapshot=(dict(deps.resource_state)
                                  if isinstance(deps.resource_state, Mapping)
                                  else deps.resource_state),
-        budget_state_snapshot=(dict(deps.budget_state)
-                               if isinstance(deps.budget_state, Mapping)
-                               else deps.budget_state),
+        budget_state_snapshot=_budget_state_snapshot(
+            deps.budget_state, request.project_id),
         candidate_snapshot=candidate_snapshot,
         policy_versions=(_policy_ref(policy), _policy_ref(opt)),
         capability_evidence_refs=tuple(
@@ -1062,9 +1129,8 @@ def blocked_outcome(request: RoutingRequest, deps: RoutingDeps,
         resource_state_snapshot=(dict(deps.resource_state)
                                  if isinstance(deps.resource_state, Mapping)
                                  else deps.resource_state),
-        budget_state_snapshot=(dict(deps.budget_state)
-                               if isinstance(deps.budget_state, Mapping)
-                               else deps.budget_state),
+        budget_state_snapshot=_budget_state_snapshot(
+            deps.budget_state, request.project_id),
         candidate_snapshot=tuple(
             {"provider": ev.candidate.provider, "model": ev.candidate.model,
              "provider_type": ev.candidate.provider_type,
@@ -1258,9 +1324,15 @@ def select(task_contract_ref: str, candidates: List[CandidateView],
                row.get("fail_detail"))
             for row in outcome.snapshot.candidate_snapshot
             if not row.get("passed") and row.get("failed_step"))
+        kb_reads = "; ".join(
+            _kb_read_line(row)
+            for row in outcome.snapshot.candidate_snapshot
+            if not row.get("passed") and row.get("failed_step"))
         reason = outcome.decision.reason
         if refusals:
             reason = "%s; %s" % (reason, refusals)
+        if kb_reads:
+            reason = "%s; %s" % (reason, kb_reads)
         raise ValueError(reason)
     _winner = (outcome.decision.selected_provider,
                outcome.decision.selected_model)

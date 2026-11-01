@@ -36,32 +36,12 @@ import itertools
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from enum import Enum
 from typing import Any, Final, Optional, Protocol, Tuple
 
-
-class AuditResult(str, Enum):
-    """Canonical audit verdicts; immutable evidence (K13 §17B)."""
-
-    PASS = "PASS"
-    REWORK = "REWORK"
-    BLOCKED = "BLOCKED"
-    ESCALATE = "ESCALATE"
-    FAIL = "FAIL"
-
-
-class VerificationFailureClass(str, Enum):
-    """One deterministic path per failure class (K13 §17C)."""
-
-    VERIFICATION_INFRA_FAILURE = "VERIFICATION_INFRA_FAILURE"
-    OUTPUT_FORMAT_FAILURE = "OUTPUT_FORMAT_FAILURE"
-    PROVIDER_OR_MODEL_CAPABILITY_FAILURE = (
-        "PROVIDER_OR_MODEL_CAPABILITY_FAILURE"
-    )
-    IMPLEMENTATION_AC_DEFECT = "IMPLEMENTATION_AC_DEFECT"
-    SECURITY_OR_POLICY_FAILURE = "SECURITY_OR_POLICY_FAILURE"
-    UNKNOWN_FAILURE = "UNKNOWN_FAILURE"
-
+from agent_si.assurance.audit_records import AuditResult as AuditResult
+from agent_si.assurance.audit_records import (
+    VerificationFailureClass as VerificationFailureClass,
+)
 
 #: Default per-scope audit correction bound (K13 §16 RetryPolicy default).
 AUDIT_CORRECTION_MAX: Final = 2
