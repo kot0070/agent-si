@@ -31,6 +31,9 @@ if _SRC not in sys.path:
 from agent_si.backend.app import create_app  # noqa: E402
 from agent_si.backend.orchestration import offload as _offload  # noqa: E402
 from agent_si.backend.orchestration import steplimits as _steplimits  # noqa: E402
+from tests.test_fxautodev_served import (  # noqa: E402
+    bind_canned_hierarchy_adapter as _bind_canned,
+)
 
 TEST_TOKEN = "ock02-hierarchy-token"
 ACTOR = "tester-ock02"
@@ -68,6 +71,7 @@ def _refs(n):
 
 def test_r302_hierarchy_run_splits_runs_integrates(tmp_path):
     client = TestClient(create_app(_settings(tmp_path)))
+    _canned_patch = _bind_canned()
     resp = client.get("/api/v1/hierarchy/control-plane")
     assert resp.status_code == 200, resp.text
     plane = resp.json()
@@ -88,6 +92,7 @@ def test_r302_hierarchy_run_splits_runs_integrates(tmp_path):
         },
         headers=_auth(),
     )
+    _canned_patch.stop()
     assert resp.status_code == 200, resp.text
     payload = resp.json()
     assert payload["director"] == "director-ock02"

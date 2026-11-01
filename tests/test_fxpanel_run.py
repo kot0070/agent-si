@@ -21,6 +21,9 @@ if _SRC not in sys.path:
 from agent_si.backend.app import create_app  # noqa: E402
 from agent_si.backend.orchestration import graph as _graph  # noqa: E402
 from agent_si.routing.types import RoleModelProfile  # noqa: E402
+from tests.test_fxautodev_served import (  # noqa: E402
+    bind_canned_hierarchy_adapter as _bind_canned,
+)
 
 TEST_TOKEN = "fxpanel-run-token"
 
@@ -70,11 +73,13 @@ def _run_body(**overrides):
 def test_run_record_carries_per_level_identity(tmp_path):
     app, client, headers = make_client(tmp_path)
     pin_profiles(app, "fxp-proj")
+    _canned_patch = _bind_canned(project_id="fxp-proj")
     resp = client.post(
         "/api/v1/hierarchy/run",
         json=_run_body(project_id="fxp-proj"),
         headers=headers,
     )
+    _canned_patch.stop()
     assert resp.status_code == 200, resp.text
     payload = resp.json()
     assert payload["director"] == "director-fxp"
@@ -95,11 +100,13 @@ def test_run_record_carries_per_level_identity(tmp_path):
 
 def test_run_record_without_profiles_has_null_identity(tmp_path):
     _app, client, headers = make_client(tmp_path)
+    _canned_patch = _bind_canned()
     resp = client.post(
         "/api/v1/hierarchy/run",
         json=_run_body(),
         headers=headers,
     )
+    _canned_patch.stop()
     assert resp.status_code == 200, resp.text
     payload = resp.json()
     assert [entry["role"] for entry in payload["levels"]] == [
@@ -122,6 +129,7 @@ def test_run_record_foreign_agent_is_400(tmp_path):
 
 def test_run_keeps_control_plane_static(tmp_path):
     _app, client, headers = make_client(tmp_path)
+    _canned_patch = _bind_canned()
     before = client.get("/api/v1/hierarchy/control-plane")
     assert before.status_code == 200, before.text
     resp = client.post(
@@ -129,6 +137,7 @@ def test_run_keeps_control_plane_static(tmp_path):
         json=_run_body(),
         headers=headers,
     )
+    _canned_patch.stop()
     assert resp.status_code == 200, resp.text
     after = client.get("/api/v1/hierarchy/control-plane")
     assert after.status_code == 200, after.text
