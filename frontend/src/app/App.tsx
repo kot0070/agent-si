@@ -61,6 +61,8 @@ import { BenchHistoryList } from "../k07next3/BenchHistoryList";
 import { TestsViewBoard } from "../k07next3/TestsViewBoard";
 import { SessionTokenCard } from "../k07next4/SessionTokenCard";
 import { ConsolePageShell } from "../k07next4/ConsolePageShell";
+import { WatcherTab } from "../watcher/WatcherTab";
+import { KbRefreshProposal } from "../k07next2/KbRefreshProposal";
 
 export const ROUTES: RouteTable = {
   chat: "/",
@@ -346,6 +348,14 @@ function MigrationRoute(): ReactElement {
   return <MigrationViewPage projectId={current.projectId} />;
 }
 
+function WatcherRoute(): ReactElement {
+  const current = useCurrentProject();
+  if (current.projectId === null) {
+    return <ProjectsPageView />;
+  }
+  return <WatcherTab projectId={current.projectId} />;
+}
+
 function TasksRoute(props: { projectId: string }): ReactElement {
   const [search] = useSearchParams();
   const initialTaskId = search.get("initialTask");
@@ -514,11 +524,13 @@ function SettingsSectionRoute(): ReactElement {
         <span data-testid="settings-section-body">
           <LocalBenchTab client={new HttpLocalBenchClient()} />
         </span>
-      ) : route.path === "models" ||
-        route.path === "routing" ||
-        route.path === "capabilityDB" ? (
+      ) : route.path === "models" || route.path === "routing" ? (
         <span data-testid="settings-section-body">
           <ProvidersPage project_id={projectId ?? "local"} />
+        </span>
+      ) : route.path === "capabilityDB" ? (
+        <span data-testid="settings-section-body">
+          <KbRefreshProposal />
         </span>
       ) : route.path === "optimization" ? (
         <span data-testid="settings-section-body">
@@ -559,6 +571,7 @@ function AppShell(): ReactElement {
             <Routes>
               <Route path={ROUTES.chat} element={<ChatRoute />} />
               <Route path={ROUTES.agentsLive} element={<AgentsRoute />} />
+              <Route path="/watcher" element={<WatcherRoute />} />
               <Route path={ROUTES.projects} element={<ProjectsPageView />} />
               <Route
                 path={ROUTES.projectOverview}

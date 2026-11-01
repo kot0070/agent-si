@@ -35,6 +35,9 @@ export function Sidebar(props: SidebarProps): ReactElement {
       <Link data-testid="menu-results" to={resultsTo}>
         {t("projects.reports.title")}
       </Link>
+      <Link data-testid="menu-watcher" to="/watcher">
+        {t("shell.topbar.watcher")}
+      </Link>
       <Link data-testid="menu-settings" to="/settings">
         {t("settings.general.title")}
       </Link>
