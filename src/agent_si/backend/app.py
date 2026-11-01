@@ -3545,6 +3545,63 @@ def create_app(settings: Any = None,
             "options": [],
         }
 
+    # DEMOF13W mounts BEGIN
+    from agent_si.toolguard import permissions as _demof13w_permissions
+    from agent_si.qa_catalog import qa_catalog as _demof13w_catalog
+
+    _demof13w_store_dir = app.state.data_dir
+    _demof13w_asked: set[str] = (
+        _demof13w_permissions.load_asked_once(_demof13w_store_dir))
+
+    @app.post(_demof13w_permissions.PERMISSIONS_CHECK_ROUTE)
+    async def _demof13w_permissions_check(
+            request: Request) -> dict[str, Any]:
+        try:
+            _demof13w_payload = await request.json()
+        except Exception:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "DEMOF13F1_BAD_JSON",
+                        "message": "permissions check needs a JSON body"}
+            ) from None
+        try:
+            _demof13w_tool_id = _demof13w_permissions.require_tool_id(
+                _demof13w_payload)
+        except _demof13w_permissions.PermissionCheckError as exc:
+            raise HTTPException(
+                status_code=exc.status,
+                detail={"code": exc.code,
+                        "message": str(exc)}) from None
+        _demof13w_seen = _demof13w_permissions.record_install_ask(
+            _demof13w_store_dir, _demof13w_asked, _demof13w_tool_id)
+        return {
+            "allowed": _demof13w_permissions.check_install_permission(
+                _demof13w_tool_id),
+            "asked_once": _demof13w_seen,
+        }
+
+    @app.post(_demof13w_catalog.CATALOG_RUN_ROUTE)
+    async def _demof13w_catalog_run(
+            request: Request) -> dict[str, Any]:
+        try:
+            _demof13w_body = await request.json()
+        except Exception:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "DEMOF13F1_BAD_JSON",
+                        "message": "catalog run needs a JSON body"}
+            ) from None
+        _demof13w_suite = (
+            _demof13w_body.get("suite")
+            if isinstance(_demof13w_body, dict) else None)
+        try:
+            return _demof13w_catalog.run_suite(_demof13w_suite)
+        except _demof13w_catalog.CatalogRunError as exc:
+            raise HTTPException(
+                status_code=exc.status,
+                detail={"code": exc.code,
+                        "message": str(exc)}) from None
+    # DEMOF13W mounts END
     # --- DEMOF3 auto-hierarchy mount (additions-only) ---
     from agent_si.backend import routing_auto as _demof3_routing_auto
 

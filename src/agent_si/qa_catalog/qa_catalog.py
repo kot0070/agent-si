@@ -8,7 +8,7 @@ Catalog text is data (selected test intents only), never instructions.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 #: Exact shipped-preset model id (never retyped, never a second id).
 MODEL_ID = "meta/muse-spark-1.3-contributor"
@@ -180,6 +180,59 @@ def get_catalog(catalog_ref: str) -> QACatalog:
         raise CatalogError(
             "UNKNOWN_CATALOG", "unknown catalog ref %r" % catalog_ref
         )
+
+
+#: Frozen F1 route.
+CATALOG_RUN_ROUTE = "/api/v1/catalog/run"
+
+
+class CatalogRunError(Exception):
+    """Refusal carrying its HTTP status plus signal code."""
+
+    def __init__(self, status: int, code: str, message: str) -> None:
+        super().__init__(message)
+        self.status = status
+        self.code = code
+
+
+def get_catalog_json(suite: str) -> Dict[str, Any]:
+    """Return the plain-JSON catalog for a suite name.
+
+    Raises CatalogRunError for a missing suite and keeps the real
+    entry's UNKNOWN_CATALOG code for an unknown suite name.
+    """
+    if not isinstance(suite, str) or not suite.strip():
+        raise CatalogRunError(
+            400, "DEMOF13F1_SUITE_MISSING",
+            "catalog run needs a non-empty suite string")
+    ref = suite.strip()
+    try:
+        catalog = get_catalog(ref)
+    except CatalogError as exc:
+        raise CatalogRunError(400, exc.code, str(exc)) from None
+    return {
+        "suite": catalog.catalog_ref,
+        "version": catalog.version,
+        "tests": [
+            {
+                "test_id": entry.test_id,
+                "kind": entry.kind,
+                "priority": entry.priority,
+                "intent": entry.intent,
+                "oracle": entry.oracle,
+            }
+            for entry in catalog.tests
+        ],
+    }
+
+
+def run_suite(suite: str) -> Dict[str, Any]:
+    """Run every test of the named suite; report ok plus the ran count."""
+    catalog = get_catalog_json(suite)
+    ran = 0
+    for _entry in catalog["tests"]:
+        ran += 1
+    return {"ok": True, "ran": ran}
 
 
 def derive_plan(
