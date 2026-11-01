@@ -51,7 +51,7 @@ def client(tmp_path):
 
 def test_r350_public_text_check_served(client):
     resp = client.post(
-        "/api/v1/demo/public-text/check",
+        "/api/v1/public-text/check",
         json={"idea_text": "A public demo night showing a garden watering rota."},
         headers=_auth(),
     )
@@ -59,7 +59,7 @@ def test_r350_public_text_check_served(client):
     assert resp.json() == {"ok": True, "violations": []}
 
     resp = client.post(
-        "/api/v1/demo/public-text/check",
+        "/api/v1/public-text/check",
         json={"idea_text": "Demo login with api_key = hunter2-demo-value"},
         headers=_auth(),
     )
@@ -70,7 +70,7 @@ def test_r350_public_text_check_served(client):
     assert _public_text.RULE_SECRET_IN_PUBLIC_TEXT in codes
 
     resp = client.post(
-        "/api/v1/demo/public-text/check",
+        "/api/v1/public-text/check",
         json={"idea_text": "Screenshots live under /home/ops/private-demo/shot.png"},
         headers=_auth(),
     )
@@ -82,7 +82,7 @@ def test_r350_public_text_check_served(client):
 
     for body in ({}, {"idea_text": ""}, {"idea_text": "   "}):
         resp = client.post(
-            "/api/v1/demo/public-text/check",
+            "/api/v1/public-text/check",
             json=dict(body),
             headers=_auth(),
         )
@@ -90,13 +90,13 @@ def test_r350_public_text_check_served(client):
         assert resp.json()["code"] == "EMPTY_IDEA_TEXT"
 
     resp = client.post(
-        "/api/v1/demo/public-text/check",
+        "/api/v1/public-text/check",
         json={"idea_text": "A public demo night."},
         headers=_auth(actor=None),
     )
     assert resp.status_code == 401, resp.text
     resp = client.post(
-        "/api/v1/demo/public-text/check",
+        "/api/v1/public-text/check",
         json={"idea_text": "A public demo night."},
         headers=_auth(token="wrong-token"),
     )
@@ -108,7 +108,7 @@ def test_r350_public_text_check_served(client):
 
 def test_hc3_submission_scan_served(client):
     resp = client.post(
-        "/api/v1/demo/submission/scan",
+        "/api/v1/submission/scan",
         json={
             "files": [{"path": "demo/notes.md", "content": "public demo notes"}],
             "notes": "nothing private here",
@@ -119,7 +119,7 @@ def test_hc3_submission_scan_served(client):
     assert resp.json() == {"ok": True, "findings": []}
 
     resp = client.post(
-        "/api/v1/demo/submission/scan",
+        "/api/v1/submission/scan",
         json={
             "files": [
                 {
@@ -140,7 +140,7 @@ def test_hc3_submission_scan_served(client):
     assert secret_hits and secret_hits[0]["path"] == "demo/config.env"
 
     resp = client.post(
-        "/api/v1/demo/submission/scan",
+        "/api/v1/submission/scan",
         json={
             "files": [
                 {
@@ -163,7 +163,7 @@ def test_hc3_submission_scan_served(client):
 
     for body in ({}, {"files": []}, {"files": [], "notes": "  "}):
         resp = client.post(
-            "/api/v1/demo/submission/scan",
+            "/api/v1/submission/scan",
             json=dict(body),
             headers=_auth(),
         )
@@ -172,13 +172,13 @@ def test_hc3_submission_scan_served(client):
 
     payload = {"files": [{"path": "a.md", "content": "hi"}], "notes": "hi"}
     resp = client.post(
-        "/api/v1/demo/submission/scan",
+        "/api/v1/submission/scan",
         json=dict(payload),
         headers=_auth(actor=None),
     )
     assert resp.status_code == 401, resp.text
     resp = client.post(
-        "/api/v1/demo/submission/scan",
+        "/api/v1/submission/scan",
         json=dict(payload),
         headers=_auth(token="wrong-token"),
     )
