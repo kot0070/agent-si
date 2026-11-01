@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agent_si.backend import task_turns as _task_turns
-from agent_si.backend.agents_live import record_live_row
+from agent_si.backend.agents_live import COST_UNAVAILABLE, record_live_row
 from agent_si.backend.orchestration import graph as _graph
 from agent_si.backend.orchestration import steplimits as _steplimits
 from agent_si.sdk_adapter.orchestration_interface import (
@@ -516,8 +516,20 @@ def run_task_streamed(
         _telemetry_report_terminated(shape, active_run_id, reason)
 
     def _emit(event: RunEvent) -> RunEvent:
+        try:
+            model = str(
+                getattr(getattr(provider, "config", None), "model", "")
+                or "")
+        except Exception:
+            model = ""
+        try:
+            input_tok, output_tok = _usage_tokens(captured.get("usage"))
+        except Exception:
+            input_tok, output_tok = (None, None)
         _record(shape, active_run_id, event, validated.subtask_id,
-                validated.agent_id or str(manager_id))
+                validated.agent_id or str(manager_id),
+                model=model,
+                tokens={"input": input_tok, "output": output_tok})
         return event
 
     try:
@@ -689,15 +701,48 @@ def run_task_streamed(
 
 
 def _record(shape: dict[str, Any], run_id: str, event: RunEvent,
-            subtask_id: str, agent: str) -> None:
-    """Record one yielded event to the live-row sink (never raises)."""
-    record_live_row(
-        f"{run_id}/{subtask_id or shape['task_id'] or 'run'}",
-        {"agent": agent or "manager",
-         "scope": f"{shape['task_id'] or 'task'}/{subtask_id or 'run'}",
-         "deliverable": f"artifact://run/{run_id}/output",
-         "status": STATUS_BY_EVENT.get(event.event, "RUNNING")},
-    )
+            subtask_id: str, agent: str, model: str = "",
+            tokens: Mapping[str, Any] | None = None) -> None:
+    """Record one yielded event to the live-row sink (never raises).
+
+    FXPANEL append-only fields ride on the frozen four: role is always
+    this manager run, model the bound provider model, step the event
+    turn, file the produced output ref, cost the event cost or
+    UNAVAILABLE (pricing stays owned by the BudgetGate charge path),
+    tokens the latest evidenced usage, context the run input ref,
+    errors the refusal reason, waits the pending approval or budget.
+    """
+    try:
+        data = event.data if isinstance(event.data, Mapping) else {}
+        errors: list[str] = []
+        if event.event == "dispatch_rejected" and data.get("reason"):
+            errors.append(str(data.get("reason")))
+        if data.get("error"):
+            errors.append(str(data.get("error")))
+        waits: list[str] = []
+        if data.get("approval_requested"):
+            waits.append("approval")
+        if event.event == "budget_stop":
+            waits.append("budget")
+        record_live_row(
+            f"{run_id}/{subtask_id or shape['task_id'] or 'run'}",
+            {"agent": agent or "manager",
+             "scope": f"{shape['task_id'] or 'task'}/{subtask_id or 'run'}",
+             "deliverable": f"artifact://run/{run_id}/output",
+             "status": STATUS_BY_EVENT.get(event.event, "RUNNING"),
+             "role": "manager",
+             "model": str(model or ""),
+             "step": event.turn,
+             "file": str(data.get("output_ref") or ""),
+             "cost": str(data.get("cost") or COST_UNAVAILABLE),
+             "tokens": dict(tokens) if isinstance(tokens, Mapping)
+             else {"input": None, "output": None},
+             "context": f"artifact:run/{run_id}/input",
+             "errors": errors,
+             "waits": waits},
+        )
+    except Exception:
+        pass
 
 
 __all__ = [

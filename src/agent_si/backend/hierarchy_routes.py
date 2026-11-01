@@ -23,6 +23,55 @@ from typing import Any
 from fastapi import HTTPException, Request
 
 
+def _pinned_identity(table: Any, project_id: str | None,
+                     role: str) -> tuple:
+    """Provider/model from the PINNED profile for one role (Nones absent).
+
+    Only a PINNED profile names a single model for the run; any other
+    mode, a missing profile, or a missing table yields (None, None).
+    Never raises.
+    """
+    if table is None or not project_id:
+        return (None, None)
+    try:
+        profile = table.get_profile(project_id, role)
+    except Exception:
+        return (None, None)
+    if profile is None:
+        return (None, None)
+    try:
+        if str(getattr(profile, "mode", "")) != "PINNED":
+            return (None, None)
+        return (str(profile.provider), str(profile.model))
+    except Exception:
+        return (None, None)
+
+
+def _run_levels(request: Request, project_id: str | None,
+                director_id: str, manager_id: str,
+                tool_agent_ids: list) -> list[dict[str, Any]]:
+    """Per-level role/agent/provider/model from pinned profiles.
+
+    Reads the app's server-side role table (None-safe); levels are
+    director, manager, then one worker entry per tool agent. Never
+    raises: identity gaps surface as null provider/model, never a
+    refused run.
+    """
+    try:
+        ctx = getattr(getattr(request, "app", None), "state", None)
+        table = getattr(getattr(ctx, "k04_ctx", None), "role_table", None)
+    except Exception:
+        table = None
+    levels: list[dict[str, Any]] = []
+    pairs = [("director", director_id), ("manager", manager_id)]
+    pairs.extend(("worker", str(agent)) for agent in tool_agent_ids)
+    for role, agent_id in pairs:
+        provider, model = _pinned_identity(table, project_id, role)
+        levels.append({"role": role, "agent_id": agent_id,
+                       "provider": provider, "model": model})
+    return levels
+
+
 def register_hierarchy_routes(app: Any) -> Any:
     """Mount the R-302 hierarchy routes; returns the app."""
 
@@ -81,6 +130,7 @@ def register_hierarchy_routes(app: Any) -> Any:
                     "director_id, manager_id and tool_agent_ids "
                     "must be non-empty"
                 )
+            project_id = str(body.get("project_id") or "").strip() or None
             worker_class = str(body.get("worker_class") or "tool-agent")
             execution_type = str(body.get("execution_type") or "tool-part")
             store = _graph.HierarchyConfigStore()
@@ -153,10 +203,13 @@ def register_hierarchy_routes(app: Any) -> Any:
             raise HTTPException(
                 status_code=400, detail=str(err)
             ) from None
+        levels = _run_levels(request, project_id, director_id,
+                               manager_id, tool_agent_ids)
         return {
             "package_id": package_id,
             "director": director_id,
             "manager": manager_id,
+            "levels": levels,
             "parts": [
                 {
                     "gate_verdict_ref": part.gate_verdict_ref,

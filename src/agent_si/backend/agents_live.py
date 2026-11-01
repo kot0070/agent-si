@@ -15,6 +15,57 @@ from typing import Any
 
 _LIVE_ROWS: dict[str, dict[str, Any]] = {}
 
+#: Append-only FXPANEL live fields (the frozen four stay first, untouched).
+LIVE_EXTRA_FIELDS = ("role", "model", "step", "file", "cost",
+                     "tokens", "context", "errors", "waits")
+
+#: Cost marker when no price was evidenced for the run. The BudgetGate
+#: owns pricing; the live sink never invents a cost.
+COST_UNAVAILABLE = "UNAVAILABLE"
+
+
+def _live_tokens(value: Any) -> dict[str, Any]:
+    """Normalize a tokens value to {"input", "output"} (Nones unevidenced)."""
+    if isinstance(value, Mapping):
+        return {"input": value.get("input"), "output": value.get("output")}
+    return {"input": None, "output": None}
+
+
+def _live_strings(value: Any) -> list[str]:
+    """Normalize an errors/waits value to a list of strings."""
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value]
+    if value is None or value == "":
+        return []
+    return [str(value)]
+
+
+def _live_step(value: Any) -> int:
+    """Normalize a step value to an int (0 when unevidenced)."""
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return value
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return 0
+
+
+def live_defaults() -> dict[str, Any]:
+    """Default append-only fields for rows with no run evidence."""
+    return {
+        "role": "",
+        "model": "",
+        "step": 0,
+        "file": "",
+        "cost": COST_UNAVAILABLE,
+        "tokens": {"input": None, "output": None},
+        "context": "",
+        "errors": [],
+        "waits": [],
+    }
+
 
 def record_live_row(key: str, row: Mapping[str, Any]) -> dict[str, Any]:
     """Upsert one live row by key; returns a stored copy."""
@@ -23,6 +74,15 @@ def record_live_row(key: str, row: Mapping[str, Any]) -> dict[str, Any]:
         "scope": str(row.get("scope", "")),
         "deliverable": str(row.get("deliverable", "")),
         "status": str(row.get("status", "")),
+        "role": str(row.get("role", "")),
+        "model": str(row.get("model", "")),
+        "step": _live_step(row.get("step", 0)),
+        "file": str(row.get("file", "")),
+        "cost": str(row.get("cost", COST_UNAVAILABLE)),
+        "tokens": _live_tokens(row.get("tokens")),
+        "context": str(row.get("context", "")),
+        "errors": _live_strings(row.get("errors")),
+        "waits": _live_strings(row.get("waits")),
     }
     _LIVE_ROWS[str(key)] = stored
     return dict(stored)
@@ -44,6 +104,7 @@ def live_rows() -> dict[str, Any]:
             "scope": row.scope,
             "deliverable": row.deliverable,
             "status": row.status,
+            **live_defaults(),
         })
     rows = [dict(item) for item in merged.values()]
     rows.sort(key=lambda item: (item["agent"], item["scope"]))
@@ -55,8 +116,11 @@ agents_live_payload = live_rows
 
 
 __all__ = [
+    "COST_UNAVAILABLE",
+    "LIVE_EXTRA_FIELDS",
     "agents_live_payload",
     "clear_live_rows",
+    "live_defaults",
     "live_rows",
     "record_live_row",
 ]
