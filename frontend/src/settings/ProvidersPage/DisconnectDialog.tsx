@@ -3,7 +3,13 @@
 // Closable via Escape, the X button, and Cancel.
 
 import { useEffect, useState } from "react";
+import {
+  disconnectProvider,
+  failureReason,
+  isNetworkFailure,
+} from "./connectApi";
 import { APP_NAMESPACE_PREFIX } from "./types";
+import { secretIdForProvider } from "./secretStore";
 import type { SecretStorePort } from "./secretStore";
 
 type DisconnectDialogProps = {
@@ -58,6 +64,17 @@ export function DisconnectDialog({
     return null;
   }
 
+  async function removeLocalReference(): Promise<void> {
+    const rows = await store.list(APP_NAMESPACE_PREFIX);
+    const bound = rows.find((row) => row.secret_id === secretId) ?? null;
+    if (bound === null || bound.provider_id !== provider_id) {
+      throw new Error(`Refused: secret ${secretId} is not bound to provider ${provider_id}.`);
+    }
+    await store.remove(secretId, sessionToken);
+    onDisconnected(secretId);
+    onClose();
+  }
+
   async function handleDisconnect(): Promise<void> {
     if (busy) {
       return;
@@ -67,14 +84,36 @@ export function DisconnectDialog({
     try {
       // The frozen identity is provider_id: the remove runs only for a
       // secret bound to that provider; a mismatch is refused visibly
-      // with no store call.
-      const rows = await store.list(APP_NAMESPACE_PREFIX);
-      const bound = rows.find((row) => row.secret_id === secretId) ?? null;
-      if (bound === null || bound.provider_id !== provider_id) {
+      // with no store call and no route call.
+      if (secretId !== secretIdForProvider(provider_id)) {
         setError(`Refused: secret ${secretId} is not bound to provider ${provider_id}.`);
         return;
       }
-      await store.remove(secretId, sessionToken);
+      if (sessionToken.length === 0) {
+        // Token-less runs never touch the network; the local refusal
+        // below surfaces without a route call.
+        await removeLocalReference();
+        return;
+      }
+      try {
+        await disconnectProvider(provider_id);
+      } catch (err: unknown) {
+        if (!isNetworkFailure(err)) {
+          setError(failureReason("Disconnect", err));
+          return;
+        }
+        // No route answered (offline run): fall through to the local
+        // reference flow, which keeps the saved behavior.
+        await removeLocalReference();
+        return;
+      }
+      // The route answered: the local reference is a mirror only and a
+      // missing mirror entry never blocks the confirmed disconnect.
+      try {
+        await store.remove(secretId, sessionToken);
+      } catch {
+        // Mirror already gone; the server answer rules.
+      }
       onDisconnected(secretId);
       onClose();
     } catch (err: unknown) {
