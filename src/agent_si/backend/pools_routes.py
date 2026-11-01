@@ -322,7 +322,9 @@ def set_role_pool(project_id: str, role: str, mode: RoleMode,
 # Handlers: (ctx, query, body) -> (status, payload)
 
 def list_roles(ctx: RoutingCtx, query, body) -> Tuple[int, Dict]:
-    project_id = _q(query, "project_id", "p1")
+    project_id = _q(query, "project_id", None)
+    if not isinstance(project_id, str) or not project_id:
+        return 400, {"error": "project_id required"}
     roles = []
     for role in T.ROLES:
         profile = ctx.role_table.get_profile(project_id, role)
@@ -341,7 +343,9 @@ def list_roles(ctx: RoutingCtx, query, body) -> Tuple[int, Dict]:
 
 
 def get_role(ctx: RoutingCtx, query, body) -> Tuple[int, Dict]:
-    project_id = _q(query, "project_id", "p1")
+    project_id = _q(query, "project_id", None)
+    if not isinstance(project_id, str) or not project_id:
+        return 400, {"error": "project_id required"}
     role = _q(query, "role", None)
     if role not in T.ROLES:
         return 400, {"error": "unknown role %r" % (role,)}
@@ -362,7 +366,9 @@ def set_role(ctx: RoutingCtx, query, body) -> Tuple[int, Dict]:
     if hit:
         return 400, {"error": "raw secret material refused at %s "
                               "(pass a SecretRef handle, never raw)" % hit}
-    project_id = body.get("project_id", "p1")
+    project_id = body.get("project_id")
+    if not isinstance(project_id, str) or not project_id:
+        return 400, {"error": "project_id required"}
     role = body.get("role")
     mode = body.get("mode")
     if role not in T.ROLES:
@@ -421,7 +427,9 @@ def set_role(ctx: RoutingCtx, query, body) -> Tuple[int, Dict]:
 
 
 def get_picker(ctx: RoutingCtx, query, body) -> Tuple[int, Dict]:
-    project_id = _q(query, "project_id", "p1")
+    project_id = _q(query, "project_id", None)
+    if not isinstance(project_id, str) or not project_id:
+        return 400, {"error": "project_id required"}
     role = _q(query, "role", None)
     purpose = _q(query, "purpose", "coding")
     if role not in T.ROLES:
@@ -434,7 +442,9 @@ def get_picker(ctx: RoutingCtx, query, body) -> Tuple[int, Dict]:
 
 def post_pick(ctx: RoutingCtx, query, body) -> Tuple[int, Dict]:
     body = body or {}
-    project_id = body.get("project_id", "p1")
+    project_id = body.get("project_id")
+    if not isinstance(project_id, str) or not project_id:
+        return 400, {"error": "project_id required"}
     role = body.get("role")
     key = body.get("key")
     if role not in T.ROLES:
@@ -460,7 +470,9 @@ def post_pick(ctx: RoutingCtx, query, body) -> Tuple[int, Dict]:
 
 
 def get_bindings(ctx: RoutingCtx, query, body) -> Tuple[int, Dict]:
-    project_id = _q(query, "project_id", "p1")
+    project_id = _q(query, "project_id", None)
+    if not isinstance(project_id, str) or not project_id:
+        return 400, {"error": "project_id required"}
     role = _q(query, "role", None)
     if role not in T.ROLES:
         return 400, {"error": "unknown role %r" % (role,)}
@@ -496,7 +508,9 @@ def get_why(ctx: RoutingCtx, query, body) -> Tuple[int, Dict]:
 
 
 def list_role_pools(ctx: RoutingCtx, query, body) -> Tuple[int, Dict]:
-    project_id = _q(query, "project_id", "p1")
+    project_id = _q(query, "project_id", None)
+    if not isinstance(project_id, str) or not project_id:
+        return 400, {"error": "project_id required"}
     # Internal caller: ctx mapped explicitly via the bound default, so the
     # facade call below carries exactly the frozen params.
     old = _DEFAULT_POOLS_CTX
@@ -532,8 +546,11 @@ def put_role_pools(ctx: RoutingCtx, query, body) -> Tuple[int, Dict]:
     try:
         try:
             _refuse_raw_secret(body)
+            project_id = body.get("project_id")
+            if not isinstance(project_id, str) or not project_id:
+                return 400, {"error": "project_id required"}
             profile = set_role_pool(
-                body.get("project_id", "p1"), body.get("role"),
+                project_id, body.get("role"),
                 body.get("mode"), body.get("provider"), body.get("model"),
                 body.get("pool"), body.get("strategy"))
         except (ValueError, KeyError, TypeError) as exc:
@@ -820,9 +837,15 @@ def _blocked_with_reason(request: R.RoutingRequest, deps: R.RoutingDeps,
 
 def post_decide(ctx: RoutingCtx, query, body) -> Tuple[int, Dict]:
     body = body or {}
-    project_id = body.get("project_id", "p1")
-    task_id = body.get("task_id", "t1")
-    run_id = body.get("run_id", "r1")
+    project_id = body.get("project_id")
+    if not isinstance(project_id, str) or not project_id:
+        return 400, {"error": "project_id required"}
+    task_id = body.get("task_id")
+    if not isinstance(task_id, str) or not task_id:
+        return 400, {"error": "task_id required"}
+    run_id = body.get("run_id")
+    if not isinstance(run_id, str) or not run_id:
+        return 400, {"error": "run_id required"}
     role = body.get("role", "worker")
     if role not in T.ROLES:
         return 400, {"error": "unknown role %r" % (role,)}
@@ -1031,7 +1054,9 @@ def post_target_flow(ctx, query, body) -> Tuple[int, Dict]:
     stores partial defaults.
     """
     body = body if isinstance(body, Mapping) else {}
-    project_id = body.get("project_id", "p1")
+    project_id = body.get("project_id")
+    if not isinstance(project_id, str) or not project_id:
+        return 400, {"error": "project_id required"}
     config = body.get("target_flow") or {}
     try:
         loaded = RL.load_target_flow(ctx.role_table, config,

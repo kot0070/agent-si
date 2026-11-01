@@ -97,7 +97,7 @@ def get_budget(ctx, query, body) -> Tuple[int, Dict[str, Any]]:
     params = body if isinstance(body, Mapping) else {}
     project_id = _query_value(query, "project_id", None)
     if project_id is None:
-        project_id = params.get("project_id", "p1")
+        project_id = params.get("project_id")
     if not isinstance(project_id, str) or not project_id:
         return 400, {"code": BUDGET_PROJECT_ID_REQUIRED,
                          "message": "project_id required"}
@@ -384,7 +384,7 @@ def k04f_breach(ctx, query, body):
     from agent_si.budget.gate import BudgetBlockedError
 
     body = body if isinstance(body, Mapping) else {}
-    project_id = body.get("project_id") or "k04f-breach"
+    project_id = body.get("project_id")
     if not isinstance(project_id, str) or not project_id:
         return 400, {"code": BUDGET_PROJECT_ID_REQUIRED,
                      "message": "project_id required"}
@@ -440,7 +440,10 @@ def k04f_blocked_terminate(ctx, query, body):
     from agent_si.state_machines import run_machine as _run_machine
 
     body = body if isinstance(body, Mapping) else {}
-    project_id = body.get("project_id") or "k04f-b34"
+    project_id = body.get("project_id")
+    if not isinstance(project_id, str) or not project_id:
+        return 400, {"code": BUDGET_PROJECT_ID_REQUIRED,
+                     "message": "project_id required"}
     task_id = body.get("task_id")
     if not isinstance(task_id, str) or not task_id:
         return 400, {"code": BUDGET_TASK_ID_REQUIRED,
@@ -761,10 +764,18 @@ def k04n4_trial_cap(ctx, query, body):
     from agent_si.budget.gate import BudgetBlockedError
 
     body = body if isinstance(body, Mapping) else {}
-    project_id = body.get("project_id") or "k04n4-p63"
+    project_id = body.get("project_id")
     if not isinstance(project_id, str) or not project_id:
         return 400, {"code": BUDGET_PROJECT_ID_REQUIRED,
                      "message": "project_id required"}
+    task_id = body.get("task_id")
+    if not isinstance(task_id, str) or not task_id:
+        return 400, {"code": BUDGET_TASK_ID_REQUIRED,
+                     "message": "task_id required"}
+    run_id = body.get("run_id")
+    if not isinstance(run_id, str) or not run_id:
+        return 400, {"code": BUDGET_RUN_ID_REQUIRED,
+                     "message": "run_id required"}
     currency = body.get("currency") or "USD"
     monthly_cap = body.get("monthly_cap") or "10.00"
     soft = body.get("soft_limit") or "7.00"
@@ -788,7 +799,7 @@ def k04n4_trial_cap(ctx, query, body):
             pass
     stamp, expiry = _reservation_window()
     first = gate.compare_and_reserve(
-        {"project_id": project_id, "task_id": "t1", "run_id": "r1",
+        {"project_id": project_id, "task_id": task_id, "run_id": run_id,
          "reservation_id": "k04n4-p63-r1",
          "estimated_amount": "6.00", "reserved_at": stamp,
          "expires_at": expiry, "provider_request_ref": "k04n4-req-1"})
@@ -800,7 +811,7 @@ def k04n4_trial_cap(ctx, query, body):
          "actual_amount": "6.00",
          "provider_usage_evidence_ref": "usage:k04n4-p63/t1"})
     second = gate.compare_and_reserve(
-        {"project_id": project_id, "task_id": "t1", "run_id": "r1",
+        {"project_id": project_id, "task_id": task_id, "run_id": run_id,
          "reservation_id": "k04n4-p63-r2",
          "estimated_amount": "2.00", "reserved_at": stamp,
          "expires_at": expiry, "provider_request_ref": "k04n4-req-2"})
@@ -810,7 +821,8 @@ def k04n4_trial_cap(ctx, query, body):
                      "message": "near-cap reserve did not warn"}
     try:
         gate.compare_and_reserve(
-            {"project_id": project_id, "task_id": "t1", "run_id": "r1",
+            {"project_id": project_id, "task_id": task_id,
+             "run_id": run_id,
              "reservation_id": "k04n4-p63-r3",
              "estimated_amount": "5.00", "reserved_at": stamp,
              "expires_at": expiry,
@@ -823,7 +835,7 @@ def k04n4_trial_cap(ctx, query, body):
     incidents = gate.list_incidents(project_id)
     incident_id = incidents[-1].incident_id if incidents else ""
     over = gate.compare_and_reserve(
-        {"project_id": project_id, "task_id": "t1", "run_id": "r1",
+        {"project_id": project_id, "task_id": task_id, "run_id": run_id,
          "reservation_id": "k04n4-p63-r4",
          "estimated_amount": "5.00", "reserved_at": stamp,
          "expires_at": expiry, "provider_request_ref": "k04n4-req-4",
