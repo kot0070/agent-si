@@ -9,7 +9,8 @@
     "reserved": "0",
     "soft_limit": "4.00",
     "spent": "0",
-    "updated_at": ""
+    "updated_at": "",
+    "warned": false
   },
   "project_id": "wire-project-001"
 }
