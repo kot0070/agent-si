@@ -2125,6 +2125,161 @@ def create_app(settings: Any = None,
                 "source_version": _status["source_version"],
                 **_row}
 
+    # --- FXKB model-KB Update (F09; additions-only, marked block). ---
+    # POST /api/v1/kb/update sources bound-catalog rows for EVERY
+    # connected (registry-ONLINE) provider from the staged provider
+    # sections (in-repo sourced evidence with per-field URLs, no
+    # network, no keys): unknown pairs stage as added rows through
+    # updater.propose_from_field_data plus apply_proposal on explicit
+    # approval, then the catalog is bound plus persisted
+    # (kb_catalog.json) with kb_version + 1, so GET /api/v1/kb/status
+    # shows the refreshed timestamp plus source. Writes keep the frozen
+    # USER_WRITE guard (401 missing x-actor, 403 bad token); a missing
+    # approval refuses with 400 documenting the approval shape.
+    # Nothing connected (or nothing sourced) refuses with 409, never an
+    # invented row. No earlier line in this file changes.
+    _FXKB_UPDATE_APPROVAL_SHAPE = '{"approved_by_user": true}'
+
+    @app.post("/api/v1/kb/update")
+    async def _fxkb_post_update(request: Request) -> dict[str, Any]:
+        _actor = (request.headers.get("x-actor") or "").strip()
+        if not _actor:
+            raise HTTPException(status_code=401,
+                                detail="missing x-actor header")
+        _token = request.headers.get("x-ui-session-token")
+        _check = getattr(app.state, "auth_hook", None)
+        _allowed = False
+        if callable(_check):
+            try:
+                _allowed = bool(_check(_token, _actor, USER_WRITE))
+            except Exception:
+                _allowed = False
+        else:
+            _expected = getattr(app.state, "ui_session_token", None)
+            _allowed = (_expected is not None and _token == _expected)
+        if not _allowed:
+            raise HTTPException(status_code=403, detail="forbidden")
+        try:
+            _body = await request.json()
+        except Exception:
+            _body = None
+        if not isinstance(_body, dict) or _body.get(
+                "approved_by_user") is not True:
+            raise HTTPException(
+                status_code=400,
+                detail="KB update needs explicit approval with body "
+                       + _FXKB_UPDATE_APPROVAL_SHAPE)
+        try:
+            from agent_si.backend import routing_auto as _fxkb_auto
+            from agent_si.model_kb import kb as _fxkb_kb
+            from agent_si.model_kb import loader as _fxkb_loader
+            from agent_si.model_kb import updater as _fxkb_updater
+            from agent_si.providers.registry import (
+                provider_store as _fxkb_store)
+        except ImportError as _exc:
+            raise HTTPException(
+                status_code=500,
+                detail="KB update unavailable: %s" % (_exc,))
+        _online = _fxkb_auto.registry_online_connected(request)
+        if not _online:
+            raise HTTPException(
+                status_code=409,
+                detail="KB update refused: no ONLINE provider connected")
+        try:
+            _records = _fxkb_store.load_connections(_k04_dir)
+        except Exception:
+            _records = []
+        _wanted = {}
+        for _rec in _records or []:
+            if not isinstance(_rec, dict):
+                continue
+            _pid = str(_rec.get("provider_id") or "")
+            _model = str(_rec.get("model") or "")
+            if _pid in _online and _model and _pid not in _wanted:
+                _wanted[_pid] = _model
+        _pairs = [(_pid, _wanted[_pid]) for _pid in _online
+                  if _pid in _wanted]
+        if not _pairs:
+            raise HTTPException(
+                status_code=409,
+                detail="KB update refused: connected providers carry "
+                       "no model to source")
+        _staged = _fxkb_loader.staged_section_rows()
+        _envelopes = _fxkb_loader.STAGED_PROVIDER_ENVELOPES
+        _retrieved = _fxkb_loader.STAGED_SECTIONS_RETRIEVED_AT
+        _entries = []
+        _unavailable = []
+        _have = set()
+        for _pid, _model in _pairs:
+            _match = None
+            for _mid, _fields in _staged.get(_pid, []):
+                if _mid == _model:
+                    _match = _fields
+                    break
+            if _match is None:
+                _unavailable.append("%s/%s" % (_pid, _model))
+                continue
+            _have.add(_pid)
+            for _name in sorted(_match):
+                _value, _source = _match[_name]
+                _entries.append({
+                    "provider_id": _pid,
+                    "model_id": _model,
+                    "field": _name,
+                    "new": _value,
+                    "source": _source,
+                    "retrieved_at": _retrieved})
+        if not _entries:
+            raise HTTPException(
+                status_code=409,
+                detail="KB update refused: no staged source on file "
+                       "for the connected providers")
+        _envelope = _envelopes.get(sorted(_have)[0]) or (
+            _fxkb_updater.KB_SOURCE_ALLOWLIST[0])
+        _catalog = _fxkb_kb.bound_catalog()
+        _proposal = _fxkb_updater.propose_from_field_data(
+            _catalog, _entries, _envelope, _retrieved)
+        _errors = _fxkb_updater.validate_proposal(_catalog, _proposal)
+        if _errors:
+            raise HTTPException(status_code=400,
+                                detail="KB update rejected: %s"
+                                % ("; ".join(_errors),))
+        if not _proposal["changes"] and not _proposal.get("added"):
+            return {"applied": False,
+                    "kb_version": _catalog["version"].get("kb_version"),
+                    "reason": "no schema-valid field changes in entry data",
+                    "unavailable": sorted(_unavailable)}
+        _result = _fxkb_updater.apply_proposal(
+            _catalog, _proposal, user_confirmed=True)
+        _fxkb_kb.bind_catalog(_result["catalog"])
+        try:
+            _fxkb_kb.persist_bound()
+        except Exception as _exc:
+            raise HTTPException(
+                status_code=500,
+                detail="KB update not persisted: %s: %s"
+                % (type(_exc).__name__, _exc))
+        _models_out = []
+        _providers_out = []
+        for _src in list(_proposal.get("added", []) or []
+                         ) + _proposal["changes"]:
+            _pair = "%s/%s" % (_src.get("provider_id"),
+                               _src.get("model_id"))
+            if _pair not in _models_out:
+                _models_out.append(_pair)
+            if _src.get("provider_id") not in _providers_out:
+                _providers_out.append(_src.get("provider_id"))
+        return {"applied": True,
+                "kb_version": _result["version"],
+                "updated_at": _result["catalog"]["version"].get(
+                    "updated_at"),
+                "providers": sorted(_providers_out),
+                "models": sorted(_models_out),
+                "changes": len(_proposal["changes"]),
+                "added": len(_proposal.get("added", []) or []),
+                "source": _envelope,
+                "unavailable": sorted(_unavailable)}
+
     # K12OPEN1 Beacon (rows R-350 + HC-3): idea/demo public-text rules
     # plus submission secret/private scan; sibling-mount pattern only.
     from agent_si.backend import k12open1_routes as _k12open1_routes

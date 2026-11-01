@@ -8,6 +8,14 @@ Manager profile model), and every STORE read runs through
 model_kb.loader.find_row (exact provider/model match; model ids pass
 through verbatim, never invented here).
 
+Connected set (FXKB F03): the provider-registry ONLINE providers read
+off the app (app.state.k04_ctx.provider_facade, ids only, never key
+material); the `connected` query param may only narrow that set, never
+widen it. With no registry visible the query param is the connected
+set, which keeps the frozen DEMOF3 contract. With no param the
+registry default resolves and the 200 carries the why-record; an
+explicit param keeps the frozen exact {"manager", "model"} shape.
+
 Query params follow the k04n4 convention (budget/routes.py
 k04n4_kb_auto): `task_type` (default "coding"; known {"coding",
 "general"} from loader.auto_fit_price_quality default plus the
@@ -51,6 +59,41 @@ def _parse_connected(raw_values: Any) -> list:
     return connected
 
 
+def registry_online_connected(request: Request) -> list | None:
+    """ONLINE provider ids off the app registry, or None when unseen.
+
+    Reads app.state.k04_ctx.provider_facade.list_providers (ids only,
+    never key material) and keeps health == "ONLINE" in facade order.
+    Any failure reads as unseen (None): callers fall back to the
+    frozen query-param contract instead of failing open or closed.
+    """
+    try:
+        app = getattr(request, "app", None)
+        state = getattr(app, "state", None)
+        ctx = getattr(state, "k04_ctx", None)
+        facade = getattr(ctx, "provider_facade", None)
+        if facade is None:
+            return None
+        views = facade.list_providers()
+    except Exception:
+        return None
+    try:
+        items = list(views or [])
+    except TypeError:
+        return None
+    online = []
+    for view in items:
+        try:
+            if getattr(view, "health", None) != "ONLINE":
+                continue
+            pid = str(getattr(view, "provider_id", "") or "")
+        except Exception:
+            continue
+        if pid and pid not in online:
+            online.append(pid)
+    return online
+
+
 def pick_auto(catalog: dict, connected: list,
               task_type: str) -> dict:
     """Resolve the AUTO manager choice through the frozen seams.
@@ -59,7 +102,9 @@ def pick_auto(catalog: dict, connected: list,
     store-verified row) raises AutoBlocked. The pick is the first
     connected candidate in catalog order whose row the store confirms
     via find_row, bound through resolve_manager with no target (the
-    router keeps the profile model, never re-selects per run).
+    router keeps the profile model, never re-selects per run). The
+    why-record carries the effective connected set, the task type and
+    the seam's shortlist reason.
     """
     from agent_si.model_kb import loader as _loader
     from agent_si.routing import roles as _roles
@@ -80,7 +125,10 @@ def pick_auto(catalog: dict, connected: list,
         profile = _roles.make_default_manager_profile(provider, model)
         _, bound = _roles.resolve_manager(profile)
         return {"manager": str(bound.provider),
-                "model": str(bound.model)}
+                "model": str(bound.model),
+                "why": {"connected": list(connected or []),
+                        "task_type": task,
+                        "reason": auto.get("reason")}}
     raise AutoBlocked(
         "AUTO BLOCKED: %s" % (auto.get("reason") or "no candidate"))
 
@@ -94,11 +142,24 @@ def register_routing_auto_routes(app: Any) -> Any:
 
         params = request.query_params
         task_type = params.get("task_type") or "coding"
-        connected = _parse_connected(params.getlist("connected"))
+        requested = _parse_connected(params.getlist("connected"))
+        online = registry_online_connected(request)
+        if online is None:
+            connected = requested
+            explicit = True
+        elif requested:
+            connected = [p for p in requested if p in online]
+            explicit = True
+        else:
+            connected = list(online)
+            explicit = False
         try:
-            return pick_auto(_kb.bound_catalog(), connected, task_type)
+            pick = pick_auto(_kb.bound_catalog(), connected, task_type)
         except (UnknownTask, AutoBlocked) as err:
             raise HTTPException(
                 status_code=422, detail=str(err)) from None
+        if explicit:
+            return {"manager": pick["manager"], "model": pick["model"]}
+        return pick
 
     return app
