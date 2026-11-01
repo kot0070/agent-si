@@ -167,6 +167,7 @@ def k03wire_run(payload: dict[str, Any]) -> dict[str, Any]:
         producer_session_refs=_str_tuple(
             _need_list(payload, "producer_session_refs")),
         tool_rows=tuple(_need_list(payload, "tool_rows")),
+        criteria=tuple(_need_list(payload, "criteria")),
         project_dir=str(payload.get("project_dir") or ""),
         output_refs=_str_tuple(_need_list(payload, "output_refs")),
         metric_refs=_str_tuple(_need_list(payload, "metric_refs")),

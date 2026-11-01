@@ -86,6 +86,7 @@ def _run_kwargs(project_dir):
         "producer_session_refs": ("sess-prod-p6journal-1",),
         "tool_rows": ({"tool": "read", "ref": "tool-p6journal-1"},),
         "project_dir": project_dir,
+        "criteria": ("criterion-p6",),
         "task_state": manifest.TaskState.COMPLETED,
         "output_refs": ("art-p6journal-1",),
         "metric_refs": ("m-p6journal-1",),

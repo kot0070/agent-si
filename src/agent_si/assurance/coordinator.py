@@ -103,6 +103,7 @@ def run_assurance(
     work_refs: Tuple[str, ...] = (),
     producer_session_refs: Tuple[str, ...] = (),
     tool_rows: Tuple[Any, ...] = (),
+    criteria: Tuple[Any, ...] = (),
     project_dir: str = "",
     task_state: Any = None,
     output_refs: Tuple[str, ...] = (),
@@ -123,6 +124,7 @@ def run_assurance(
     work_refs = tuple(work_refs)
     producer_session_refs = tuple(producer_session_refs)
     tool_rows = tuple(tool_rows)
+    criteria = tuple(criteria)
     output_refs = tuple(output_refs)
     metric_refs = tuple(metric_refs)
     run = run_machine.ExecutionRun(
@@ -155,18 +157,16 @@ def run_assurance(
         project_id, run_id, "start", "VERIFYING", "verification started"
     )
     try:
+        if not criteria:
+            raise ValueError("no criteria: nothing to verify")
         verification_record = verify_run(
+            project_dir=project_dir,
+            tool_rows=tool_rows,
+            criteria=criteria,
             project_id=project_id,
             task_id=task_id,
             run_id=run_id,
             contract_hash=contract_hash,
-            artifact_refs=artifact_refs,
-            evidence_refs=evidence_refs,
-            work_refs=work_refs,
-            producer_session_refs=producer_session_refs,
-            tool_rows=tool_rows,
-            project_dir=project_dir,
-            task_state=task_state,
         )
     except Exception as exc:
         run = _move(run, "FAILED", "VERIFICATION_FAILED")

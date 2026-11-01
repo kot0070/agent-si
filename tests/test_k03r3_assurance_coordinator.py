@@ -34,17 +34,13 @@ _CHECKER_MODULE = "agent_si.assurance.verification.checker"
 
 _VERIFY_CALL_KEYS = frozenset(
     {
+        "project_dir",
+        "tool_rows",
+        "criteria",
         "project_id",
         "task_id",
         "run_id",
         "contract_hash",
-        "artifact_refs",
-        "evidence_refs",
-        "work_refs",
-        "producer_session_refs",
-        "tool_rows",
-        "project_dir",
-        "task_state",
     }
 )
 
@@ -74,6 +70,7 @@ def _run_kwargs(tag, project_dir):
         producer_session_refs=("sess-prod-%s" % tag,),
         tool_rows=({"tool": "read", "ref": "tool-%s-1" % tag},),
         project_dir=project_dir,
+        criteria=("criterion-k03r3",),
         task_state=manifest.TaskState.COMPLETED,
         output_refs=("art-%s-1" % tag,),
         metric_refs=("m-%s-1" % tag,),
@@ -135,8 +132,29 @@ def _verification_record(tag, passed, kwargs):
 def _install_checker(monkeypatch, record):
     calls = []
 
-    def verify_run(**kwargs):
-        calls.append(kwargs)
+    def verify_run(
+        *,
+        project_dir,
+        tool_rows,
+        criteria,
+        project_id,
+        task_id,
+        run_id,
+        contract_hash,
+        verification_id=None,
+        verification_sequence=None,
+    ):
+        calls.append(
+            {
+                "project_dir": project_dir,
+                "tool_rows": tool_rows,
+                "criteria": criteria,
+                "project_id": project_id,
+                "task_id": task_id,
+                "run_id": run_id,
+                "contract_hash": contract_hash,
+            }
+        )
         return record
 
     module = types.ModuleType(_CHECKER_MODULE)

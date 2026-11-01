@@ -2683,6 +2683,7 @@ def create_app(settings: Any = None,
                 producer_session_refs=tuple(
                     _k03a_tuples(data.get("producer_session_refs"))),
                 tool_rows=tuple(_k03a_tuples(data.get("tool_rows"))),
+                criteria=tuple(_k03a_tuples(data.get("criteria"))),
                 project_dir=str(data.get("project_dir") or ""),
                 task_state=data.get("task_state"),
                 output_refs=tuple(_k03a_tuples(data.get("output_refs"))),
