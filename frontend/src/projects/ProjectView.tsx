@@ -296,8 +296,8 @@ export function LocalTestsSwitch(props: {
 
   return (
     <section data-testid="local-tests-section">
-      <h2>Local tests</h2>
-      <p>Catalog checks this machine runs before spend. One switch only.</p>
+      <h2>{t("projects.tests.local.title")}</h2>
+      <p>{t("projects.tests.local.body")}</p>
       {failed ? (
         <div data-testid="local-tests-error">
           <span>{t("errors.generic")}</span>
@@ -312,7 +312,7 @@ export function LocalTestsSwitch(props: {
           </button>
         </div>
       ) : null}
-      <label htmlFor="local-tests-switch">Local tests</label>
+      <label htmlFor="local-tests-switch">{t("projects.tests.local.label")}</label>
       <input
         id="local-tests-switch"
         data-testid="local-tests-switch"
@@ -323,7 +323,7 @@ export function LocalTestsSwitch(props: {
           void onToggle();
         }}
       />
-      <span data-testid="local-tests-value">{enabled ? "on" : "off"}</span>
+      <span data-testid="local-tests-value">{enabled ? t("projects.tests.local.on") : t("projects.tests.local.off")}</span>
     </section>
   );
 }
@@ -1006,6 +1006,7 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
       case "reports": {
         return (
           <div>
+            <p data-testid="project-reports-subtitle">{t("projects.reports.subtitle")}</p>
             <div data-testid="project-report-readable">
               {projectError !== null ? (
                 panelError(projectError)

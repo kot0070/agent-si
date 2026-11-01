@@ -45,7 +45,7 @@ function K10ANValue(props: {
   testid: string;
 }): ReactElement {
   if (props.value === null || props.value === undefined) {
-    return <span data-testid={props.testid}>UNAVAILABLE</span>;
+    return <span data-testid={props.testid}>{t("telemetry.unavailable")}</span>;
   }
   return <span data-testid={props.testid}>{props.value}</span>;
 }
@@ -53,17 +53,17 @@ function K10ANValue(props: {
 function K10ANModelTable(props: { rows: K10ANModelRow[] }): ReactElement {
   if (props.rows.length === 0) {
     return (
-      <p data-testid="k10an-models-unavailable">UNAVAILABLE</p>
+      <p data-testid="k10an-models-unavailable">{t("telemetry.unavailable")}</p>
     );
   }
   return (
     <table data-testid="k10an-models">
       <thead>
         <tr>
-          <th>Model</th>
-          <th>Calls</th>
-          <th>Tokens</th>
-          <th>Cost</th>
+          <th>{t("telemetry.model")}</th>
+          <th>{t("telemetry.calls")}</th>
+          <th>{t("telemetry.tokens")}</th>
+          <th>{t("telemetry.cost")}</th>
         </tr>
       </thead>
       <tbody>
@@ -93,17 +93,17 @@ function K10ANModelTable(props: { rows: K10ANModelRow[] }): ReactElement {
 function K10ANProviderTable(props: { rows: K10ANProviderRow[] }): ReactElement {
   if (props.rows.length === 0) {
     return (
-      <p data-testid="k10an-providers-unavailable">UNAVAILABLE</p>
+      <p data-testid="k10an-providers-unavailable">{t("telemetry.unavailable")}</p>
     );
   }
   return (
     <table data-testid="k10an-providers">
       <thead>
         <tr>
-          <th>Provider</th>
-          <th>Calls</th>
-          <th>Tokens</th>
-          <th>Cost</th>
+          <th>{t("telemetry.provider")}</th>
+          <th>{t("telemetry.calls")}</th>
+          <th>{t("telemetry.tokens")}</th>
+          <th>{t("telemetry.cost")}</th>
         </tr>
       </thead>
       <tbody>
@@ -177,16 +177,16 @@ export function TelemetrySummary(props: {
         </dl>
       )}
       <section data-testid="k10an-project">
-        <h3>Project</h3>
+        <h3>{t("telemetry.project")}</h3>
         <dl>
-          <dt>Tasks</dt>
+          <dt>{t("telemetry.tasks")}</dt>
           <dd>
             <K10ANValue
               value={summary?.project?.tasks ?? null}
               testid="k10an-project-tasks"
             />
           </dd>
-          <dt>Audits</dt>
+          <dt>{t("telemetry.audits")}</dt>
           <dd>
             <K10ANValue
               value={summary?.project?.audits ?? null}
@@ -196,11 +196,11 @@ export function TelemetrySummary(props: {
         </dl>
       </section>
       <section data-testid="k10an-model-section">
-        <h3>Per-model</h3>
+        <h3>{t("telemetry.perModel")}</h3>
         <K10ANModelTable rows={summary?.models ?? []} />
       </section>
       <section data-testid="k10an-provider-section">
-        <h3>Per-provider</h3>
+        <h3>{t("telemetry.perProvider")}</h3>
         <K10ANProviderTable rows={summary?.providers ?? []} />
       </section>
     </section>
