@@ -1,0 +1,14 @@
+{
+  "files": [
+    {
+      "path": "tools/drive/demo/fixtures_local.json",
+      "sha256": "a6027352a34f80b9d3b707dc62bdbb3e0788cefdb44efc9ee3061951f52a795c"
+    },
+    {
+      "path": "tools/drive/demo/fixtures_remote.json",
+      "sha256": "5c784d2ca6ca3a807d0f69c299435e3e05769c839458cda15d16a2720f263af0"
+    }
+  ],
+  "label": "TEST FIXTURES",
+  "pack": "fixture-pack-v1"
+}
