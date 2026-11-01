@@ -7,7 +7,8 @@ import { useState } from "react";
 import { PROVIDER_CATALOG } from "./catalog";
 import { enabledChatChoices } from "./ChatSelector";
 import type { ChatChoice } from "./ChatSelector";
-import { ROLE_LABELS } from "./types";
+import { roleLabel } from "./types";
+import { t } from "../../locale/index";
 
 export type RolePoolMode = "PINNED" | "pool" | "AUTO";
 
@@ -20,24 +21,51 @@ export const POOL_STRATEGY_LABELS: Record<PoolStrategy, string> = {
   SPLIT_PARALLEL: "Draft locally, verify in the cloud",
 };
 
-const STRATEGY_HELP: Record<PoolStrategy, string> = {
-  DIRECTOR_PER_TASK: "The Director chooses a pool member per task.",
-  AUTO: "Pool members are chosen automatically on task fit, price and quality.",
-  FALLBACK_ORDER: "Pool members are tried in listed order; on failure the next member takes over.",
-  SPLIT_PARALLEL: "A local draft is verified in the cloud.",
-};
+function strategyLabel(strategy: PoolStrategy): string {
+  if (strategy === "DIRECTOR_PER_TASK") {
+    return t("providers.rolepool.strategyDirectorPerTask");
+  }
+  if (strategy === "FALLBACK_ORDER") {
+    return t("providers.rolepool.strategyFallbackOrder");
+  }
+  if (strategy === "SPLIT_PARALLEL") {
+    return t("providers.rolepool.strategySplitParallel");
+  }
+  return t("providers.rolepool.strategyAuto");
+}
 
-const MODE_LABELS: Record<RolePoolMode, string> = {
-  PINNED: "Pinned model",
-  pool: "Model pool",
-  AUTO: "Automatic",
-};
+function strategyHelp(strategy: PoolStrategy): string {
+  if (strategy === "DIRECTOR_PER_TASK") {
+    return t("providers.rolepool.strategyHelpDirectorPerTask");
+  }
+  if (strategy === "FALLBACK_ORDER") {
+    return t("providers.rolepool.strategyHelpFallbackOrder");
+  }
+  if (strategy === "SPLIT_PARALLEL") {
+    return t("providers.rolepool.strategyHelpSplitParallel");
+  }
+  return t("providers.rolepool.strategyHelpAuto");
+}
 
-const MODE_HELP: Record<RolePoolMode, string> = {
-  PINNED: "Always use this one model for the role.",
-  pool: "Choose from these models by strategy.",
-  AUTO: "Route on task fit, price and quality. No fixed model.",
-};
+function modeLabel(mode: RolePoolMode): string {
+  if (mode === "PINNED") {
+    return t("providers.rolepool.modePinned");
+  }
+  if (mode === "pool") {
+    return t("providers.rolepool.modePool");
+  }
+  return t("providers.rolepool.modeAuto");
+}
+
+function modeHelp(mode: RolePoolMode): string {
+  if (mode === "PINNED") {
+    return t("providers.rolepool.helpPinned");
+  }
+  if (mode === "pool") {
+    return t("providers.rolepool.helpPool");
+  }
+  return t("providers.rolepool.helpAuto");
+}
 
 const MODES: RolePoolMode[] = ["PINNED", "pool", "AUTO"];
 
@@ -95,7 +123,7 @@ export function RolePoolPicker({ role, project_id = "local", options, onChange }
   const poolOptions = options ?? choicesToPoolOptions(enabledChatChoices(PROVIDER_CATALOG, {}));
   const resolve = defaultPoolResolver(poolOptions);
   const [current, setInner] = useState<RolePoolValue>(DEFAULT_VALUE);
-  const roleLabel = (ROLE_LABELS as Record<string, string>)[role] ?? role;
+  const label = roleLabel(role);
   const group = `role-pool-${project}-${role}-mode`;
 
   function emit(next: RolePoolValue): void {
@@ -120,7 +148,7 @@ export function RolePoolPicker({ role, project_id = "local", options, onChange }
 
   return (
     <fieldset data-testid="role-pool-picker" data-role={role} data-project-id={project}>
-      <legend>{roleLabel}</legend>
+      <legend>{label}</legend>
       {MODES.map((mode) => (
         <label key={mode}>
           <input
@@ -129,15 +157,15 @@ export function RolePoolPicker({ role, project_id = "local", options, onChange }
             checked={current.mode === mode}
             onChange={() => emit({ ...current, mode })}
           />
-          {MODE_LABELS[mode]}
+          {modeLabel(mode)}
         </label>
       ))}
-      <p>{MODE_HELP[current.mode]}</p>
+      <p>{modeHelp(current.mode)}</p>
       {current.mode === "PINNED" ? (
         <label>
-          {`${roleLabel} pinned model`}
+          {t("providers.rolepool.pinnedAria", { role: label })}
           <select
-            aria-label={`${roleLabel} pinned model`}
+            aria-label={t("providers.rolepool.pinnedAria", { role: label })}
             value={current.pinnedKey}
             onChange={(event) => {
               if (event.target.value === "" || known(event.target.value)) {
@@ -145,7 +173,7 @@ export function RolePoolPicker({ role, project_id = "local", options, onChange }
               }
             }}
           >
-            <option value="">Select a model</option>
+            <option value="">{t("providers.rolepool.selectOption")}</option>
             {poolOptions.map((option) => (
               <option key={option.key} value={option.key}>
                 {option.label}
@@ -171,20 +199,20 @@ export function RolePoolPicker({ role, project_id = "local", options, onChange }
             ))}
           </ul>
           <label>
-            {`${roleLabel} pool strategy`}
+            {t("providers.rolepool.strategyAria", { role: label })}
             <select
-              aria-label={`${roleLabel} pool strategy`}
+              aria-label={t("providers.rolepool.strategyAria", { role: label })}
               value={current.strategy}
               onChange={(event) => emit({ ...current, strategy: event.target.value as PoolStrategy })}
             >
               {STRATEGIES.map((strategy) => (
                 <option key={strategy} value={strategy}>
-                  {POOL_STRATEGY_LABELS[strategy]}
+                  {strategyLabel(strategy)}
                 </option>
               ))}
             </select>
           </label>
-          <p>{STRATEGY_HELP[current.strategy]}</p>
+          <p>{strategyHelp(current.strategy)}</p>
         </div>
       ) : null}
     </fieldset>

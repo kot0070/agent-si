@@ -3,11 +3,9 @@
 // Closable via Escape, the X button, and Cancel.
 
 import { useEffect, useState } from "react";
-import {
-  disconnectProvider,
-  failureReason,
-  isNetworkFailure,
-} from "./connectApi";
+import { disconnectProvider, isNetworkFailure } from "./connectApi";
+import { ApiError } from "../../api/errors";
+import { t } from "../../locale/index";
 import { APP_NAMESPACE_PREFIX } from "./types";
 import { secretIdForProvider } from "./secretStore";
 import type { SecretStorePort } from "./secretStore";
@@ -22,6 +20,16 @@ type DisconnectDialogProps = {
   onClose: () => void;
   onDisconnected: (secretId: string) => void;
 };
+
+function disconnectFailure(err: unknown): string {
+  if (err instanceof ApiError) {
+    return t("providers.disconnect.failedCode", { code: err.code, status: String(err.status) });
+  }
+  if (err instanceof Error && err.message.length > 0) {
+    return t("providers.disconnect.failedMessage", { message: err.message });
+  }
+  return t("providers.disconnect.failedGeneric");
+}
 
 export function DisconnectDialog({
   provider_id,
@@ -68,7 +76,9 @@ export function DisconnectDialog({
     const rows = await store.list(APP_NAMESPACE_PREFIX);
     const bound = rows.find((row) => row.secret_id === secretId) ?? null;
     if (bound === null || bound.provider_id !== provider_id) {
-      throw new Error(`Refused: secret ${secretId} is not bound to provider ${provider_id}.`);
+      throw new Error(
+        t("providers.disconnect.refused", { secret: secretId, provider: provider_id }),
+      );
     }
     await store.remove(secretId, sessionToken);
     onDisconnected(secretId);
@@ -86,7 +96,7 @@ export function DisconnectDialog({
       // secret bound to that provider; a mismatch is refused visibly
       // with no store call and no route call.
       if (secretId !== secretIdForProvider(provider_id)) {
-        setError(`Refused: secret ${secretId} is not bound to provider ${provider_id}.`);
+        setError(t("providers.disconnect.refused", { secret: secretId, provider: provider_id }));
         return;
       }
       if (sessionToken.length === 0) {
@@ -99,7 +109,7 @@ export function DisconnectDialog({
         await disconnectProvider(provider_id);
       } catch (err: unknown) {
         if (!isNetworkFailure(err)) {
-          setError(failureReason("Disconnect", err));
+          setError(disconnectFailure(err));
           return;
         }
         // No route answered (offline run): fall through to the local
@@ -117,22 +127,26 @@ export function DisconnectDialog({
       onDisconnected(secretId);
       onClose();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Disconnect failed.");
+      setError(err instanceof Error ? err.message : t("providers.disconnect.failed"));
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <div role="dialog" aria-modal="true" aria-label={`Disconnect ${providerLabel}`}>
-      <button type="button" aria-label="Close" onClick={onClose}>
-        X
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={t("providers.disconnect.title", { label: providerLabel })}
+    >
+      <button type="button" aria-label={t("providers.disconnect.close")} onClick={onClose}>
+        {t("providers.disconnect.closeGlyph")}
       </button>
-      <h2>Disconnect {providerLabel}</h2>
-      <p>This removes the saved key reference {secretId}.</p>
+      <h2>{t("providers.disconnect.title", { label: providerLabel })}</h2>
+      <p>{t("providers.disconnect.body", { id: secretId })}</p>
       {error !== null ? <p role="alert">{error}</p> : null}
       <button type="button" onClick={onClose}>
-        Cancel
+        {t("providers.disconnect.cancel")}
       </button>
       <button
         type="button"
@@ -141,7 +155,7 @@ export function DisconnectDialog({
           void handleDisconnect();
         }}
       >
-        {busy ? "Disconnecting..." : "Disconnect"}
+        {busy ? t("providers.disconnect.busy") : t("providers.disconnect.confirm")}
       </button>
     </div>
   );

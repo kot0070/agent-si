@@ -8,7 +8,8 @@
 // wizard stays pick-or-AUTO so a fresh install finishes with explicit picks.
 
 import { useState } from "react";
-import { AUTO_SENTINEL, ROLE_KEYS, ROLE_LABELS } from "./types";
+import { AUTO_SENTINEL, ROLE_KEYS, roleLabel } from "./types";
+import { t } from "../../locale/index";
 import type { ChatChoice } from "./ChatSelector";
 import type { RoleAssignment, RoleKey } from "./types";
 
@@ -40,17 +41,17 @@ export function SetupWizard({ choices, initial, onDone }: SetupWizardProps) {
 
   return (
     <div>
-      <h1>Setup wizard</h1>
-      <p>Choose a model per role, or leave a role on Automatic.</p>
+      <h1>{t("providers.setup.title")}</h1>
+      <p>{t("providers.setup.hint")}</p>
       {ROLE_KEYS.map((role) => (
         <label key={role}>
-          {ROLE_LABELS[role]}
+          {roleLabel(role)}
           <select
-            aria-label={ROLE_LABELS[role]}
+            aria-label={roleLabel(role)}
             value={assignment[role]}
             onChange={(event) => pick(role, event.target.value)}
           >
-            <option value={AUTO_SENTINEL}>Automatic</option>
+            <option value={AUTO_SENTINEL}>{t("providers.setup.autoOption")}</option>
             {choices.map((choice) => (
               <option key={`${choice.providerId}/${choice.modelId}`} value={choice.modelId}>
                 {choice.label}
@@ -65,7 +66,7 @@ export function SetupWizard({ choices, initial, onDone }: SetupWizardProps) {
           onDone(assignment);
         }}
       >
-        Finish setup
+        {t("providers.setup.finish")}
       </button>
     </div>
   );

@@ -6,10 +6,11 @@ import { useEffect, useState } from "react";
 import {
   connectCloud,
   connectLocal,
-  failureReason,
   isNetworkFailure,
   saveKey,
 } from "./connectApi";
+import { ApiError } from "../../api/errors";
+import { t } from "../../locale/index";
 import { secretIdForProvider } from "./secretStore";
 import type { SecretStorePort } from "./secretStore";
 import type { ProviderPreset, SecretRef } from "./types";
@@ -34,7 +35,7 @@ export const CONNECT_TIMEOUT_MS = 8000;
 export function saveWithTimeout(task: Promise<void>, timeoutMs: number): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => {
-      reject(new Error(`Save timed out after ${timeoutMs} ms.`));
+      reject(new Error(t("providers.connect.timeout", { ms: String(timeoutMs) })));
     }, timeoutMs);
     task.then(
       () => {
@@ -43,10 +44,20 @@ export function saveWithTimeout(task: Promise<void>, timeoutMs: number): Promise
       },
       (err: unknown) => {
         clearTimeout(timer);
-        reject(err instanceof Error ? err : new Error("Save failed."));
+        reject(err instanceof Error ? err : new Error(t("providers.connect.saveFailed")));
       },
     );
   });
+}
+
+function connectFailure(err: unknown): string {
+  if (err instanceof ApiError) {
+    return t("providers.connect.failedCode", { code: err.code, status: String(err.status) });
+  }
+  if (err instanceof Error && err.message.length > 0) {
+    return t("providers.connect.failedMessage", { message: err.message });
+  }
+  return t("providers.connect.failedGeneric");
 }
 
 export function ConnectDialog({
@@ -102,7 +113,7 @@ export function ConnectDialog({
     // The frozen identity is preset_id: a mismatch is refused visibly
     // with no store call.
     if (activePreset.id !== preset_id) {
-      setResult({ kind: "error", text: `Refused: preset mismatch for ${preset_id}.` });
+      setResult({ kind: "error", text: t("providers.connect.refusedMismatch", { id: preset_id }) });
       return;
     }
     setSaving(true);
@@ -126,7 +137,7 @@ export function ConnectDialog({
       } else {
         const firstModel = activePreset.models[0];
         if (firstModel === undefined) {
-          setResult({ kind: "error", text: `Refused: no model for preset ${preset_id}.` });
+          setResult({ kind: "error", text: t("providers.connect.refusedNoModel", { id: preset_id }) });
           setSaving(false);
           return;
         }
@@ -137,7 +148,7 @@ export function ConnectDialog({
       setApiKey("");
     } catch (err: unknown) {
       if (!isNetworkFailure(err)) {
-        setResult({ kind: "error", text: failureReason("Connect", err) });
+        setResult({ kind: "error", text: connectFailure(err) });
         setApiKey("");
         setSaving(false);
         return;
@@ -147,50 +158,60 @@ export function ConnectDialog({
     }
     try {
       await saveWithTimeout(store.save(ref), timeoutMs);
-      setResult({ kind: "success", text: `Connected ${activePreset.label}. Reference saved.` });
+      setResult({
+        kind: "success",
+        text: t("providers.connect.connected", { label: activePreset.label }),
+      });
       onConnected(preset_id, ref);
     } catch (err: unknown) {
-      setResult({ kind: "error", text: err instanceof Error ? err.message : "Save failed." });
+      setResult({
+        kind: "error",
+        text: err instanceof Error ? err.message : t("providers.connect.saveFailed"),
+      });
     } finally {
       setSaving(false);
     }
   }
 
   return (
-    <div role="dialog" aria-modal="true" aria-label={`Connect ${preset.label}`}>
-      <button type="button" aria-label="Close" onClick={onClose}>
-        X
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={t("providers.connect.title", { label: preset.label })}
+    >
+      <button type="button" aria-label={t("providers.connect.close")} onClick={onClose}>
+        {t("providers.connect.closeGlyph")}
       </button>
-      <h2>Connect {preset.label}</h2>
+      <h2>{t("providers.connect.title", { label: preset.label })}</h2>
       <dl>
         <div>
-          <dt>Provider ID</dt>
+          <dt>{t("providers.connect.providerId")}</dt>
           <dd>{preset.id}</dd>
         </div>
         <div>
-          <dt>Type</dt>
+          <dt>{t("providers.connect.kind")}</dt>
           <dd>{preset.kind}</dd>
         </div>
         <div>
-          <dt>Base URL</dt>
+          <dt>{t("providers.connect.baseUrl")}</dt>
           <dd>{preset.baseUrl}</dd>
         </div>
       </dl>
       <label>
-        API key
+        {t("providers.connect.apiKey")}
         <input
           type="password"
-          aria-label="API key"
+          aria-label={t("providers.connect.apiKey")}
           value={apiKey}
           autoComplete="off"
           onChange={(event) => setApiKey(event.target.value)}
         />
       </label>
-      <p>Key format: {preset.keyHint}</p>
-      {showHintWarning ? <p>This key does not match the expected format.</p> : null}
+      <p>{t("providers.connect.keyFormat", { hint: preset.keyHint })}</p>
+      {showHintWarning ? <p>{t("providers.connect.hintMismatch")}</p> : null}
       {result !== null ? <p role="status">{result.text}</p> : null}
       <button type="button" onClick={onClose}>
-        Cancel
+        {t("providers.connect.cancel")}
       </button>
       <button
         type="button"
@@ -199,7 +220,7 @@ export function ConnectDialog({
           void handleSave();
         }}
       >
-        {saving ? "Saving..." : "Save"}
+        {saving ? t("providers.connect.saving") : t("providers.connect.save")}
       </button>
     </div>
   );

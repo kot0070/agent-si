@@ -6,6 +6,7 @@
 
 import { useEffect, useState } from "react";
 import { APP_NAMESPACE_PREFIX } from "./types";
+import { t } from "../../locale/index";
 import type { SecretStorePort } from "./secretStore";
 import type { SecretRef } from "./types";
 
@@ -39,7 +40,7 @@ export function LeftoverFinder({
       },
       (err: unknown) => {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Could not list entries.");
+          setError(err instanceof Error ? err.message : t("providers.leftover.listFailed"));
         }
       },
     );
@@ -61,11 +62,11 @@ export function LeftoverFinder({
     try {
       await store.remove(entry.secret_id, sessionToken);
       setArmedId(null);
-      setNotice(`Deleted ${entry.secret_id}.`);
+      setNotice(t("providers.leftover.deleted", { id: entry.secret_id }));
       setEntries((prev) => prev.filter((row) => row.secret_id !== entry.secret_id));
     } catch (err: unknown) {
       setNotice(null);
-      setError(err instanceof Error ? err.message : "Delete failed.");
+      setError(err instanceof Error ? err.message : t("providers.leftover.deleteFailed"));
     } finally {
       setBusy(false);
     }
@@ -76,7 +77,7 @@ export function LeftoverFinder({
       {error !== null ? <p role="alert">{error}</p> : null}
       {notice !== null ? <p role="status">{notice}</p> : null}
       {entries.length === 0 ? (
-        <p>No leftover keys.</p>
+        <p>{t("providers.leftover.empty")}</p>
       ) : (
         <ul>
           {entries.map((entry) => {
@@ -85,27 +86,27 @@ export function LeftoverFinder({
             return (
               <li key={entry.secret_id} data-testid="leftover-entry">
                 <span>{entry.secret_id}</span>
-                <span>Created: {entry.created_at}</span>
+                <span>{t("providers.leftover.created", { date: entry.created_at })}</span>
                 {entry.last_rotated_at !== null ? (
-                  <span>Rotated: {entry.last_rotated_at}</span>
+                  <span>{t("providers.leftover.rotated", { date: entry.last_rotated_at })}</span>
                 ) : null}
                 {linked ? (
-                  <span title="In use by a live provider">In use</span>
+                  <span title={t("providers.leftover.inUseTitle")}>{t("providers.leftover.inUse")}</span>
                 ) : (
                   <span>
                     <button
                       type="button"
-                      aria-label={`Delete ${entry.secret_id}`}
+                      aria-label={t("providers.leftover.deleteAria", { id: entry.secret_id })}
                       disabled={busy}
                       onClick={() => {
                         void handleDelete(entry);
                       }}
                     >
-                      {armed ? "Confirm delete" : "Delete"}
+                      {armed ? t("providers.leftover.confirmDelete") : t("providers.leftover.delete")}
                     </button>
                     {armed ? (
                       <button type="button" onClick={() => setArmedId(null)}>
-                        Cancel
+                        {t("providers.leftover.cancel")}
                       </button>
                     ) : null}
                   </span>
