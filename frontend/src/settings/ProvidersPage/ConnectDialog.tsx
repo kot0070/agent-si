@@ -64,6 +64,23 @@ export function saveWithTimeout(task: Promise<void>, timeoutMs: number): Promise
 
 function connectFailure(err: unknown): string {
   if (err instanceof ApiError) {
+    // FXR2E wrong key: the refused key and the unreachable provider
+    // read as fixed plain strings, never a machine code. Anything
+    // else shows the served plain text when the route sent one.
+    const code = String(err.code);
+    if (err.status === 401 || err.status === 403
+      || code === "PROVIDER_KEY_REFUSED") {
+      return t("providers.connect.refusedKey");
+    }
+    if (err.status === 0 || err.status === 503
+      || code === "EVIDENCE_PROBE_NETWORK") {
+      return t("providers.connect.unreachable");
+    }
+    if (typeof err.details?.message === "string"
+      && err.details.message.length > 0) {
+      return t("providers.connect.failedMessage",
+        { message: err.details.message });
+    }
     return t("providers.connect.failedCode", { code: err.code, status: String(err.status) });
   }
   if (err instanceof Error && err.message.length > 0) {
