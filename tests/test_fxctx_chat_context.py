@@ -20,6 +20,8 @@ import os
 import sys
 import types
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 _WS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -100,6 +102,21 @@ def _apply_chat_limits(project_id):
 
 def setup_function(_func):
     _steplimits._reset_state()
+
+
+@pytest.fixture(autouse=True)
+def _fxloc_real_budget_gate():
+    """FXLOC C5: fail-closed gate needs a real gate for the direct run."""
+    from agent_si.budget.gate import BudgetGate
+    from agent_si.runtime import manager as _mgr
+
+    prev = _mgr._BUDGET_GATE
+    gate = BudgetGate()
+    gate.configure_project(
+        "p-fxctx-mgr", "USD", "1000000.00", "900000.00", "1000000.00")
+    _mgr.set_budget_gate(gate)
+    yield
+    _mgr.set_budget_gate(prev)
 
 
 def teardown_function(_func):

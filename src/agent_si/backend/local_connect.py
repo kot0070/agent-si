@@ -14,7 +14,9 @@ in REALIZATION_MAP. Standard library only.
 
 from __future__ import annotations
 
+import json
 import os
+import tempfile
 import threading
 from dataclasses import dataclass
 from typing import Dict, Tuple
@@ -60,6 +62,100 @@ _STATE_LOCK = threading.Lock()
 
 #: Status reported when an attached runtime is discovered reachable.
 _STATUS_READY = "READY"
+
+#: FXLOC C2: runtime attachment snapshot name under the product data dir.
+_RUNTIME_REF_FILE_NAME = "local_runtime_ref.json"
+
+
+def _data_dir() -> str | None:
+    """Product data dir, or None when this process names none.
+
+    Resolves through the single k10_start call-site; any failure
+    (unset, blank, unimportable) means memory-only, never a raise.
+    """
+    try:
+        from agent_si.k10_start import resolve_env_data_dir
+    except Exception:
+        return None
+    try:
+        return resolve_env_data_dir()
+    except Exception:
+        return None
+
+
+def _runtime_ref_path() -> str | None:
+    """Attachment snapshot path, or None when persistence is unavailable."""
+    directory = _data_dir()
+    if not directory:
+        return None
+    return os.path.join(directory, _RUNTIME_REF_FILE_NAME)
+
+
+def _write_runtime_ref(runtime_ref: str) -> None:
+    """Snapshot the attached ref atomically; never raises."""
+    path = _runtime_ref_path()
+    if not path:
+        return
+    try:
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(
+            dir=parent or ".", prefix=".local-runtime-ref-", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump({"runtime_ref": runtime_ref}, handle,
+                          sort_keys=True)
+                handle.write("\n")
+            os.replace(tmp_path, path)
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+    except Exception:
+        pass
+
+
+def _delete_runtime_ref() -> None:
+    """Drop the attachment snapshot; never raises."""
+    path = _runtime_ref_path()
+    if not path:
+        return
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+def restore_attached_runtime() -> str | None:
+    """Re-attach from the snapshot; None when absent/invalid.
+
+    Never raises: a missing, unreadable or ill-formed snapshot leaves
+    the current attachment untouched.
+    """
+    path = _runtime_ref_path()
+    if not path:
+        return None
+    try:
+        with open(path, encoding="utf-8") as handle:
+            doc = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    ref = doc.get("runtime_ref") if isinstance(doc, dict) else None
+    if not isinstance(ref, str) or not ref:
+        return None
+    global _ATTACHED_RUNTIME
+    with _STATE_LOCK:
+        _ATTACHED_RUNTIME = ref
+    return ref
+
+
+try:
+    restore_attached_runtime()
+except Exception:
+    pass
 
 
 def _require_session_token(session_token: str) -> str:
@@ -112,6 +208,7 @@ def connect(runtime_ref: str, session_token: str) -> LocalStatus:
     global _ATTACHED_RUNTIME
     with _STATE_LOCK:
         _ATTACHED_RUNTIME = runtime_ref
+    _write_runtime_ref(runtime_ref)
     return LocalStatus(
         status="NOT_CONFIGURED",
         reason=f"runtime {runtime_ref!r} attached; capability base absent, routing continues",
@@ -124,6 +221,7 @@ def disconnect(session_token: str) -> LocalStatus:
     global _ATTACHED_RUNTIME
     with _STATE_LOCK:
         _ATTACHED_RUNTIME = None
+    _delete_runtime_ref()
     return LocalStatus(
         status="NOT_CONFIGURED",
         reason="runtime detached; capability base absent, routing continues",

@@ -9,6 +9,7 @@
 """
 import os
 import sys
+import urllib.request as _urlreq
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _SRC = os.path.abspath(os.path.join(_HERE, "..", "src"))
@@ -39,7 +40,26 @@ def _settings(tmp_path, **extra):
     return base
 
 
-def test_os_served_audit_persists_across_restart(tmp_path):
+def _stub_models_ok(monkeypatch):
+    """Save preflight sees a live /models list (network stays faked)."""
+
+    class _Resp:
+        def read(self):
+            return b'{"data": [{"id": "gpt-4o"}]}'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(
+        _urlreq, "urlopen",
+        lambda request, timeout=None: _Resp())
+
+
+def test_os_served_audit_persists_across_restart(tmp_path, monkeypatch):
+    _stub_models_ok(monkeypatch)
     settings = _settings(tmp_path)
     app = create_app(settings)
     assert app.state.k04_config_error is None, app.state.k04_config_error
@@ -124,7 +144,8 @@ def test_os_build_failure_starts_app_and_503_no_memory(monkeypatch, tmp_path):
     assert reason in conn.text
 
 
-def test_memory_setting_keeps_memory_stack(tmp_path):
+def test_memory_setting_keeps_memory_stack(tmp_path, monkeypatch):
+    _stub_models_ok(monkeypatch)
     settings = _settings(tmp_path, secret_store="memory")
     app = create_app(settings)
     assert app.state.k04_config_error is None

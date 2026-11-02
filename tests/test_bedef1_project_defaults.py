@@ -194,4 +194,7 @@ def test_f_stream_without_limits_self_heals_then_fails_on_roles(tmp_path):
     assert _steplimits.limits_for("task", pid) == 40
     assert _steplimits.limits_for("chat", pid) == 15
     assert events[-1].get("type") == "done"
-    assert "has no provider" in str(events[-1].get("text", ""))
+    # FXCLASS CA-1/CA-3/CA-4: one plain line, same words on chat + Tasks,
+    # no role word; the verbatim role detail stays in the journal only.
+    assert "Connect a provider first" in str(events[-1].get("text", ""))
+    assert "role" not in str(events[-1].get("text", "")).lower()

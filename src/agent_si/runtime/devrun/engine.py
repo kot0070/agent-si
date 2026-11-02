@@ -623,14 +623,22 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
             worker = _roles.resolve_role(app, project, "worker")
             auditor = _roles.resolve_role(app, project, "auditor")
         except _roles.RoleUnbound as exc:
-            record["summary"] = "run failed: %s" % (exc,)
+            # FXCLASS CA-1/CA-3/CA-4: a new project with no provider ends
+            # with one plain line, same words on chat + Tasks, no role word.
+            # The verbatim role detail stays in the journal, never on screen.
+            _journal("DEVRUN_NOPROVIDER", "role unbound: %s" % (exc,))
+            record["summary"] = "Connect a provider first"
             record["success"] = False
             _finish_task()
             yield _run_event("delta", turn, task_id, record["summary"],
-                             {"run_id": run_id, "success": False})
+                             {"run_id": run_id, "success": False,
+                              "code": "NO_PROVIDER_BOUND",
+                              "connectHref": "/providers"})
             turn += 1
             yield _run_event("done", turn, task_id, record["summary"],
-                             {"run_id": run_id, "success": False})
+                             {"run_id": run_id, "success": False,
+                              "code": "NO_PROVIDER_BOUND",
+                              "connectHref": "/providers"})
             return
         # FXPARALLEL BEGIN adapters: one auditor adapter per part is
         # built inside the part thread (A4); only plan-phase adapters
@@ -640,14 +648,20 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
             manager_adapter = _roles.build_adapter(app, manager)
         except _roles.RoleUnbound as exc:
         # FXPARALLEL END adapters.
-            record["summary"] = "run failed: %s" % (exc,)
+            # FXCLASS CA-1/CA-3/CA-4: same plain line as the resolve path.
+            _journal("DEVRUN_NOPROVIDER", "adapter unbound: %s" % (exc,))
+            record["summary"] = "Connect a provider first"
             record["success"] = False
             _finish_task()
             yield _run_event("delta", turn, task_id, record["summary"],
-                             {"run_id": run_id, "success": False})
+                             {"run_id": run_id, "success": False,
+                              "code": "NO_PROVIDER_BOUND",
+                              "connectHref": "/providers"})
             turn += 1
             yield _run_event("done", turn, task_id, record["summary"],
-                             {"run_id": run_id, "success": False})
+                             {"run_id": run_id, "success": False,
+                              "code": "NO_PROVIDER_BOUND",
+                              "connectHref": "/providers"})
             return
         for line in _team_lines([
                 ("director", director), ("manager", manager),
@@ -812,7 +826,11 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
             record["run_end"] = _run_end_tests(
                 project_id=project, run_id=run_id, task_id=task_id)
         _journal("DEVRUN_END", record.get("summary") or "run ended")
-        _close_live("RETURNED")
+        # FXCLASS CB-6: one shared status map. A run with a FAIL part is
+        # failed on every surface: the live row closes BLOCKED (never
+        # RETURNED beside a FAIL verdict), the served run row carries
+        # success=False, and the chat verdict reads Failed.
+        _close_live("RETURNED" if record.get("success") else "BLOCKED")
         yield _run_event("delta", turn, task_id,
                          _ledger_total_line(record),
                          {"run_id": run_id})
@@ -897,6 +915,12 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         record["success"] = False
         record["summary"] = "run failed: internal %s: %s" % (
             type(exc).__name__, exc)
+        try:
+            from agent_si import file_log as _file_log
+
+            _file_log.log_exception("devrun-engine", run_id, exc)
+        except Exception:
+            pass
         _finish_task()
         _publish()
         _close_live("BLOCKED")
@@ -1770,7 +1794,7 @@ def _worker_prompt(spec: dict, message: str, attempt: int,
             "Project task: %s. Files you may write: %s. "
             "Actions: read_file {path}, list_dir {path}, "
             "write_file {path, content}, run {argv}. Writes outside "
-            "your files are refused. Inspect first, then create "
+            "your files are refused. Inspect only what you need, then create "
             "deliverables with write_file. Relative paths only. "
             "To install packages, run the installer argv (for example "
             "[\"npm\", \"install\"]): the run action IS the permission "

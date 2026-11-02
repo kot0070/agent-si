@@ -493,6 +493,43 @@ def _deny_shape(argv: list[str]) -> str:
     return ""
 
 
+#: Bare heads whose Store alias stub never counts as installed.
+_STUB_HEADS = frozenset({"python", "python3", "pytest"})
+
+
+def _is_windows_store_stub(path: str) -> bool:
+    """True when a which() hit is a Windows Store alias stub."""
+    try:
+        text = str(path or "")
+    except Exception:
+        return False
+    if not text:
+        return False
+    if "windowsapps" in text.lower():
+        return True
+    try:
+        import os as _os
+        if _os.path.isfile(text) and _os.path.getsize(text) == 0:
+            return True
+    except OSError:
+        return False
+    return False
+
+
+def _which_real(name: str):
+    """shutil.which filtered for Store stubs."""
+    hit = shutil.which(name)
+    if hit is None:
+        return None
+    if _bare_head(name) in _STUB_HEADS:
+        if _is_windows_store_stub(hit):
+            return None
+        return hit
+    if "windowsapps" in str(hit).lower():
+        return None
+    return hit
+
+
 def _missing_head(words: list[str], folder: str) -> str | None:
     """Bare tool head when no executable can start it, else None.
 
@@ -500,13 +537,24 @@ def _missing_head(words: list[str], folder: str) -> str | None:
     python/python3/pytest; pytest falls back to python -m pytest, the
     python pair falls back to each other and then to the py launcher);
     a head naming an existing file under the folder also counts as
-    startable (Popen resolves it against the child cwd).
+    startable (Popen resolves it against the child cwd). A Windows
+    Store alias stub (WindowsApps path or zero-byte alias) for
+    python/python3/pytest counts as NOT installed and is never
+    spawned, not even for --version.
     """
     resolved = resolve_argv([str(word) for word in words], folder)
-    if shutil.which(resolved[0]) is not None:
-        return None
-    if os.path.isabs(resolved[0]) and os.path.isfile(resolved[0]):
-        return None
+    prog = str(resolved[0])
+    if os.path.isabs(prog):
+        if os.path.isfile(prog) and not _is_windows_store_stub(prog):
+            if shutil.which(prog) is not None:
+                return None
+            return None
+    else:
+        if _which_real(prog) is not None:
+            return None
+        if shutil.which(prog) is not None and not _is_windows_store_stub(
+                str(shutil.which(prog))):
+            return None
     head = str(words[0])
     if "/" in head or "\\" in head or os.path.isabs(head):
         candidate = head if os.path.isabs(head) else os.path.join(
@@ -566,22 +614,30 @@ def resolve_argv(argv: list[str], folder: str | None = None) -> list[str]:
             if head == "pytest":
                 return [venv, "-m", "pytest", *words[1:]]
             return [venv, *words[1:]]
-    if head == "pytest" and shutil.which("pytest") is None:
-        python = (shutil.which("python") or shutil.which("python3")
-                  or shutil.which("py"))
+    if head == "pytest" and _which_real("pytest") is None:
+        python = (_which_real("python") or _which_real("python3")
+                  or _which_real("py"))
         if python is not None:
             return [python, "-m", "pytest", *words[1:]]
         return words
-    found = shutil.which(head)
+    found = _which_real(head) if head in ("python", "python3", "pytest", "py") else shutil.which(head)
     if found is not None:
-        return [found, *words[1:]]
-    if head in ("python", "python3"):
-        fallback = shutil.which(
+        # Never return a Store stub, even when the head itself is absolute.
+        if _is_windows_store_stub(found):
+            found = None
+        else:
+            return [found, *words[1:]]
+    if found is None and head in ("python", "python3"):
+        fallback = _which_real(
             "python3" if head == "python" else "python")
         if fallback is None:
-            fallback = shutil.which("py")
+            fallback = _which_real("py")
         if fallback is not None:
             return [fallback, *words[1:]]
+    if head in ("python", "python3", "pytest"):
+        # Bare head with only a stub on PATH: stay bare so _missing_head
+        # names the plain missing-tool line (never run the stub).
+        return words
     return words
 
 

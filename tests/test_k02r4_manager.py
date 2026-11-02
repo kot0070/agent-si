@@ -51,6 +51,32 @@ TEST_TOKEN = "k02r4-manager-token"
 TEST_SETTINGS = {"testing": True, "ui_session_token": TEST_TOKEN}
 
 
+# -- FXLOC C5: real budget gate (fail-closed product gate) --------------------
+_FXLOC_GATE_PROJECTS = (
+    "k02r4-budget",
+    "k02r4-sdk",
+    "k02r4-live",
+    "k02r4-dispatch",
+    "k02r4-hook",
+)
+
+
+@pytest.fixture(autouse=True)
+def _fxloc_real_budget_gate():
+    """Fail-closed gate needs a real gate: generous limits, restored after."""
+    from agent_si.budget.gate import BudgetGate
+    from agent_si.runtime import manager as _mgr
+
+    prev = _mgr._BUDGET_GATE
+    gate = BudgetGate()
+    for project in _FXLOC_GATE_PROJECTS:
+        gate.configure_project(
+            project, "USD", "1000000.00", "900000.00", "1000000.00")
+    _mgr.set_budget_gate(gate)
+    yield
+    _mgr.set_budget_gate(prev)
+
+
 def _mock_adapter(canned=None):
     config = AdapterConfig(
         provider_id="mock",
