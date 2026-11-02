@@ -506,6 +506,7 @@ export type LocaleKey =
   | 'shell.topbar.project'
   | 'shell.topbar.projectPlaceholder'
   | 'shell.topbar.stop_all'
+  | 'shell.topbar.stop_all_idle'
   | 'shell.topbar.stop_clear'
   | 'shell.topbar.stop_result'
   | 'shell.topbar.watcher'

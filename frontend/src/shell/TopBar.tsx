@@ -171,8 +171,10 @@ export function TopBar(props: TopBarProps): ReactElement {
     };
   }, [client, effective, effectiveMissing]);
 
-  // FXTABS T10: quiet style while nothing runs, red only with a live
-  // run; the button always stays clickable (never disabled).
+  // FXLAST (advisor decision on FXREL-5 vs FXTABS T10): quiet style
+  // while nothing runs, red only with a live run; the button is
+  // disabled with a reason tooltip when idle, enabled while a run is
+  // active.
   const hasLiveRun =
     (liveRows ?? []).some((row) => row.status === "RUNNING") ||
     liveRows === null;
@@ -393,6 +395,10 @@ export function TopBar(props: TopBarProps): ReactElement {
           type="button"
           data-testid="topbar-stop-all"
           className={hasLiveRun ? "fx-stop-danger" : "fx-btn-quiet"}
+          disabled={!hasLiveRun}
+          title={
+            hasLiveRun ? undefined : t("shell.topbar.stop_all_idle")
+          }
           onClick={() => {
             void stopAll();
           }}

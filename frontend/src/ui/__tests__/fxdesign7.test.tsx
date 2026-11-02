@@ -110,12 +110,15 @@ afterEach(() => {
 });
 
 describe("fxdesign7 top bar", () => {
-  it("stop-all is quiet when nothing runs and stays clickable", async () => {
+  it("stop-all is quiet and disabled with a reason when nothing runs", async () => {
     renderAppAt("/");
     const stop = await screen.findByTestId("topbar-stop-all");
+    await waitFor(() => {
+      expect((stop as HTMLButtonElement).disabled).toBe(true);
+    });
     expect(stop.textContent).toBe(t("shell.topbar.stop_all"));
+    expect(stop.getAttribute("title")).toBe(t("shell.topbar.stop_all_idle"));
     expect(stop.className).toContain("fx-btn-quiet");
-    expect((stop as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("stop-all turns red with a live run", async () => {
