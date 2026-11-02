@@ -232,11 +232,17 @@ def write_file(
 #: npx rides here verb-gated like the rest: `npx install` asks while
 #: `npx tsc` (no install verb) keeps its normal class.
 _INSTALL_PROGRAMS = frozenset({
-    "pip", "pip3", "npm", "npx", "yarn", "pnpm", "poetry", "uv", "pipx",
-    "cargo", "go", "dotnet", "nuget", "winget", "choco", "apt",
-    "apt-get", "brew",
+    "pip", "pip3", "npm", "npx", "yarn", "pnpm", "poetry", "uv", "uvx",
+    "pipx", "corepack", "cargo", "go", "dotnet", "nuget", "winget",
+    "choco", "apt", "apt-get", "brew",
 })
 _INSTALL_VERBS = frozenset({"install", "add", "require"})
+
+#: Fetch-and-run heads: always the install class (they download before
+#: they run, whatever the subcommand). `npx`/`pipx`/`uvx`/`corepack`
+#: bare, plus the `dlx`/`exec` fetch verbs of the JS managers.
+_ALWAYS_INSTALL_HEADS = frozenset({"npx", "uvx", "pipx", "corepack"})
+_FETCH_VERBS = frozenset({"dlx", "exec"})
 
 #: Python launchers whose `-m <module>` form runs the module as the
 #: effective tool (workspace `.venv` pythons resolve here by basename,
@@ -371,6 +377,11 @@ def classify_argv(argv: list[str]) -> str:
             module = ""
         if module:
             effective = module.strip().lower().rsplit("/", 1)[-1]
+    if effective in _ALWAYS_INSTALL_HEADS:
+        return "install"
+    if effective in ("yarn", "pnpm", "npm") and words[:1] \
+            and words[0].lower() in _FETCH_VERBS:
+        return "install"
     if effective in _INSTALL_PROGRAMS and any(
             word.lower() in _INSTALL_VERBS for word in words):
         return "install"
@@ -518,6 +529,13 @@ def scrub_env() -> dict[str, str]:
     env.pop("PYTHONPATH", None)
     env.pop("PYTHONHOME", None)
     env["PYTHONNOUSERSITE"] = "1"
+    # A7: install managers must never self-fetch. On Windows the
+    # Python install-manager alias (and the py launcher) auto-download
+    # a full runtime when the child probes `python --version`; pin
+    # both switches off. Project-local values (LOCALAPPDATA, APPDATA,
+    # HOME, ...) still pass through untouched above.
+    env["PYTHON_MANAGER_AUTOMATIC_INSTALL"] = "false"
+    env["PYLAUNCHER_ALLOW_INSTALL"] = "0"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     return env
 
