@@ -7,8 +7,8 @@
 import { useEffect, useState } from "react";
 import type { ReactElement } from "react";
 import type { PartRow } from "../api/iface";
-import { ApiError, apiErrorLocaleKey } from "../api/errors";
 import { useApiClient } from "../app/ApiClientProvider";
+import { refreshLive, useLiveRows } from "./liveStore";
 import { t, useLocale } from "../locale/index";
 import { EmptyState } from "../ui/EmptyState";
 import { ErrorPanel } from "../ui/ErrorPanel";
@@ -25,12 +25,6 @@ import {
 export interface AgentsLiveProps {
   projectId: string;
 }
-
-interface LiveSubscriber {
-  subscribe?: (listener: (rows: PartRow[]) => void) => () => void;
-}
-
-const POLL_MS = 2000;
 
 // N1: the live panel shows only live rows. Run-end paths move rows out
 // of RUNNING (RETURNED on success, BLOCKED on stop/budget/held) and the
@@ -88,60 +82,22 @@ function formatLiveList(value: unknown): string {
 export function AgentsLive(props: AgentsLiveProps): ReactElement {
   const client = useApiClient();
   const { locale } = useLocale();
-  const [rows, setRows] = useState<PartRow[] | null>(null);
+  // FXDESIGN8: the shared store owns the single poller; the page reads it
+  // and retries through it. The failed flag mirrors the last fetch outcome.
+  const snapshot = useLiveRows(client);
+  const rows = snapshot.rows;
   const [projectName, setProjectName] = useState<string | null>(null);
-  const [failure, setFailure] = useState<{
-    errorKey: string;
-    code: string;
-  } | null>(null);
   const [nonce, setNonce] = useState(0);
 
+  const failure =
+    snapshot.failed && (rows === null || rows.length === 0)
+      ? { errorKey: "errors.generic", code: "CONTEXT_MISSING" }
+      : null;
+
   useEffect(() => {
-    let alive = true;
-    let stop: (() => void) | undefined;
-    let timer: ReturnType<typeof setInterval> | undefined;
-    async function load(): Promise<void> {
-      try {
-        const next = await client.listAgentsLive();
-        if (alive) {
-          setRows(next);
-          setFailure(null);
-        }
-      } catch (error) {
-        if (alive) {
-          if (error instanceof ApiError) {
-            setFailure({
-              errorKey: apiErrorLocaleKey(error.code),
-              code: error.code,
-            });
-          } else {
-            setFailure({ errorKey: "errors.generic", code: "CONTEXT_MISSING" });
-          }
-        }
-      }
+    if (nonce > 0) {
+      refreshLive(client);
     }
-    void load();
-    const source = client as unknown as LiveSubscriber;
-    if (typeof source.subscribe === "function") {
-      stop = source.subscribe((next) => {
-        if (alive) {
-          setRows([...next]);
-        }
-      });
-    } else {
-      timer = setInterval(() => {
-        void load();
-      }, POLL_MS);
-    }
-    return () => {
-      alive = false;
-      if (stop !== undefined) {
-        stop();
-      }
-      if (timer !== undefined) {
-        clearInterval(timer);
-      }
-    };
   }, [client, nonce]);
 
   useEffect(() => {
