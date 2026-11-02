@@ -2,7 +2,7 @@
 // FXTABS RED-first: project tabs + tables fixes T1-T11, (b)(c)(d), J7.
 // Real App render, fetch stubbed at network only.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, fireEvent } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { HttpApiClient } from "../../api/client";
 import { ApiClientProvider } from "../../app/ApiClientProvider";
@@ -60,7 +60,7 @@ function jsonBody(data: unknown, status = 200): Response {
   });
 }
 
-function stubFetch(): void {
+function stubFetch(liveRows: unknown[] = LIVE): void {
   vi.stubGlobal(
     "fetch",
     async (input: unknown, init?: RequestInit): Promise<Response> => {
@@ -82,7 +82,7 @@ function stubFetch(): void {
         return jsonBody({ project_id: "p9", budget: BUDGET });
       }
       if (method === "GET" && url === "/api/v1/agents/live") {
-        return jsonBody({ agents: LIVE });
+        return jsonBody({ agents: liveRows });
       }
       if (method === "GET" && url === "/api/v1/providers") {
         return jsonBody({ providers: [] });
@@ -226,10 +226,21 @@ describe("fxtabs tabs", () => {
   });
 
   it("T10 stop-all is quiet when idle and clickable", async () => {
+    vi.unstubAllGlobals();
+    stubFetch([]);
     renderAppAt("/projects/p9/overview");
     const stop = await screen.findByTestId("topbar-stop-all");
     expect((stop as HTMLButtonElement).disabled).toBe(false);
     expect(stop.className).not.toMatch(/danger/);
+    expect(stop.className).toMatch(/quiet/);
+  });
+
+  it("T10 stop-all is red with a live run", async () => {
+    renderAppAt("/projects/p9/overview");
+    const stop = await screen.findByTestId("topbar-stop-all");
+    await waitFor(() => {
+      expect(stop.className).toMatch(/danger/);
+    });
   });
 
   it("T5-D1 no glued Queued2 after runs ended, and tokens tab counts", async () => {
