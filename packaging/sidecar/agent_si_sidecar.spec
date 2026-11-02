@@ -8,6 +8,10 @@
 # Signature: UNSIGNED-BLOCKED (no cert in sandbox; never invent a signature).
 # OFFLINE: freezing (`pyinstaller packaging/sidecar/agent_si_sidecar.spec`) uses
 # local inputs only: no downloads, no installs, no remote fetches of any kind.
+# TARGETS: one-file (default, `dist/sidecar/AgentSI.exe`) and one-dir
+# (`AGENT_SI_SIDECAR_ONEDIR=1`, `dist/sidecar/AgentSI/AgentSI.exe` plus
+# support files). The exe name, the SI icon and console=False hold on
+# both; packaging/build_app.ps1 stages either into the app folder.
 # datas below are staged by the owning lanes (frontend assets, migrations,
 # locale files, kb-data from the model KB, watcher scripts); a source absent
 # from the tree is skipped with a build-log line and waits for its owning
@@ -202,16 +206,18 @@ a.datas = [
     and not dest.replace("\\", "/").split("/")[-1].lower().endswith(_EXCLUDE_FILE_SUFFIXES)
 ]
 
+# Build flavour (owner 2026-11-02: one-folder decision):
+#   default (env unset) = one-file (the frozen behaviour above, unchanged);
+#   AGENT_SI_SIDECAR_ONEDIR=1 = one-dir (EXE + COLLECT into the `AgentSI`
+#   folder, AgentSI.exe at its root with its support files beside it).
+# Both targets stay buildable; the owner flips the default later. Until
+# then one-file stays the default and no caller may assume the folder.
+_ONE_DIR = os.environ.get("AGENT_SI_SIDECAR_ONEDIR", "") == "1"
+_ONE_DIR_FOLDER = "AgentSI"
+
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    [],
-    name=EXE_NAME,
+_EXE_KWARGS = dict(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -226,3 +232,34 @@ exe = EXE(
     entitlements_file=None,
     icon=_ICON,
 )
+
+if _ONE_DIR:
+    exe = EXE(
+        pyz,
+        a.scripts,
+        [],
+        exclude_binaries=True,
+        name=EXE_NAME,
+        **_EXE_KWARGS,
+    )
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        strip=False,
+        upx=False,
+        upx_exclude=[],
+        name=_ONE_DIR_FOLDER,
+    )
+else:
+    exe = EXE(
+        pyz,
+        a.scripts,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        [],
+        name=EXE_NAME,
+        **_EXE_KWARGS,
+    )
