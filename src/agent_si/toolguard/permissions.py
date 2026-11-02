@@ -16,9 +16,11 @@ error code for the failed condition.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import tempfile
+from datetime import UTC, datetime
 from typing import Any
 
 ACTION_CLASSES: tuple[str, ...] = ("R0", "R1", "R2", "R3")
@@ -248,3 +250,206 @@ def record_install_ask(store_dir: Any, memory: set[str],
     if store_dir:
         save_asked_once(store_dir, asked)
     return seen
+
+
+#: Frozen FXASKA route recording one install decision.
+PERMISSIONS_DECIDE_ROUTE = "/api/v1/permissions/decide"
+
+#: Frozen FXASKA route listing recorded install decisions.
+PERMISSIONS_DECISIONS_ROUTE = "/api/v1/permissions/decisions"
+
+#: File in the app store dir holding the persisted decision ledger.
+DECISIONS_FILENAME = "demof13w_decisions.json"
+
+#: Accepted ledger decisions.
+DECISION_ALLOW = "allow"
+DECISION_DENY = "deny"
+DECISION_VALUES = (DECISION_ALLOW, DECISION_DENY)
+
+
+def _decision_now() -> str:
+    """Current UTC time rendered like the frozen journal timestamps."""
+    return (
+        datetime.now(UTC)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
+def require_decision(payload: Any) -> str:
+    """Return the required allow|deny decision, else a loud 400."""
+    value = payload.get("decision") if isinstance(payload, dict) else None
+    if value not in DECISION_VALUES:
+        raise PermissionCheckError(
+            400, "DEMOF13W_DECISION_INVALID",
+            "permissions decide needs decision allow or deny")
+    return str(value)
+
+
+def require_project_id(payload: Any) -> str:
+    """Return the required non-blank project_id, else a loud 400."""
+    value = payload.get("project_id") if isinstance(payload, dict) else None
+    if not isinstance(value, str) or not value.strip():
+        raise PermissionCheckError(
+            400, "DEMOF13W_PROJECT_ID_MISSING",
+            "permissions decide needs a non-empty project_id string")
+    return value.strip()
+
+
+def install_tool_id(project_id: str, argv0: str) -> str:
+    """Tool id for one install-class ask: install:<project>:<argv0>."""
+    return f"install:{project_id}:{argv0}"
+
+
+def _decisions_path(store_dir: str) -> str:
+    """Path of the persisted decision ledger inside the store dir."""
+    return os.path.join(store_dir, DECISIONS_FILENAME)
+
+
+def load_decisions(store_dir: Any) -> dict[str, dict[str, str]]:
+    """Read the persisted decision ledger; unknown state reads empty."""
+    if not store_dir:
+        return {}
+    try:
+        with open(_decisions_path(store_dir),
+                  encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    ledger: dict[str, dict[str, str]] = {}
+    for key, value in data.items():
+        if isinstance(key, str) and isinstance(value, dict):
+            ledger[key] = {
+                str(field): str(item)
+                for field, item in value.items()
+            }
+    return ledger
+
+
+def save_decisions(
+        store_dir: Any,
+        decisions: dict[str, dict[str, str]]) -> None:
+    """Persist the decision ledger with a temp file plus os.replace."""
+    if not store_dir:
+        return
+    os.makedirs(store_dir, exist_ok=True)
+    path = _decisions_path(store_dir)
+    fd, tmp = tempfile.mkstemp(
+        dir=store_dir, prefix="decisions_", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(
+                {key: decisions[key] for key in sorted(decisions)},
+                handle)
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
+#: Store dir bound by the app composition root (create_app); the spawn
+#: path reads decisions through this binding, never the environment.
+_BOUND_STORE_DIR: str | None = None
+
+#: In-process decision memory shared by the served decide route and the
+#: spawn path; the file stays the durable record.
+_BOUND_DECISIONS: dict[str, dict[str, str]] = {}
+
+
+def bind_decision_store(store_dir: Any) -> dict[str, dict[str, str]]:
+    """Bind the ledger store dir; reseed shared memory from the file."""
+    global _BOUND_STORE_DIR
+    _BOUND_STORE_DIR = str(store_dir) if store_dir else None
+    _BOUND_DECISIONS.clear()
+    _BOUND_DECISIONS.update(load_decisions(store_dir))
+    return _BOUND_DECISIONS
+
+
+def _resolve_ledger(store_dir: Any,
+                    memory: Any) -> tuple[Any, dict]:
+    """Fill unset ledger call sites from the bound store and memory."""
+    if store_dir is None:
+        store_dir = _BOUND_STORE_DIR
+    if memory is None:
+        memory = _BOUND_DECISIONS
+    return store_dir, memory
+
+
+def get_decision(store_dir: Any = None, memory: Any = None,
+                 tool_id: str = "") -> str | None:
+    """Read one ledger decision; unknown ids read as none."""
+    store_dir, memory = _resolve_ledger(store_dir, memory)
+    key = str(tool_id)
+    entry = None
+    if isinstance(memory, dict):
+        entry = memory.get(key)
+    if entry is None and store_dir:
+        entry = load_decisions(store_dir).get(key)
+    if isinstance(entry, dict):
+        decision = entry.get("decision")
+        if decision in DECISION_VALUES:
+            return str(decision)
+    return None
+
+
+def record_decision(store_dir: Any = None, memory: Any = None,
+                    tool_id: str = "", decision: str = "",
+                    project_id: str = "",
+                    decided_at: str | None = None) -> dict[str, str]:
+    """Record one install decision; the file is the durable record.
+
+    Raises PermissionCheckError (400) for a bad decision; unknown ids
+    stay unreadable as none until recorded.
+    """
+    if decision not in DECISION_VALUES:
+        raise PermissionCheckError(
+            400, "DEMOF13W_DECISION_INVALID",
+            "permissions decide needs decision allow or deny")
+    store_dir, memory = _resolve_ledger(store_dir, memory)
+    key = str(tool_id)
+    record = {
+        "decision": str(decision),
+        "time": decided_at or _decision_now(),
+        "project": str(project_id),
+    }
+    merged = load_decisions(store_dir)
+    if isinstance(memory, dict):
+        for known_key, known in memory.items():
+            if isinstance(known, dict):
+                merged[known_key] = known
+        memory[key] = record
+    merged[key] = record
+    save_decisions(store_dir, merged)
+    return record
+
+
+def list_decisions(store_dir: Any = None, memory: Any = None,
+                   project_id: str = "") -> list[dict[str, str]]:
+    """List ledger rows for one project, ordered by tool id."""
+    store_dir, memory = _resolve_ledger(store_dir, memory)
+    merged = load_decisions(store_dir)
+    if isinstance(memory, dict):
+        for key, value in memory.items():
+            if isinstance(value, dict):
+                merged[key] = value
+    rows: list[dict[str, str]] = []
+    for key in sorted(merged):
+        entry = merged[key]
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("project", "")) != str(project_id):
+            continue
+        decision = entry.get("decision")
+        if decision not in DECISION_VALUES:
+            continue
+        rows.append({
+            "tool_id": key,
+            "decision": str(decision),
+            "project": str(entry.get("project", "")),
+            "time": str(entry.get("time", "")),
+        })
+    return rows
