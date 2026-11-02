@@ -238,6 +238,7 @@ export const RunLedgerRowSchema = z.object({
   run_id: z.string().min(1),
   project: z.string().optional(),
   task: z.string().optional(),
+  folder: z.string().optional(),
   // FXR2B: short per-run title (first 80 chars of the user task).
   title: z.string().optional(),
   start: z.union([z.string(), z.number()]).optional(),

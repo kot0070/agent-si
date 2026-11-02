@@ -122,7 +122,7 @@ describe("fxmodelid catalog carries real ids, connect sends them", () => {
       expect(await within(dialog).findByText("Key checked. Save to connect.")).toBeTruthy();
       fireEvent.click(within(dialog).getByText("Save"));
       // Step 2 opens in the same dialog; Done closes it before the next card.
-      expect(await within(dialog).findByText(/Reference saved/)).toBeTruthy();
+      expect(await within(dialog).findByText(`Connected ${entry.label}.`)).toBeTruthy();
       fireEvent.click(within(dialog).getByText("Done"));
       await waitFor(() =>
         expect(
@@ -162,7 +162,7 @@ describe("fxmodelid catalog carries real ids, connect sends them", () => {
       target: { value: "local-dev-key" },
     });
     fireEvent.click(within(dialog).getByText("Save"));
-    expect(await within(dialog).findByText(/Reference saved/)).toBeTruthy();
+    expect(await within(dialog).findByText("Connected Ollama.")).toBeTruthy();
     fireEvent.click(within(dialog).getByText("Done"));
     await waitFor(() =>
       expect(screen.getByLabelText("Disconnect Ollama")).toBeTruthy(),

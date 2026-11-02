@@ -199,12 +199,11 @@ describe("fxdesign7 role profile", () => {
 });
 
 describe("fxdesign7 providers", () => {
-  it("every card carries a cap line and the key-only note", async () => {
+  it("cards carry no lone dash line, only the key-only note", async () => {
     render(<ProvidersPage project_id="p1" />);
     const cards = await screen.findAllByTestId("provider-card");
     expect(cards.length).toBeGreaterThan(0);
-    const caps = document.querySelector('[data-testid^="provider-caps-"]');
-    expect(caps?.textContent?.length).toBeGreaterThan(0);
+    expect(document.querySelector('[data-testid^="provider-caps-"]')).toBeNull();
     const keynote = document.querySelector(
       '[data-testid^="provider-keynote-"]',
     );

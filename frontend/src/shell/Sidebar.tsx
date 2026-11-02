@@ -14,6 +14,7 @@ import { hasChatUnseen, useUnseenVersion } from "../chat/index";
 import { t } from "../locale/index";
 import { Icon } from "../ui/icons";
 import type { IconName } from "../ui/icons";
+import { EmptyState } from "../ui/EmptyState";
 import { ErrorPanel } from "../ui/ErrorPanel";
 import { LoadingState } from "../ui/LoadingState";
 
@@ -147,6 +148,14 @@ export function Sidebar(props: SidebarProps): ReactElement {
           ) : (
             <LoadingState loadingKey="ui.loading.more" />
           )
+        ) : projects.length === 0 ? (
+          <div data-testid="sidebar-projects-empty">
+            <EmptyState
+              stateKey="projects.list.empty"
+              actionKey={null}
+              onAction={null}
+            />
+          </div>
         ) : (
           projects.map((project) => (
             <button

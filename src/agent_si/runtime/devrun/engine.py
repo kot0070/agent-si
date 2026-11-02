@@ -863,7 +863,8 @@ def _ledger_total_line(record: Any) -> str:
             priced = amount if priced is None else priced + amount
     except Exception:
         unknown = True
-    cost_text = "UNKNOWN" if unknown or priced is None else str(priced)
+    cost_text = ("cost not known (no price)"
+                 if unknown or priced is None else str(priced))
     return ("Total: %d input + %d output = %d tokens; cost: %s"
             % (total_in, total_out, total_in + total_out, cost_text))
 
@@ -1481,12 +1482,28 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                               "code": "NO_PROVIDER_BOUND",
                               "connectHref": "/providers"})
             return
-        for line in _team_lines([
-                ("director", director), ("manager", manager),
-                ("worker", worker), ("auditor", auditor)]):
-            yield _run_event("delta", turn, task_id, line,
-                             {"run_id": run_id, "part_id": None})
-            turn += 1
+        # U8: the team line reads once per team, not every turn: a
+        # repeat run with the same roles/providers shows no Team line.
+        team_pairs = [("director", director), ("manager", manager),
+                      ("worker", worker), ("auditor", auditor)]
+        try:
+            team_sig = json.dumps(
+                [[role, (res or {}).get("provider"),
+                  (res or {}).get("model"),
+                  (res or {}).get("mode")]
+                 for role, res in team_pairs],
+                sort_keys=True, default=str)
+        except Exception:
+            team_sig = ""
+        if team_sig and team_sig == state.get("chat_team_last"):
+            pass
+        else:
+            for line in _team_lines(team_pairs):
+                yield _run_event("delta", turn, task_id, line,
+                                 {"run_id": run_id, "part_id": None})
+                turn += 1
+            if team_sig:
+                state["chat_team_sig"] = team_sig
         _check_stop()
 
         def _context_dead() -> Any:
@@ -2853,14 +2870,22 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
             stop_seen=stop_seen, lock=lock)
         turn, check_rows, checks_ok = checks
         for check in check_rows:
-            command = " ".join(
-                str(word) for word in (check.get("argv") or []))
+            argv = [str(word) for word in (check.get("argv") or [])]
+            command = " ".join(argv)
+            # U8: the chat check line names the tool, never a resolved
+            # executable path; the rows above keep the full argv (the
+            # log keeps the path). A trailing .exe reads as the bare
+            # tool name (findstr.EXE shows as findstr).
+            tool = os.path.basename(argv[0]) if argv else "?"
+            if tool.lower().endswith(".exe"):
+                tool = tool[:-4]
+            short = " ".join([tool] + argv[1:]) if argv else command
             if check.get("could_not_start") or check.get("refused"):
                 line = "Check %s $ %s: %s" % (
-                    part_id, command, check.get("output_tail"))
+                    part_id, short, check.get("output_tail"))
             else:
                 line = "Check %s $ %s -> exit %s" % (
-                    part_id, command, check.get("exit_code"))
+                    part_id, short, check.get("exit_code"))
             log_path = os.path.join(
                 str(folder), str(check.get("output_file") or ""))
             if not os.path.exists(log_path):

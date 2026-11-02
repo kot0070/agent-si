@@ -159,7 +159,7 @@ export function DisconnectDialog({
       style={{
         position: "fixed",
         inset: 0,
-        backgroundColor: "#000",
+        backgroundColor: "rgba(0, 0, 0, 0.5)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -189,8 +189,10 @@ export function DisconnectDialog({
           {t("providers.disconnect.closeGlyph")}
         </button>
         <h2>{t("providers.disconnect.title", { label: providerLabel })}</h2>
-        <p>{t("providers.disconnect.body", { id: secretId })}</p>
+        <p>{t("providers.disconnect.body", { label: providerLabel })}</p>
         {error !== null ? <p role="alert">{error}</p> : null}
+        {/* U7: Cancel + Disconnect share one spaced action row. */}
+        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
         <button
           type="button"
           ref={cancelRef}
@@ -211,6 +213,7 @@ export function DisconnectDialog({
         >
           {busy ? t("providers.disconnect.busy") : t("providers.disconnect.confirm")}
         </button>
+        </div>
       </div>
     </div>
   );
