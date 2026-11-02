@@ -115,9 +115,15 @@ def jail_abs(folder: str, raw: str) -> str:
     candidate = os.path.abspath(os.path.join(base, *text.split("/")))
     try:
         real = os.path.realpath(candidate)
+        real_base = os.path.realpath(base)
     except Exception:
         raise ActionRefused("refused: unreadable path") from None
-    if real != base and not real.startswith(base + os.sep):
+    # Compare realpath + normcase on both sides: an 8.3 short form
+    # (PCIA~1), a junction alias or a case variant of the folder is
+    # the same jail once resolved; escapes still refuse below.
+    want = os.path.normcase(real_base)
+    got = os.path.normcase(real)
+    if got != want and not got.startswith(want + os.sep):
         raise ActionRefused("refused: path escapes the project folder")
     return candidate
 
