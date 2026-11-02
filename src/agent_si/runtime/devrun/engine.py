@@ -2037,6 +2037,8 @@ def _director_prompt(message: str, history: str = "") -> str:
         "result (for example a check that runs the installed tool or "
         "reads the real lock file), never a stub.%s" % (
             message or "(no task text)", _platform_guidance()))
+    from agent_si.runtime.devrun import roles as _roles
+    base = "%s %s" % (base, _roles.reply_language_line())
     if history:
         return "%s\n\n%s" % (base, history)
     return base
@@ -3215,6 +3217,8 @@ def _worker_prompt(spec: dict, message: str, attempt: int,
                          ", ".join(known) if known else "(none)",
                          last_text[:2000] if last_text else "(none)"))
     head += _platform_guidance()
+    from agent_si.runtime.devrun import roles as _roles
+    head = "%s %s" % (head, _roles.reply_language_line())
     return head
 
 
