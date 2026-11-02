@@ -166,7 +166,8 @@ def test_fxopen_sys_executable_use_audit():
 
     catalog_v2.py: frozen --qa-runner branch only; host.py: the same
     frozen dispatch; code_executor.py: frozen_python never returns the
-    exe; actions.py: comment text only.
+    exe; actions.py: comment text only; sidecar.py: frozen-only
+    Zone.Identifier strip (no-op unless sys.frozen).
     """
     allowed = {
         "catalog_v2.py": ("--qa-runner",),
@@ -174,6 +175,10 @@ def test_fxopen_sys_executable_use_audit():
         "code_executor.py": ("frozen_python", "sys.executable"),
         "actions.py": ("never sys.executable",),
         "suite_invoke.py": ("never sys.executable",),
+        # sidecar.py: frozen-only Zone.Identifier cleanup (returns 0
+        # unless sys.frozen, src/agent_si/sidecar.py:284-290) -- same
+        # frozen-only class as the --qa-runner branch above.
+        "sidecar.py": ("frozen-only Zone-strip", "sys.executable"),
     }
     hits = []
     for path in (_SRC / "agent_si").rglob("*.py"):
