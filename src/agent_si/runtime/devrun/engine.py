@@ -16,6 +16,7 @@ import contextlib
 import hashlib
 import json
 import os
+import sys
 import uuid
 from typing import Any
 
@@ -655,6 +656,27 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                          {"run_id": run_id, "success": False})
 
 
+def _platform_guidance() -> str:
+    """One platform line for the Director/worker briefs (W1).
+
+    States sys.platform so planned check commands match this machine.
+    On Windows only executables present here are allowed (python -m
+    pytest with a test file, findstr for text search); POSIX shell
+    utilities are unavailable, and inline code stays refused.
+    """
+    plat = str(sys.platform)
+    if plat.startswith("win"):
+        return (" Platform: %s (Windows). Plan check commands only with"
+                " executables present on this machine: tests as"
+                " [\"python\", \"-m\", \"pytest\", ...] with a test file,"
+                " text search with findstr. POSIX shell utilities are"
+                " unavailable here. Inline code stays refused (it needs"
+                " approval first)." % (plat,))
+    return (" Platform: %s. Check commands must be argv word lists of"
+            " executables present on this machine; inline code stays"
+            " refused." % (plat,))
+
+
 def _director_prompt(message: str) -> str:
     """The Director brief: strict plan-or-answer JSON, no prose."""
     return (
@@ -666,7 +688,8 @@ def _director_prompt(message: str) -> str:
         "\"check_commands\": [[\"python\", \"-m\", \"pytest\", ...]], "
         "\"depends_on\": []}]}. Paths stay inside the project folder, "
         "file sets are disjoint, argv lists are word lists, depends_on "
-        "names part ids without cycles." % (message or "(no task text)",))
+        "names part ids without cycles.%s" % (
+            message or "(no task text)", _platform_guidance()))
 
 
 def _manager_order(record: Any, manager: dict, adapter: Any,
@@ -851,8 +874,12 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
         for check in check_rows:
             command = " ".join(
                 str(word) for word in (check.get("argv") or []))
-            line = "Check %s $ %s -> exit %s" % (
-                part_id, command, check.get("exit_code"))
+            if check.get("could_not_start"):
+                line = "Check %s $ %s: %s" % (
+                    part_id, command, check.get("output_tail"))
+            else:
+                line = "Check %s $ %s -> exit %s" % (
+                    part_id, command, check.get("exit_code"))
             log_path = os.path.join(
                 str(folder), str(check.get("output_file") or ""))
             if not os.path.exists(log_path):
@@ -894,16 +921,16 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
             turn += 1
             yield _run_event(
                 "delta", turn, part_id,
-                "Auditor for %s: %s (%s) [%s]"
-                % (part_id, entry["result"], first_reason,
-                   auditor_ref),
+                "Auditor for %s: %s (%s)"
+                % (part_id, entry["result"], first_reason),
                 {"run_id": run_id, "part_id": part_id})
             _journal_event(
                 project, "DEVRUN_AUDIT",
-                "audit %s attempt %d: %s (%s)"
+                "audit %s attempt %d: %s (%s) [%s]"
                 % (part_id, attempt, entry["result"],
                    "; ".join((entry or {}).get("reasons", [])
-                             or ["auditor gave no reason"])))
+                             or ["auditor gave no reason"]),
+                   auditor_ref))
             if entry.get("over_cap"):
                 raise _BudgetOut(
                     "budget stop: auditor call spent past the cap")
@@ -926,6 +953,44 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
             publish()
             return row["verdict"], turn
         auditor_ok = entry is not None and entry["result"] == "PASS"
+        started = [check for check in check_rows
+                   if not check.get("could_not_start")]
+        if spec["check_commands"] and not started:
+            # No check could start (missing executable): not a red
+            # check, no attempt burn; the auditor alone decides now.
+            no_start_reasons = list(
+                (entry or {}).get("reasons", [])) or [
+                "auditor gave no reason"]
+            if auditor_ok:
+                row["verdict"] = "PASS"
+                row["reason"] = (
+                    "auditor only: check could not run; auditor: %s"
+                    % ("; ".join(no_start_reasons),))
+                turn += 1
+                yield _run_event(
+                    "delta", turn, part_id,
+                    "Part %s: PASS (auditor only: check could not run)"
+                    % (part_id,),
+                    {"run_id": run_id, "part_id": part_id})
+                publish()
+                return "PASS", turn
+            row["verdict"] = "FAIL"
+            row["reason"] = "check could not run: %s; auditor: %s" % (
+                "; ".join(str(check.get("output_tail") or "")
+                          for check in check_rows) or "no checks",
+                "; ".join(no_start_reasons))
+            turn += 1
+            yield _run_event(
+                "delta", turn, part_id,
+                "Part %s: FAILED (%s)" % (part_id, row["reason"]),
+                {"run_id": run_id, "part_id": part_id})
+            publish()
+            turn += 1
+            yield _run_event(
+                "delta", turn, part_id,
+                "Needs you: %s: %s" % (part_id, row["reason"]),
+                {"run_id": run_id, "part_id": part_id})
+            return "FAIL", turn
         if checks_ok and auditor_ok:
             row["verdict"] = "PASS"
             row["reason"] = "checks green, auditor PASS"
@@ -936,10 +1001,19 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
                 {"run_id": run_id, "part_id": part_id})
             publish()
             return "PASS", turn
-        failing = ["$ %s -> exit %s\n%s" % (
-            " ".join(check.get("argv", [])), check.get("exit_code"),
-            str(check.get("output_tail") or "")[:2000])
-                   for check in check_rows]
+        failing = []
+        for check in check_rows:
+            if check.get("could_not_start"):
+                failing.append(
+                    "$ %s: %s\n%s" % (
+                        " ".join(check.get("argv", [])),
+                        check.get("output_tail"),
+                        str(check.get("output_tail") or "")[:2000]))
+            else:
+                failing.append("$ %s -> exit %s\n%s" % (
+                    " ".join(check.get("argv", [])),
+                    check.get("exit_code"),
+                    str(check.get("output_tail") or "")[:2000]))
         reasons = list((entry or {}).get("reasons", [])) or [
             "auditor gave no reason"]
         if attempt < _EXTRA_ATTEMPTS + 1:
@@ -1055,6 +1129,7 @@ def _worker_prompt(spec: dict, message: str, attempt: int,
                  "Auditor reasons: %s. Fix the part." % (
                      " | ".join(failing) or "no output",
                      " | ".join(reasons) or "no reason"))
+    head += _platform_guidance()
     return head
 
 
@@ -1216,6 +1291,13 @@ def _run_checks(*, record: Any, spec: dict, row: dict, folder: str,
             spawn = _actions.spawn_checked(
                 project, check_id, folder, [str(word) for word in command],
                 log_path, log_rel)
+        except _actions.SpawnNotInstalled as exc:
+            rows.append({"argv": [str(word) for word in command],
+                         "exit_code": None, "output_file": log_rel,
+                         "output_tail": str(exc),
+                         "pid": 0, "could_not_start": True,
+                         "missing_word": exc.word})
+            continue
         except (PermissionError, ValueError) as exc:
             rows.append({"argv": [str(word) for word in command],
                          "exit_code": None, "output_file": log_rel,
