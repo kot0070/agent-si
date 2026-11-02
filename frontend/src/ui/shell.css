@@ -1245,6 +1245,33 @@ div[data-testid="app-shell"] :focus-visible {
   outline-offset: 2px;
 }
 
+/* J11: skip link to the composer. First in tab order, visually hidden
+   until focused, then a plain token-styled line. */
+a[data-testid="skip-to-composer"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+a[data-testid="skip-to-composer"]:focus-visible {
+  position: static;
+  width: auto;
+  height: auto;
+  margin: 0;
+  overflow: visible;
+  clip: auto;
+  white-space: normal;
+  color: var(--fx-link);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 /* FXDESIGN7 deferred: Tokens/Tests metric cards — the chevron lives in
    the heading row (inline, quiet), never a lone bordered box. */
 section[data-testid^="kit-metric-"] > h2 {

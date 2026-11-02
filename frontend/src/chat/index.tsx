@@ -1650,6 +1650,7 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
               <span className="fx-vh">{t("chat.composer.prompt")}</span>
               <input
                 data-testid="chat-prompt"
+                id="chat-prompt"
                 type="text"
                 placeholder={t("chat.composer.prompt")}
                 aria-label={t("chat.composer.prompt")}

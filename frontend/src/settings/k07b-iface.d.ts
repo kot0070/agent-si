@@ -483,6 +483,7 @@ export type LocaleKey =
   | 'shell.inspector.live_agents'
   | 'shell.sidebar.agents_live'
   | 'shell.sidebar.chat'
+  | 'shell.skipToComposer'
   | 'shell.sidebar.projects'
   | 'shell.sidebar.resultsHint'
   | 'shell.sidebar.settings'
