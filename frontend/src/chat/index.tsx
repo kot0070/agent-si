@@ -149,12 +149,13 @@ interface ChatPump {
 
 const pumps = new Map<string, ChatPump>();
 
-// Executed engine turns (done event with executed:true) hide the verdict
-// card (D6(b), FXDESIGN6). Stored stopped/failed turns hide it too: the
-// flag does not survive a restart, so the history merge re-marks those
-// ids here. The store shape is frozen, so the per-message flags live
-// here, keyed by the unique store message id.
-const engineRunMessages = new Set<string>();
+// A card shows ONLY for a live waiting proposal: the stream's own
+// clean terminal event marks the message id here. Default is no card —
+// history, failed, stopped, engine and interrupted turns never mark,
+// so a restart or a remount can never resurrect one. The store shape
+// is frozen, so the per-message mark lives here, keyed by the unique
+// store message id.
+const proposalMessages = new Set<string>();
 
 // Stopped-turn assistants show one plain stopped line instead of the card.
 const stoppedAssistants = new Set<string>();
@@ -444,14 +445,10 @@ function buildHistoryBatch(
         at,
         final: true,
       });
-      if (turn.status === "stopped" || turn.status === "failed") {
-        // FXR1B: a stored terminal turn never shows the approval card
-        // after a restart — the per-message flags above do not survive
-        // one. Stopped turns show one plain stopped line instead.
-        engineRunMessages.add(assistantId);
-        if (turn.status === "stopped") {
-          stoppedAssistants.add(assistantId);
-        }
+      if (turn.status === "stopped") {
+        // Stopped turns show one plain stopped line instead of a card.
+        // History never marks a proposal: default is no card.
+        stoppedAssistants.add(assistantId);
       }
     }
     if (turn.status === "failed" || turn.status === "stopped") {
@@ -826,18 +823,13 @@ function startChatRun(
     ({ aborted, executed }) => {
       pumps.delete(key);
       setChatRunner(key, { streamId: null, streaming: false });
-      // FXR1B: the done event carries executed on stop too. An engine
-      // turn never shows the approval card, stopped or not — the abort
-      // path below must honor it exactly like the ok path did.
-      if (executed === true) {
-        engineRunMessages.add(assistantId);
-      }
       const answer =
         getChatState(key).messages.find(
           (message) => message.id === assistantId,
         )?.text ?? "";
       if (aborted) {
-        // Stop closes the run as stopped: stored, never Working.
+        // Stop closes the run as stopped: stored, never Working. No
+        // card mark: a stopped turn is never a waiting proposal.
         patchChatMessage(key, assistantId, { final: false });
         stoppedAssistants.add(assistantId);
         void recordTurnBestEffort(projectId, text, answer, {
@@ -861,6 +853,12 @@ function startChatRun(
       } else {
         setChatHealth(key, "ok");
         patchChatMessage(key, assistantId, { final: true });
+        // The stream's own clean terminal event marks the waiting
+        // proposal — the ONLY card path. Engine turns (executed) never
+        // mark, so they never show a card, live or reloaded.
+        if (executed !== true) {
+          proposalMessages.add(assistantId);
+        }
         void recordTurnBestEffort(projectId, text, answer, {
           status: "ok",
           run_id: runId,
@@ -1531,10 +1529,10 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
                 </span>
               ) : null}
               {message.role === "assistant" &&
+              proposalMessages.has(message.id) &&
               message.final &&
               message.text !== "" &&
               message.decided === undefined &&
-              !engineRunMessages.has(message.id) &&
               !streaming ? (
                 <ApprovalCard
                   proposal={message.text}
@@ -1685,9 +1683,19 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
             <span>{directorModel ?? t("chat.hierarchy.auto")}</span>
             <span>{statusRoute()}</span>
             <span>
-              {streaming
-                ? t("chat.composer.statusWorking")
-                : t("chat.composer.statusReady")}
+              {streaming ? (
+                <>
+                  <span
+                    data-testid="chat-spinner"
+                    role="status"
+                    aria-label={t("chat.stream.spinner")}
+                    className="fx-spin"
+                  />
+                  <span>{t("chat.composer.statusWorking")}</span>
+                </>
+              ) : (
+                t("chat.composer.statusReady")
+              )}
             </span>
           </p>
           {streaming && draft.trim() !== "" ? (
@@ -1699,17 +1707,13 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
             </span>
           ) : null}
           {streaming ? (
-            <span data-testid="chat-spinner" role="status" className="fx-quiet">
-              {t("chat.stream.spinner")}
-            </span>
-          ) : null}
-          {streaming ? (
             <button
               type="button"
               data-testid="chat-abort"
               className="fx-btn-quiet"
               onClick={handleAbort}
             >
+              <span className="fx-spin" aria-hidden="true" />
               {t("chat.abort.cancel")}
             </button>
           ) : null}
