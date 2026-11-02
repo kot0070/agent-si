@@ -23,6 +23,8 @@ import {
   placementForRow,
   resolveStatusHuman,
 } from "../agents/agentsApi";
+import { humanRunRef, buildRunRecords } from "./viewsApi";
+import "./projectview.css";
 
 export interface RunHistoryProps {
   projectId: string;
@@ -115,49 +117,75 @@ export function RunHistory(props: RunHistoryProps): ReactElement {
         />
       ) : (
         <div>
-          {ledger.map((row) => (
-            <div
-              key={row.package_id}
-              data-testid={`runhistory-ledger-${row.package_id}`}
-            >
-              <span>{row.package_id}</span>
-              <span>{t("agents.live.title")}</span>
-              <span>{row.agents}</span>
-              <span>{t("ui.card.total")}</span>
-              <span>{row.peak_concurrency}</span>
-              <span>{t("projects.time.title")}</span>
-              <span>{row.wall_time_s}</span>
-            </div>
-          ))}
+          {ledger.map((row) => {
+            const short = humanRunRef(row.package_id);
+            return (
+              <div
+                key={row.package_id}
+                data-testid={`runhistory-ledger-${row.package_id}`}
+                className="fxpv-row"
+              >
+                <span>{t("projectView.runs.package")}</span>
+                <span title={short.title}>{short.text}</span>
+                <span>{t("projectView.runs.agents")}</span>
+                <span>{row.agents}</span>
+                <span>{t("projectView.runs.peak")}</span>
+                <span>{row.peak_concurrency}</span>
+                <span>{t("projectView.runs.wall")}</span>
+                <span>{row.wall_time_s}</span>
+              </div>
+            );
+          })}
           <div>
             <span>{t("agents.live.title")}</span>
-            {parts.map((part) => (
-              <div key={part.agent} data-testid={`runhistory-part-${part.agent}`}>
-                <span>{part.agent}</span>
-                <span>
-                  {resolveStatusHuman(
-                    readStatusHuman(part),
-                    part.status,
-                    locale,
-                  )}
-                </span>
-                <span>{t(placementKey(placementForRow(part)))}</span>
-              </div>
-            ))}
+            {parts.map((part) => {
+              const short = humanRunRef(part.agent);
+              return (
+                <div
+                  key={part.agent}
+                  data-testid={`runhistory-part-${part.agent}`}
+                  className="fxpv-row"
+                >
+                  <span title={short.title}>{short.text}</span>
+                  <span>
+                    {resolveStatusHuman(
+                      readStatusHuman(part),
+                      part.status,
+                      locale,
+                    )}
+                  </span>
+                  <span>{t(placementKey(placementForRow(part)))}</span>
+                </div>
+              );
+            })}
+          </div>
+          <div>
+            <span>{t("projectView.runs.verdict")}</span>
+            {buildRunRecords({ ledger, live: parts }).map((record) => {
+              const short = humanRunRef(record.packageId);
+              return (
+                <div
+                  key={record.packageId}
+                  data-testid={`runrecord-${record.packageId}`}
+                  className="fxpv-row"
+                >
+                  <span>{t("projectView.runs.package")}:</span>
+                  <span title={short.title}>{short.text}</span>
+                  <span>{record.agents}</span>
+                  <span>{record.peak}</span>
+                  <span>{record.wallTimeS}</span>
+                  <span>{t("shell.common.unknown")}</span>
+                </div>
+              );
+            })}
           </div>
           <div>
             <span>{t("projects.reports.title")}</span>
-            {report === null || report === "missing" ? (
-              <EmptyState
-                stateKey="ui.table.empty"
-                actionKey={null}
-                onAction={null}
-              />
-            ) : (
-              <div data-testid="runhistory-install">
+            {report === null || report === "missing" ? null : (
+              <div data-testid="runhistory-install" className="fxpv-row">
+                <span>{t("projectView.runs.package")}</span>
+                <span>{humanRunRef(report.row.package_id).text}</span>
                 <span>{report.nudge}</span>
-                <span>{String(report.auto_push)}</span>
-                <span>{report.row.package_id}</span>
                 <span>{report.row.agents}</span>
                 <span>{report.row.peak_concurrency}</span>
                 <span>{report.row.wall_time_s}</span>
