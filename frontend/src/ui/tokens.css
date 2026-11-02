@@ -3,6 +3,7 @@
    custom props; base.css and shell.css consume var(--fx-*) only. */
 :root,
 [data-theme="dark"] {
+  color-scheme: dark;
   --agent-si-surface: #14161a;
   --agent-si-ink: #f2f4f8;
   --agent-si-accent: #6aa8ff;
@@ -31,6 +32,7 @@
 }
 
 [data-theme="light"] {
+  color-scheme: light;
   --agent-si-surface: #ffffff;
   --agent-si-ink: #16181d;
   --agent-si-accent: #2456c6;
@@ -53,4 +55,14 @@
   --fx-danger: #b3261e;
   --fx-danger-ink: #ffffff;
   --fx-danger-fill: #b3261e;
+}
+
+/* U12: native select popups ignore control styling and follow
+   color-scheme + option colors. One token rule covers every native
+   select (language, project, mode, model, strategy, watcher) so the
+   hovered and selected option text stays readable in dark + light. */
+select option,
+select optgroup {
+  background-color: var(--fx-input-bg);
+  color: var(--fx-ink);
 }

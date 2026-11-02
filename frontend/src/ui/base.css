@@ -1,9 +1,8 @@
 /* Provenance: authored for OC-K07 (DESIGN1 D01): baseline layout, spacing,
    typography and form rules. No copied content. Works under both themes via
    the existing --agent-si-* tokens; holds no user-visible strings. */
-html {
-  color-scheme: dark light;
-}
+/* U12: no static color-scheme here — tokens.css sets it per theme on
+   :root so native select popups follow the active theme. */
 
 body {
   margin: 0;
