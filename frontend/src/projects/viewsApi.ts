@@ -150,21 +150,30 @@ export interface DedupedRow {
   scopes: string[];
 }
 
-// Attempts of the same agent+role+model+placement+status fold into one row
-// with an attempt count; different statuses stay separate rows so a
-// BLOCKED end never hides behind an earlier RUNNING attempt.
+// FXTABS T6: attempts of one agent fold into ONE row with an attempt
+// count and the agent's last status. A terminal end (BLOCKED, REJECTED,
+// RETURNED, ACCEPTED) wins over a stale RUNNING attempt served beside
+// it, so at run end nothing stays Running; otherwise the last served
+// status wins. Tokens add up, files unite.
+function statusRank(status: PartRow["status"]): number {
+  switch (status) {
+    case "BLOCKED":
+    case "REJECTED":
+    case "RETURNED":
+    case "ACCEPTED":
+      return 3;
+    case "RUNNING":
+      return 2;
+    default:
+      return 1;
+  }
+}
+
 export function dedupeLiveRows(rows: PartRow[]): DedupedRow[] {
   const byKey = new Map<string, DedupedRow>();
   for (const row of rows) {
     const extras = readLiveExtras(row);
-    const key = [
-      row.agent,
-      extras.role ?? "",
-      extras.model ?? "",
-      extras.provider ?? "",
-      placementForRow(row),
-      row.status,
-    ].join("\u0000");
+    const key = row.agent;
     const seen = byKey.get(key);
     if (seen === undefined) {
       byKey.set(key, {
@@ -183,6 +192,21 @@ export function dedupeLiveRows(rows: PartRow[]): DedupedRow[] {
       continue;
     }
     seen.attempts += 1;
+    const nextRank = statusRank(row.status);
+    const seenRank = statusRank(seen.status);
+    if (nextRank > seenRank || nextRank === seenRank) {
+      seen.status = row.status;
+      if (extras.role !== undefined) {
+        seen.role = extras.role;
+      }
+      if (extras.model !== undefined) {
+        seen.model = extras.model;
+      }
+      if (extras.provider !== undefined) {
+        seen.provider = extras.provider;
+      }
+      seen.placement = placementForRow(row);
+    }
     if (extras.tokensTotal !== null) {
       seen.tokensTotal = (seen.tokensTotal ?? 0) + extras.tokensTotal;
     }
