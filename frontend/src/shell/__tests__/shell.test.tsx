@@ -6,6 +6,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { Link, RouterProvider, createMemoryRouter, useLocation } from "react-router-dom";
 import type { ReactElement } from "react";
@@ -213,19 +214,22 @@ describe("inspector", () => {
     expect(scroll.style.overflowY).toBe("auto");
   });
 
-  it("mounts live agents through the app inspector team card", async () => {
+  it("mounts live agents on the agents-live route beside the inspector team card", async () => {
     const inspectorRouter = createMemoryRouter(
       [{ path: "*", element: <App /> }],
-      { initialEntries: ["/"] },
+      { initialEntries: ["/agents/live"] },
     );
     render(
       <ApiClientProvider client={new FakeApiClient({})}>
         <RouterProvider router={inspectorRouter} />
       </ApiClientProvider>,
     );
-    expect(await screen.findByTestId("chat-prompt")).toBeTruthy();
     expect(await screen.findByTestId("inspector-card-team")).toBeTruthy();
-    const badges = await screen.findAllByTestId("agent-badge-LOCAL");
+    const main = await screen.findByTestId("app-main");
+    expect(
+      await within(main).findByTestId("agents-live-rows"),
+    ).toBeTruthy();
+    const badges = await within(main).findAllByTestId("agent-badge-LOCAL");
     expect(badges.length).toBeGreaterThanOrEqual(1);
   });
 });
