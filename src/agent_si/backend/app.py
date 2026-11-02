@@ -405,9 +405,13 @@ def _reconcile_running_to_interrupted(app: Any) -> dict[str, Any]:
         except Exception:
             merged = {}
         try:
-            for key, record in list(store.items()):
-                if isinstance(record, dict):
-                    merged[str(key)] = record
+            for record in _records._unique_run_records(store):
+                try:
+                    key = str(record.get("run_id") or "")
+                except Exception:
+                    continue
+                if key:
+                    merged[key] = record
         except Exception:
             pass
         for key, record in list(merged.items()):
@@ -420,7 +424,11 @@ def _reconcile_running_to_interrupted(app: Any) -> dict[str, Any]:
                 record["interrupted"] = True
                 record["interrupted_at"] = stamp
                 try:
-                    store[str(key)] = record
+                    run_key = str(record.get("run_id") or key)
+                    store[run_key] = record
+                    project_of = str(record.get("project") or "")
+                    if project_of:
+                        store[project_of] = record
                 except Exception:
                     pass
                 result["runs"] += 1
