@@ -59,7 +59,7 @@ function sseResponse(
 }
 
 function errorPanelMessage(): string | null {
-  const panel = screen.queryByTestId("kit-error-panel");
+  const panel = screen.queryByTestId("chat-error-line");
   return panel?.querySelector("p")?.textContent ?? null;
 }
 
@@ -196,8 +196,8 @@ describe("L0B-11 localized chat errors", () => {
       </ApiClientProvider>,
     );
     promptAndSend("hello");
-    await screen.findByTestId("kit-error-panel");
-    expect(errorPanelMessage()).toBe(t("api.error.budget_capped"));
+    await screen.findByTestId("chat-error-line");
+    expect(errorPanelMessage()).toContain(t("api.error.budget_capped"));
     expect(errorPanelMessage()).not.toContain("BUDGET_CAPPED");
   });
 
@@ -211,8 +211,8 @@ describe("L0B-11 localized chat errors", () => {
       </ApiClientProvider>,
     );
     promptAndSend("привіт");
-    await screen.findByTestId("kit-error-panel");
-    expect(errorPanelMessage()).toBe(t("api.error.budget_capped"));
+    await screen.findByTestId("chat-error-line");
+    expect(errorPanelMessage()).toContain(t("api.error.budget_capped"));
     expect(errorPanelMessage()).not.toBe("BUDGET_CAPPED");
   });
 
@@ -225,8 +225,8 @@ describe("L0B-11 localized chat errors", () => {
       </ApiClientProvider>,
     );
     promptAndSend("hello");
-    await screen.findByTestId("kit-error-panel");
-    expect(errorPanelMessage()).toBe(t("errors.generic"));
+    await screen.findByTestId("chat-error-line");
+    expect(errorPanelMessage()).toContain(t("errors.generic"));
     expect(errorPanelMessage()).not.toContain("WIBBLE_X9");
   });
 
@@ -239,8 +239,8 @@ describe("L0B-11 localized chat errors", () => {
       </ApiClientProvider>,
     );
     promptAndSend("hello");
-    await screen.findByTestId("kit-error-panel");
-    expect(errorPanelMessage()).toBe(t("firstrun.steps.connectProvider"));
+    await screen.findByTestId("chat-error-line");
+    expect(errorPanelMessage()).toContain(t("firstrun.steps.connectProvider"));
     expect(errorPanelMessage()).not.toContain("NO_PROVIDER_BOUND");
     cleanup();
     setLocale("uk");
@@ -252,8 +252,8 @@ describe("L0B-11 localized chat errors", () => {
       </ApiClientProvider>,
     );
     promptAndSend("привіт");
-    await screen.findByTestId("kit-error-panel");
-    expect(errorPanelMessage()).toBe(t("firstrun.steps.connectProvider"));
+    await screen.findByTestId("chat-error-line");
+    expect(errorPanelMessage()).toContain(t("firstrun.steps.connectProvider"));
     expect(errorPanelMessage()).not.toContain("NO_PROVIDER_BOUND");
   });
 
@@ -273,7 +273,7 @@ describe("L0B-11 localized chat errors", () => {
       </ApiClientProvider>,
     );
     promptAndSend("hello");
-    await screen.findByTestId("kit-error-panel");
-    expect(errorPanelMessage()).toBe(t("firstrun.steps.connectProvider"));
+    await screen.findByTestId("chat-error-line");
+    expect(errorPanelMessage()).toContain(t("firstrun.steps.connectProvider"));
   });
 });

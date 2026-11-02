@@ -226,7 +226,7 @@ describe("fxask install-permission-asked-once dialog", () => {
     renderChat();
     promptAndSend("please install the helper");
     await waitFor(() => {
-      expect(screen.queryByTestId("kit-error-panel")).toBeTruthy();
+      expect(screen.queryByTestId("chat-error-line")).toBeTruthy();
     });
     expect(screen.queryByTestId("permission-dialog")).toBeNull();
     expect(f1Posts.length).toBe(0);

@@ -92,17 +92,18 @@ describe("outage and health transitions", () => {
         <ChatArea projectId="p-1" />
       </ApiClientProvider>,
     );
-    expect(screen.queryByTestId("chat-health-degraded")).toBeNull();
+    expect(screen.queryByTestId("chat-error-line")).toBeNull();
     promptAndSend("hello");
-    const degraded = await screen.findByTestId("chat-health-degraded");
-    expect(degraded.textContent).toBe(t("errors.generic"));
-    expect(await screen.findByTestId("kit-error-panel")).toBeTruthy();
+    const line = await screen.findByTestId("chat-error-line");
+    expect(line.textContent).toContain("hello");
+    expect(screen.queryByTestId("chat-health-degraded")).toBeNull();
+    expect(await screen.findByTestId("kit-error-retry")).toBeTruthy();
     mode = "ok";
     fireEvent.click(screen.getByTestId("kit-error-retry"));
     const answered = await screen.findAllByText("recovered");
     expect(answered.length).toBe(2);
     await waitFor(() => {
-      expect(screen.queryByTestId("chat-health-degraded")).toBeNull();
+      expect(screen.queryByTestId("chat-error-line")).toBeNull();
     });
   });
 

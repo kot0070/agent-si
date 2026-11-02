@@ -185,10 +185,11 @@ describe("chat area streaming", () => {
     fireEvent.change(screen.getByTestId("chat-prompt"), {
       target: { value: "draft text" },
     });
-    expect(await screen.findByTestId("chat-draft-chip")).toBeTruthy();
-    expect(screen.getByTestId("chat-draft-chip").textContent).toBe(
-      t("chat.composer.draft"),
-    );
+    // J6: no "Draft" label; the typed text stays in the box.
+    expect(screen.queryByTestId("chat-draft-chip")).toBeNull();
+    expect(
+      (screen.getByTestId("chat-prompt") as HTMLTextAreaElement).value,
+    ).toBe("draft text");
     fireEvent.click(screen.getByTestId("chat-send"));
     expect(await screen.findByTestId("chat-spinner")).toBeTruthy();
     const streamed = await screen.findAllByText("ok");
@@ -291,8 +292,8 @@ describe("chat area streaming", () => {
       </ApiClientProvider>,
     );
     promptAndSend("hello");
-    const panel = await screen.findByTestId("kit-error-panel");
-    expect(panel.textContent).toContain(t("api.error.budget_capped"));
+    const line = await screen.findByTestId("chat-error-line");
+    expect(line.textContent).toContain(t("api.error.budget_capped"));
     expect(screen.queryByTestId("chat-toast")).toBeNull();
     expect(screen.queryByTestId("chat-spinner")).toBeNull();
   });
