@@ -152,3 +152,76 @@ export async function writeRoleProfileToServer(
   );
   return toRoleModelProfile(answered.profile);
 }
+
+// FXSAVED item 2: full saved pool state for one role (profile plus the
+// binding the same GET carries). Mode/pinned come from the profile;
+// pool members plus strategy come from the binding. A never-saved role
+// answers 404 and reads as undefined (the picker keeps AUTO); any other
+// failure also reads as undefined so the page never breaks on load.
+export type RolePoolSavedMember = {
+  provider: string;
+  model: string;
+};
+
+export type RolePoolSaved = {
+  mode: RoleModelProfile["mode"];
+  provider?: string;
+  model?: string;
+  pool: RolePoolSavedMember[];
+  strategy?: string;
+};
+
+const RolePoolBindingSchema = z
+  .object({
+    strategy: z.string().optional(),
+    members: z
+      .array(
+        z
+          .object({ provider: z.string(), model: z.string() })
+          .passthrough(),
+      )
+      .optional(),
+  })
+  .passthrough();
+
+const RolePoolStateResponseSchema = z.object({
+  profile: ServerRoleProfileSchema,
+  binding: RolePoolBindingSchema.optional(),
+});
+
+export async function readRolePoolState(
+  projectId: string,
+  role: string,
+): Promise<RolePoolSaved | undefined> {
+  const path =
+    `${ROLE_PROFILE_ENDPOINT}?project_id=${encodeURIComponent(projectId)}` +
+    `&role=${encodeURIComponent(role)}`;
+  try {
+    const body = await requestJson(
+      path,
+      { method: "GET", kind: "read" },
+      RolePoolStateResponseSchema,
+    );
+    const profile = toRoleModelProfile(body.profile);
+    const members: RolePoolSavedMember[] = [];
+    for (const member of body.binding?.members ?? []) {
+      members.push({ provider: member.provider, model: member.model });
+    }
+    return {
+      mode: profile.mode,
+      ...(profile.provider !== undefined
+        ? { provider: profile.provider }
+        : {}),
+      ...(profile.model !== undefined ? { model: profile.model } : {}),
+      pool: members,
+      ...(typeof body.binding?.strategy === "string"
+        ? { strategy: body.binding.strategy }
+        : {}),
+    };
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      return undefined;
+    }
+    return undefined;
+  }
+}
