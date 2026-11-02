@@ -136,6 +136,19 @@ a = Analysis(
     noarchive=False,
 )
 
+# Bundle hygiene (FXRELTOOLS): test and cache files never ship. Whole
+# lane dirs enter `datas` above, so drop interpreter caches, test
+# trees and test modules here; runtime imports never resolve from
+# them (every .pyc has a .py sibling; no non-test source imports
+# __tests__). TOC entries are (dest, src, kind) triples.
+_EXCLUDE_DIR_SEGS = ("__pycache__", "__tests__")
+_EXCLUDE_FILE_SUFFIXES = (".pyc", ".pyo", ".test.tsx", ".test.ts")
+a.datas = [
+    (dest, src, kind) for (dest, src, kind) in a.datas
+    if not any(seg in _EXCLUDE_DIR_SEGS for seg in dest.replace("\\", "/").split("/"))
+    and not dest.replace("\\", "/").split("/")[-1].lower().endswith(_EXCLUDE_FILE_SUFFIXES)
+]
+
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 exe = EXE(

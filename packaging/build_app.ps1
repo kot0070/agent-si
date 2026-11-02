@@ -107,6 +107,20 @@ function Copy-TreeArtifacts {
     $base = (Resolve-Path -LiteralPath $From).Path
     foreach ($f in (Get-ChildItem -LiteralPath $From -Recurse -File)) {
         $rel = $f.FullName.Substring($base.Length).TrimStart('\', '/')
+        # Bundle hygiene (FXRELTOOLS): interpreter caches, test trees and
+        # test modules never ship. Python never imports from __pycache__
+        # by name (every .pyc has a .py sibling), and no non-test source
+        # imports from __tests__ (test-only FakeApiClient and one comment
+        # mention), so skipping them cannot break the runtime.
+        $segs = ($rel -replace '[\\/]', '/').Split('/')
+        $skip = $false
+        foreach ($s in $segs) {
+            if (($s -eq '__pycache__') -or ($s -eq '__tests__')) { $skip = $true; break }
+        }
+        $leaf = $segs[$segs.Length - 1].ToLowerInvariant()
+        if (($leaf.EndsWith('.pyc')) -or ($leaf.EndsWith('.pyo')) -or
+            ($leaf.EndsWith('.test.tsx')) -or ($leaf.EndsWith('.test.ts'))) { $skip = $true }
+        if ($skip) { continue }
         $dest = Join-Path $To ($rel -replace '[\\/]', [IO.Path]::DirectorySeparatorChar)
         Ensure-Dir (Split-Path -Parent $dest)
         Copy-Item -LiteralPath $f.FullName -Destination $dest -Force
