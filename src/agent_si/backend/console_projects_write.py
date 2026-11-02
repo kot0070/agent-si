@@ -17,6 +17,7 @@ ends a live stream by stream_id through the shared chat bridge
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -94,6 +95,83 @@ def _new_id() -> str:
 def _unknown_project(project_id: str) -> HTTPException:
     return HTTPException(
         status_code=404, detail=f"unknown project {project_id!r}")
+
+
+def _new_task_record(project_id: str, title: str, scope: list) -> dict:
+    """Build one task row in the shared task shape (not yet stored)."""
+    task_id = _new_id()
+    return {
+        "record_id": task_id,
+        "project_id": project_id,
+        "task_id": task_id,
+        "title": title.strip(),
+        "scope": list(scope),
+        "status": "CREATED",
+        "created_at": _utcnow(),
+    }
+
+
+def append_task_record(app: Any, project_id: str, title: str,
+                       scope: list) -> dict:
+    """Append one task row through the shared K13 ports, then persist.
+
+    The single write path behind both HTTP task creates and the
+    first-chat hook: unknown/archived projects refuse with the honest
+    404; the stored row is returned.
+    """
+    projects, tasks = repos_for(app)
+    if _stored_project(projects, project_id) is None:
+        raise _unknown_project(project_id)
+    stored = tasks.append(_new_task_record(project_id, title, scope))
+    persist_k02r3_store(app)
+    return stored
+
+
+def ensure_first_chat_task(app: Any, project_id: str, message: str,
+                           chat_task: str = "") -> dict | None:
+    """Create the first task row for a chat conversation (FXCHATTASK).
+
+    A conversation with no task yet plus a visible project stores one
+    row through the shared task path above: the stripped message text
+    is the title (the task path caps nothing beyond non-empty, so no
+    further truncation applies) with an empty scope. A named chat task
+    that already exists, or a project that already holds any task row,
+    means a later message: nothing is stored. No project, an unknown
+    or archived project, or an empty message stores nothing.
+
+    Never raises: every skip and every write failure yields None so
+    the chat stream continues whole; write failures are logged. No
+    key or secret is ever read or stored here: secrets travel as
+    SecretRef refs only, and the task path has no redaction step to
+    reuse, so none applies.
+    """
+    logger = logging.getLogger(__name__)
+    project = (project_id or "").strip()
+    if not project:
+        return None
+    text = (message or "").strip()
+    if not text:
+        logger.debug("fxchattask: skip empty message, stream continues")
+        return None
+    try:
+        projects, tasks = repos_for(app)
+        if _stored_project(projects, project) is None:
+            logger.debug(
+                "fxchattask: skip unknown/archived project %r", project)
+            return None
+        name = (chat_task or "").strip()
+        if name and tasks.load(name) is not None:
+            return None
+        if tasks.list_by({"project_id": project}):
+            return None
+        stored = tasks.append(_new_task_record(project, text, []))
+        persist_k02r3_store(app)
+    except Exception:
+        logger.exception(
+            "fxchattask: first-chat task write failed for project %r; "
+            "stream continues", project)
+        return None
+    return stored
 
 
 def register_console_projects_write_routes(app: Any) -> Any:
@@ -185,9 +263,6 @@ def register_console_projects_write_routes(app: Any) -> Any:
 
     async def _create_task(request: Request, project_id: str) -> dict:
         _enforce_user_write(request)
-        projects, tasks = repos_for(request.app)
-        if _stored_project(projects, project_id) is None:
-            raise _unknown_project(project_id)
         body = await _json_body(request)
         title = body.get("title")
         scope = body.get("scope")
@@ -202,18 +277,8 @@ def register_console_projects_write_routes(app: Any) -> Any:
             raise HTTPException(
                 status_code=400,
                 detail="task needs a scope list of strings")
-        task_id = _new_id()
-        record = {
-            "record_id": task_id,
-            "project_id": project_id,
-            "task_id": task_id,
-            "title": title.strip(),
-            "scope": list(scope),
-            "status": "CREATED",
-            "created_at": _utcnow(),
-        }
-        stored = tasks.append(record)
-        persist_k02r3_store(request.app)
+        stored = append_task_record(
+            request.app, project_id, title.strip(), list(scope))
         return {"task": task_view(stored)}
 
     @app.post("/api/v1/projects/{project_id}/tasks")
