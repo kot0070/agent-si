@@ -8,8 +8,8 @@
 import { Suspense, lazy, useEffect, useState } from "react";
 import type { ReactElement } from "react";
 import {
-  Link,
   Navigate,
+  NavLink,
   Route,
   Routes,
   useNavigate,
@@ -553,6 +553,32 @@ function ProjectSubview(props: { view: ProjectViewName }): ReactElement {
   );
 }
 
+function SettingsTabs(): ReactElement {
+  return (
+    <nav data-testid="settings-tabs">
+      {SETTINGS_ROUTES.map((route) => (
+        <NavLink
+          key={route.path}
+          to={`/settings/${route.path}`}
+          data-testid={`settings-link-${route.path}`}
+          end
+          className={({ isActive }) => (isActive ? "fx-tab-active" : undefined)}
+        >
+          {t(route.titleKey)}
+        </NavLink>
+      ))}
+      <NavLink
+        key="diagnostics"
+        to="/settings/diagnostics"
+        data-testid="settings-link-diagnostics"
+        className={({ isActive }) => (isActive ? "fx-tab-active" : undefined)}
+      >
+        {t("diagnostics.title")}
+      </NavLink>
+    </nav>
+  );
+}
+
 function SettingsIndexRoute(): ReactElement {
   const general = SETTINGS_ROUTES[0];
   if (general === undefined) {
@@ -566,24 +592,7 @@ function SettingsIndexRoute(): ReactElement {
       purposeKey={general.purposeKey}
       needItNowKey={general.needItNowKey}
     >
-      <nav>
-        {SETTINGS_ROUTES.map((route) => (
-          <Link
-            key={route.path}
-            to={`/settings/${route.path}`}
-            data-testid={`settings-link-${route.path}`}
-          >
-            {t(route.titleKey)}
-          </Link>
-        ))}
-        <Link
-          key="diagnostics"
-          to="/settings/diagnostics"
-          data-testid="settings-link-diagnostics"
-        >
-          {t("diagnostics.title")}
-        </Link>
-      </nav>
+      <SettingsTabs />
     </SettingsLayout>
   );
 }
@@ -615,6 +624,7 @@ function SettingsSectionRoute(): ReactElement {
       purposeKey={route.purposeKey}
       needItNowKey={route.needItNowKey}
     >
+      <SettingsTabs />
       {route.path === "project" ? (
         // FXPOINT1 P1: the role editor stays mounted even with no project
         // selected so its labelled Mode/Role controls always resolve; the

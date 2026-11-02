@@ -6,7 +6,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { ApiClientProvider } from "../../app/ApiClientProvider";
 import { FakeApiClient } from "../../api/__tests__/fakeApiClient";
 import {
-  formatDate,
+  formatDateLong,
   resetLocaleForTests,
   setLocale,
 } from "../../locale/index";
@@ -49,14 +49,14 @@ afterEach(() => {
 
 describe("l0b04 project card display format", () => {
   it("shows the name plus a locale-formatted date, never the raw id or ISO stamp", async () => {
-    const expectedEn = formatDate(new Date(CREATED_AT), "en");
+    const expectedEn = formatDateLong(CREATED_AT, "en");
     const textEn = await cardText("en");
     expect(textEn).toContain("n-9");
     expect(textEn).toContain(expectedEn);
     expect(textEn).not.toContain("p-9");
     expect(textEn).not.toContain(CREATED_AT);
 
-    const expectedUk = formatDate(new Date(CREATED_AT), "uk");
+    const expectedUk = formatDateLong(CREATED_AT, "uk");
     const textUk = await cardText("uk");
     expect(textUk).toContain("n-9");
     expect(textUk).toContain(expectedUk);

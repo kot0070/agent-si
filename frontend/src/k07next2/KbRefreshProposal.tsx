@@ -6,6 +6,7 @@
 import { useEffect, useState } from "react";
 import type { ReactElement } from "react";
 import { t } from "../locale/index";
+import { formatDateLong } from "../locale/index";
 import { EVIDENCE_LOCALE_KEYS } from "../settings/LocalBenchTypes";
 import { requestResponse } from "../api/errors";
 import { readKbProposalDoc } from "./k07next2Api";
@@ -60,8 +61,26 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 // so no braces or quotes from JSON.stringify ever reach the card.
 // FXDESIGN3 S6: served evidence-enum tokens (UNKNOWN/PROXY/MEASURED) render
 // their locale label, never the bare token.
+/** FXDESIGN7 item 15: served snake_case facts render human
+ * ("kb_version" -> "Version", "updated_at" -> "Updated"); values stay
+ * served, ISO timestamps render as locale dates. */
+const HUMAN_FIELD_ALIASES: Record<string, string> = {
+  kb_version: "Version",
+  updated_at: "Updated",
+  per_provider: "Per provider",
+};
+
+export function humanFieldName(name: string): string {
+  return HUMAN_FIELD_ALIASES[name] ?? name;
+}
+
+const ISO_STAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
+
 function renderFactValue(value: unknown): string {
   if (typeof value === "string") {
+    if (ISO_STAMP.test(value)) {
+      return formatDateLong(value);
+    }
     const tier = value.toUpperCase() as keyof typeof EVIDENCE_LOCALE_KEYS;
     const labelKey = EVIDENCE_LOCALE_KEYS[tier];
     if (labelKey !== undefined) {
@@ -80,7 +99,7 @@ function renderFactValue(value: unknown): string {
   }
   if (isRecord(value)) {
     const parts = Object.entries(value).map(
-      ([name, entry]) => `${name}: ${renderFactValue(entry)}`,
+      ([name, entry]) => `${humanFieldName(name)}: ${renderFactValue(entry)}`,
     );
     return parts.length === 0 ? t("shell.common.unknown") : parts.join("; ");
   }
@@ -93,7 +112,7 @@ function FactRows(props: { data: unknown }): ReactElement {
       <>
         {Object.entries(props.data).map(([name, entry]) => (
           <tr key={name}>
-            <th scope="row">{name}</th>
+            <th scope="row">{humanFieldName(name)}</th>
             <td>{renderFactValue(entry)}</td>
           </tr>
         ))}

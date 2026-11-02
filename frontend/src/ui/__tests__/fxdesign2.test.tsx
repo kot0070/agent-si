@@ -42,6 +42,20 @@ const WHY = {
   },
 };
 
+const LIVE_UNKNOWN_COUNTS = {
+  agents: [
+    {
+      agent: "agent-9",
+      scope: "scope-9",
+      deliverable: "part-9",
+      status: "RUNNING",
+      role: "worker",
+    },
+  ],
+};
+
+let liveAgents: unknown = { agents: [] };
+
 function jsonBody(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
@@ -52,6 +66,7 @@ function jsonBody(data: unknown, status = 200): Response {
 beforeEach(() => {
   resetLocaleForTests();
   setLocale("en");
+  liveAgents = { agents: [] };
   window.localStorage.clear();
   window.sessionStorage.clear();
   vi.stubGlobal(
@@ -72,7 +87,7 @@ beforeEach(() => {
         return jsonBody({ rows: [] });
       }
       if (url === "/api/v1/agents/live") {
-        return jsonBody({ agents: [] });
+        return jsonBody(liveAgents);
       }
       if (url === "/api/v1/budget?project_id=p-1") {
         return jsonBody(BUDGET);
@@ -166,24 +181,25 @@ describe("fxdesign2 S2 kb facts table", () => {
 
 describe("fxdesign2 S3 context card and project form locales", () => {
   it("renders dedicated context lines with real locale strings, never garble keys", async () => {
+    liveAgents = LIVE_UNKNOWN_COUNTS;
     renderAppAt("/projects");
-    const percent = await screen.findByTestId("ctx-percent");
-    expect(percent.textContent).toContain(t("shell.cards.context.percent"));
-    expect(percent.textContent).toContain(t("shell.common.unknown"));
-    const win = await screen.findByTestId("ctx-window");
-    expect(win.textContent).toContain(t("shell.cards.context.window"));
-    expect(win.textContent).toContain(t("shell.common.unknown"));
-    for (const testId of ["ctx-percent", "ctx-window"]) {
-      const text = screen.getByTestId(testId).textContent ?? "";
-      expect(text).not.toContain("shell.cards");
-      expect(text).not.toContain("shell.common");
-    }
+    const unknown = await screen.findByTestId("ctx-unknown");
+    expect(unknown.getAttribute("title")).toBe(t("shell.common.unknown"));
+    expect(screen.queryByTestId("ctx-percent")).toBeNull();
+    expect(screen.queryByTestId("ctx-window")).toBeNull();
+    const text = unknown.textContent ?? "";
+    expect(text).not.toContain(t("shell.common.unknown"));
+    expect(text).not.toContain("Used");
+    expect(text).not.toContain("/");
+    expect(text).not.toContain("shell.cards");
+    expect(text).not.toContain("shell.common");
     expect(t("shell.cards.context.percentValue", { value: "v" })).toContain("v");
     expect(t("shell.cards.context.windowValue", { value: "v" })).toContain("v");
   });
 
   it("reads project name, folder and choose-folder from the uk locale", async () => {
     setLocale("uk");
+    liveAgents = LIVE_UNKNOWN_COUNTS;
     renderAppAt("/projects");
     const form = await screen.findByTestId("project-add-form");
     const formText = form.textContent ?? "";
@@ -192,12 +208,16 @@ describe("fxdesign2 S3 context card and project form locales", () => {
     expect(formText).toContain("Обрати теку");
     expect(formText).not.toContain("Project name");
     expect(formText).not.toContain("Choose folder");
-    const percent = await screen.findByTestId("ctx-percent");
-    const win = screen.getByTestId("ctx-window");
-    for (const text of [percent.textContent ?? "", win.textContent ?? ""]) {
-      expect(text).toContain("НЕВІДОМО");
-      expect(/[A-Za-z]/.test(text)).toBe(false);
-    }
+    const unknown = await screen.findByTestId("ctx-unknown");
+    expect(unknown.getAttribute("title")).toBe(t("shell.common.unknown"));
+    expect(unknown.getAttribute("title")).toContain("НЕВІДОМО");
+    expect(screen.queryByTestId("ctx-percent")).toBeNull();
+    expect(screen.queryByTestId("ctx-window")).toBeNull();
+    const text = unknown.textContent ?? "";
+    expect(text).not.toContain("НЕВІДОМО");
+    expect(text).not.toContain("Used");
+    expect(text).not.toContain("/");
+    expect(/[A-Za-z]/.test(text)).toBe(false);
   });
 });
 

@@ -256,6 +256,16 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
                       {t("providers.page.connectLabel")}
                     </button>
                   )}
+                  <p
+                    data-testid={`provider-caps-${preset.id}`}
+                    className="fx-cap-line"
+                    title={preset.caps ?? t("shell.common.unknown")}
+                  >
+                    {preset.caps ?? "—"}
+                  </p>
+                  <p data-testid={`provider-keynote-${preset.id}`} className="fx-quiet-line">
+                    {preset.keyHint}
+                  </p>
                   <ul>
                     {preset.models.map((model) => (
                       <li key={model.id} data-testid="model-row">
