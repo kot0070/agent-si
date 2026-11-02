@@ -1017,7 +1017,7 @@ _T9_BASELINE = [
                "no:cacheprovider -> exit 0\n"),
     ("delta", "Auditor for p2: PASS (checks green)\n"),
     ("delta", "Part p2: PASS (checks green, auditor PASS)\n"),
-    ("delta", "Total: 0 input + 0 output = 0 tokens; cost: UNKNOWN\n"),
+    ("delta", "Total: 0 input + 0 output = 0 tokens; cost: cost not known (no price)\n"),
     ("delta", "run success: all 2 parts PASS\n"),
     ("done", "run success: all 2 parts PASS\n"),
 ]
