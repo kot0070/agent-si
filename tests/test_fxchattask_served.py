@@ -8,7 +8,9 @@ MockProviderAdapter (no network, no keys, no token in URL).
   msg1 with project selected -> exactly one task row holding the
     message text, in the k02r3_tasks.jsonl snapshot AND listed by
     GET /api/v1/tasks?project_id=.
-  msg2 same conversation (with or without the task id) -> still one.
+  B2 (frozen): every accepted message stores one row; a repeat of the
+    same stripped text stores none (same text twice -> one row,
+    a different second message -> two rows).
   chat with no project, or an unknown project -> 200, no row.
   task-write failure -> the stream still 200s with one start plus one
     terminal event (never breaks on the write).
@@ -172,24 +174,30 @@ def test_first_message_creates_one_task_row(tmp_path, monkeypatch):
     assert MSG1 in listed[0]["title"], listed[0]
 
 
-# -- R2 later messages add none ------------------------------------------
+# -- R2/B2 later messages: same stripped text adds none, different adds one -
 
 
-def test_second_message_same_conversation_adds_none(tmp_path, monkeypatch):
+def test_second_message_follows_b2_dedup_rule(tmp_path, monkeypatch):
     client, _app = _served_client(tmp_path, monkeypatch)
     pid = _create_project(client)
     _apply_chat_limits(pid)
     first = _post_chat(client, MSG1, project=pid)
     assert first.status_code == 200, first.text
     tid = _listed_tasks(client, pid)[0]["task_id"]
-    second = _post_chat(client, MSG2, project=pid, task=tid)
-    assert second.status_code == 200, second.text
-    third = _post_chat(client, MSG2, project=pid)
-    assert third.status_code == 200, third.text
+    repeat_with_task = _post_chat(client, MSG1, project=pid, task=tid)
+    assert repeat_with_task.status_code == 200, repeat_with_task.text
+    repeat_bare = _post_chat(client, "  " + MSG1 + "  ", project=pid)
+    assert repeat_bare.status_code == 200, repeat_bare.text
     rows = _snapshot_rows(tmp_path)
     mine = [row for row in rows if row.get("project_id") == pid]
     assert len(mine) == 1, rows
     assert len(_listed_tasks(client, pid)) == 1
+    second_new = _post_chat(client, MSG2, project=pid)
+    assert second_new.status_code == 200, second_new.text
+    rows = _snapshot_rows(tmp_path)
+    mine = [row for row in rows if row.get("project_id") == pid]
+    assert len(mine) == 2, rows
+    assert len(_listed_tasks(client, pid)) == 2
 
 
 # -- R3 no project changes nothing ----------------------------------------
