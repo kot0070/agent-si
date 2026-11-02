@@ -16,8 +16,11 @@ from typing import Any
 _LIVE_ROWS: dict[str, dict[str, Any]] = {}
 
 #: Append-only FXPANEL live fields (the frozen four stay first, untouched).
+#: FXDESIGN4 adds provider plus placement (placement truth per row),
+#: last_action (the step text) and window (model context size when known).
 LIVE_EXTRA_FIELDS = ("role", "model", "step", "file", "cost",
-                     "tokens", "context", "errors", "waits")
+                     "tokens", "context", "errors", "waits",
+                     "provider", "placement", "last_action", "window")
 
 #: Cost marker when no price was evidenced for the run. The BudgetGate
 #: owns pricing; the live sink never invents a cost.
@@ -69,6 +72,20 @@ def live_defaults() -> dict[str, Any]:
 
 def record_live_row(key: str, row: Mapping[str, Any]) -> dict[str, Any]:
     """Upsert one live row by key; returns a stored copy."""
+    context = row.get("context", "")
+    if isinstance(context, bool):
+        context = ""
+    elif not isinstance(context, int):
+        context = str(context)
+    window = row.get("window", None)
+    if isinstance(window, bool):
+        window = "UNKNOWN"
+    elif isinstance(window, int):
+        pass
+    elif window is None or window == "":
+        window = None
+    else:
+        window = str(window)
     stored = {
         "agent": str(row.get("agent", "")),
         "scope": str(row.get("scope", "")),
@@ -80,10 +97,20 @@ def record_live_row(key: str, row: Mapping[str, Any]) -> dict[str, Any]:
         "file": str(row.get("file", "")),
         "cost": str(row.get("cost", COST_UNAVAILABLE)),
         "tokens": _live_tokens(row.get("tokens")),
-        "context": str(row.get("context", "")),
+        "context": context,
         "errors": _live_strings(row.get("errors")),
         "waits": _live_strings(row.get("waits")),
     }
+    # FXDESIGN4 truth fields ride only when a writer sourced them, so
+    # rows written before the upgrade parse and compare unchanged.
+    if "provider" in row:
+        stored["provider"] = str(row.get("provider", ""))
+    if "placement" in row:
+        stored["placement"] = str(row.get("placement", ""))
+    if "last_action" in row:
+        stored["last_action"] = str(row.get("last_action", ""))
+    if window is not None:
+        stored["window"] = window
     _LIVE_ROWS[str(key)] = stored
     return dict(stored)
 

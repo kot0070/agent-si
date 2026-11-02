@@ -20,6 +20,7 @@ import {
   placementForRow,
   placementKey,
   resolveStatusHuman,
+  shortenLiveRef,
 } from "./agentsApi";
 
 export interface AgentsLiveProps {
@@ -189,19 +190,39 @@ export function AgentsLive(props: AgentsLiveProps): ReactElement {
       ) : (
         <div
           data-testid="agents-live-rows"
-          style={{ maxHeight: "240px", overflowY: "auto" }}
+          style={{ maxHeight: "240px", overflowY: "auto", overflowX: "hidden" }}
         >
           {rows.map((row) => {
             const placement = placementForRow(row);
+            const scopeRef = shortenLiveRef(row.scope);
+            const deliverableRef = shortenLiveRef(row.deliverable);
             return (
               <div key={row.agent} data-testid={`agent-row-${row.agent}`}>
                 <span data-testid={`agent-row-who-${row.agent}`}>
                   {row.agent}
                 </span>
-                <span>{t("agents.row.scope")}</span>
-                <span>{row.scope}</span>
-                <span>{t("agents.row.deliverable")}</span>
-                <span>{row.deliverable}</span>
+                <span className="fx-live-pair">
+                  <span className="fx-live-label">
+                    {t("agents.row.scope")}
+                  </span>{" "}
+                  <span title={scopeRef.title}>{scopeRef.text}</span>
+                </span>
+                <span className="fx-live-pair">
+                  <span className="fx-live-label">
+                    {t("agents.row.deliverable")}
+                  </span>{" "}
+                  <span title={deliverableRef.title}>
+                    {deliverableRef.text}
+                  </span>
+                </span>
+                <span className="fx-live-pair">
+                  <span className="fx-live-label">
+                    {t("settings.roleProfile.providerLabel")}
+                  </span>{" "}
+                  <span>
+                    {formatLiveText(readLiveExtra(row, "provider"))}
+                  </span>
+                </span>
                 <span>
                   {resolveStatusHuman(readStatusHuman(row), row.status, locale)}
                 </span>

@@ -17,6 +17,7 @@ import type {
 import type { InspectorProps as InspectorBaseProps } from "../app/iface";
 import { useApiClient } from "../app/ApiClientProvider";
 import { formatNumber, t } from "../locale/index";
+import { shortenLiveRef } from "../agents/agentsApi";
 import { remainingBudget } from "../projects/projectsApi";
 import { MetricCard } from "../ui/MetricCard";
 import { fetchAppsCard } from "../watcher/AppsCard";
@@ -25,6 +26,7 @@ import {
   fetchWatcherJournal,
   fetchWatcherStatus,
 } from "../watcher/WatcherTab";
+import { WATCHER_JOURNAL_ROUTE } from "../watcher/WatcherTab";
 import type {
   WatcherJournalEntry,
   WatcherStatusData,
@@ -67,6 +69,13 @@ function readTokenSum(rows: PartRow[], kind: string): number {
     }
   }
   return sum;
+}
+
+function readCount(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return value;
+  }
+  return null;
 }
 
 function readSilent(value: unknown): string {
@@ -145,6 +154,7 @@ export function Inspector(props: InspectorProps): ReactElement {
   const [budget, setBudget] = useState<BudgetState | null>(null);
   const [watcherStatus, setWatcherStatus] =
     useState<WatcherStatusData | null>(null);
+  const [watchDecided, setWatchDecided] = useState<boolean | null>(null);
   const [journal, setJournal] = useState<WatcherJournalEntry[] | null>(null);
   const [watcherFailed, setWatcherFailed] = useState(false);
   const [apps, setApps] = useState<AppsCardData | null>(null);
@@ -205,6 +215,39 @@ export function Inspector(props: InspectorProps): ReactElement {
       }
     };
   }, [client]);
+
+  // §6: the newest WATCH_DECISION row proves the watcher decided; the
+  // served receipt carries no model, so the value stays the configured
+  // setting and only the label differs (state vs setting).
+  useEffect(() => {
+    if (projectId === null) {
+      setWatchDecided(null);
+      return;
+    }
+    let alive = true;
+    void fetch(
+      `${WATCHER_JOURNAL_ROUTE}?project_id=${encodeURIComponent(projectId)}&kind=WATCH_DECISION`,
+    )
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`watcher journal request failed: ${response.status}`);
+        }
+        return response.json() as Promise<unknown>;
+      })
+      .then((body) => {
+        if (alive) {
+          setWatchDecided(Array.isArray(body) && body.length > 0);
+        }
+      })
+      .catch(() => {
+        if (alive) {
+          setWatchDecided(null);
+        }
+      });
+    return () => {
+      alive = false;
+    };
+  }, [projectId]);
 
   useEffect(() => {
     let alive = true;
@@ -323,10 +366,27 @@ export function Inspector(props: InspectorProps): ReactElement {
     }
   }
 
+  // §3: Used is the input tokens of the role's last call, Window the
+  // model's KB context size when known; the percent renders only when
+  // both are known. The newest served live row carries them; with no
+  // live row everything reads UNKNOWN and no source line renders.
+  const newest = rows.length === 0 ? null : (rows[rows.length - 1] ?? null);
+
   const tokenIn = readTokenSum(rows, "input");
   const tokenOut = readTokenSum(rows, "output");
   const tokenTotal = tokenIn + tokenOut;
   const unknown = t("shell.common.unknown");
+
+  const usedCount =
+    newest === null ? null : readCount(readExtra(newest, "context"));
+  const windowCount =
+    newest === null ? null : readCount(readExtra(newest, "window"));
+  const percentText =
+    usedCount !== null && windowCount !== null && windowCount > 0
+      ? `${Math.round((usedCount / windowCount) * 100)}%`
+      : unknown;
+  const usedText = usedCount !== null ? formatNumber(usedCount) : unknown;
+  const windowText = windowCount !== null ? formatNumber(windowCount) : unknown;
 
   const lastPackages = (ledger ?? []).slice(-3);
   const activeTasks = (tasks ?? []).filter(
@@ -396,6 +456,8 @@ export function Inspector(props: InspectorProps): ReactElement {
               {rows.map((row) => {
                 const fileRef = readRef(readExtra(row, "file"));
                 const lastActionRef = readRef(readExtra(row, "last_action"));
+                const scopeRef = shortenLiveRef(row.scope);
+                const deliverableRef = shortenLiveRef(row.deliverable);
                 return (
                   <li
                     key={row.agent}
@@ -403,6 +465,24 @@ export function Inspector(props: InspectorProps): ReactElement {
                     className="fx-team-row"
                   >
                     <span className="fx-team-field">{row.agent}</span>
+                    <span className="fx-team-field">
+                      {t("agents.row.scope")}{" "}
+                      <span
+                        className="fx-team-value fx-truncate"
+                        title={scopeRef.title}
+                      >
+                        {scopeRef.text}
+                      </span>
+                    </span>
+                    <span className="fx-team-field">
+                      {t("agents.row.deliverable")}{" "}
+                      <span
+                        className="fx-team-value fx-truncate"
+                        title={deliverableRef.title}
+                      >
+                        {deliverableRef.text}
+                      </span>
+                    </span>
                     <span className="fx-team-field">
                       {t("settings.roleProfile.roleLabel")}{" "}
                       {readRoleText(readExtra(row, "role"))}
@@ -464,7 +544,7 @@ export function Inspector(props: InspectorProps): ReactElement {
           </p>
           {liveRows === null ? (
             <p data-testid="context-empty">{t("empty.generic")}</p>
-          ) : (
+          ) : newest === null ? (
             <>
               <p data-testid="ctx-percent">
                 {t("shell.cards.context.percentValue", { value: unknown })}
@@ -472,9 +552,42 @@ export function Inspector(props: InspectorProps): ReactElement {
               <p data-testid="ctx-window">
                 {t("shell.cards.context.windowValue", { value: unknown })}
               </p>
+              <div data-testid="ctx-bar">
+                <div
+                  data-testid="ctx-bar-input"
+                  style={{
+                    width: `${fractionOf(tokenIn, tokenTotal) * 100}%`,
+                  }}
+                />
+                <div
+                  data-testid="ctx-bar-output"
+                  style={{
+                    width: `${fractionOf(tokenOut, tokenTotal) * 100}%`,
+                  }}
+                />
+              </div>
+              <div data-testid="ctx-legend">
+                <span>
+                  {t("shell.cards.context.input")} {formatNumber(tokenIn)}
+                </span>
+                <span>
+                  {t("shell.cards.context.output")} {formatNumber(tokenOut)}
+                </span>
+              </div>
+            </>
+          ) : (
+            <>
+              <p data-testid="ctx-percent">
+                {t("shell.cards.context.percentValue", { value: percentText })}
+              </p>
+              <p data-testid="ctx-window">
+                {t("shell.cards.context.windowValue", { value: windowText })}
+              </p>
+              <p data-testid="ctx-used">
+                {t("shell.cards.context.percentValue", { value: usedText })}
+              </p>
               <p data-testid="ctx-source">
-                {t("shell.cards.context.source")}{" "}
-                {t("shell.cards.context.sourceLive")}
+                {t("shell.cards.context.source")} last call
               </p>
               <div data-testid="ctx-bar">
                 <div
@@ -588,7 +701,9 @@ export function Inspector(props: InspectorProps): ReactElement {
                   : t("shell.cards.watcher.failed")}
               </p>
               <p data-testid="watcher-model">
-                {t("settings.roleProfile.modelLabel")}: {watcherModel}
+                {watchDecided === true
+                  ? `${t("settings.roleProfile.modelLabel")}: ${watcherModel}`
+                  : `Configured model: ${watcherModel}`}
               </p>
               <p data-testid="watcher-action">
                 {t("shell.cards.team.lastAction")} {watcherAction}

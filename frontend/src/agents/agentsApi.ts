@@ -17,7 +17,7 @@ import type { SupportedLocale } from "../locale/index";
 export type { PartRow, PartStatus };
 export { PartRowSchema, PartStatusSchema, parseAgentsLive };
 
-export const PLACEMENTS = ["LOCAL", "SPLIT", "CLOUD"] as const;
+export const PLACEMENTS = ["LOCAL", "SPLIT", "CLOUD", "UNKNOWN"] as const;
 export type Placement = (typeof PLACEMENTS)[number];
 
 export const PlacementSchema: z.ZodType<Placement> = z.enum(PLACEMENTS);
@@ -26,6 +26,7 @@ const PLACEMENT_KEYS: Record<Placement, string> = {
   LOCAL: "agents.badge.local",
   SPLIT: "agents.badge.split",
   CLOUD: "agents.badge.cloud",
+  UNKNOWN: "shell.common.unknown",
 };
 
 export function placementKey(placement: Placement): string {
@@ -36,29 +37,72 @@ export function placementLabel(placement: Placement): string {
   return t(PLACEMENT_KEYS[placement]);
 }
 
-// The served PartRow carries no placement field, so the panel buckets rows
-// with this documented rule: executed or completed parts read LOCAL, queued
-// or parked parts read CLOUD, cross-boundary parts read SPLIT. Counts per
-// bucket are exact row counts, never estimates.
-export function placementForRow(row: PartRow): Placement {
-  switch (row.status) {
-    case "RUNNING":
-    case "RETURNED":
-    case "ACCEPTED":
-      return "LOCAL";
-    case "QUEUED":
-    case "BLOCKED":
-      return "CLOUD";
-    case "REJECTED":
-    case "HANDOFF":
-      return "SPLIT";
+function readRowPlacement(row: PartRow): Placement | null {
+  const placement = (row as unknown as Record<string, unknown>)["placement"];
+  if (
+    placement === "LOCAL" ||
+    placement === "SPLIT" ||
+    placement === "CLOUD" ||
+    placement === "UNKNOWN"
+  ) {
+    return placement;
   }
+  return null;
+}
+
+// Served rows carry the truth in row.placement (LOCAL when the provider
+// is a local type, CLOUD otherwise, SPLIT for mixed plan rows). A row
+// without it reads UNKNOWN, never a status guess.
+export function placementForRow(row: PartRow): Placement {
+  return readRowPlacement(row) ?? "UNKNOWN";
+}
+
+/** Local loopback provider ids (ollama/lm_studio legs); all others are cloud. */
+const LOCAL_PROVIDER_IDS = new Set(["ollama", "lm_studio"]);
+
+export function placementForProviderId(providerId: string): Placement {
+  return LOCAL_PROVIDER_IDS.has(providerId) ? "LOCAL" : "CLOUD";
+}
+
+export interface ShortRef {
+  text: string;
+  title?: string;
+}
+
+// Shorten served refs for tight rows: drop the fxdevrun: prefix and
+// artifact://run/<id>/ to the last part. The full value rides the
+// title when shortened; unevidenced values stay a dash.
+export function shortenLiveRef(value: unknown): ShortRef {
+  if (value === undefined || value === null || value === "") {
+    return { text: "–" };
+  }
+  const full = String(value);
+  let text = full;
+  let stripped = false;
+  if (text.startsWith("fxdevrun:")) {
+    const parts = text.split(":");
+    text = parts[parts.length - 1] ?? text;
+    stripped = true;
+  }
+  const artifact = /^artifact:\/\/run\/[^/]+\/(.+)$/.exec(text);
+  if (artifact !== null) {
+    text = artifact[1] ?? text;
+    stripped = true;
+  }
+  if (stripped) {
+    const segments = text.split("/");
+    text = segments[segments.length - 1] ?? text;
+  }
+  if (text === "" || text === full) {
+    return text === "" ? { text: "–" } : { text };
+  }
+  return { text, title: full };
 }
 
 export type PlacementCounts = Record<Placement, number>;
 
 export function countPlacements(rows: PartRow[]): PlacementCounts {
-  const counts: PlacementCounts = { LOCAL: 0, SPLIT: 0, CLOUD: 0 };
+  const counts: PlacementCounts = { LOCAL: 0, SPLIT: 0, CLOUD: 0, UNKNOWN: 0 };
   for (const row of rows) {
     counts[placementForRow(row)] += 1;
   }

@@ -131,10 +131,13 @@ describe("fxbatch4 stop-all request body over the real App", () => {
       ).toBe(HEX_ID);
     });
     await armAndConfirmStopAll();
-    expect(screen.getByTestId("stop-all-result").textContent).toBe("200");
+    expect(screen.getByTestId("stop-all-result").textContent).toBe(
+      "Stopped 0",
+    );
     expect(stopPosts()).toHaveLength(1);
     expect(JSON.parse(stopPosts()[0]?.body ?? "")).toEqual({
       project_id: HEX_ID,
+      actor: "user",
     });
   });
 
@@ -142,9 +145,13 @@ describe("fxbatch4 stop-all request body over the real App", () => {
     renderApp(new FakeApiClient({ projects: [] }));
     expect(await screen.findByTestId("chat-prompt")).toBeTruthy();
     await armAndConfirmStopAll();
-    expect(screen.getByTestId("stop-all-result").textContent).toBe("200");
+    expect(screen.getByTestId("stop-all-result").textContent).toBe(
+      "Stopped 0",
+    );
     expect(stopPosts()).toHaveLength(1);
-    expect(JSON.parse(stopPosts()[0]?.body ?? "")).toEqual({});
+    expect(JSON.parse(stopPosts()[0]?.body ?? "")).toEqual({
+      actor: "user",
+    });
   });
 });
 

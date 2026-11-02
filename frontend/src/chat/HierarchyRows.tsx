@@ -241,6 +241,7 @@ export function HierarchyRows({
         <button
           type="button"
           data-testid="hierarchy-collapsed"
+          className="fx-btn-quiet"
           aria-label={pt("chat.hierarchy.expand", "Show model hierarchy")}
           onClick={() => toggle(true)}
         >
@@ -343,6 +344,7 @@ export function HierarchyRows({
       <button
         type="button"
         data-testid="hierarchy-collapse"
+        className="fx-btn-quiet"
         aria-label={pt("chat.hierarchy.collapse", "Hide model hierarchy")}
         onClick={() => toggle(false)}
       >
