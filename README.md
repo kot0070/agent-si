@@ -28,7 +28,7 @@ Get-FileHash -Algorithm SHA256 AgentSI.exe
 
 <<FINAL: release hashes and file names are stamped at release time; re-verify against SHA256SUMS.txt in the bundle>>
 
-The build is unsigned, so Windows SmartScreen will warn on first start. This is expected for this release.
+The build is unsigned, so on first start Windows SmartScreen shows "Windows protected your PC" with publisher Unknown. This is expected for this release. Click More info, then Run anyway — only after the SHA256 values above match. Do not run the app if they differ.
 
 ## First run, step by step
 
@@ -69,6 +69,11 @@ Provider keys are stored only in the Windows Credential Manager under the app na
 - On first start the app copies previous settings and keys into the new data folder and keeps the originals untouched. A file that already exists at the destination is never overwritten.
 - Interface preferences (first-run done flag, language, watcher display options) live in the browser local storage. Tab-only mirrors (role profiles, accepted risk) live in the session storage. Key material never lives there.
 - Secret references live only in memory while the app runs.
+
+## Remove and closing
+
+- Remove: delete the app folder. Data lives in the `data` folder next to `AgentSI.exe` by default (`%LOCALAPPDATA%\AgentSI\data` when the app folder is not writable; the `AGENT_SI_DATA_DIR` folder path overrides both). Delete that data folder too for a full removal. Provider keys live in the Windows Credential Manager under `app:<provider>` — Disconnect removes the entry.
+- Closing is safe: history and records stay on disk and reappear on the next start. A run stops when the window closes (stop the whole `AgentSI.exe` tree, not just the starter).
 
 ## First task and Stop
 
