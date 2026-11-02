@@ -441,11 +441,23 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
               messages: list, part: Any, attempt: int,
               waits: list) -> Any:
         _check_stop()
+
+        def _waiting(elapsed: float) -> None:
+            with contextlib.suppress(Exception):
+                _live(str(role), str(resolution.get("model", "")),
+                      part, attempt,
+                      _roles.waiting_line(str(role), elapsed), "",
+                      {}, None, list(waits or []),
+                      str(resolution.get("provider", "")))
+
         try:
             response, over = _roles.invoke(
                 app, adapter, resolution, messages, record=record,
                 project_id=project, run_id=run_id, part=part,
-                attempt=attempt)
+                attempt=attempt, stop_seen=_stop_seen,
+                on_waiting=_waiting)
+        except _roles.ModelStopped:
+            raise _Stopped()
         except _roles._BudgetOut as exc:
             raise _BudgetOut(str(exc)) from None
         usage = getattr(response, "usage", {}) or {}
@@ -534,26 +546,72 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                              {"run_id": run_id, "part_id": None})
             turn += 1
         _check_stop()
-        director_text = _call(
-            "director", director, director_adapter,
-            [{"role": "user", "content": _director_prompt(message)}],
-            None, 0, waits=["plan"])
+        try:
+            director_text = _call(
+                "director", director, director_adapter,
+                [{"role": "user", "content": _director_prompt(message)}],
+                None, 0, waits=["plan"])
+        except _roles.ModelTimeout as exc:
+            _journal("SERVICE_STATE",
+                     "model call timed out (director, one retry left): "
+                     "%s" % (exc,))
+            yield _run_event(
+                "delta", turn, task_id,
+                "Director timed out (%s); retrying once" % (exc,),
+                {"run_id": run_id})
+            turn += 1
+            try:
+                director_text = _call(
+                    "director", director, director_adapter,
+                    [{"role": "user",
+                      "content": _director_prompt(message)},
+                     {"role": "assistant", "content": ""},
+                     {"role": "user",
+                      "content": ("Your previous reply never arrived: "
+                                  "the model call timed out (%s). Return "
+                                  "ONLY the corrected JSON object, "
+                                  "no prose.") % (exc,)}],
+                    None, 0, waits=["plan repair"])
+            except _roles.ModelTimeout as exc2:
+                record["summary"] = (
+                    "run failed: director timed out twice: %s" % (exc2,))
+                record["success"] = False
+                _finish_task()
+                yield _run_event("delta", turn, task_id, record["summary"],
+                                 {"run_id": run_id, "success": False})
+                turn += 1
+                yield _run_event("done", turn, task_id, record["summary"],
+                                 {"run_id": run_id, "success": False})
+                return
         try:
             parsed = _protocol.parse_director_reply(
                 director_text.output_text or "")
         except _protocol.PlanError as exc:
             _check_stop()
-            repair = _call(
-                "director", director, director_adapter,
-                [{"role": "user",
-                  "content": _director_prompt(message)},
-                 {"role": "assistant",
-                  "content": director_text.output_text or ""},
-                 {"role": "user",
-                  "content": ("Your previous reply was not valid: %s "
-                              "Return ONLY the corrected JSON object, "
-                              "no prose.") % (exc,)}],
-                None, 0, waits=["plan repair"])
+            try:
+                repair = _call(
+                    "director", director, director_adapter,
+                    [{"role": "user",
+                      "content": _director_prompt(message)},
+                     {"role": "assistant",
+                      "content": director_text.output_text or ""},
+                     {"role": "user",
+                      "content": ("Your previous reply was not valid: %s "
+                                  "Return ONLY the corrected JSON object, "
+                                  "no prose.") % (exc,)}],
+                    None, 0, waits=["plan repair"])
+            except _roles.ModelTimeout as exc_timeout:
+                record["summary"] = (
+                    "run failed: director timed out on repair: %s"
+                    % (exc_timeout,))
+                record["success"] = False
+                _finish_task()
+                yield _run_event("delta", turn, task_id, record["summary"],
+                                 {"run_id": run_id, "success": False})
+                turn += 1
+                yield _run_event("done", turn, task_id, record["summary"],
+                                 {"run_id": run_id, "success": False})
+                return
             try:
                 parsed = _protocol.parse_director_reply(
                     repair.output_text or "")
@@ -983,9 +1041,29 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
                     goal=spec["goal"], files_diff=files_diff,
                     checks=check_rows,
                     artifact_refs=["%s/%s" % (part_id, path)
-                                   for path in spec["files"]])
+                                   for path in spec["files"]],
+                    stop_seen=stop_seen,
+                    on_waiting=lambda elapsed: _live(
+                        "auditor", str(auditor_spec.get("model", "")),
+                        part_id, attempt,
+                        _roles.waiting_line("auditor", elapsed), "",
+                        {}, None, ["audit:%s" % (part_id,)],
+                        str(auditor_spec.get("provider", ""))))
             except _roles._BudgetOut as exc:
                 raise _BudgetOut(str(exc)) from None
+            except _roles.ModelTimeout as exc:
+                entry = {
+                    "producer_ref": str(producer_ref),
+                    "audit_ref": str(auditor_ref),
+                    "audit_session": "",
+                    "result": "FAIL",
+                    "reasons": ["auditor timed out: %s" % (exc,)],
+                    "over_cap": False,
+                }
+                _journal_event(
+                    project, "DEVRUN_AUDIT",
+                    "audit %s attempt %d: FAIL (auditor timed out) [%s]"
+                    % (part_id, attempt, auditor_ref))
             record.setdefault("audits", []).append({
                 "producer_ref": entry["producer_ref"],
                 "audit_ref": entry["audit_id"],
@@ -1145,20 +1223,34 @@ def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
     The stop line is set only when one identical failing run call hit
     three times: the attempt ends with that honest line. A second
     identical failure tells the worker to change approach in the reply;
-    different (or read-only) calls never count.
+    different (or read-only) calls never count. A timed-out model call
+    feeds a timeout note back to the worker and continues within the
+    turn budget; the attempt is never lost to a stall.
     """
     from agent_si.runtime.devrun import protocol as _protocol
+    from agent_si.runtime.devrun import roles as _call_roles
 
     worker_spec = _resolve_worker(app, project)
     history: list[dict[str, str]] = [
         {"role": "user", "content": _worker_prompt(
             spec, message, attempt, failing, reasons)}]
     repeat_counts: dict[str, int] = {}
+
+    def _timed_out_note(exc: BaseException) -> dict[str, str]:
+        return {"role": "user", "content": (
+            "The model call timed out (%s) with no response; continue "
+            "with a smaller next step, restating what you still need."
+            % (exc,))}
+
     for _ in range(max(1, int(turn_cap))):
         check_stop()
-        response = call("worker", worker_spec, adapter, history,
-                        part_id, attempt,
-                        waits=["agent:%s" % (part_id,)])
+        try:
+            response = call("worker", worker_spec, adapter, history,
+                            part_id, attempt,
+                            waits=["agent:%s" % (part_id,)])
+        except _call_roles.ModelTimeout as exc:
+            history.append(_timed_out_note(exc))
+            continue
         try:
             parsed = _protocol.parse_agent_reply(
                 response.output_text or "")
@@ -1170,9 +1262,13 @@ def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
                 "Return ONLY {\"actions\": [...], \"done\": bool}, "
                 "no prose.") % (exc,)})
             check_stop()
-            response = call("worker", worker_spec, adapter, history,
-                            part_id, attempt,
-                            waits=["agent:%s" % (part_id,)])
+            try:
+                response = call("worker", worker_spec, adapter, history,
+                                part_id, attempt,
+                                waits=["agent:%s" % (part_id,)])
+            except _call_roles.ModelTimeout as exc:
+                history.append(_timed_out_note(exc))
+                continue
             try:
                 parsed = _protocol.parse_agent_reply(
                     response.output_text or "")

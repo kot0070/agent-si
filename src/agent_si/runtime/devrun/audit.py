@@ -119,8 +119,16 @@ def judge(
     files_diff: str,
     checks: list[dict[str, Any]],
     artifact_refs: list[str],
+    timeout_s: Any = None,
+    stop_seen: Any = None,
+    on_waiting: Any = None,
 ) -> dict[str, Any]:
-    """Run one audit: invoke, parse, store; return the stored row."""
+    """Run one audit: invoke, parse, store; return the stored row.
+
+    The audit call shares the bounded model timeout (a stall raises
+    ModelTimeout to the caller); waiting notices and the stop hook
+    ride the same parameters as any role call.
+    """
     from agent_si.runtime.devrun import protocol as _protocol
     from agent_si.runtime.devrun import roles as _roles
 
@@ -128,7 +136,8 @@ def judge(
     response, over = _roles.invoke(
         app, adapter, resolution, messages, record=record,
         project_id=project_id, run_id=run_id, part=part_id,
-        attempt=attempt)
+        attempt=attempt, timeout_s=timeout_s, stop_seen=stop_seen,
+        on_waiting=on_waiting)
     entry: dict[str, Any] = {
         "part_id": str(part_id), "attempt": int(attempt),
         "producer_ref": str(producer_ref),
