@@ -53,6 +53,12 @@ HOST = "127.0.0.1"
 #: Web-tree destination name inside the frozen bundle.
 _WEB_DEST = "frontend"
 
+#: FXLOC C6 frozen bundle destinations (packaging/sidecar spec ships
+#: these; the About refs below resolve to them under sys.frozen).
+_LICENSE_DEST = "LICENSE"
+_NOTICES_DEST = os.path.join(
+    "docs", "third_party_notices", "NOTICES.md")
+
 #: Profile dir name for the webview window under the product data dir.
 _WEBVIEW_DIR_NAME = "webview"
 
@@ -132,6 +138,23 @@ def _resolve_web_dir() -> str:
     if getattr(sys, "frozen", False) and meipass:
         return os.path.join(str(meipass), _WEB_DEST)
     return os.path.join(_here_root(), "frontend", "dist")
+
+
+def _license_ref() -> str:
+    """LICENSE ref: bundle-absolute when frozen, repo-relative otherwise."""
+    meipass = getattr(sys, "_MEIPASS", None)
+    if getattr(sys, "frozen", False) and meipass:
+        return os.path.join(str(meipass), _LICENSE_DEST)
+    return "LICENSE"
+
+
+def _notices_ref() -> str:
+    """NOTICES.md ref: bundle-absolute when frozen, repo-relative otherwise."""
+    meipass = getattr(sys, "_MEIPASS", None)
+    if getattr(sys, "frozen", False) and meipass:
+        return os.path.join(
+            str(meipass), "docs", "third_party_notices", "NOTICES.md")
+    return "docs/third_party_notices/NOTICES.md"
 
 
 def _index_path(web_dir: str) -> str | None:
@@ -468,8 +491,8 @@ def build_app():
         "status": "ok",
         "copyright": COPYRIGHT,
         "license": LICENSE_NAME,
-        "license_file": "LICENSE",
-        "notices": "docs/third_party_notices/NOTICES.md",
+        "license_file": _license_ref(),
+        "notices": _notices_ref(),
     }
 
     async def sidecar_about() -> dict:
