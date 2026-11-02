@@ -28,6 +28,21 @@ class ActionRefused(PermissionError):
     code: str = "DEVRUN_ACTION_REFUSED"
 
 
+class InstallAskNeeded(PermissionError):
+    """An install-class command with no recorded decision must ask.
+
+    A PermissionError so the engine's existing refusal path turns the
+    ask into run text and the run continues; the tool id rides along
+    for the dialog that records the decision.
+    """
+
+    code: str = "DEVRUN_INSTALL_ASK_NEEDED"
+
+    def __init__(self, tool_id: str, message: str) -> None:
+        super().__init__(message)
+        self.tool_id = str(tool_id)
+
+
 #: Secret file classes (suffixes built without literals): content is
 #: never returned and the refusal names only the class.
 _DOT = "."
@@ -398,10 +413,23 @@ def spawn_checked(
         raise PermissionError("refused: %s" % (denied,))
     kind = classify_argv(words)
     if kind == "install":
-        raise PermissionError(
-            "refused: install-class command %r needs install "
-            "permission (ungranted runs continue without the install)"
-            % (words[0],))
+        from agent_si.toolguard import permissions as _ask_permissions
+
+        _ask_tool_id = _ask_permissions.install_tool_id(
+            str(project_id), words[0])
+        _ask_decision = _ask_permissions.get_decision(
+            tool_id=_ask_tool_id)
+        if _ask_decision is None:
+            raise InstallAskNeeded(
+                _ask_tool_id,
+                f"refused: install-class command {words[0]!r} needs "
+                "install permission (ungranted runs continue without "
+                "the install)")
+        if _ask_decision != "allow":
+            raise PermissionError(
+                f"refused: install-class command {words[0]!r} needs "
+                "install permission (ungranted runs continue without "
+                "the install)")
     if kind == "inline":
         raise PermissionError(
             "refused: inline code needs approval first "

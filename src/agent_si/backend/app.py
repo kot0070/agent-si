@@ -3787,6 +3787,8 @@ def create_app(settings: Any = None,
     _demof13w_store_dir = app.state.data_dir
     _demof13w_asked: set[str] = (
         _demof13w_permissions.load_asked_once(_demof13w_store_dir))
+    _demof13w_decisions = _demof13w_permissions.bind_decision_store(
+        _demof13w_store_dir)
 
     @app.post(_demof13w_permissions.PERMISSIONS_CHECK_ROUTE)
     async def _demof13w_permissions_check(
@@ -3813,6 +3815,104 @@ def create_app(settings: Any = None,
             "allowed": _demof13w_permissions.check_install_permission(
                 _demof13w_tool_id),
             "asked_once": _demof13w_seen,
+        }
+
+    @app.post(_demof13w_permissions.PERMISSIONS_DECIDE_ROUTE)
+    async def _demof13w_permissions_decide(
+            request: Request) -> dict[str, Any]:
+        try:
+            _demof13w_decide_payload = await request.json()
+        except Exception:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "BAD_JSON_BODY",
+                        "message": "permissions decide needs a JSON body"}
+            ) from None
+        _demof13w_token = request.headers.get("x-ui-session-token")
+        if not isinstance(_demof13w_token, str) or not _demof13w_token:
+            _demof13w_body_token = (
+                _demof13w_decide_payload.get("session_token")
+                if isinstance(_demof13w_decide_payload, dict) else None)
+            if (isinstance(_demof13w_body_token, str)
+                    and _demof13w_body_token):
+                _demof13w_token = _demof13w_body_token
+            else:
+                raise HTTPException(
+                    status_code=401,
+                    detail={
+                        "code": "SESSION_TOKEN_MISSING",
+                        "message": "decide needs a live session token",
+                    },
+                )
+        if not _k08_token_live(_demof13w_token):
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "SESSION_TOKEN_INVALID",
+                    "message": "unknown session token",
+                },
+            )
+        if _k08_rate is not None:
+            try:
+                _demof13w_rate_ok = bool(_k08_rate(_demof13w_token))
+            except Exception:
+                _demof13w_rate_ok = False
+            if not _demof13w_rate_ok:
+                raise HTTPException(
+                    status_code=429,
+                    detail={
+                        "code": "RATE_LIMITED",
+                        "message": "rate hook refused",
+                    },
+                )
+        try:
+            _demof13w_decide_tool = (
+                _demof13w_permissions.require_tool_id(
+                    _demof13w_decide_payload))
+            _demof13w_decide_project = (
+                _demof13w_permissions.require_project_id(
+                    _demof13w_decide_payload))
+            _demof13w_decide_value = (
+                _demof13w_permissions.require_decision(
+                    _demof13w_decide_payload))
+        except _demof13w_permissions.PermissionCheckError as exc:
+            raise HTTPException(
+                status_code=exc.status,
+                detail={"code": exc.code,
+                        "message": str(exc)}) from None
+        _demof13w_record = _demof13w_permissions.record_decision(
+            _demof13w_store_dir, _demof13w_decisions,
+            _demof13w_decide_tool, _demof13w_decide_value,
+            _demof13w_decide_project)
+        from agent_si.watcher import journal as _demof13w_journal
+        _demof13w_journal.append_event(
+            _demof13w_decide_project, "permissions", "WATCH_DECISION",
+            f"PERMISSION_DECISION tool={_demof13w_decide_tool} "
+            f"decision={_demof13w_decide_value}",
+            (_demof13w_decide_tool, _demof13w_decide_project))
+        return {
+            "tool_id": _demof13w_decide_tool,
+            "decision": _demof13w_decide_value,
+            "project_id": _demof13w_decide_project,
+            "time": _demof13w_record["time"],
+        }
+
+    @app.get(_demof13w_permissions.PERMISSIONS_DECISIONS_ROUTE)
+    async def _demof13w_permissions_decisions(
+            project_id: str = "") -> dict[str, Any]:
+        try:
+            _demof13w_list_project = (
+                _demof13w_permissions.require_project_id(
+                    {"project_id": project_id}))
+        except _demof13w_permissions.PermissionCheckError as exc:
+            raise HTTPException(
+                status_code=exc.status,
+                detail={"code": exc.code,
+                        "message": str(exc)}) from None
+        return {
+            "decisions": _demof13w_permissions.list_decisions(
+                _demof13w_store_dir, _demof13w_decisions,
+                _demof13w_list_project),
         }
 
     @app.post(_demof13w_catalog.CATALOG_RUN_ROUTE)
