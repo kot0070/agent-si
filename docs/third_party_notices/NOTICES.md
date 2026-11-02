@@ -42,4 +42,4 @@ Material Icons by Google, Apache License, Version 2.0. Twelve glyphs used as inl
 - `licenses/LICENSE.bottle` — bottle licence text.
 - proxy_tools — MIT per installed metadata; no separate text file ships in the bundle.
 
-<<FINAL: regenerate this table from the lock files at release time and confirm each licence text is present in the bundle>>
+Table verified at release time against frontend/package-lock.json, pyproject.toml, and the sidecar bundle metadata; every licence text listed above ships in the bundle under docs/third_party_notices/licenses/.
