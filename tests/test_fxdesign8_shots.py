@@ -1,6 +1,6 @@
 """FXDESIGN8 shots: chat empty, chat after a run, agents, watcher at
-1280x800 + 1024x700, dark-en + light-en + dark-uk. Saves to
-DIRECTOR/AUDIT/D8SHOTS. Also logs centre-column widths per shot.
+1280x800 + 1024x700, dark-en + light-en + dark-uk. Saves to the audit
+shot directory (D8SHOTS). Also logs centre-column widths per shot.
 """
 import json
 import os

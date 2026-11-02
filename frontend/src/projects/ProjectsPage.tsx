@@ -28,7 +28,7 @@ const FOLDER_PICK_UNAVAILABLE = 409;
 // FXKITUI labelled project form: every input carries a visible label plus
 // a placeholder example. Keys are projectForm.<field>.label/.placeholder;
 // EN defaults live in code as the fallback and the locale lane ships the
-// uk lines from _task/FXKITUI/HITS.md. Locale files stay untouched.
+// uk lines from the locale lane hits record. Locale files stay untouched.
 export const PROJECT_FORM_KEYS = {
   nameLabel: "projectForm.name.label",
   namePlaceholder: "projectForm.name.placeholder",

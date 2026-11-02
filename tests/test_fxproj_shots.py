@@ -4,7 +4,8 @@ network boundary only (stateful: projects start empty, creation persists).
 Fresh profile: first message -> project in left list + Projects page ->
 Settings -> return by each of the 3 paths (left row, Projects row Open,
 top picker) -> same history. One assistant message with the run log
-lines, no Accept/Edit/Reject card. Shots to DIRECTOR/AUDIT/HISTSHOTS.
+lines, no Accept/Edit/Reject card. Shots to the audit shot
+directory (HISTSHOTS).
 """
 import json
 import os
