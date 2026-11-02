@@ -127,9 +127,22 @@ export class HttpApiClient implements ApiClient {
       }
     };
     function terminal(): ChatChunk {
-      return { stream_id: effectiveId, delta: "", done: true };
+      return {
+        stream_id: effectiveId,
+        delta: "",
+        done: true,
+        // D6(b): present only for executed engine turns, so legacy and
+        // plain resolutions keep their exact historical shape.
+        ...(executedSeen ? { executed: true as const } : {}),
+      };
     }
     let finished = false;
+    // D6(b): the typed done event of an executed engine turn carries
+    // executed:true. The terminal chunk forwards it only when present,
+    // so legacy and plain resolutions keep their exact historical shape.
+    // (Done text alone is not a signal: the served plain vocabulary
+    // repeats delta text on done too, L0B-10.)
+    let executedSeen = false;
     function* handleLine(line: string, status: number): Generator<ChatChunk, void, void> {
       const trimmed = line.trim();
       if (!trimmed.startsWith("data:")) {
@@ -180,6 +193,9 @@ export class HttpApiClient implements ApiClient {
               wire.approval_requested === true
             ) {
               throw approvalRequired(status, wire.tool_id);
+            }
+            if (wire.type === "done" && wire.executed === true) {
+              executedSeen = true;
             }
             finished = true;
             yield terminal();

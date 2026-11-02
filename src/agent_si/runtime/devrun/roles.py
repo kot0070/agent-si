@@ -131,16 +131,81 @@ def _pool_pick(
     return None
 
 
+def _facade_first_model(app: Any, provider: str) -> str | None:
+    """First model id the facade holds for one provider, or None.
+
+    Reads the provider facade's own connect-time model rows verbatim
+    (provider prefix stripped the way the chat bind does); never
+    invented, never a KB read. A connected provider's models are
+    enabled by connection, so the first stored row is the fallback.
+    """
+    try:
+        ctx = getattr(getattr(app, "state", None), "k04_ctx", None)
+        facade = getattr(ctx, "provider_facade", None)
+        if facade is None:
+            return None
+        providers = getattr(facade, "_providers", None)
+        if not isinstance(providers, dict):
+            return None
+        record = providers.get(provider)
+        if not isinstance(record, dict):
+            return None
+        models_map = record.get("models", {})
+        if not isinstance(models_map, dict):
+            return None
+        for value in models_map.values():
+            text = str(value or "")
+            if not text:
+                continue
+            if "/" in text:
+                head, _, tail = text.partition("/")
+                if head == provider and tail:
+                    text = tail
+            if text:
+                return text
+    except Exception:
+        return None
+    return None
+
+
 def _auto_pick(
     app: Any, factory: Any, role: str
 ) -> dict[str, Any]:
-    """One AUTO resolution; RoleUnbound names the role on no candidate."""
+    """One AUTO resolution; RoleUnbound names the role on no candidate.
+
+    A pick blocked only because no connected provider holds a KB row
+    falls back to that provider's first enabled facade model (honest
+    why, UNKNOWN price until the user runs Update); any other block
+    stays a run-failed line naming the role.
+    """
     connected = _connected_providers(app, factory)
     try:
         from agent_si.backend import routing_auto as _auto
 
         pick = _auto.pick_auto(_bound_catalog(), connected, "coding")
     except Exception as exc:
+        try:
+            from agent_si.backend import routing_auto as _blocked
+
+            no_kb_row = (isinstance(exc, _blocked.AutoBlocked)
+                         and "connected providers hold no KB rows"
+                         in str(exc))
+        except Exception:
+            no_kb_row = False
+        if no_kb_row:
+            for provider in connected or []:
+                model = _facade_first_model(app, provider)
+                if model:
+                    return {
+                        "role": role, "mode": "AUTO",
+                        "provider": str(provider),
+                        "model": str(model),
+                        "why": {
+                            "connected": list(connected or []),
+                            "task_type": "coding",
+                            "reason": "no KB row: first enabled model "
+                                      "of the connected provider"},
+                    }
         raise RoleUnbound(
             "role %r has no provider: AUTO pick failed: %s"
             % (role, exc)) from None
@@ -409,15 +474,43 @@ def invoke(
     attempt: int = 0,
     lock: Any = None,
 ) -> Any:
-    """One model call: charge, ledger, budget-cap stop signal.
+    """One model call: charge with a per-call id, ledger, budget-cap stop.
 
-    Returns (response, over_cap, ledger_row): over_cap is True only
-    when the call's own cost exceeds the remaining budget, and
-    ledger_row is the row this call wrote (callers read their own
-    row, never the ledger tail). A reached provider cap or hard
-    limit raises _BudgetOut before the call. The model call always
-    runs outside the lock; the whole post-call block (charge,
-    ledger, telemetry, over-cap) runs under it as one unit.
+    The charge id is the run id plus "-c" plus the ledger sequence
+    number, so every call settles its own reservation; repeating the
+    same call id is refused by the gate like any duplicate (int B4,
+    per-call billing). The plain manager path is unchanged. Returns
+    (response, over_cap): over_cap is True only when the call's own
+    cost exceeds the remaining budget. A reached provider cap or hard
+    limit raises _BudgetOut before call. The model call always runs
+    outside any lock; the whole post-call block (charge, ledger,
+    telemetry, over-cap) runs as one unit under the given lock, so
+    two parts never interleave a charge (A1). Callers that need the
+    row they wrote (never the ledger tail) use invoke_owned.
+    """
+    response, over, _row = invoke_owned(
+        app, adapter, resolution, messages, record=record,
+        project_id=project_id, run_id=run_id, part=part,
+        attempt=attempt, lock=lock)
+    return response, over
+
+
+def invoke_owned(
+    app: Any,
+    adapter: Any,
+    resolution: dict[str, Any],
+    messages: list,
+    *,
+    record: Any,
+    project_id: str,
+    run_id: str,
+    part: Any = None,
+    attempt: int = 0,
+    lock: Any = None,
+) -> Any:
+    """Same as invoke, plus the ledger row this call wrote.
+
+    Returns (response, over_cap, ledger_row) for the A2 own-row rule.
     """
     provider = str(resolution["provider"])
     model = str(resolution["model"])
@@ -429,11 +522,16 @@ def invoke(
 
     # FXPARALLEL BEGIN charge-lock: post-call block as one unit.
     def _charge_locked() -> Any:
-        cost: Any = None
         try:
             from agent_si.runtime import manager as _manager
+            try:
+                seq = len(record.get("ledger", []) or []) if isinstance(
+                    record, dict) else 0
+            except Exception:
+                seq = 0
+            call_id = "%s-c%d" % (run_id, int(seq) + 1)
             cost = _manager._charge_budget_gate(
-                str(project_id), provider, model, usage, str(run_id))
+                str(project_id), provider, model, usage, str(call_id))
         except Exception:
             cost = None
         row: Any = {}

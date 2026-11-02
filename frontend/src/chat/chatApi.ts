@@ -19,7 +19,7 @@ export interface ChatProgress {
 
 export interface ChatRunner {
   readonly streamId: string;
-  readonly done: Promise<{ aborted: boolean }>;
+  readonly done: Promise<{ aborted: boolean; executed?: boolean }>;
   cancel(): Promise<void>;
 }
 
@@ -38,8 +38,9 @@ export function streamChat(
   }
   const stream = client.openChatStream(checked.data);
   let cancelRequested = false;
-  const done: Promise<{ aborted: boolean }> = (async () => {
+  const done: Promise<{ aborted: boolean; executed?: boolean }> = (async () => {
     let aborted = false;
+    let executed: boolean | undefined;
     for await (const raw of stream.chunks) {
       if (cancelRequested || progress.isCancelled()) {
         aborted = true;
@@ -50,6 +51,13 @@ export function streamChat(
         throw invalidBody();
       }
       const data: ChatChunk = chunk.data;
+      // D6(b): an executed engine turn marks its done event with
+      // executed:true. That withholds the verdict card; plain answers
+      // keep it. (Done text alone is not a signal: served plain
+      // vocabulary repeats delta text on done, L0B-10.)
+      if (data.executed === true) {
+        executed = true;
+      }
       if (data.delta !== "") {
         progress.onChunkText(data.delta);
       }
@@ -57,7 +65,11 @@ export function streamChat(
         break;
       }
     }
-    return { aborted: aborted || cancelRequested };
+    // D6(b): the executed key exists only for executed engine turns so
+    // plain resolutions keep their exact historical shape.
+    return executed === true
+      ? { aborted: aborted || cancelRequested, executed: true as const }
+      : { aborted: aborted || cancelRequested };
   })();
   return {
     get streamId() {

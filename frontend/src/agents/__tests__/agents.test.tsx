@@ -26,14 +26,16 @@ afterEach(() => {
 });
 
 const THREE_ROWS = [
-  { agent: "n-local", scope: "s-1", deliverable: "d-1", status: "RUNNING" },
-  { agent: "n-split", scope: "s-2", deliverable: "d-2", status: "HANDOFF" },
-  { agent: "n-cloud", scope: "s-3", deliverable: "d-3", status: "QUEUED" },
+  { agent: "n-local", scope: "s-1", deliverable: "d-1", status: "RUNNING", placement: "LOCAL" },
+  { agent: "n-split", scope: "s-2", deliverable: "d-2", status: "HANDOFF", placement: "SPLIT" },
+  { agent: "n-cloud", scope: "s-3", deliverable: "d-3", status: "QUEUED", placement: "CLOUD" },
 ] as const;
 
 describe("agents live panel", () => {
   it("shows LOCAL plus SPLIT plus CLOUD badges with exact row counts", async () => {
-    const client = new FakeApiClient({});
+    const client = new FakeApiClient({
+      liveRows: THREE_ROWS.map((row) => ({ ...row })),
+    });
     render(
       <ApiClientProvider client={client}>
         <AgentsLive projectId="p-1" />
@@ -44,7 +46,8 @@ describe("agents live panel", () => {
     expect(await screen.findByTestId("agent-badge-CLOUD")).toBeTruthy();
     expect((await screen.findByTestId("agent-badge-LOCAL")).textContent).toContain("1");
     expect((await screen.findByTestId("agent-badge-CLOUD")).textContent).toContain("1");
-    expect((await screen.findByTestId("agent-badge-SPLIT")).textContent).toContain("0");
+    expect((await screen.findByTestId("agent-badge-SPLIT")).textContent).toContain("1");
+    expect((await screen.findByTestId("agent-badge-UNKNOWN")).textContent).toContain("0");
   });
 
   it("shows a badge per node", async () => {

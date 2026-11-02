@@ -32,7 +32,7 @@ import {
   t,
 } from "../locale/index";
 import type { SupportedLocale } from "../locale/index";
-import { SETTINGS_ROUTES, AcceptedRiskSwitch, FirstRunGate, RoleProfileEditor } from "../settings/index";
+import { SETTINGS_ROUTES, AcceptedRiskSwitch, FirstRunGate, RoleProfileEditor, markFirstRunDone } from "../settings/index";
 import { OptimizationPolicySection } from "../settings/optimizationPolicy";
 import { ProvidersPage } from "../settings/ProvidersPage";
 import {
@@ -286,8 +286,10 @@ function ChatStartBox(props: {
 
   return (
     <section data-testid="chat-area" aria-label={t("shell.sidebar.chat")}>
-      <h1>{t("shell.sidebar.chat")}</h1>
-      <div data-testid="chat-composer">
+      {/* FXDESIGN6: no visible "Chat" heading; the h1 stays for the
+          frozen heading contract. */}
+      <h1 className="fx-vh">{t("shell.sidebar.chat")}</h1>
+      <div data-testid="chat-composer" className="fx-composer">
         <label>
           {t("chat.composer.prompt")}
           <input
@@ -646,6 +648,9 @@ function FirstRunRoute(props: {
   return (
     <FirstRunFlowView
       onComplete={() => {
+        // Finishing the wizard completes the first run: the start
+        // gate must never send this profile back to /firstrun.
+        markFirstRunDone();
         const pid = current.projectId;
         if (pid === null) {
           navigate(ROUTES.chat);

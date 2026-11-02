@@ -19,6 +19,7 @@ import hashlib
 import json
 import os
 import queue
+import sys
 import threading
 import uuid
 from datetime import UTC, datetime
@@ -40,13 +41,26 @@ class _BudgetOut(Exception):
     code: str = "DEVRUN_BUDGET_STOP"
 
 
+class _InstallHeld(Exception):
+    """An install ask holds the run: status line plus terminal approval."""
+
+    code: str = "DEVRUN_INSTALL_ASK_NEEDED"
+
+    def __init__(self, tool_id: str, command: str) -> None:
+        super().__init__(
+            "run held: install permission needed for %s" % (tool_id,))
+        self.tool_id = str(tool_id)
+        self.command = str(command)
+
+
 #: Extra worker attempts after the first, per F-VERDICT.
 _EXTRA_ATTEMPTS = 2
 
-# FXPARALLEL BEGIN limit: one limit, default 2, this one place.
-#: Max independent parts of one run executing at once. Tests pin it
-#: to 1 (today's order, the safety switch) or 2 via monkeypatch.
-_MAX_PART_WORKERS = 2
+# FXPARALLEL BEGIN limit: one limit, default 1, this one place.
+#: Max independent parts of one run executing at once. Default 1:
+#: sequential, byte-for-byte int behaviour. Tests pin it to 2 via
+#: monkeypatch only where the spec proves overlap.
+_MAX_PART_WORKERS = 1
 # FXPARALLEL END limit.
 
 # FXPARALLEL BEGIN helpers: stamps plus abort kill pass.
@@ -102,6 +116,78 @@ def _run_event(event: str, turn: int, subtask: str, detail: str,
     body.setdefault("text", text)
     return RunEvent(event=event, turn=turn, subtask_id=str(subtask),
                     detail=text, data=body)
+
+
+def _placement_for_provider(app: Any, provider: str) -> Any:
+    """LOCAL when the provider's facade type is local, else CLOUD.
+
+    The provider facade type already on the path decides; only when no
+    facade answers does the loopback leg list decide. Empty provider
+    yields None (the row shows UNKNOWN, never a guess).
+    """
+    name = str(provider or "")
+    if not name:
+        return None
+    try:
+        ctx = getattr(getattr(app, "state", None), "k04_ctx", None)
+        facade = getattr(ctx, "provider_facade", None)
+        views = facade.list_providers(True) if facade is not None else []
+    except Exception:
+        views = []
+    for view in views or ():
+        try:
+            if str(getattr(view, "provider_id", "")) == name:
+                return ("LOCAL" if str(
+                    getattr(view, "provider_type", "cloud")) == "local"
+                        else "CLOUD")
+        except Exception:
+            continue
+    if name in ("ollama", "lm_studio"):
+        return "LOCAL"
+    return "CLOUD"
+
+
+def _window_for_model(provider: str, model: str) -> Any:
+    """Model context size from the KB when known, else UNKNOWN."""
+    try:
+        from agent_si.model_kb import loader as _loader
+        from agent_si.model_kb import kb as _kb
+        row = _loader.find_row(
+            _kb.bound_catalog(), str(provider), str(model))
+        size = (row or {}).get("context_window")
+        if isinstance(size, bool):
+            return "UNKNOWN"
+        if isinstance(size, int) and size > 0:
+            return size
+    except Exception:
+        pass
+    return "UNKNOWN"
+
+
+def _team_reason(mode: str) -> str:
+    """One short chat-visible reason per role mode (full why in plan)."""
+    if mode == "AUTO":
+        return "Auto: cheapest known price among connected providers"
+    if mode == "pool":
+        return "Pool pick"
+    return "Pinned"
+
+
+def _team_lines(team: list) -> list[str]:
+    """Short chat team lines: one line when all roles share provider,
+    model and mode (FXRC1FIX P2: the raw why JSON flooded chat); one
+    short line per role otherwise. The full why stays in DEVRUN_PLAN."""
+    pairs = {(str(res.get("provider")), str(res.get("model")))
+             for _, res in team}
+    modes = {str(res.get("mode")) for _, res in team}
+    if len(pairs) == 1 and len(modes) == 1:
+        provider, model = next(iter(pairs))
+        return ["Team: director, manager, worker, auditor on %s/%s (%s)"
+                % (provider, model, _team_reason(next(iter(modes))))]
+    return ["Role %s: %s/%s (%s)"
+            % (role_name, res.get("provider"), res.get("model"),
+               _team_reason(str(res.get("mode"))))
+            for role_name, res in team]
 
 
 def _journal_event(project: str, kind: str, summary: str) -> None:
@@ -192,7 +278,7 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
     """Stream one autonomous dev run as RunEvents (F-ENTRY).
 
     A generator: start, human progress deltas, then exactly one
-    terminal event (done, cancelled or budget_stop).
+    terminal event (done, cancelled, budget_stop or approval).
     """
     from agent_si.runtime.devrun import actions as _actions
     from agent_si.runtime.devrun import protocol as _protocol
@@ -215,6 +301,9 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
     run_lock = threading.Lock()
     abort = threading.Event()
     # FXPARALLEL END run-state.
+    live_cache: dict[str, dict[str, Any]] = {}
+    plan_keys: set[str] = set()
+    seen_placements: set[str] = set()
 
     def _publish() -> None:
         # FXPARALLEL BEGIN run-state: publish under the run lock.
@@ -225,7 +314,58 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                 store = {}
                 app.state.devrun_runs = store
             store[str(project)] = record
+            _records.sync_files(record)
+            _records.persist_devrun_runs(app)
         # FXPARALLEL END run-state.
+
+    def _set_task(status: str) -> None:
+        """Mirror the run state onto the task repo row (best effort).
+
+        Absent task id: no-op, never a crash, never an invented row.
+        A row naming another project is left untouched. Persisted
+        through the repo's own store file.
+        """
+        try:
+            tasks = getattr(getattr(app, "state", None),
+                            "k02r3_tasks", None)
+            if tasks is None:
+                return
+            stored = tasks.load(task_id)
+            if stored is None:
+                return
+            if str(stored.get("project_id") or "") != str(project):
+                return
+            updated = dict(stored)
+            updated["status"] = str(status)
+            try:
+                tasks.compare_and_set(
+                    task_id, stored.get("version"), updated)
+            except Exception:
+                return
+            try:
+                from agent_si.backend.read_routes import (
+                    persist_k02r3_store as _persist_tasks)
+                _persist_tasks(app)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def _finish_task() -> None:
+        """Stamp the run end and mirror the terminal task status."""
+        try:
+            _records.mark_ended(record)
+        except Exception:
+            pass
+        try:
+            _records.sync_files(record)
+            _records.persist_devrun_runs(app)
+        except Exception:
+            pass
+        if record.get("stopped"):
+            _set_task("stopped")
+        else:
+            _set_task("done" if record.get("success") else "failed")
 
     def _journal(kind: str, summary: str) -> None:
         _journal_event(project, kind, summary)
@@ -262,11 +402,15 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
 
     def _live(role: str, model: str, part: Any, attempt: int,
               step: str, path: str, tokens: Any, cost: Any,
-              waits: list) -> None:
+              waits: list, provider: str = "") -> None:
         try:
             from agent_si.backend import agents_live as _live_mod
             row_tokens = tokens if isinstance(tokens, dict) else {}
             row_waits = [str(item) for item in waits]
+            try:
+                step_num = int(attempt or 0)
+            except (TypeError, ValueError):
+                step_num = 0
             if part is None:
                 # Plan-level agents (director, manager) are scoped to
                 # the whole part set once the plan lands; before that
@@ -282,28 +426,68 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                 scope = "fxdevrun:%s:%s:%s" % (project, part, role)
                 key = "%s/%s/%s/%s" % (run_id, part, role, attempt)
                 label = str(part)
-            _live_mod.record_live_row(key, {
+            placement = _placement_for_provider(app, provider)
+            row_input = row_tokens.get("input")
+            row_context: Any = (row_input if isinstance(row_input, int)
+                                and not isinstance(row_input, bool) else "")
+            row = {
                 "agent": "%s-%s" % (role, label),
                 "scope": scope,
                 "deliverable": "artifact://run/%s/%s" % (run_id, label),
                 "status": "RUNNING",
                 "role": str(role),
                 "model": str(model),
-                "step": 0,
+                "step": step_num,
                 "file": str(path or ""),
                 "cost": "UNKNOWN" if cost is None else str(cost),
                 "tokens": row_tokens,
-                "context": "UNKNOWN",
+                "context": row_context,
                 "errors": [],
                 "waits": row_waits,
-            })
-            # FXPARALLEL BEGIN live-lock: run_agents write under lock.
-            if part is None:
-                with run_lock:
+                "last_action": str(step or ""),
+                "window": _window_for_model(provider, model),
+            }
+            if provider:
+                row["provider"] = str(provider)
+            if placement is not None:
+                row["placement"] = str(placement)
+            # FXPARALLEL BEGIN live-lock: shared run writes under one
+            # lock (A7); the live store locks itself inside
+            # record_live_row, called outside this lock below.
+            with run_lock:
+                if placement is not None:
+                    seen_placements.add(str(placement))
+                live_cache[key] = dict(row)
+                split_updates: list = []
+                if part is None:
+                    plan_keys.add(key)
                     run_agents[str(role)] = {
                         "model": str(model), "tokens": row_tokens,
-                        "cost": cost, "waits": row_waits}
+                        "cost": cost, "waits": row_waits,
+                        "provider": str(provider or "")}
+                if {"LOCAL", "CLOUD"} <= seen_placements:
+                    for plan_key in plan_keys:
+                        cached = live_cache.get(plan_key)
+                        if (cached is None
+                                or cached.get("placement") == "SPLIT"):
+                            continue
+                        cached["placement"] = "SPLIT"
+                        split_updates.append(
+                            (plan_key, dict(cached)))
             # FXPARALLEL END live-lock.
+            _live_mod.record_live_row(key, row)
+            for plan_key, cached_row in split_updates:
+                _live_mod.record_live_row(plan_key, dict(cached_row))
+        except Exception:
+            pass
+
+    def _close_live(status: str) -> None:
+        """Move every tracked row out of RUNNING at run end."""
+        try:
+            from agent_si.backend import agents_live as _live_mod
+            for key, cached in live_cache.items():
+                _live_mod.record_live_row(
+                    key, {**cached, "status": str(status)})
         except Exception:
             pass
 
@@ -316,7 +500,8 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         # FXPARALLEL END live-lock.
         for saved_role, saved in saved_agents.items():
             _live(saved_role, saved["model"], None, 0, "plan", "",
-                  saved["tokens"], saved["cost"], saved["waits"])
+                  saved["tokens"], saved["cost"], saved["waits"],
+                  saved.get("provider", ""))
 
     def _call(role: str, resolution: dict[str, Any], adapter: Any,
               messages: list, part: Any, attempt: int,
@@ -324,8 +509,10 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         _check_stop()
         try:
             # FXPARALLEL BEGIN own-row: cost from the row this call
-            # wrote, never the ledger tail (A2).
-            response, over, own_row = _roles.invoke(
+            # wrote, never the ledger tail (A2). Per-call ids are int's
+            # B4 scheme (run-c<seq>); the post-call block stays one
+            # locked unit (A1), the model call stays outside the lock.
+            response, over, own_row = _roles.invoke_owned(
                 app, adapter, resolution, messages, record=record,
                 project_id=project, run_id=run_id, part=part,
                 attempt=attempt, lock=run_lock)
@@ -336,13 +523,15 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         tokens = dict(usage) if isinstance(usage, dict) else {}
         _live(role, str(resolution["model"]), part, attempt,
               "invoke", "", tokens,
-              (own_row or {}).get("cost"), waits)
+              (own_row or {}).get("cost"), waits,
+              str(resolution.get("provider", "")))
         if over:
             raise _BudgetOut(
                 "budget stop: call cost exceeds the remaining budget")
         return response
 
     _publish()
+    _set_task("running")
     yield _run_event("start", turn, task_id,
                      "devrun run started for %s" % (task_id,),
                      {"run_id": run_id, "project_id": project,
@@ -354,6 +543,7 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                 "run failed: project folder %r is not a directory"
                 % (folder,))
             record["success"] = False
+            _finish_task()
             yield _run_event("delta", turn, task_id, record["summary"],
                              {"run_id": run_id, "success": False})
             turn += 1
@@ -373,6 +563,7 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                 "run failed: no step limits for project %r (%s)"
                 % (project, exc))
             record["success"] = False
+            _finish_task()
             yield _run_event("done", turn, task_id, record["summary"],
                              {"run_id": run_id, "success": False})
             return
@@ -384,6 +575,7 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         except _roles.RoleUnbound as exc:
             record["summary"] = "run failed: %s" % (exc,)
             record["success"] = False
+            _finish_task()
             yield _run_event("delta", turn, task_id, record["summary"],
                              {"run_id": run_id, "success": False})
             turn += 1
@@ -400,27 +592,18 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         # FXPARALLEL END adapters.
             record["summary"] = "run failed: %s" % (exc,)
             record["success"] = False
+            _finish_task()
             yield _run_event("delta", turn, task_id, record["summary"],
                              {"run_id": run_id, "success": False})
             turn += 1
             yield _run_event("done", turn, task_id, record["summary"],
                              {"run_id": run_id, "success": False})
             return
-        for role_name, resolution in (
+        for line in _team_lines([
                 ("director", director), ("manager", manager),
-                ("worker", worker), ("auditor", auditor)):
-            try:
-                why = json.dumps(resolution.get("why", {}),
-                                 sort_keys=True, default=str)
-            except Exception:
-                why = "{}"
-            yield _run_event(
-                "delta", turn, task_id,
-                "Role %s: %s/%s (%s why: %s)"
-                % (role_name, resolution.get("provider"),
-                   resolution.get("model"),
-                   resolution.get("mode"), why),
-                {"run_id": run_id, "part_id": None})
+                ("worker", worker), ("auditor", auditor)]):
+            yield _run_event("delta", turn, task_id, line,
+                             {"run_id": run_id, "part_id": None})
             turn += 1
         _check_stop()
         director_text = _call(
@@ -450,6 +633,7 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                 record["summary"] = (
                     "run failed: director plan invalid: %s" % (exc2,))
                 record["success"] = False
+                _finish_task()
                 yield _run_event("delta", turn, task_id,
                                  record["summary"],
                                  {"run_id": run_id, "success": False})
@@ -520,11 +704,13 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                 for part in record.get("parts", [])) and bool(
                     record.get("parts", []))
             record["summary"] = _records.format_summary(record)
+        _finish_task()
         _publish()
         if not record.get("stopped"):
             record["run_end"] = _run_end_tests(
                 project_id=project, run_id=run_id, task_id=task_id)
         _journal("DEVRUN_END", record.get("summary") or "run ended")
+        _close_live("RETURNED")
         yield _run_event("delta", turn, task_id,
                          _ledger_total_line(record),
                          {"run_id": run_id})
@@ -540,7 +726,9 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         record["stopped"] = True
         record["success"] = False
         record["summary"] = "run stopped: user stop"
+        _finish_task()
         _publish()
+        _close_live("BLOCKED")
         _journal("DEVRUN_END", record.get("summary") or "run ended")
         yield _run_event("delta", turn, task_id, record["summary"],
                          {"run_id": run_id})
@@ -550,7 +738,9 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
     except _BudgetOut as exc:
         record["success"] = False
         record["summary"] = "run failed: %s" % (exc,)
+        _finish_task()
         _publish()
+        _close_live("BLOCKED")
         _journal("DEVRUN_END", record.get("summary") or "run ended")
         stop_text = "budget stop: %s" % (exc,)
         yield _run_event("delta", turn, task_id, stop_text,
@@ -558,6 +748,32 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         turn += 1
         yield _run_event("budget_stop", turn, task_id, stop_text,
                          {"run_id": run_id})
+    except _InstallHeld as exc:
+        record["success"] = False
+        record["summary"] = ("run held: install permission needed for %s"
+                             % (exc.tool_id,))
+        _finish_task()
+        _publish()
+        if not record.get("stopped"):
+            record["run_end"] = _run_end_tests(
+                project_id=project, run_id=run_id, task_id=task_id)
+        _close_live("BLOCKED")
+        _journal("DEVRUN_END", record.get("summary") or "run ended")
+        status = "Needs your permission to install: %s" % (exc.command,)
+        yield _run_event("delta", turn, task_id, status,
+                         {"run_id": run_id})
+        turn += 1
+        yield _run_event("delta", turn, task_id,
+                         _ledger_total_line(record),
+                         {"run_id": run_id})
+        turn += 1
+        yield _run_event("delta", turn, task_id, record["summary"],
+                         {"run_id": run_id,
+                          "success": bool(record.get("success"))})
+        turn += 1
+        yield _run_event("approval", turn, task_id, status,
+                         {"run_id": run_id, "tool_id": exc.tool_id,
+                          "reason": record["summary"]})
     except GeneratorExit:
         # FXPARALLEL BEGIN disconnect: latch abort so part threads see
         # it; _run_parts joins them on its way out.
@@ -569,15 +785,40 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         record["summary"] = (
             "%s (client disconnect: children reaped)"
             % (record.get("summary") or "run ended"))
+        _finish_task()
         _publish()
+        _close_live("BLOCKED")
         raise
     except Exception as exc:
         record["success"] = False
         record["summary"] = "run failed: internal %s: %s" % (
             type(exc).__name__, exc)
+        _finish_task()
         _publish()
+        _close_live("BLOCKED")
         yield _run_event("done", turn, task_id, record["summary"],
                          {"run_id": run_id, "success": False})
+
+
+def _platform_guidance() -> str:
+    """One platform line for the Director/worker briefs (W1).
+
+    States sys.platform so planned check commands match this machine.
+    On Windows only executables present here are allowed (python -m
+    pytest with a test file, findstr for text search); POSIX shell
+    utilities are unavailable, and inline code stays refused.
+    """
+    plat = str(sys.platform)
+    if plat.startswith("win"):
+        return (" Platform: %s (Windows). Plan check commands only with"
+                " executables present on this machine: tests as"
+                " [\"python\", \"-m\", \"pytest\", ...] with a test file,"
+                " text search with findstr. POSIX shell utilities are"
+                " unavailable here. Inline code stays refused (it needs"
+                " approval first)." % (plat,))
+    return (" Platform: %s. Check commands must be argv word lists of"
+            " executables present on this machine; inline code stays"
+            " refused." % (plat,))
 
 
 def _director_prompt(message: str) -> str:
@@ -591,7 +832,8 @@ def _director_prompt(message: str) -> str:
         "\"check_commands\": [[\"python\", \"-m\", \"pytest\", ...]], "
         "\"depends_on\": []}]}. Paths stay inside the project folder, "
         "file sets are disjoint, argv lists are word lists, depends_on "
-        "names part ids without cycles." % (message or "(no task text)",))
+        "names part ids without cycles.%s" % (
+            message or "(no task text)", _platform_guidance()))
 
 
 def _manager_order(record: Any, manager: dict, adapter: Any,
@@ -927,8 +1169,12 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
         for check in check_rows:
             command = " ".join(
                 str(word) for word in (check.get("argv") or []))
-            line = "Check %s $ %s -> exit %s" % (
-                part_id, command, check.get("exit_code"))
+            if check.get("could_not_start"):
+                line = "Check %s $ %s: %s" % (
+                    part_id, command, check.get("output_tail"))
+            else:
+                line = "Check %s $ %s -> exit %s" % (
+                    part_id, command, check.get("exit_code"))
             log_path = os.path.join(
                 str(folder), str(check.get("output_file") or ""))
             if not os.path.exists(log_path):
@@ -987,16 +1233,16 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
             turn += 1
             yield _run_event(
                 "delta", turn, part_id,
-                "Auditor for %s: %s (%s) [%s]"
-                % (part_id, entry["result"], first_reason,
-                   auditor_ref),
+                "Auditor for %s: %s (%s)"
+                % (part_id, entry["result"], first_reason),
                 {"run_id": run_id, "part_id": part_id})
             _journal_event(
                 project, "DEVRUN_AUDIT",
-                "audit %s attempt %d: %s (%s)"
+                "audit %s attempt %d: %s (%s) [%s]"
                 % (part_id, attempt, entry["result"],
                    "; ".join((entry or {}).get("reasons", [])
-                             or ["auditor gave no reason"])))
+                             or ["auditor gave no reason"]),
+                   auditor_ref))
             if entry.get("over_cap"):
                 raise _BudgetOut(
                     "budget stop: auditor call spent past the cap")
@@ -1019,6 +1265,44 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
             publish()
             return row["verdict"], turn
         auditor_ok = entry is not None and entry["result"] == "PASS"
+        started = [check for check in check_rows
+                   if not check.get("could_not_start")]
+        if spec["check_commands"] and not started:
+            # No check could start (missing executable): not a red
+            # check, no attempt burn; the auditor alone decides now.
+            no_start_reasons = list(
+                (entry or {}).get("reasons", [])) or [
+                "auditor gave no reason"]
+            if auditor_ok:
+                row["verdict"] = "PASS"
+                row["reason"] = (
+                    "auditor only: check could not run; auditor: %s"
+                    % ("; ".join(no_start_reasons),))
+                turn += 1
+                yield _run_event(
+                    "delta", turn, part_id,
+                    "Part %s: PASS (auditor only: check could not run)"
+                    % (part_id,),
+                    {"run_id": run_id, "part_id": part_id})
+                publish()
+                return "PASS", turn
+            row["verdict"] = "FAIL"
+            row["reason"] = "check could not run: %s; auditor: %s" % (
+                "; ".join(str(check.get("output_tail") or "")
+                          for check in check_rows) or "no checks",
+                "; ".join(no_start_reasons))
+            turn += 1
+            yield _run_event(
+                "delta", turn, part_id,
+                "Part %s: FAILED (%s)" % (part_id, row["reason"]),
+                {"run_id": run_id, "part_id": part_id})
+            publish()
+            turn += 1
+            yield _run_event(
+                "delta", turn, part_id,
+                "Needs you: %s: %s" % (part_id, row["reason"]),
+                {"run_id": run_id, "part_id": part_id})
+            return "FAIL", turn
         if checks_ok and auditor_ok:
             row["verdict"] = "PASS"
             row["reason"] = "checks green, auditor PASS"
@@ -1029,10 +1313,19 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
                 {"run_id": run_id, "part_id": part_id})
             publish()
             return "PASS", turn
-        failing = ["$ %s -> exit %s\n%s" % (
-            " ".join(check.get("argv", [])), check.get("exit_code"),
-            str(check.get("output_tail") or "")[:2000])
-                   for check in check_rows]
+        failing = []
+        for check in check_rows:
+            if check.get("could_not_start"):
+                failing.append(
+                    "$ %s: %s\n%s" % (
+                        " ".join(check.get("argv", [])),
+                        check.get("output_tail"),
+                        str(check.get("output_tail") or "")[:2000]))
+            else:
+                failing.append("$ %s -> exit %s\n%s" % (
+                    " ".join(check.get("argv", [])),
+                    check.get("exit_code"),
+                    str(check.get("output_tail") or "")[:2000]))
         reasons = list((entry or {}).get("reasons", [])) or [
             "auditor gave no reason"]
         if attempt < _EXTRA_ATTEMPTS + 1:
@@ -1148,6 +1441,7 @@ def _worker_prompt(spec: dict, message: str, attempt: int,
                  "Auditor reasons: %s. Fix the part." % (
                      " | ".join(failing) or "no output",
                      " | ".join(reasons) or "no reason"))
+    head += _platform_guidance()
     return head
 
 
@@ -1192,7 +1486,8 @@ def _apply_actions(*, record: Any, row: Any, folder: str, project: str,
                 live("worker", str(worker_spec.get("model", "")),
                      part_id, attempt, "write_file",
                      str(entry["path"]), {}, "UNKNOWN",
-                     ["agent:%s" % (part_id,)])
+                     ["agent:%s" % (part_id,)],
+                     str(worker_spec.get("provider", "")))
                 notes.append("write_file %s: ok sha256 %s" % (
                     entry["path"], entry["sha256"][:16]))
             elif name == "run":
@@ -1228,7 +1523,11 @@ def _run_agent_command(*, record: Any, folder: str, project: str,
                        run_id: str, argv: list, state: Any,
                        procs: list, attached: Any = None,
                        stop_seen: Any = None, lock: Any = None) -> str:
-    """Run one worker command; refusals and failures return as text."""
+    """Run one worker command; refusals and failures return as text.
+
+    An install-class command with no recorded decision raises
+    _InstallHeld (the run ends as held, never as run text).
+    """
     from agent_si.runtime.devrun import actions as _actions
 
     log_dir = os.path.join(str(folder), ".devrun", "agent")
@@ -1250,6 +1549,8 @@ def _run_agent_command(*, record: Any, folder: str, project: str,
         else:
             spawn = _actions.spawn_checked(
                 project, run_id, folder, argv, log_path, log_rel)
+    except _actions.InstallAskNeeded as exc:
+        raise _InstallHeld(exc.tool_id, " ".join(argv)) from None
     except (PermissionError, ValueError) as exc:
         return "run %s: %s" % (" ".join(argv), exc)
     proc = spawn.get("proc")
@@ -1344,6 +1645,13 @@ def _run_checks(*, record: Any, spec: dict, row: dict, folder: str,
                     project, check_id, folder,
                     [str(word) for word in command],
                     log_path, log_rel)
+        except _actions.SpawnNotInstalled as exc:
+            rows.append({"argv": [str(word) for word in command],
+                         "exit_code": None, "output_file": log_rel,
+                         "output_tail": str(exc),
+                         "pid": 0, "could_not_start": True,
+                         "missing_word": exc.word})
+            continue
         except (PermissionError, ValueError) as exc:
             rows.append({"argv": [str(word) for word in command],
                          "exit_code": None, "output_file": log_rel,

@@ -10,6 +10,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { ApiClientProvider } from "../../app/ApiClientProvider";
@@ -124,17 +125,26 @@ describe("fxbatch4 stop-all request body over the real App", () => {
         ],
       }),
     );
-    expect(await screen.findByText(PROJECT_NAME)).toBeTruthy();
+    // D6B: the Sidebar project list shows the same name as visible text,
+    // so the wait scopes to the TopBar select option (the surface this
+    // test then asserts). Same asserted property: the name renders.
+    const projectSelect = await screen.findByTestId("topbar-project");
+    expect(
+      await within(projectSelect as HTMLElement).findByText(PROJECT_NAME),
+    ).toBeTruthy();
     await waitFor(() => {
       expect(
         (screen.getByTestId("topbar-project") as HTMLSelectElement).value,
       ).toBe(HEX_ID);
     });
     await armAndConfirmStopAll();
-    expect(screen.getByTestId("stop-all-result").textContent).toBe("200");
+    expect(screen.getByTestId("stop-all-result").textContent).toBe(
+      "Stopped 0",
+    );
     expect(stopPosts()).toHaveLength(1);
     expect(JSON.parse(stopPosts()[0]?.body ?? "")).toEqual({
       project_id: HEX_ID,
+      actor: "user",
     });
   });
 
@@ -142,9 +152,13 @@ describe("fxbatch4 stop-all request body over the real App", () => {
     renderApp(new FakeApiClient({ projects: [] }));
     expect(await screen.findByTestId("chat-prompt")).toBeTruthy();
     await armAndConfirmStopAll();
-    expect(screen.getByTestId("stop-all-result").textContent).toBe("200");
+    expect(screen.getByTestId("stop-all-result").textContent).toBe(
+      "Stopped 0",
+    );
     expect(stopPosts()).toHaveLength(1);
-    expect(JSON.parse(stopPosts()[0]?.body ?? "")).toEqual({});
+    expect(JSON.parse(stopPosts()[0]?.body ?? "")).toEqual({
+      actor: "user",
+    });
   });
 });
 
@@ -160,7 +174,9 @@ describe("fxbatch4 project select shows names, id only in the title", () => {
     const select = (await screen.findByTestId(
       "topbar-project",
     )) as HTMLSelectElement;
-    expect(await screen.findByText(PROJECT_NAME)).toBeTruthy();
+    // D6B: scoped to the select (see above): the Sidebar project list
+    // renders the same name as visible text.
+    expect(await within(select as HTMLElement).findByText(PROJECT_NAME)).toBeTruthy();
     expect(select.textContent).toContain(PROJECT_NAME);
     expect(HEX_RE.test(select.textContent ?? "")).toBe(false);
     const options = Array.from(select.querySelectorAll("option"));

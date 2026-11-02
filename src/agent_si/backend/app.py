@@ -110,9 +110,11 @@ def get_data_dir(settings: Any = None) -> str | None:
     module never touches process environment directly (K04WIRE1 rule). The env dir
     wins; a differing harness settings dir is rejected (ValueError); with
     no env dir the harness dir (if any) is returned for the legacy path,
-    else None. An explicitly blank env value fails loud (never a silent
-    fallback). Resolving from env also ensures the dir exists and runs
-    the first-start legacy migration (originals kept).
+    else the frozen portable default (exe-folder data, else
+    LocalAppData; None unfrozen). An explicitly blank env value fails
+    loud (never a silent fallback). Resolving from env also ensures the
+    dir exists and runs the first-start legacy migration (originals
+    kept).
     """
     from agent_si.k10_start import resolve_env_data_dir
     _resolved = resolve_env_data_dir()
@@ -382,16 +384,27 @@ def create_app(settings: Any = None,
     @app.get("/api/v1/runs/ledger")
     def runs_ledger(project_id: str) -> dict[str, Any]:
         ledger = ledgers.get(project_id)
-        if ledger is None:
-            return {"rows": []}
         rows = []
-        for pid in ledger.package_ids():
-            row = ledger.get_row(pid)
-            if row is not None:
-                rows.append(_ledger_row_payload(
-                    row.package_id, row.agents,
-                    row.peak_concurrency, row.wall_time_s))
-        return {"rows": rows}
+        if ledger is not None:
+            for pid in ledger.package_ids():
+                row = ledger.get_row(pid)
+                if row is not None:
+                    rows.append(_ledger_row_payload(
+                        row.package_id, row.agents,
+                        row.peak_concurrency, row.wall_time_s))
+        # FXVIEWS2: devrun run records for this project ride the same
+        # route as runs rows (additions-only: the key is present only
+        # when devrun runs exist, so the legacy {"rows": [...]} body
+        # stays byte-identical otherwise). Served cells only: run id,
+        # start/end stamps, parts, verdicts, tokens, cost or UNKNOWN.
+        try:
+            from agent_si.runtime.devrun import records as _devrun_records
+            runs = _devrun_records.runs_for_project(app, project_id)
+        except Exception:
+            runs = []
+        if not runs:
+            return {"rows": rows}
+        return {"rows": rows, "runs": runs}
 
     def _find_ledger_with(package_id: str,
                           project_id: str | None) -> PackageLedger | None:
@@ -877,6 +890,8 @@ def create_app(settings: Any = None,
     _fxtests2_executor.bind_data_root(app.state.k02r3_store_dir)
     _k02r3_read.register_read_routes(app)
     _k02r3_write.register_console_projects_write_routes(app)
+    from agent_si.backend import chat_history as _fxchathist
+    _fxchathist.register_chat_history_routes(app)
 
     # R349A project step limits (additions-only): GET+PUT surface plus
     # steplimits.json persistence owned by steplimit_routes; the K02 seam
@@ -3913,6 +3928,98 @@ def create_app(settings: Any = None,
             "decisions": _demof13w_permissions.list_decisions(
                 _demof13w_store_dir, _demof13w_decisions,
                 _demof13w_list_project),
+        }
+
+    # FXASKB B3: one journal row per recorded chat answer. The A2 decide
+    # route records an install allow/deny per tool, which never fits an
+    # answer accept/reject, so this route posts the row instead.
+    _FXASKB_CHAT_DECISION_ROUTE = "/api/v1/chat/decision"
+    _FXASKB_CHAT_DECISION_VALUES = ("accepted", "rejected", "recorded")
+
+    @app.post(_FXASKB_CHAT_DECISION_ROUTE)
+    async def _fxaskb_chat_decision(
+            request: Request) -> dict[str, Any]:
+        try:
+            _fxaskb_body = await request.json()
+        except Exception:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "BAD_JSON_BODY",
+                        "message": "chat decision needs a JSON body"}
+            ) from None
+        _fxaskb_token = request.headers.get("x-ui-session-token")
+        if not isinstance(_fxaskb_token, str) or not _fxaskb_token:
+            _fxaskb_body_token = (
+                _fxaskb_body.get("session_token")
+                if isinstance(_fxaskb_body, dict) else None)
+            if (isinstance(_fxaskb_body_token, str)
+                    and _fxaskb_body_token):
+                _fxaskb_token = _fxaskb_body_token
+            else:
+                raise HTTPException(
+                    status_code=401,
+                    detail={
+                        "code": "SESSION_TOKEN_MISSING",
+                        "message": "chat decision needs a live session token",
+                    },
+                )
+        if not _k08_token_live(_fxaskb_token):
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "SESSION_TOKEN_INVALID",
+                    "message": "unknown session token",
+                },
+            )
+        if _k08_rate is not None:
+            try:
+                _fxaskb_rate_ok = bool(_k08_rate(_fxaskb_token))
+            except Exception:
+                _fxaskb_rate_ok = False
+            if not _fxaskb_rate_ok:
+                raise HTTPException(
+                    status_code=429,
+                    detail={
+                        "code": "RATE_LIMITED",
+                        "message": "rate hook refused",
+                    },
+                )
+        try:
+            _fxaskb_project = (
+                _demof13w_permissions.require_project_id(_fxaskb_body))
+        except _demof13w_permissions.PermissionCheckError as exc:
+            raise HTTPException(
+                status_code=exc.status,
+                detail={"code": exc.code,
+                        "message": str(exc)}) from None
+        _fxaskb_decision = (
+            _fxaskb_body.get("decision")
+            if isinstance(_fxaskb_body, dict) else None)
+        if _fxaskb_decision not in _FXASKB_CHAT_DECISION_VALUES:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "FXASKB_DECISION_INVALID",
+                        "message": ("chat decision needs one of accepted, "
+                                    "rejected, recorded")},
+            )
+        _fxaskb_proposal = (
+            _fxaskb_body.get("proposal")
+            if isinstance(_fxaskb_body, dict) else None)
+        _fxaskb_proposal_text = (
+            str(_fxaskb_proposal)[:500]
+            if isinstance(_fxaskb_proposal, str) else "")
+        _fxaskb_summary = "CHAT_DECISION decision=%s" % (_fxaskb_decision,)
+        if _fxaskb_proposal_text:
+            _fxaskb_summary += " proposal=%s" % (_fxaskb_proposal_text,)
+        from agent_si.watcher import journal as _fxaskb_journal
+        _fxaskb_receipt = _fxaskb_journal.append_event(
+            _fxaskb_project, "chat", "WATCH_DECISION", _fxaskb_summary,
+            (_fxaskb_project,))
+        return {
+            "ok": True,
+            "project_id": _fxaskb_project,
+            "decision": _fxaskb_decision,
+            "time": _fxaskb_receipt.timestamp,
         }
 
     @app.post(_demof13w_catalog.CATALOG_RUN_ROUTE)

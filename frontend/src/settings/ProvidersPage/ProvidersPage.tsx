@@ -263,12 +263,20 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
                           <input
                             type="checkbox"
                             aria-label={`${preset.label} ${model.label}`}
+                            title={
+                              state.connected
+                                ? undefined
+                                : t("chat.hierarchy.connect")
+                            }
                             checked={state.enabledModels.includes(model.id)}
                             disabled={!state.connected}
                             onChange={() => toggleModel(preset.id, model.id)}
                           />
                           {model.label}
-                        </label>
+                        </label>{" "}
+                        <small data-testid={`model-id-${model.id}`}>
+                          {model.id}
+                        </small>
                       </li>
                     ))}
                   </ul>

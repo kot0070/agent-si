@@ -15,7 +15,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { useApiClient } from "../app/ApiClientProvider";
-import { ApiError, apiErrorLocaleKey } from "../api/errors";
+import { ApiError, apiErrorLocaleKey, requestResponse } from "../api/errors";
 import { DEFAULT_LOCALE, formatDate, t } from "../locale/index";
 import enTable from "../locale/en.json";
 import { ErrorPanel } from "../ui/ErrorPanel";
@@ -29,6 +29,14 @@ import {
   streamChat,
 } from "./chatApi";
 import type { ChatRunner } from "./chatApi";
+import {
+  placementForProviderId,
+  placementKey,
+} from "../agents/agentsApi";
+import type { Placement } from "../agents/agentsApi";
+import { listConnectedProviders } from "../settings/ProvidersPage/connectApi";
+import { readRoleProfiles } from "../settings/index";
+import { Icon } from "../ui/icons";
 import {
   askPermission,
   isInstallPermissionAsk,
@@ -50,6 +58,10 @@ interface ChatMessage {
   at: number;
   final: boolean;
   decided?: "accepted" | "rejected";
+  // D6(b): the done event of an executed engine turn marks its answer;
+  // the verdict card is withheld under finished engine runs (nothing to
+  // accept: the work already happened) and kept for plain answers.
+  engineRun?: boolean;
 }
 
 interface BlockingError {
@@ -102,6 +114,18 @@ function readChannelLocale(): string {
 /** Bound chat models for the pre-send hint (GET only, never a token). */
 const CHAT_MODELS_ROUTE = "/api/v1/chat/models";
 
+/** FXASKB B2: the devrun-hold decision ledger (A2 route, token-guarded). */
+const PERMISSIONS_DECIDE_ROUTE = "/api/v1/permissions/decide";
+
+/** FXASKB B3: one journal row per recorded chat answer (token-guarded). */
+const CHAT_DECISION_ROUTE = "/api/v1/chat/decision";
+
+function isInstallHoldTool(toolName: string): boolean {
+  // A B1 hold id names the held command (install:<project>:<argv0>); the
+  // legacy guard-tool asks keep the asked-once check path.
+  return toolName.startsWith("install:");
+}
+
 async function readBoundModels(projectId: string): Promise<unknown[] | null> {
   try {
     const response = await fetch(
@@ -121,6 +145,8 @@ async function readBoundModels(projectId: string): Promise<unknown[] | null> {
 export function ChatArea(props: ChatAreaProps): ReactElement {
   const client = useApiClient();
   const [boundModels, setBoundModels] = useState<unknown[] | null>(null);
+  const [connected, setConnected] = useState<string[] | null>(null);
+  const [directorModel, setDirectorModel] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState(props.initialDraft ?? "");
   const [streaming, setStreaming] = useState(false);
@@ -143,6 +169,11 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
   const cancelRef = useRef(false);
   const streamingRef = useRef(false);
   const lastSentRef = useRef<string | null>(null);
+  // FXRC1FIX P3: the message list owns the scroll inside the chat card;
+  // the composer sits below it in flow and never overlays text. stick
+  // follows the newest message unless the user scrolled up.
+  const messagesRef = useRef<HTMLDivElement | null>(null);
+  const stickRef = useRef(true);
 
   useEffect(() => {
     const onOnline = (): void => {
@@ -190,6 +221,58 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
     };
   }, [props.projectId]);
 
+  // FXDESIGN6: the status line under the composer names the same model and
+  // route the hierarchy rows and the top bar show (served records only).
+  useEffect(() => {
+    let alive = true;
+    void listConnectedProviders().then((ids) => {
+      if (alive) {
+        setConnected(ids);
+      }
+    });
+    void readRoleProfiles(props.projectId).then(
+      (profiles) => {
+        if (!alive) {
+          return;
+        }
+        const director = profiles.director;
+        if (
+          director !== undefined &&
+          director.mode === "PINNED" &&
+          director.provider !== undefined &&
+          director.model !== undefined
+        ) {
+          setDirectorModel(`${director.provider} — ${director.model}`);
+        } else {
+          setDirectorModel(null);
+        }
+      },
+      () => {
+        if (alive) {
+          setDirectorModel(null);
+        }
+      },
+    );
+    return () => {
+      alive = false;
+    };
+  }, [props.projectId]);
+
+  function statusRoute(): string {
+    if (connected === null || connected.length === 0) {
+      return t("shell.common.unknown");
+    }
+    const route = new Set<Placement>();
+    for (const id of connected) {
+      route.add(placementForProviderId(id));
+    }
+    if (route.size === 1) {
+      const only = [...route][0];
+      return only === undefined ? t("shell.common.unknown") : t(placementKey(only));
+    }
+    return t(placementKey("SPLIT"));
+  }
+
   const sendPrompt = (text: string): void => {
     const prompt = text.trim();
     if (prompt === "" || streamingRef.current) {
@@ -236,7 +319,7 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
     );
     runnerRef.current = runner;
     runner.done.then(
-      ({ aborted }) => {
+      ({ aborted, executed }) => {
         runnerRef.current = null;
         streamingRef.current = false;
         setStreaming(false);
@@ -246,7 +329,7 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
         setMessages((prev) =>
           prev.map((message) =>
             message.id === assistantId
-              ? { ...message, final: !aborted }
+              ? { ...message, final: !aborted, engineRun: executed }
               : message,
           ),
         );
@@ -270,6 +353,18 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
             ),
           );
           const toolName = (error as ApiError).toolId as string;
+          if (isInstallHoldTool(toolName)) {
+            // FXASKB B1 hold: the dialog shows regardless of the
+            // asked-once flag; Allow/Deny records the decision and the
+            // same prompt resends, so the run continues stored and
+            // never asks again. The tool is the command's own id.
+            if (pendingAskRef.current?.toolName === toolName) {
+              return;
+            }
+            pendingAskRef.current = { toolName, messageId: assistantId };
+            setPendingAsk({ toolName, messageId: assistantId });
+            return;
+          }
           if (pendingAskRef.current?.toolName === toolName) {
             return;
           }
@@ -404,6 +499,58 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
     }
     pendingAskRef.current = null;
     setPendingAsk(null);
+    if (isInstallHoldTool(ask.toolName)) {
+      // FXASKB B2: record the decision with the session token, then
+      // resend the same prompt automatically; the stored answer lets
+      // the run continue without asking again.
+      const decision = allow ? "allow" : "deny";
+      void requestResponse(PERMISSIONS_DECIDE_ROUTE, {
+        method: "POST",
+        kind: "write",
+        body: {
+          tool_id: ask.toolName,
+          decision,
+          project_id: props.projectId,
+        },
+      }).then(
+        () => {
+          const note = allow
+            ? pt(
+                "chat.permission.allowed",
+                "Install permission granted for '{tool}'.",
+                { tool: ask.toolName },
+              )
+            : pt(
+                "chat.permission.denied",
+                "Install permission denied for '{tool}'.",
+                { tool: ask.toolName },
+              );
+          setMessages((prev) =>
+            prev.map((message) =>
+              message.id === ask.messageId
+                ? {
+                    ...message,
+                    text:
+                      message.text === ""
+                        ? note
+                        : `${message.text}
+${note}`,
+                    decided: allow ? "accepted" : "rejected",
+                  }
+                : message,
+            ),
+          );
+          const prompt = lastSentRef.current;
+          if (prompt !== null && !streamingRef.current) {
+            sendPrompt(prompt);
+          }
+        },
+        () => {
+          setBlocking({ errorKey: "errors.generic", code: "UNKNOWN" });
+        },
+      );
+      return;
+    }
     void askPermission(ask.toolName).then(
       () => {
         const note = allow
@@ -440,12 +587,51 @@ ${note}`,
   };
 
   const decide = (id: string, decided: "accepted" | "rejected"): void => {
+    const proposal =
+      messages.find((message) => message.id === id)?.text ?? "";
     setMessages((prev) =>
       prev.map((message) =>
         message.id === id ? { ...message, decided } : message,
       ),
     );
+    // FXASKB B3: Accept and Reject each post one journal row through
+    // the token-guarded route; a failed post never blocks the local
+    // decision.
+    void requestResponse(CHAT_DECISION_ROUTE, {
+      method: "POST",
+      kind: "write",
+      body: {
+        project_id: props.projectId,
+        decision: decided,
+        proposal: proposal.slice(0, 500),
+      },
+    }).then(
+      () => undefined,
+      () => undefined,
+    );
   };
+
+  // FXRC1FIX P3: follow new text only while the user stays pinned
+  // to the newest message; a manual scroll-up keeps its position.
+  useEffect(() => {
+    if (!stickRef.current) {
+      return;
+    }
+    const box = messagesRef.current;
+    if (box === null) {
+      return;
+    }
+    box.scrollTop = box.scrollHeight;
+  }, [messages, streaming]);
+
+  function handleMessagesScroll(): void {
+    const box = messagesRef.current;
+    if (box === null) {
+      return;
+    }
+    stickRef.current =
+      box.scrollHeight - box.scrollTop - box.clientHeight < 24;
+  }
 
   const channelLocale = readChannelLocale();
   const channelTags = messages.flatMap((message) =>
@@ -455,10 +641,21 @@ ${note}`,
 
   return (
     <section data-testid="chat-area" aria-label={t("shell.sidebar.chat")}>
-      <h1>{t("shell.sidebar.chat")}</h1>
+      {/* FXDESIGN6: the ref centre carries no card and no "Chat" heading;
+          the h1 stays in the DOM for the frozen heading contract but reads
+          as plain conversation (visually hidden). */}
+      <h1 className="fx-vh">{t("shell.sidebar.chat")}</h1>
       <HierarchyRows projectId={props.projectId} />
-      <div data-testid="chat-layout">
-        <div data-testid="chat-messages">
+      <div
+        data-testid="chat-layout"
+        style={{ maxHeight: "calc(100vh - 200px)" }}
+      >
+        <div
+          data-testid="chat-messages"
+          ref={messagesRef}
+          onScroll={handleMessagesScroll}
+          className="fx-chat-column"
+        >
           {messages.map((message) => (
             <div
               key={message.id}
@@ -467,8 +664,13 @@ ${note}`,
                   ? "chat-user-message"
                   : "chat-assistant-message"
               }
+              className={
+                message.role === "user"
+                  ? "fx-msg fx-msg-user"
+                  : "fx-msg fx-msg-assistant"
+              }
             >
-              <p>{message.text}</p>
+              <p style={{ whiteSpace: "pre-wrap" }}>{message.text}</p>
               <time
                 data-testid="chat-timestamp"
                 title={t("chat.stream.timestamp")}
@@ -479,6 +681,7 @@ ${note}`,
               message.final &&
               message.text !== "" &&
               message.decided === undefined &&
+              message.engineRun !== true &&
               !streaming ? (
                 <ApprovalCard
                   proposal={message.text}
@@ -547,66 +750,92 @@ ${note}`,
             </button>
           </div>
         ) : null}
-        <div data-testid="chat-composer">
+        {/* FXDESIGN6: one rounded box docked at the bottom: the field
+            inside, the send as an icon button inside right; a small status
+            line under it (model | route | working state). */}
+        <div data-testid="chat-composer" className="fx-composer">
           {draft !== "" ? (
-            <span data-testid="chat-draft-chip">{t("chat.composer.draft")}</span>
+            <span data-testid="chat-draft-chip" className="fx-quiet">{t("chat.composer.draft")}</span>
           ) : null}
           {boundModels !== null && boundModels.length === 0 ? (
-            <>
-              <p data-testid="chat-no-model-hint">{t("chat.composer.noModel")}</p>
-              <a data-testid="chat-no-model-connect" href="/settings/models">
+            <div className="fx-composer-hint">
+              <p data-testid="chat-no-model-hint" className="fx-quiet">{t("chat.composer.noModel")}</p>
+              <a data-testid="chat-no-model-connect" href="/settings/models" className="fx-btn-quiet">
                 {t("chat.hierarchy.connect")}
               </a>
-            </>
+            </div>
           ) : null}
-          <label>
-            {t("chat.composer.prompt")}
-            <input
-              data-testid="chat-prompt"
-              type="text"
-              placeholder={t("chat.composer.prompt")}
-              aria-label={t("chat.composer.prompt")}
-              value={draft}
-              onChange={(event) => {
-                setDraft(event.target.value);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  handleSend();
-                }
-              }}
-            />
-          </label>
-          <button
-            type="button"
-            data-testid="chat-send"
-            disabled={draft.trim() === "" || streaming}
-            onClick={handleSend}
-          >
-            {t("chat.composer.send")}
-          </button>
+          <div className="fx-composer-box">
+            <label className="fx-composer-field">
+              <span className="fx-vh">{t("chat.composer.prompt")}</span>
+              <input
+                data-testid="chat-prompt"
+                type="text"
+                placeholder={t("chat.composer.prompt")}
+                aria-label={t("chat.composer.prompt")}
+                value={draft}
+                onChange={(event) => {
+                  setDraft(event.target.value);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    handleSend();
+                  }
+                }}
+              />
+            </label>
+            <button
+              type="button"
+              data-testid="chat-send"
+              className="fx-send-btn"
+              aria-label={t("chat.composer.send")}
+              title={t("chat.composer.send")}
+              disabled={draft.trim() === "" || streaming}
+              onClick={handleSend}
+            >
+              <Icon name="send" />
+              <span className="fx-vh">{t("chat.composer.send")}</span>
+            </button>
+          </div>
+          <p data-testid="chat-statusline" className="fx-statusline">
+            {/* FXDESIGN6: one span per value; the "|" dividers are CSS
+                (no separator text nodes, so the locale-only contract
+                sees exactly the three locale values). */}
+            <span>{directorModel ?? t("chat.hierarchy.auto")}</span>
+            <span>{statusRoute()}</span>
+            <span>
+              {streaming
+                ? t("chat.composer.statusWorking")
+                : t("chat.composer.statusReady")}
+            </span>
+          </p>
           {streaming ? (
-            <span data-testid="chat-spinner" role="status">
+            <span data-testid="chat-spinner" role="status" className="fx-quiet">
               {t("chat.stream.spinner")}
             </span>
           ) : null}
           {streaming ? (
-            <button type="button" data-testid="chat-abort" onClick={handleAbort}>
+            <button
+              type="button"
+              data-testid="chat-abort"
+              className="fx-btn-quiet"
+              onClick={handleAbort}
+            >
               {t("chat.abort.cancel")}
             </button>
           ) : null}
           {online ? null : (
-            <span data-testid="chat-offline-dot" role="status">
+            <span data-testid="chat-offline-dot" role="status" className="fx-quiet">
               {t("chat.stream.offline")}
             </span>
           )}
           {health === "degraded" ? (
-            <span data-testid="chat-health-degraded" role="status">
+            <span data-testid="chat-health-degraded" role="status" className="fx-quiet">
               {t("errors.generic")}
             </span>
           ) : null}
           {health === "reconnecting" ? (
-            <span data-testid="chat-health-reconnecting" role="status">
+            <span data-testid="chat-health-reconnecting" role="status" className="fx-quiet">
               {t("chat.stream.offline")}
             </span>
           ) : null}

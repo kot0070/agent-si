@@ -32,11 +32,21 @@ const PartRowBase = z.object({
 export const PartRowSchema: z.ZodType<PartRow> = PartRowBase;
 
 // FXPANEL append-only live fields: every extra is optional, so rows
-// served before the panel upgrade still parse unchanged.
+// served before the panel upgrade still parse unchanged. provider plus
+// placement ride the FXDESIGN4 truth (row.placement LOCAL/SPLIT/CLOUD,
+// UNKNOWN when no writer sourced it); last_action carries the step text;
+// window carries the model context size when the KB knew it.
 export const LiveTokensSchema = z.object({
   input: z.number().int().nullable().optional(),
   output: z.number().int().nullable().optional(),
 });
+
+export const LivePlacementSchema = z.enum([
+  "LOCAL",
+  "SPLIT",
+  "CLOUD",
+  "UNKNOWN",
+]);
 
 export interface LiveRowExtra {
   role?: string;
@@ -45,9 +55,13 @@ export interface LiveRowExtra {
   file?: string;
   cost?: string;
   tokens?: z.infer<typeof LiveTokensSchema>;
-  context?: string;
+  context?: string | number;
   errors?: string[];
   waits?: string[];
+  provider?: string;
+  placement?: z.infer<typeof LivePlacementSchema>;
+  last_action?: string;
+  window?: string | number;
 }
 
 export type LiveRow = PartRow & LiveRowExtra;
@@ -59,9 +73,13 @@ export const LiveRowSchema: z.ZodType<LiveRow> = PartRowBase.extend({
   file: z.string().optional(),
   cost: z.string().optional(),
   tokens: LiveTokensSchema.optional(),
-  context: z.string().optional(),
+  context: z.union([z.string(), z.number().int()]).optional(),
   errors: z.array(z.string()).optional(),
   waits: z.array(z.string()).optional(),
+  provider: z.string().optional(),
+  placement: LivePlacementSchema.optional(),
+  last_action: z.string().optional(),
+  window: z.union([z.string(), z.number().int()]).optional(),
 });
 
 const AgentsLiveResponseSchema = z.object({

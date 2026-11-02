@@ -28,6 +28,22 @@ class ActionRefused(PermissionError):
     code: str = "DEVRUN_ACTION_REFUSED"
 
 
+class SpawnNotInstalled(ValueError):
+    """One check/agent command whose executable is missing here.
+
+    A ValueError so the worker run path turns it into run text; the
+    engine catches it first and marks the check could-not-start (never
+    a red check, never an attempt burn).
+    """
+
+    code: str = "DEVRUN_SPAWN_NOT_INSTALLED"
+
+    def __init__(self, word: str) -> None:
+        super().__init__(
+            "could not start: %s is not installed" % (word,))
+        self.word = str(word)
+
+
 class InstallAskNeeded(PermissionError):
     """An install-class command with no recorded decision must ask.
 
@@ -278,6 +294,26 @@ def _deny_shape(argv: list[str]) -> str:
     return ""
 
 
+def _missing_head(words: list[str], folder: str) -> str | None:
+    """Bare tool head when no executable can start it, else None.
+
+    Mirrors resolve_argv (pytest falls back to python -m pytest, the
+    python pair falls back to each other); a head naming an existing
+    file under the folder also counts as startable (Popen resolves it
+    against the child cwd).
+    """
+    resolved = resolve_argv([str(word) for word in words])
+    if shutil.which(resolved[0]) is not None:
+        return None
+    head = str(words[0])
+    if "/" in head or "\\" in head or os.path.isabs(head):
+        candidate = head if os.path.isabs(head) else os.path.join(
+            str(folder), head)
+        if os.path.isfile(candidate):
+            return None
+    return _bare_head(head)
+
+
 def resolve_argv(argv: list[str]) -> list[str]:
     """Resolve the tool head with shutil.which (never sys.executable).
 
@@ -375,6 +411,9 @@ class _ExecTool:
                         env=env,
                         creationflags=flags,
                     )
+            except FileNotFoundError:
+                raise SpawnNotInstalled(
+                    _bare_head(words[0])) from None
             except OSError as exc:
                 raise ValueError(
                     "cannot spawn command: %s" % (exc,)) from None
@@ -450,6 +489,9 @@ def spawn_checked(
         raise PermissionError(
             "refused: inline code needs approval first "
             "(unapproved runs continue without it)")
+    missing = _missing_head(words, str(folder))
+    if missing is not None:
+        raise SpawnNotInstalled(missing)
     job: dict[str, Any] = {
         "project_id": str(project_id),
         "check_run_id": str(run_id),

@@ -54,9 +54,10 @@ export type BenchEstimateDoc = z.infer<typeof BenchEstimateDocSchema>;
 
 export async function readBenchEstimateDoc(
   modelId: string,
+  level = "Quick",
 ): Promise<BenchEstimateDoc> {
   return requestJson(
-    `/api/v1/local/bench/estimate?model_id=${encodeURIComponent(modelId)}&level=Quick`,
+    `/api/v1/local/bench/estimate?model_id=${encodeURIComponent(modelId)}&level=${encodeURIComponent(level)}`,
     { method: "GET", kind: "read" },
     BenchEstimateDocSchema,
   );

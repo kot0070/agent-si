@@ -103,16 +103,26 @@ describe("fxdesign1 stop status", () => {
     vi.stubGlobal(
       "fetch",
       async (input: unknown) =>
-        new Response(JSON.stringify({ ok: true }), {
-          status: String(input) === "/api/v1/stop-all" ? 200 : 404,
-          headers: { "content-type": "application/json" },
-        }),
+        new Response(
+          JSON.stringify({
+            project_id: "",
+            accepted: true,
+            reason: "stop supervised by user",
+            stopped_count: 3,
+            journal_entry_id: "evt-fxd1",
+            stopped_at: "2026-11-01T00:00:00Z",
+          }),
+          {
+            status: String(input) === "/api/v1/stop-all" ? 200 : 404,
+            headers: { "content-type": "application/json" },
+          },
+        ),
     );
     renderApp(new FakeApiClient({ projects: [PROJECT], liveRows: liveRows() }));
     fireEvent.click(await screen.findByTestId("topbar-stop-all"));
     fireEvent.click(screen.getByTestId("topbar-stop-all"));
     expect((await screen.findByTestId("stop-all-result")).textContent).toBe(
-      "200",
+      "Stopped 3",
     );
   });
 });

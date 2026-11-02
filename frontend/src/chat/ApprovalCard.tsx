@@ -49,9 +49,12 @@ export function ApprovalCard(props: ApprovalCardProps): ReactElement {
       >
         {t("chat.approval.accept")}
       </button>
+      {/* FXDESIGN5 S4: accept is the single primary; edit and reject
+          read as quiet secondaries. */}
       <button
         type="button"
         data-testid="approval-edit"
+        className="fx-btn-quiet"
         onClick={() => {
           setEditText(props.proposal);
           setEditing(true);
@@ -62,6 +65,7 @@ export function ApprovalCard(props: ApprovalCardProps): ReactElement {
       <button
         type="button"
         data-testid="approval-reject"
+        className="fx-btn-quiet"
         onClick={props.onReject}
       >
         {t("chat.approval.reject")}

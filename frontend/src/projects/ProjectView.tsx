@@ -32,9 +32,20 @@ import { LoadingState } from "../ui/LoadingState";
 import { placementKey, resolveStatusHuman } from "../agents/agentsApi";
 import { TASKS_CHANGED_EVENT, taskStatusLabel } from "../tasks/TaskComposer";
 import {
+  buildTokenRows,
+  changedFiles,
+  dedupeLiveRows,
+  formatServedDate,
+  humanRunRef,
+  isFinishedStatus,
+  readTelemetrySummary,
+  sumTokenRows,
+} from "./viewsApi";
+import type { TelemetrySummary } from "./viewsApi";
+import "./projectview.css";
+import {
   PROJECT_VIEWS,
   buildDerivedSplit,
-  buildReportNarrative,
   computeAgeDays,
   CONTEXT_SOURCE,
   contextUsage,
@@ -44,7 +55,6 @@ import {
   readLocalTests,
   remainingBudget,
   saveLocalTests,
-  splitRowsByPlacement,
   sumLedger,
 } from "./projectsApi";
 import type { ProjectViewName } from "./projectsApi";
@@ -54,7 +64,6 @@ import { ProjectLimitsSection } from "../settings/projectLimits";
 import { HealthView } from "./observe/HealthView";
 import { MatrixView } from "./observe/MatrixView";
 import { VerifierView } from "./observe/VerifierView";
-import { classifyScope } from "./scope";
 import { AttachControl } from "../kb/AttachControl";
 
 export type { ProjectViewName };
@@ -89,9 +98,51 @@ function Fact(props: {
   value: string | number;
 }): ReactElement {
   return (
-    <div data-testid={props.testId}>
-      <span>{t(props.labelKey)}</span>
-      <span>{props.value}</span>
+    <div data-testid={props.testId} className="fxpv-fact">
+      <span className="fxpv-fact-label">{t(props.labelKey)}:</span>
+      <span className="fxpv-fact-value">{props.value}</span>
+    </div>
+  );
+}
+
+// One deduped agent row: short human name, served role plus model plus
+// tokens, attempt count when repeated, finished wording for passed rows,
+// and the served reason note for blocked ends. No scope-kind verdict.
+function AgentPlacementRow(props: {
+  testId: string;
+  agent: string;
+  role?: string;
+  model?: string;
+  tokensTotal: number | null;
+  attempts: number;
+  status: PartRow["status"];
+  statusHuman: unknown;
+  placementLabel: string;
+}): ReactElement {
+  const { locale } = useLocale();
+  const short = humanRunRef(props.agent);
+  return (
+    <div key={props.testId} data-testid={props.testId} className="fxpv-row">
+      <span title={short.title}>{short.text}</span>
+      <span>{props.role ?? t("shell.common.unknown")}</span>
+      <span>{props.model ?? t("shell.common.unknown")}</span>
+      <span>
+        {props.tokensTotal === null
+          ? t("shell.common.unknown")
+          : formatNumber(props.tokensTotal, locale)}
+      </span>
+      {props.attempts > 1 ? (
+        <span>{t("projectView.attempts", { count: props.attempts })}</span>
+      ) : null}
+      <span>
+        {isFinishedStatus(props.status)
+          ? t("projectView.finished")
+          : resolveStatusHuman(props.statusHuman, props.status, locale)}
+      </span>
+      {props.status === "BLOCKED" ? (
+        <span className="fxpv-note">{t("projectView.blockedNote")}</span>
+      ) : null}
+      <span className="fxpv-note">{props.placementLabel}</span>
     </div>
   );
 }
@@ -328,6 +379,25 @@ export function LocalTestsSwitch(props: {
   );
 }
 
+const PURPOSE_KEYS: Record<ProjectViewName, string | null> = {
+  overview: "projectView.purpose.overview",
+  tasks: "projectView.purpose.tasks",
+  runs: "projectView.purpose.runs",
+  time: "projectView.purpose.time",
+  "ai-usage": "projectView.purpose.aiUsage",
+  tokens: "projectView.purpose.tokens",
+  cost: "projectView.purpose.cost",
+  "local-ai": "projectView.purpose.localAi",
+  "cloud-ai": "projectView.purpose.cloudAi",
+  models: "projectView.purpose.models",
+  "routing-decisions": "projectView.purpose.routing",
+  audits: "projectView.purpose.audits",
+  errors: "projectView.purpose.errors",
+  reports: "projectView.purpose.reports",
+  // The tests tab already opens with its own served explainer line.
+  tests: null,
+};
+
 export function ProjectView(props: ProjectViewProps): ReactElement {
   const client = useApiClient();
   const { locale } = useLocale();
@@ -350,6 +420,7 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
   const [report, setReport] = useState<string | null>(null);
   const [reportError, setReportError] = useState<PanelError | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
+  const [telemetry, setTelemetry] = useState<TelemetrySummary | null>(null);
   const [nonce, setNonce] = useState(0);
   const [collapsed, setCollapsed] = useState(false);
 
@@ -534,6 +605,24 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
     };
   }, [client, props.projectId, props.view, nonce]);
 
+  // FXVIEWS: optional telemetry enrichment for the tokens and audits
+  // tabs. A missing doc reads null and the tabs stay honestly empty.
+  useEffect(() => {
+    if (props.view !== "tokens" && props.view !== "audits") {
+      setTelemetry(null);
+      return;
+    }
+    let alive = true;
+    void readTelemetrySummary(props.projectId).then((doc) => {
+      if (alive) {
+        setTelemetry(doc);
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, [props.projectId, props.view]);
+
   useEffect(() => {
     if (props.view !== "tasks") {
       return;
@@ -556,6 +645,29 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
     };
   }, [props.projectId, props.view]);
 
+  // FXVIEWS V4: run events land as served task rows, so while any task is
+  // still open the tasks tab re-reads on a short interval; a finished run
+  // stops polling by itself.
+  const tasksUnfinished =
+    tasks !== null &&
+    tasks.some(
+      (task) =>
+        task.status === "QUEUED" ||
+        task.status === "RUNNING" ||
+        task.status === "CREATED",
+    );
+  useEffect(() => {
+    if (props.view !== "tasks" || !tasksUnfinished) {
+      return;
+    }
+    const timer = setInterval(() => {
+      setNonce((value) => value + 1);
+    }, 5000);
+    return () => {
+      clearInterval(timer);
+    };
+  }, [props.view, tasksUnfinished]);
+
   function renderContent(): ReactElement {
     switch (props.view) {
       case "overview": {
@@ -577,19 +689,19 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
                 />
                 <Fact
                   testId="overview-created"
-                  labelKey="chat.stream.timestamp"
-                  value={project.created_at}
+                  labelKey="projectView.overview.created"
+                  value={formatServedDate(project.created_at, locale)}
                 />
                 {age === null ? (
-                  <EmptyState
-                    stateKey="ui.table.empty"
-                    actionKey={null}
-                    onAction={null}
+                  <Fact
+                    testId="overview-age-days"
+                    labelKey="projectView.overview.ageDays"
+                    value={t("shell.common.unknown")}
                   />
                 ) : (
                   <Fact
                     testId="overview-age-days"
-                    labelKey="projects.time.title"
+                    labelKey="projectView.overview.ageDays"
                     value={age}
                   />
                 )}
@@ -642,13 +754,13 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
               <>
                 <Fact
                   testId="overview-budget-spent"
-                  labelKey="telemetry.cost"
-                  value={budget.spent}
+                  labelKey="projectView.cost.spent"
+                  value={`${budget.spent} ${budget.currency}`}
                 />
                 <Fact
                   testId="overview-budget-remaining"
-                  labelKey="projects.derived.label"
-                  value={remainingBudget(budget)}
+                  labelKey="projectView.cost.remaining"
+                  value={`${remainingBudget(budget)} ${budget.currency}`}
                 />
               </>
             )}
@@ -679,9 +791,15 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
         return (
           <div>
             {tasks.map((task) => (
-              <div key={task.task_id} data-testid={`task-row-${task.task_id}`}>
+              <div
+                key={task.task_id}
+                data-testid={`task-row-${task.task_id}`}
+                className="fxpv-task-row"
+              >
                 <span>{task.title}</span>
-                <span>{taskStatusLabel(task.status)}</span>
+                <span className="fxpv-task-chip">
+                  {taskStatusLabel(task.status)}
+                </span>
                 <span>{formatTaskDate(task.created_at, locale)}</span>
               </div>
             ))}
@@ -714,12 +832,21 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
         }
         return (
           <div>
-            {ledger.map((row) => (
-              <div key={row.package_id} data-testid={`time-row-${row.package_id}`}>
-                <span>{row.package_id}</span>
-                <span>{row.wall_time_s}</span>
-              </div>
-            ))}
+            {ledger.map((row) => {
+              const short = humanRunRef(row.package_id);
+              return (
+                <div
+                  key={row.package_id}
+                  data-testid={`time-row-${row.package_id}`}
+                  className="fxpv-row"
+                >
+                  <span>{t("projectView.time.package")}</span>
+                  <span title={short.title}>{short.text}</span>
+                  <span>{row.wall_time_s}</span>
+                  <span>{t("projectView.time.seconds")}</span>
+                </div>
+              );
+            })}
             <Fact
               testId="time-wall-total"
               labelKey="projects.time.title"
@@ -730,6 +857,19 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
       }
       case "ai-usage": {
         const sums = ledger === null ? null : sumLedger(ledger);
+        // XOR: an empty ledger reads as one empty state, never zero rows
+        // plus another empty state; an empty live list reads as a note.
+        if (ledgerError === null && sums !== null && ledger?.length === 0) {
+          return (
+            <div>
+              <EmptyState
+                stateKey="ui.table.empty"
+                actionKey={null}
+                onAction={null}
+              />
+            </div>
+          );
+        }
         return (
           <div>
             {ledgerError !== null ? (
@@ -759,41 +899,72 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
               panelError(liveError)
             ) : live === null ? (
               <LoadingState loadingKey="ui.loading.more" />
+            ) : live.length === 0 ? (
+              <span className="fxpv-note">{t("projectView.noLive")}</span>
             ) : (
               <MatrixView rows={live} />
             )}
           </div>
         );
       }
+      // FXVIEWS V2: the tokens tab reads served token cells only (live
+      // rows plus the analytics telemetry doc): one row per role plus
+      // model with its token count, never money. Missing cells read
+      // UNKNOWN; an unknown project still errors like every tab.
       case "tokens": {
-        if (budgetError !== null) {
-          return panelError(budgetError);
+        if (projectError !== null) {
+          return panelError(projectError);
         }
-        if (budget === null) {
+        if (project === null) {
           return <LoadingState loadingKey="ui.loading.more" />;
+        }
+        if (liveError !== null) {
+          return panelError(liveError);
+        }
+        if (live === null) {
+          return <LoadingState loadingKey="ui.loading.more" />;
+        }
+        const rows = buildTokenRows(live, telemetry);
+        const total = sumTokenRows(rows);
+        const unknown = t("shell.common.unknown");
+        if (rows.length === 0) {
+          return (
+            <div>
+              <EmptyState
+                stateKey="ui.table.empty"
+                actionKey={null}
+                onAction={null}
+              />
+            </div>
+          );
         }
         return (
           <div>
             <Fact
               testId="tokens-spent"
-              labelKey="telemetry.cost"
-              value={budget.spent}
+              labelKey="projectView.tokens.used"
+              value={total === null ? unknown : formatNumber(total, locale)}
             />
-            <Fact
-              testId="tokens-reserved"
-              labelKey="projects.cost.title"
-              value={budget.reserved}
-            />
-            <Fact
-              testId="tokens-limit"
-              labelKey="ui.card.total"
-              value={budget.hard_limit}
-            />
-            <Fact
-              testId="tokens-remaining"
-              labelKey="projects.derived.label"
-              value={remainingBudget(budget)}
-            />
+            {rows.map((row, index) => (
+                <div
+                  key={`${row.role ?? ""}-${row.model ?? ""}-${index}`}
+                  data-testid={`tokens-row-${index}`}
+                  className="fxpv-row"
+                >
+                  <span>{row.role ?? unknown}</span>
+                  <span>{row.model ?? unknown}</span>
+                  <span>
+                    {row.tokens === null
+                      ? unknown
+                      : formatNumber(row.tokens, locale)}
+                  </span>
+                  {row.calls === null ? null : (
+                    <span>
+                      {t("projectView.tokens.calls")}: {row.calls}
+                    </span>
+                  )}
+                </div>
+              ))}
           </div>
         );
       }
@@ -815,24 +986,27 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
                 </div>
                 <Fact
                   testId="cost-spent"
-                  labelKey="telemetry.cost"
-                  value={budget.spent}
+                  labelKey="projectView.cost.spent"
+                  value={`${budget.spent} ${budget.currency}`}
                 />
                 <Fact
                   testId="cost-reserved"
-                  labelKey="projects.cost.title"
-                  value={budget.reserved}
+                  labelKey="projectView.cost.reserved"
+                  value={`${budget.reserved} ${budget.currency}`}
                 />
                 <Fact
                   testId="cost-limit"
-                  labelKey="ui.card.total"
-                  value={budget.hard_limit}
+                  labelKey="projectView.cost.limit"
+                  value={`${budget.hard_limit} ${budget.currency}`}
                 />
                 <Fact
                   testId="cost-remaining"
-                  labelKey="projects.derived.label"
-                  value={remainingBudget(budget)}
+                  labelKey="projectView.cost.remaining"
+                  value={`${remainingBudget(budget)} ${budget.currency}`}
                 />
+                <p data-testid="cost-limit-explainer" className="fxpv-note">
+                  {t("projectView.cost.limitExplainer")}
+                </p>
               </>
             )}
             {budgetError !== null ? (
@@ -841,12 +1015,17 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
               panelError(ledgerError)
             ) : budget === null || ledger === null ? (
               <LoadingState loadingKey="ui.loading.more" />
+            ) : ledger.length === 0 ? (
+              <span className="fxpv-note">{t("projectView.noLedger")}</span>
             ) : (
               <HealthView ledger={ledger} budget={budget} />
             )}
           </div>
         );
       }
+      // FXVIEWS V5: one row per agent plus role plus model with served
+      // tokens; repeated attempts fold into one row with a count; passed
+      // rows say finished; blocked ends carry the served reason note.
       case "local-ai":
       case "cloud-ai": {
         if (liveError !== null) {
@@ -856,7 +1035,9 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
           return <LoadingState loadingKey="ui.loading.more" />;
         }
         const wanted = props.view === "local-ai" ? "LOCAL" : "CLOUD";
-        const rows = splitRowsByPlacement(live)[wanted];
+        const rows = dedupeLiveRows(live).filter(
+          (row) => row.placement === wanted,
+        );
         if (rows.length === 0) {
           return (
             <EmptyState
@@ -866,28 +1047,41 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
             />
           );
         }
+        const agentCounts = new Map<string, number>();
+        for (const row of rows) {
+          agentCounts.set(row.agent, (agentCounts.get(row.agent) ?? 0) + 1);
+        }
         return (
           <div>
-            {rows.map((row) => (
-              <div key={row.agent} data-testid={`place-row-${row.agent}`}>
-                <span>{row.agent}</span>
-                <span>{row.scope}</span>
-                <span data-testid={`scope-kind-${row.agent}`}>
-                  {classifyScope(row.scope)}
-                </span>
-                <span>
-                  {resolveStatusHuman(
-                    readStatusHuman(row),
-                    row.status,
-                    locale,
-                  )}
-                </span>
-                <span>{t(placementKey(wanted))}</span>
-              </div>
+            {rows.map((row, index) => (
+              <AgentPlacementRow
+                key={`${row.agent}-${row.status}-${row.role ?? ""}-${row.model ?? ""}`}
+                testId={
+                  (agentCounts.get(row.agent) ?? 0) > 1
+                    ? `place-row-${row.agent}-${index}`
+                    : `place-row-${row.agent}`
+                }
+                agent={row.agent}
+                role={row.role}
+                model={row.model}
+                tokensTotal={row.tokensTotal}
+                attempts={row.attempts}
+                status={row.status}
+                statusHuman={readStatusHuman(
+                  live.find(
+                    (candidate) =>
+                      candidate.agent === row.agent &&
+                      candidate.status === row.status,
+                  ) ?? live[0],
+                )}
+                placementLabel={t(placementKey(wanted))}
+              />
             ))}
           </div>
         );
       }
+      // FXVIEWS: decision replay rows plus the served live rows (role
+      // plus model plus tokens); either side alone is enough for content.
       case "models": {
         if (whyError !== null) {
           return panelError(whyError);
@@ -895,7 +1089,16 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
         if (whyLoading) {
           return <LoadingState loadingKey="ui.loading.more" />;
         }
-        if (why === null) {
+        if (live === null && liveError === null) {
+          return <LoadingState loadingKey="ui.loading.more" />;
+        }
+        const liveModels =
+          live === null
+            ? []
+            : dedupeLiveRows(live).filter(
+                (row) => row.role !== undefined || row.model !== undefined,
+              );
+        if (why === null && liveModels.length === 0) {
           return (
             <EmptyState
               stateKey="ui.table.empty"
@@ -904,15 +1107,43 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
             />
           );
         }
+        const unknown = t("shell.common.unknown");
         return (
           <div>
-            {why.assignments.map((assignment, index) => (
-              <div key={index} data-testid={`model-row-${index}`}>
-                <span>
-                  {assignment.provider_id}/{assignment.model} {assignment.role}
-                </span>
+            {why === null ? null : (
+              <div>
+                {why.assignments.map((assignment, index) => (
+                  <div key={index} data-testid={`model-row-${index}`}>
+                    <span>
+                      {assignment.provider_id}/{assignment.model}{" "}
+                      {assignment.role}
+                    </span>
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
+            {liveModels.length === 0 ? null : (
+              <div>
+                <p data-testid="models-live-title">
+                  {t("projectView.models.liveTitle")}
+                </p>
+                {liveModels.map((row, index) => (
+                  <div
+                    key={`${row.agent}-${row.role ?? ""}-${row.model ?? ""}-${index}`}
+                    data-testid={`model-live-${index}`}
+                    className="fxpv-row"
+                  >
+                    <span>{row.role ?? unknown}</span>
+                    <span>{row.model ?? unknown}</span>
+                    <span>
+                      {row.tokensTotal === null
+                        ? unknown
+                        : formatNumber(row.tokensTotal, locale)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         );
       }
@@ -970,8 +1201,10 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
               )}
             </div>
             <div data-testid="why-provenance">
-              <span>{why.snapshot.snapshot_ref}</span>
-              <span>{why.snapshot.captured_at}</span>
+              <span>{humanRunRef(why.snapshot.snapshot_ref).text}</span>
+              <span>
+                {formatServedDate(why.snapshot.captured_at, locale)}
+              </span>
             </div>
             <div data-testid="why-this-model-decision">
               <span>{why.decision.decision_id}</span>
@@ -982,25 +1215,154 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
           </div>
         );
       }
+      // FXVIEWS V4: the audits tab reads the served analytics counts plus
+      // every served row that needs attention (blocked or rejected live
+      // rows, blocked or rejected tasks). Nothing served reads as the
+      // honest empty state, never invented zeros.
       case "audits": {
+        if (tasksError !== null) {
+          return panelError(tasksError);
+        }
+        if (liveError !== null) {
+          return panelError(liveError);
+        }
+        if (tasks === null || live === null) {
+          return <LoadingState loadingKey="ui.loading.more" />;
+        }
+        const attention = dedupeLiveRows(live).filter(
+          (row) => row.status === "BLOCKED" || row.status === "REJECTED",
+        );
+        const attentionTasks = tasks.filter(
+          (task) => task.status === "BLOCKED" || task.status === "REJECTED",
+        );
+        const counts = telemetry?.project;
+        if (
+          counts === undefined &&
+          attention.length === 0 &&
+          attentionTasks.length === 0
+        ) {
+          return (
+            <EmptyState
+              stateKey="ui.table.empty"
+              actionKey={null}
+              onAction={null}
+            />
+          );
+        }
+        const unknown = t("shell.common.unknown");
         return (
-          <EmptyState
-            stateKey="ui.table.empty"
-            actionKey={null}
-            onAction={null}
-          />
+          <div>
+            {counts === undefined ? null : (
+              <div data-testid="audits-project-counts" className="fxpv-row">
+                <span>{t("projectView.audits.projectTasks")}</span>
+                <span>{counts.tasks ?? unknown}</span>
+                <span>{t("projectView.audits.projectAudits")}</span>
+                <span>{counts.audits ?? unknown}</span>
+              </div>
+            )}
+            {attention.length === 0 && attentionTasks.length === 0 ? null : (
+              <div>
+                <p data-testid="audits-attention">
+                  {t("projectView.audits.attention")}
+                </p>
+                {attention.map((row, index) => (
+                  <div
+                    key={`${row.agent}-${row.status}-${index}`}
+                    data-testid={`audit-row-${index}`}
+                    className="fxpv-row"
+                  >
+                    <span>{humanRunRef(row.agent).text}</span>
+                    <span>
+                      {resolveStatusHuman(
+                        readStatusHuman(
+                          live.find(
+                            (candidate) =>
+                              candidate.agent === row.agent &&
+                              candidate.status === row.status,
+                          ) ?? live[0],
+                        ),
+                        row.status,
+                        locale,
+                      )}
+                    </span>
+                  </div>
+                ))}
+                {attentionTasks.map((task) => (
+                  <div
+                    key={task.task_id}
+                    data-testid={`audit-task-${task.task_id}`}
+                    className="fxpv-row"
+                  >
+                    <span>{task.title}</span>
+                    <span>{taskStatusLabel(task.status)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         );
       }
+      // FXVIEWS: served failure rows only (blocked live rows, blocked or
+      // rejected tasks). No served failure reads as the honest empty
+      // state; an unknown project still errors.
       case "errors": {
         if (projectError !== null) {
           return panelError(projectError);
         }
+        if (project === null) {
+          return <LoadingState loadingKey="ui.loading.more" />;
+        }
+        if (tasksError !== null) {
+          return panelError(tasksError);
+        }
+        if (liveError !== null) {
+          return panelError(liveError);
+        }
+        if (tasks === null || live === null) {
+          return <LoadingState loadingKey="ui.loading.more" />;
+        }
+        const blocked = dedupeLiveRows(live).filter(
+          (row) => row.status === "BLOCKED",
+        );
+        const failedTasks = tasks.filter(
+          (task) => task.status === "BLOCKED" || task.status === "REJECTED",
+        );
+        if (blocked.length === 0 && failedTasks.length === 0) {
+          return (
+            <EmptyState
+              stateKey="ui.table.empty"
+              actionKey={null}
+              onAction={null}
+            />
+          );
+        }
         return (
-          <EmptyState
-            stateKey="ui.table.empty"
-            actionKey={null}
-            onAction={null}
-          />
+          <div>
+            {blocked.map((row, index) => (
+              <div
+                key={`${row.agent}-${index}`}
+                data-testid={`error-blocked-${index}`}
+                className="fxpv-row"
+              >
+                <span>{t("projectView.errors.blockedAgents")}</span>
+                <span>{humanRunRef(row.agent).text}</span>
+                <span className="fxpv-note">
+                  {t("projectView.blockedNote")}
+                </span>
+              </div>
+            ))}
+            {failedTasks.map((task) => (
+              <div
+                key={task.task_id}
+                data-testid={`error-task-${task.task_id}`}
+                className="fxpv-row"
+              >
+                <span>{t("projectView.errors.failedTasks")}</span>
+                <span>{task.title}</span>
+                <span>{taskStatusLabel(task.status)}</span>
+              </div>
+            ))}
+          </div>
         );
       }
       case "reports": {
@@ -1014,7 +1376,7 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
                 <LoadingState loadingKey="ui.loading.more" />
               ) : (
                 <div data-testid="report-project-name">
-                  <span>{t("shell.topbar.project")}</span>
+                  <span>{t("shell.topbar.project")}:</span>
                   <span>{project.name}</span>
                 </div>
               )}
@@ -1024,13 +1386,9 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
                 <LoadingState loadingKey="ui.loading.more" />
               ) : (
                 <div data-testid="report-task-counts">
-                  <span>{t("tasks.list.title")}</span>
+                  <span>{t("tasks.list.title")}:</span>
                   {tasks.length === 0 ? (
-                    <EmptyState
-                      stateKey="tasks.list.empty"
-                      actionKey={null}
-                      onAction={null}
-                    />
+                    <span>0</span>
                   ) : (
                     statusCounts(tasks).map(({ status, count }) => (
                       <div key={status} data-testid={`report-task-count-${status}`}>
@@ -1048,15 +1406,15 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
               ) : (
                 <>
                   <div data-testid="report-budget-spent">
-                    <span>{t("telemetry.cost")}</span>
+                    <span>{t("projectView.cost.spent")}:</span>
                     <span>{`${budget.spent} ${budget.currency}`}</span>
                   </div>
                   <div data-testid="report-budget-reserved">
-                    <span>{t("projects.cost.title")}</span>
+                    <span>{t("projectView.cost.reserved")}:</span>
                     <span>{`${budget.reserved} ${budget.currency}`}</span>
                   </div>
                   <div data-testid="report-budget-limit">
-                    <span>{t("ui.card.total")}</span>
+                    <span>{t("projectView.cost.limit")}:</span>
                     <span>{`${budget.hard_limit} ${budget.currency}`}</span>
                   </div>
                 </>
@@ -1081,16 +1439,29 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
                 panelError(budgetError)
               ) : tasks === null || ledger === null || budget === null ? (
                 <LoadingState loadingKey="ui.loading.more" />
-              ) : tasks.length === 0 ? (
-                <EmptyState stateKey="ui.table.empty" actionKey={null} onAction={null} />
               ) : (
                 <>
-                  <span>{t("projects.derived.label")}</span>
-                  {buildReportNarrative({
-                    tasks,
-                    ledger,
-                    budget,
-                  }).map((line) => <span key={line}>{line}</span>)}
+                  <span>{t("projects.derived.label")}:</span>
+                  {(
+                    [
+                      ["projectView.reports.packages", formatNumber(sumLedger(ledger).packages, locale)],
+                      ["projectView.reports.tasks", formatNumber(tasks.length, locale)],
+                      ["projectView.reports.agents", formatNumber(sumLedger(ledger).agents, locale)],
+                      ["projectView.reports.peak", formatNumber(sumLedger(ledger).peak, locale)],
+                      ["projectView.reports.wall", formatNumber(sumLedger(ledger).wall, locale)],
+                      ["projectView.reports.spent", `${formatNumber(budget.spent, locale)} ${budget.currency}`],
+                      ["projectView.reports.reserved", `${formatNumber(budget.reserved, locale)} ${budget.currency}`],
+                      [
+                        "projectView.reports.remaining",
+                        `${formatNumber(remainingBudget(budget), locale)} ${budget.currency}`,
+                      ],
+                    ] as Array<[string, string]>
+                  ).map(([labelKey, value]) => (
+                    <div key={labelKey} className="fxpv-row">
+                      <span>{t(labelKey)}:</span>
+                      <span>{value}</span>
+                    </div>
+                  ))}
                 </>
               )}
             </div>
@@ -1103,22 +1474,41 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
                 panelError(budgetError)
               ) : ledger === null || budget === null ? (
                 <LoadingState loadingKey="ui.loading.more" />
-              ) : tasks === null || tasks.length === 0 ? (
-                <EmptyState stateKey="ui.table.empty" actionKey={null} onAction={null} />
-              ) : buildDerivedSplit({ ledger, budget }).length === 0 ? (
-                <EmptyState stateKey="ui.table.empty" actionKey={null} onAction={null} />
-              ) : (
+              ) : buildDerivedSplit({ ledger, budget }).length === 0 ? null : (
                 buildDerivedSplit({ ledger, budget }).map((allocation) => (
                   <div
                     key={allocation.packageId}
                     data-testid={`derived-split-${allocation.packageId}`}
+                    className="fxpv-row"
                   >
                     <span>{t(allocation.labelKey)}</span>
-                    <span>{allocation.packageId}</span>
+                    <span>{humanRunRef(allocation.packageId).text}</span>
                     <span>
                       {formatNumber(allocation.derivedCost, locale)}{" "}
                       {allocation.currency}
                     </span>
+                  </div>
+                ))
+              )}
+            </div>
+            <div data-testid="project-report-files">
+              <span>{t("projectView.reports.changedFiles")}</span>
+              {liveError !== null ? (
+                panelError(liveError)
+              ) : live === null ? (
+                <LoadingState loadingKey="ui.loading.more" />
+              ) : changedFiles(live).length === 0 ? (
+                <span className="fxpv-note">
+                  {t("projectView.reports.noFiles")}
+                </span>
+              ) : (
+                changedFiles(live).map((file) => (
+                  <div
+                    key={file}
+                    data-testid="report-file-row"
+                    className="fxpv-row"
+                  >
+                    <span title={file}>{humanRunRef(file).text}</span>
                   </div>
                 ))
               )}
@@ -1134,12 +1524,16 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
 
   return (
     <div>
-      <nav>
+      <nav aria-label={t("projectView.tabsLabel")} className="fxpv-tabs">
         {PROJECT_VIEWS.map((name) => (
           <button
             key={name}
             type="button"
             data-testid={projectMenuTestId(name)}
+            aria-current={props.view === name ? "true" : undefined}
+            className={
+              props.view === name ? "fxpv-tab fxpv-tab-selected" : "fxpv-tab"
+            }
             onClick={() => {
               props.onSelect?.(name);
             }}
@@ -1154,6 +1548,9 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
           </button>
         ))}
       </nav>
+      {PURPOSE_KEYS[props.view] === null ? null : (
+        <p data-testid="tab-purpose">{t(PURPOSE_KEYS[props.view] as string)}</p>
+      )}
       <Card
         cardId={`project-${props.view}`}
         titleKey={projectViewTitleKey(props.view)}

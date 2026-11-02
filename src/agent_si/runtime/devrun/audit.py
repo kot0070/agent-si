@@ -114,7 +114,7 @@ def judge(
 
     messages = auditor_messages(goal, files_diff, checks)
     # FXPARALLEL BEGIN charge-lock: auditor charges under the run lock.
-    response, over, _row = _roles.invoke(
+    response, over, _row = _roles.invoke_owned(
         app, adapter, resolution, messages, record=record,
         project_id=project_id, run_id=run_id, part=part_id,
         attempt=attempt, lock=lock)

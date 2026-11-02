@@ -248,10 +248,10 @@ export function buildDerivedSplit(input: {
 
 export type RowsByPlacement = Record<Placement, PartRow[]>;
 
-// Buckets served agent rows with the documented placement rule from
-// agentsApi; bucket sizes are exact row counts.
+// Buckets served agent rows with the placement truth from agentsApi;
+// rows without a sourced placement read UNKNOWN, never a status guess.
 export function splitRowsByPlacement(rows: PartRow[]): RowsByPlacement {
-  const out: RowsByPlacement = { LOCAL: [], SPLIT: [], CLOUD: [] };
+  const out: RowsByPlacement = { LOCAL: [], SPLIT: [], CLOUD: [], UNKNOWN: [] };
   for (const row of rows) {
     out[placementForRow(row)].push(row);
   }

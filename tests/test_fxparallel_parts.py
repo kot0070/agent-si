@@ -791,17 +791,15 @@ def test_t6_cap_reached_ends_run_once(tmp_path, monkeypatch):
         rows = {part["part_id"]: part for part in record.get("parts", [])}
         assert rows["p1"]["attempts"] >= 1, rows
         assert rows["p2"]["attempts"] >= 1, rows
-        # Recorded spend equals the sum of priced ledger charges. Only
-        # the first call per (run, provider) settles: later calls keep
-        # the same reservation id chat-<run>-<provider> and the gate
-        # refuses the second settle as a duplicate (pre-existing,
-        # src/agent_si/runtime/manager.py:282 with
-        # src/agent_si/budget/gate.py:929-939; not changed here).
+        # Recorded spend equals the sum of priced ledger charges
+        # (per-call billing, int B4: run-c<seq> ids, every call settles
+        # its own reservation; the whole post-call block runs as one
+        # locked unit, so two racing charges never interleave).
         assert _t6_spent(app, project) == _t6_ledger_sum(record), (
             record.get("ledger"))
 
-        # Limit-1/limit-2 spent parity: the same scripted run settles
-        # the same first-call charge at either limit.
+        # Limit-1/limit-2 spent parity: the same scripted run charges
+        # the same calls at either limit.
         monkeypatch.setattr(_engine, "_MAX_PART_WORKERS", 1)
         project1 = "fxpar-t6-one"
         folder1 = _project_dir(tmp_path, project1)
@@ -983,25 +981,16 @@ def test_t10_thread_exception_one_terminal(tmp_path, monkeypatch):
 
 # -- T9: limit 1 reproduces today's order and event texts ---------------
 
-# Baseline captured from the sequential engine before the change
-# (served POST chat stream, two-part green plan, PINNED mock
-# provider, audit PASS). Run-unique hex folded to H, the working
+# Baseline pinned to int's current served shape (refreshed at the
+# origin/int merge: one Team line per FXRC1FIX P2, no adapter refs in
+# the auditor line; the same shapes test_fxdevwire_served.py asserts
+# at :459/:468/:545/:719). Run-unique hex folded to H, the working
 # folder line folded to TMP.
 _T9_BASELINE = [
     ("start", ""),
     ("delta", "Working folder: TMP\n"),
-    ("delta", "Role director: mock/mock-canned (PINNED why: "
-               '{"mode": "PINNED", "model": "mock-canned", '
-               '"provider": "mock"})\n'),
-    ("delta", "Role manager: mock/mock-canned (PINNED why: "
-               '{"mode": "PINNED", "model": "mock-canned", '
-               '"provider": "mock"})\n'),
-    ("delta", "Role worker: mock/mock-canned (PINNED why: "
-               '{"mode": "PINNED", "model": "mock-canned", '
-               '"provider": "mock"})\n'),
-    ("delta", "Role auditor: mock/mock-canned (PINNED why: "
-               '{"mode": "PINNED", "model": "mock-canned", '
-               '"provider": "mock"})\n'),
+    ("delta", "Team: director, manager, worker, auditor on "
+               "mock/mock-canned (Pinned)\n"),
     ("delta", "Director: plan of 2 parts\n"),
     ("delta", "Part p1: Write test_p1.py with one passing test "
                "[files: test_p1.py]\n"),
@@ -1010,12 +999,12 @@ _T9_BASELINE = [
     ("delta", "Part p1: attempt 1\n"),
     ("delta", "Check p1 $ python -m pytest test_p1.py -q -p "
                "no:cacheprovider -> exit 0\n"),
-    ("delta", "Auditor for p1: PASS (checks green) [auditor-H-p1-H]\n"),
+    ("delta", "Auditor for p1: PASS (checks green)\n"),
     ("delta", "Part p1: PASS (checks green, auditor PASS)\n"),
     ("delta", "Part p2: attempt 1\n"),
     ("delta", "Check p2 $ python -m pytest test_p2.py -q -p "
                "no:cacheprovider -> exit 0\n"),
-    ("delta", "Auditor for p2: PASS (checks green) [auditor-H-p2-H]\n"),
+    ("delta", "Auditor for p2: PASS (checks green)\n"),
     ("delta", "Part p2: PASS (checks green, auditor PASS)\n"),
     ("delta", "Total: 0 input + 0 output = 0 tokens; cost: UNKNOWN\n"),
     ("delta", "run success: all 2 parts PASS\n"),
@@ -1030,7 +1019,9 @@ def _t9_fold(text):
     # shutil.which finds a real interpreter under a user PATH and
     # nothing under the sandbox PATH); fold it so the safety switch
     # compares order plus shape, not the machine's python location.
-    text = re.sub(r"[A-Za-z]:[\\/][\w\-.\\/]*python(\.exe)?",
+    # The class includes the space: some machines resolve the
+    # interpreter under a profile dir like "C:\Users\PC IA\...".
+    text = re.sub(r"[A-Za-z]:[\\\w\-.\\/ ]*python(\.exe)?",
                   "python", text, flags=re.IGNORECASE)
     return re.sub(r"[0-9a-f]{8,}", "H", text)
 
@@ -1104,14 +1095,10 @@ def test_a2_live_rows_carry_own_cost(tmp_path, monkeypatch):
             return {"input_tokens": 10000, "output_tokens": 10000}
 
         # Only the worker role is priced here: director/manager/auditor
-        # run on the unpriced mock pair (UNAVAILABLE, no reservation),
-        # so the run's single priced settle belongs to a part worker
-        # call. The second worker call keeps the same reservation id
-        # and the gate refuses it as a duplicate (pre-existing,
-        # src/agent_si/runtime/manager.py:282 with
-        # src/agent_si/budget/gate.py:929-939): the own-row assertion
-        # below is the A2 contract, the priced/UNAVAILABLE split is
-        # that known bug, not this lane.
+        # run on the unpriced mock pair (UNAVAILABLE, no reservation).
+        # Per-call billing (int B4: run-c<seq> ids): each part worker
+        # call settles its own reservation, so both parts are priced.
+        # The own-row assertions below are the A2 contract.
         factory = _FakeFactory({
             "director": [_plan_text(plan)],
             "manager": [_manager_order(["p1", "p2"])],
@@ -1150,19 +1137,16 @@ def test_a2_live_rows_carry_own_cost(tmp_path, monkeypatch):
         assert set(live) == {"p1", "p2"}, _live_by_scope(project)
         assert live["p1"] == own["p1"], (live, own)
         assert live["p2"] == own["p2"], (live, own)
-        # Exactly one part worker call settles (the run's single
-        # priced settle for the pair); the peer keeps the same
-        # reservation id and is refused as a duplicate. Either order
-        # is fine, but the rows must differ and match their parts.
+        # Both part worker calls settle (per-call ids); either order
+        # is fine, but the rows must differ, match their parts, and
+        # carry the exact staged prices.
         priced = [part for part, cost in live.items()
                   if cost not in ("UNKNOWN", "UNAVAILABLE", None)]
-        assert len(priced) == 1, (live, own)
+        assert len(priced) == 2, (live, own)
         assert live["p1"] != live["p2"], (
             "the two parts carry different costs: %s" % (live,))
-        if priced == ["p1"]:
-            assert live["p1"] == "0.007500", (live, own)
-        else:
-            assert live["p2"] == "0.750000", (live, own)
+        assert live["p1"] == "0.007500", (live, own)
+        assert live["p2"] == "0.750000", (live, own)
     finally:
         _kb.bind_catalog(previous)
 
