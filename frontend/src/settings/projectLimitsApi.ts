@@ -54,6 +54,42 @@ const LimitsSavedSchema = z.object({
 
 export type LimitsSaved = z.infer<typeof LimitsSavedSchema>;
 
+const ParallelPartsSchema = z.object({
+  project_id: z.string().min(1),
+  max_parallel_parts: z.number().int(),
+});
+
+export type ParallelParts = z.infer<typeof ParallelPartsSchema>;
+
+export function parallelPartsPath(projectId: string): string {
+  return `/api/v1/projects/${encodeURIComponent(projectId)}/parallel-parts`;
+}
+
+export async function readParallelParts(
+  projectId: string,
+): Promise<ParallelParts> {
+  return requestJson(
+    parallelPartsPath(projectId),
+    { method: "GET", kind: "read" },
+    ParallelPartsSchema,
+  );
+}
+
+export async function saveParallelParts(
+  projectId: string,
+  maxParallelParts: number,
+): Promise<ParallelParts> {
+  return requestJson(
+    parallelPartsPath(projectId),
+    {
+      method: "PUT",
+      kind: "write",
+      body: { max_parallel_parts: maxParallelParts },
+    },
+    ParallelPartsSchema,
+  );
+}
+
 export function stepLimitsPath(projectId: string): string {
   return `/api/v1/projects/${encodeURIComponent(projectId)}/step-limits`;
 }

@@ -8,8 +8,10 @@ import { ApiError, apiErrorLocaleKey } from "../api/errors";
 import { t } from "../locale/index";
 import {
   readBudgetLine,
+  readParallelParts,
   readStepLimits,
   saveBudgetLimits,
+  saveParallelParts,
   saveStepLimits,
 } from "./projectLimitsApi";
 
@@ -29,6 +31,7 @@ export function ProjectLimitsSection(
 ): ReactElement {
   const [taskText, setTaskText] = useState("");
   const [chatText, setChatText] = useState("");
+  const [parallelText, setParallelText] = useState("1");
   const [budgetText, setBudgetText] = useState<string | null>(null);
   const [capsText, setCapsText] = useState("");
   const [spendingLines, setSpendingLines] = useState<ReadonlyArray<string>>(
@@ -36,6 +39,7 @@ export function ProjectLimitsSection(
   );
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [parallelSaving, setParallelSaving] = useState(false);
   const [capsSaving, setCapsSaving] = useState(false);
   const [errorKey, setErrorKey] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
@@ -70,11 +74,19 @@ export function ProjectLimitsSection(
           readStepLimits(props.projectId),
           readBudgetLine(props.projectId),
         ]);
+        let parallel = 1;
+        try {
+          const stored = await readParallelParts(props.projectId);
+          parallel = stored.max_parallel_parts;
+        } catch {
+          parallel = 1;
+        }
         if (!alive) {
           return;
         }
         setTaskText(String(limits.task_max_steps));
         setChatText(String(limits.chat_max_steps));
+        setParallelText(String(parallel));
         setBudgetText(
           `${budget.budget.spent} / ${budget.budget.hard_limit} ${budget.budget.currency}`,
         );
@@ -155,6 +167,33 @@ export function ProjectLimitsSection(
     }
   }
 
+  async function onSaveParallel(): Promise<void> {
+    const parallel = Number(parallelText);
+    if (
+      !Number.isInteger(parallel) ||
+      parallel < 1 ||
+      parallel > 4
+    ) {
+      setErrorKey("errors.generic");
+      return;
+    }
+    setParallelSaving(true);
+    try {
+      const saved = await saveParallelParts(props.projectId, parallel);
+      if (saved.project_id !== props.projectId) {
+        setErrorKey("errors.generic");
+        return;
+      }
+      setParallelText(String(saved.max_parallel_parts));
+      setErrorKey(null);
+      setNonce((value) => value + 1);
+    } catch (error) {
+      setErrorKey(errorKeyOf(error));
+    } finally {
+      setParallelSaving(false);
+    }
+  }
+
   if (!loaded) {
     return (
       <section data-testid="project-limits-section">
@@ -210,6 +249,30 @@ export function ProjectLimitsSection(
         disabled={saving}
         onClick={() => {
           void onSave();
+        }}
+      >
+        {t("chat.composer.send")}
+      </button>
+      <label htmlFor="project-limits-parallel">
+        {t("settings.project.parallel")}
+      </label>
+      <input
+        id="project-limits-parallel"
+        data-testid="project-limits-parallel"
+        type="number"
+        min={1}
+        max={4}
+        value={parallelText}
+        onChange={(event: { target: { value: string } }) => {
+          setParallelText(event.target.value);
+        }}
+      />
+      <button
+        type="button"
+        data-testid="project-limits-parallel-save"
+        disabled={parallelSaving}
+        onClick={() => {
+          void onSaveParallel();
         }}
       >
         {t("chat.composer.send")}

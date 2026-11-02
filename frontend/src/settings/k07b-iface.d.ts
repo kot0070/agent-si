@@ -304,6 +304,7 @@ export type LocaleKey =
   | 'settings.optimization.title'
   | 'settings.optimization.weights'
   | 'settings.project.needItNow'
+  | 'settings.project.parallel'
   | 'settings.project.purpose'
   | 'settings.project.title'
   | 'settings.providers.searchPlaceholder'

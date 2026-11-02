@@ -50,6 +50,7 @@ if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
 from agent_si.backend import agents_live  # noqa: E402
+from agent_si.backend import parallelparts_routes as _parallelparts  # noqa: E402
 from agent_si.backend.app import create_app  # noqa: E402
 from agent_si.backend.orchestration import steplimits as _steplimits  # noqa: E402
 from agent_si.providers.adapters.base import (  # noqa: E402
@@ -75,11 +76,13 @@ _SLOW = pytest.mark.timeout(280)
 def setup_function(_func):
     agents_live.clear_live_rows()
     _steplimits._reset_state()
+    _parallelparts._reset_state()
 
 
 def teardown_function(_func):
     agents_live.clear_live_rows()
     _steplimits._reset_state()
+    _parallelparts._reset_state()
     leaked = [thread.name for thread in threading.enumerate()
               if thread.name.startswith("fxparallel-part-")]
     assert not leaked, "part threads outlived the run: %s" % (leaked,)
@@ -1212,3 +1215,119 @@ def test_a3_stop_between_spawn_and_attach(tmp_path, monkeypatch):
     assert pids, "both parts spawned before the stop"
     for pid in pids:
         assert _pid_dead(pid), "check child pid %d is dead" % pid
+
+
+# -- S1/S2/S3: the "parts running at the same time" project setting ----
+
+def _parallel_path(project):
+    return "/api/v1/projects/%s/parallel-parts" % (project,)
+
+
+def _put_parallel(client, project, value, headers=None):
+    return client.put(
+        _parallel_path(project),
+        json={"max_parallel_parts": value},
+        headers=_auth() if headers is None else headers)
+
+
+def _s1_worker(barrier):
+    def _worker(n_calls, messages):
+        if n_calls == 0:
+            barrier.wait(timeout=15)
+        n = _part_of(messages)
+        if n_calls % 2 == 0:
+            return _write_pass(n)
+        return json.dumps({"actions": [], "done": True})
+    return _worker
+
+
+@_SLOW
+def test_s1_setting_two_via_route_overlaps(tmp_path):
+    project = "fxpar-s1"
+    folder = _project_dir(tmp_path, project)
+    barrier = threading.Barrier(2)
+    factory = _FakeFactory({
+        "director": [_plan_text(_two_part_plan())],
+        "manager": [_manager_order(["p1", "p2"])],
+        "worker": [_s1_worker(barrier)],
+        "auditor": [_audit_pass],
+    })
+    app = _served_app(tmp_path, project, factory)
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.get(_parallel_path(project), headers=_auth())
+    assert resp.status_code == 404, resp.text
+    resp = _put_parallel(client, project, 2)
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"project_id": project,
+                           "max_parallel_parts": 2}, resp.text
+    resp = client.get(_parallel_path(project), headers=_auth())
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["max_parallel_parts"] == 2, resp.text
+    saved_path = (tmp_path / ("store-" + project)
+                  / "devrun_parallel.json")
+    with open(str(saved_path), encoding="utf-8") as handle:
+        saved = json.load(handle)
+    assert saved[project] == 2, saved
+    resp = _post_chat(client, project, folder)
+    assert resp.status_code == 200, resp.text
+    text = _all_text(_parse_sse(resp.text))
+    assert "Up to 2 parts at the same time" in text, text
+    record = _run_record(app, project)
+    assert record is not None, "devrun run record stored on app state"
+    assert record.get("success") is True, record.get("summary")
+    times = _part_times(record)
+    assert _overlaps(times["p1"], times["p2"]), (
+        "setting 2 runs two parts at once: %s" % (times,))
+
+
+@_SLOW
+def test_s2_absent_setting_is_sequential(tmp_path):
+    project = "fxpar-s2"
+    folder = _project_dir(tmp_path, project)
+    factory = _FakeFactory({
+        "director": [_plan_text(_two_part_plan())],
+        "manager": [_manager_order(["p1", "p2"])],
+        "worker": [_s1_worker(threading.Barrier(1))],
+        "auditor": [_audit_pass],
+    })
+    app = _served_app(tmp_path, project, factory)
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = _post_chat(client, project, folder)
+    assert resp.status_code == 200, resp.text
+    text = _all_text(_parse_sse(resp.text))
+    assert "Up to" not in text, text
+    record = _run_record(app, project)
+    assert record is not None, "devrun run record stored on app state"
+    assert record.get("success") is True, record.get("summary")
+    times = _part_times(record)
+    assert times["p2"][0] >= times["p1"][1], (
+        "absent setting runs parts one by one: %s" % (times,))
+
+
+@_SLOW
+def test_s3_bad_value_is_one(tmp_path):
+    project = "fxpar-s3"
+    folder = _project_dir(tmp_path, project)
+    factory = _FakeFactory({
+        "director": [_plan_text(_two_part_plan())],
+        "manager": [_manager_order(["p1", "p2"])],
+        "worker": [_s1_worker(threading.Barrier(1))],
+        "auditor": [_audit_pass],
+    })
+    app = _served_app(tmp_path, project, factory)
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = _put_parallel(client, project, 9)
+    assert resp.status_code == 400, resp.text
+    assert "POLICY_CONFLICT" in resp.text, resp.text
+    resp = _put_parallel(client, project, "many")
+    assert resp.status_code == 400, resp.text
+    resp = _post_chat(client, project, folder)
+    assert resp.status_code == 200, resp.text
+    text = _all_text(_parse_sse(resp.text))
+    assert "Up to" not in text, text
+    record = _run_record(app, project)
+    assert record is not None, "devrun run record stored on app state"
+    assert record.get("success") is True, record.get("summary")
+    times = _part_times(record)
+    assert times["p2"][0] >= times["p1"][1], (
+        "bad value falls back to sequential: %s" % (times,))

@@ -57,11 +57,43 @@ class _InstallHeld(Exception):
 _EXTRA_ATTEMPTS = 2
 
 # FXPARALLEL BEGIN limit: one limit, default 1, this one place.
-#: Max independent parts of one run executing at once. Default 1:
-#: sequential, byte-for-byte int behaviour. Tests pin it to 2 via
+#: Fallback when no project setting is stored. The user-facing switch
+#: is the per-project "parts running at the same time" setting 1..4
+#: (parallel-parts route, devrun_parallel.json); _parallel_limit
+#: resolves it once per run with a clamp. Tests pin this constant via
 #: monkeypatch only where the spec proves overlap.
 _MAX_PART_WORKERS = 1
+#: Hard bounds of the user setting (mirror the route module).
+_PARALLEL_MIN = 1
+_PARALLEL_MAX = 4
 # FXPARALLEL END limit.
+
+
+def _parallel_limit(app: Any, project: str, default: Any) -> int:
+    """Effective part-parallelism for one run: stored setting wins.
+
+    Reads once at run start: in-memory project value first, else the
+    SAVED file, else the passed default. Clamped to 1..4; anything
+    unusable (absent, bad type, out of range, unreadable) is 1, the
+    sequential default. Never raises.
+    """
+    value: Any = None
+    try:
+        from agent_si.backend import parallelparts_routes as _parallel
+        store = getattr(getattr(app, "state", None),
+                        "k02r3_store_dir", None)
+        value = _parallel.effective_parallel_for(store, str(project or ""))
+    except Exception:
+        value = None
+    if value is None:
+        value = default
+    try:
+        if isinstance(value, bool):
+            return 1
+        number = int(value)
+    except (TypeError, ValueError):
+        return 1
+    return max(_PARALLEL_MIN, min(_PARALLEL_MAX, number))
 
 # FXPARALLEL BEGIN helpers: stamps plus abort kill pass.
 def _utcnow() -> str:
@@ -924,7 +956,9 @@ def _run_parts(*, record: Any, app: Any, parts: list, order: list,
     # FXPARALLEL END dep-gate.
 
     # FXPARALLEL BEGIN scheduler: threads plus one queue consumer.
-    limit = max(1, int(_MAX_PART_WORKERS))
+    # Read once at run start: the project setting wins, else the
+    # module fallback; clamped 1..4, bad/absent is 1 (sequential).
+    limit = _parallel_limit(app, project, _MAX_PART_WORKERS)
     box: Any = queue.Queue()
     threads: dict[str, Any] = {}
     running_files: dict[str, set] = {}
@@ -935,6 +969,14 @@ def _run_parts(*, record: Any, app: Any, parts: list, order: list,
         stamped = dataclasses.replace(event, turn=stamp[0])
         stamp[0] += 1
         return stamped
+
+    # Announce the switch as the first parts-phase line, only when it
+    # runs above sequential (limit 1 emits nothing: T9 stays byte-identical).
+    if limit > 1:
+        yield _stamp(_run_event(
+            "delta", 0, task_id,
+            "Up to %d parts at the same time" % (limit,),
+            {"run_id": run_id, "max_parallel_parts": limit}))
 
     def _files_overlap(part_id: str) -> bool:
         wanted = set(by_id[part_id]["files"])
