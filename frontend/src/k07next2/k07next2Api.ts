@@ -99,6 +99,17 @@ const ProjectTelemetrySchema = TelemetryDocSchema.extend({
   providers: z
     .array(TelemetryUsageRowSchema.extend({ provider: z.string() }))
     .optional(),
+  // FXTELEM roles: per-role-per-model aggregates (same events as the
+  // models rows, grouped by the role recorded at record time). Role ""
+  // buckets role-less calls and renders as Other calls.
+  roles: z
+    .array(
+      TelemetryUsageRowSchema.extend({
+        role: z.string(),
+        model: z.string(),
+      }),
+    )
+    .optional(),
 });
 
 export type ProjectTelemetry = z.infer<typeof ProjectTelemetrySchema>;

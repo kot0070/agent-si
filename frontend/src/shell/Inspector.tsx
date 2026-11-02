@@ -762,27 +762,6 @@ export function Inspector(props: InspectorProps): ReactElement {
       : runLive
         ? rows.some((row) => tokensOfRow(row) > 0)
         : projectTotal !== null;
-  // FXTELEM: a price is known when any served cost cell carries a number
-  // (telemetry model row or a run cost); otherwise spent must read the
-  // honest unknown line, never an invented 0.
-  const telemetryCostKnown =
-    (telemetry?.models ?? []).some(
-      (row) => typeof row.cost === "number" && Number.isFinite(row.cost),
-    ) ||
-    (telemetry?.providers ?? []).some(
-      (row) => typeof row.cost === "number" && Number.isFinite(row.cost),
-    );
-  const runsCostKnown = (runs ?? []).some((run) => {
-    const cost = (run as { cost?: unknown }).cost;
-    if (typeof cost === "number" && Number.isFinite(cost)) {
-      return true;
-    }
-    if (typeof cost === "string" && cost !== "" && cost !== "UNKNOWN") {
-      return !Number.isNaN(Number(cost));
-    }
-    return false;
-  });
-  const priceKnown = telemetryCostKnown || runsCostKnown;
 
   const usedCount =
     newest === null ? null : readCount(readExtra(newest, "context"));
@@ -836,22 +815,15 @@ export function Inspector(props: InspectorProps): ReactElement {
   const hard = budget?.hard_limit ?? 0;
   const remaining = budget === null ? 0 : Math.max(0, remainingBudget(budget));
   const currency = budget?.currency ?? "";
-  // FXTELEM: price unknown (no served cost number anywhere) means spent
-  // and remaining are not known, never 0; the limit stays real.
-  const spentUnknown =
-    budget !== null && !priceKnown && spent === 0 && reserved === 0;
-  const spentText = spentUnknown
-    ? t("shell.cards.budget.unknownPrice")
-    : `${formatNumber(spent)}${currency === "" ? "" : ` ${currency}`}`;
-  const remainingText = spentUnknown
-    ? t("shell.cards.budget.unknownPrice")
-    : `${formatNumber(remaining)}${currency === "" ? "" : ` ${currency}`}`;
+  // FXTELEM round 4: the budget state rows hold real numbers (spent sums
+  // the settled reservations), so spent/reserved/remaining render them;
+  // "not known" never hides a served number.
+  const spentText = `${formatNumber(spent)}${currency === "" ? "" : ` ${currency}`}`;
+  const remainingText = `${formatNumber(remaining)}${currency === "" ? "" : ` ${currency}`}`;
   const budgetTotal =
     budget === null
       ? unknown
-      : spentUnknown
-        ? `${formatNumber(hard)}${currency === "" ? "" : ` ${currency}`} · ${t("shell.cards.budget.unknownPrice")}`
-        : `${formatNumber(spent)} / ${formatNumber(hard)}${currency === "" ? "" : ` ${currency}`}`;
+      : `${formatNumber(spent)} / ${formatNumber(hard)}${currency === "" ? "" : ` ${currency}`}`;
 
   const [budgetExpanded, onBudgetToggleInner] = useKitExpanded(
     budgetCollapsed,

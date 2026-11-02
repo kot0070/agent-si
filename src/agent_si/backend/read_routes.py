@@ -397,6 +397,11 @@ def register_read_routes(app: Any) -> Any:
             store_dir=directory, project_id=str(project_id))
         providers = _telemetry_run_store.get_provider_aggregates(
             store_dir=directory, project_id=str(project_id))
+        # FXTELEM roles: per-role-per-model aggregates for the Tokens tab,
+        # so role rows carry the served per-call numbers (same events as
+        # the models rows, grouped by the role recorded at record time).
+        roles = _telemetry_run_store.get_role_aggregates(
+            store_dir=directory, project_id=str(project_id))
         unavailable: list = []
         if project.get("tasks") is None:
             unavailable.append("project.tasks")
@@ -417,6 +422,7 @@ def register_read_routes(app: Any) -> Any:
             "project": project,
             "models": models,
             "providers": providers,
+            "roles": roles,
             "source": "telemetry_store",
             "unavailable": sorted(unavailable),
         })

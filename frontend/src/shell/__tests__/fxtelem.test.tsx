@@ -67,6 +67,11 @@ const TELEMETRY_PROJECT = {
     { model: "muse-spark-1.3-contributor", calls: 2, tokens: 33180, cost: "UNAVAILABLE" },
   ],
   providers: [{ provider: "meta", calls: 2, tokens: 33180, cost: "UNAVAILABLE" }],
+  roles: [
+    { role: "manager", model: "muse-spark-1.3-contributor", calls: 1, tokens: 20000, cost: "UNAVAILABLE" },
+    { role: "worker", model: "muse-spark-1.3-contributor", calls: 1, tokens: 13180, cost: "UNAVAILABLE" },
+    { role: "auditor", model: "muse-spark-1.3-contributor", calls: 1, tokens: "UNAVAILABLE", cost: "UNAVAILABLE" },
+  ],
 };
 
 function stubTwoRuns(): void {
@@ -218,18 +223,34 @@ describe("fxtelem two-run truth", () => {
     );
     const spent = await screen.findByTestId("tokens-spent");
     expect(spent.textContent).toContain("33,180");
+    // Role rows carry the served per-role numbers; nothing lands in
+    // Other calls while every call has a role.
+    const rows = await screen.findAllByTestId(/^tokens-row-/);
+    const text = rows.map((row) => row.textContent ?? "").join("\n");
+    expect(text).toContain("manager");
+    expect(text).toContain("20,000");
+    expect(text).toContain("worker");
+    expect(text).toContain("13,180");
+    expect(text).not.toContain("Other calls");
+    // Total is the sum of known rows; the unknown row keeps its own
+    // Unknown instead of poisoning the total.
+    expect(spent.textContent).toContain("33,180");
+    expect(text).toContain("auditor");
+    expect(text).toContain("Unknown");
     cleanup();
     renderInspector();
     const project = await screen.findByTestId("tokens-project");
     expect(project.textContent).toContain("33,180");
   });
 
-  it("never renders spent 0 when the price is unknown", async () => {
+  it("shows the budget state's real numbers, never hiding spend", async () => {
     stubTwoRuns();
     renderInspector();
     const budget = await screen.findByTestId("kit-metric-fx-budget");
-    expect(budget.textContent).not.toMatch(/Spent 0([^.]|$)/);
-    expect(budget.textContent).toContain("not known, no price yet");
+    // Budget state rows hold numbers (spent 0, limit 5): the card shows
+    // them instead of an unknown line.
+    expect(budget.textContent).toContain("0 / 5 USD");
+    expect(budget.textContent).not.toContain("not known, no price yet");
   });
 
   it("names connected providers instead of Unknown", async () => {

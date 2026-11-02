@@ -555,7 +555,8 @@ def _cap_block(app: Any, project_id: str, provider: str) -> str | None:
 
 
 def _record_usage(app: Any, record: Any, project_id: str, run_id: str,
-                  provider: str, model: str, usage: Any) -> None:
+                  provider: str, model: str, usage: Any,
+                  role: Any = None) -> None:
     """One telemetry row per call; never raises into the run."""
     try:
         from agent_si.telemetry import run_store as _store
@@ -571,7 +572,8 @@ def _record_usage(app: Any, record: Any, project_id: str, run_id: str,
         _store.record_provider_usage(
             project_id=str(project_id), task_id=task_id,
             run_id=str(run_id), provider=str(provider),
-            model=str(model), usage=usage)
+            model=str(model), usage=usage,
+            role=str(role) if isinstance(role, str) and role else None)
     except Exception:
         pass
 
@@ -706,7 +708,9 @@ def invoke_owned(
         except Exception:
             pass
         _record_usage(app, record, project_id, run_id,
-                      provider, model, usage)
+                      provider, model, usage,
+                      role=resolution.get("role")
+                      if isinstance(resolution, dict) else None)
         over = _over_cap(app, project_id, provider, model, usage)
         return row, over
 
