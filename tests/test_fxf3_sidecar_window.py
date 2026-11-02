@@ -78,6 +78,11 @@ class _FakeWebview:
     def __init__(self):
         self.seen = {}
         self.started = {}
+        # FXHYGIENE: recorders for the stubbed fallbacks (no test may
+        # open a native dialog or a browser: _run_main_with_screen
+        # replaces sidecar._open_in_browser/_note_webview_missing).
+        self.browser_urls = []
+        self.missing_notes = []
 
     def create_window(self, title, url, width=None, height=None):
         self.seen = {"title": title, "url": url,
@@ -123,6 +128,15 @@ def _run_main_with_screen(monkeypatch, tmp_path, work):
     monkeypatch.setattr(sidecar, "build_app", lambda: _App())
     monkeypatch.setattr(sidecar, "pick_free_port", lambda: 12799)
     fake_webview = _FakeWebview()
+    # FXHYGIENE: stub BOTH real fallbacks (browser + native message
+    # box): any exception in main()'s try would otherwise open a real
+    # browser tab and a real MessageBoxW carrying the test token URL.
+    monkeypatch.setattr(
+        sidecar, "_open_in_browser",
+        lambda url: fake_webview.browser_urls.append(url) or False)
+    monkeypatch.setattr(
+        sidecar, "_note_webview_missing",
+        lambda url: fake_webview.missing_notes.append(url) or False)
     monkeypatch.setitem(sys.modules, "webview", fake_webview)
     monkeypatch.setitem(sys.modules, "uvicorn", _FakeUvicorn())
     old_int = signal.getsignal(signal.SIGINT)
@@ -141,6 +155,8 @@ def test_main_passes_default_size_and_saves_it(monkeypatch, tmp_path):
         monkeypatch, tmp_path, (1920, 1080))
     assert fake.seen["width"] == 1280
     assert fake.seen["height"] == 800
+    assert fake.browser_urls == []
+    assert fake.missing_notes == []
     with open(sidecar._window_size_file_path(data_root),
               encoding="utf-8") as handle:
         saved = json.load(handle)
@@ -152,3 +168,5 @@ def test_main_caps_size_on_small_screen(monkeypatch, tmp_path):
     _, fake = _run_main_with_screen(monkeypatch, tmp_path, (1100, 700))
     assert fake.seen["width"] == 1100
     assert fake.seen["height"] == 700
+    assert fake.browser_urls == []
+    assert fake.missing_notes == []
