@@ -166,8 +166,11 @@ def test_known_price_charges_spent_and_measured_cost(tmp_path, monkeypatch):
         assert "NO_PROVIDER_BOUND" not in chat.text, chat.text
         after = _budget_spent(client, pid)
         assert after > before, (before, after)
-        # (4000*0.001 + 6000*0.002)/1e6 = 16/1e6 = 0.000016, per-1M prices.
-        assert after - before == Decimal("0.000016"), (before, after)
+        # (4000*0.001 + 6000*0.002)/1e6 = 16/1e6 = 0.000016 per priced
+        # invoke; the canned-text turn always runs plan + repair invokes
+        # (non-JSON reply), each billed under its own call id, so the
+        # turn spends exactly 2x one invoke.
+        assert after - before == Decimal("0.000032"), (before, after)
         costs = _cost_rows(app)
         assert costs, "no cost rows recorded"
         measured = [r for r in costs if r.get("state") == "MEASURED"]

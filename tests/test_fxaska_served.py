@@ -9,7 +9,8 @@ journal row naming the tool plus the decision; GET
 /api/v1/permissions/decisions?project_id= lists them. A3:
 spawn_checked asks (InstallAskNeeded, a PermissionError carrying
 today's text), runs on allow, and refuses on deny with today's text;
-the engine turns the ask into run text so the run continues. Served
+the engine raises _InstallHeld on the ask so the run holds for approval
+(status line plus terminal approval event), never as run text. Served
 cases drive the real app built by create_app over HTTP; spawn cases
 call the real spawn_checked in a temp folder. Durable collateral: kept
 and updated whenever this behavior changes.
@@ -265,8 +266,11 @@ def test_a3_engine_run_continues_on_ask(tmp_path):
     _client(tmp_path)
     folder = str(tmp_path / "work")
     os.makedirs(folder, exist_ok=True)
-    text = _engine._run_agent_command(
-        record=None, folder=folder, project="proj-a3-eng",
-        run_id="run-eng", argv=["cargo", "install", "fake-pkg"],
-        state=None, procs=[], attached=set(), stop_seen=None)
-    assert "refused: install-class command 'cargo'" in text
+    with pytest.raises(_engine._InstallHeld) as excinfo:
+        _engine._run_agent_command(
+            record=None, folder=folder, project="proj-a3-eng",
+            run_id="run-eng", argv=["cargo", "install", "fake-pkg"],
+            state=None, procs=[], attached=set(), stop_seen=None)
+    assert excinfo.value.tool_id == "install:proj-a3-eng:cargo"
+    assert "install permission needed" in str(excinfo.value)
+    assert "install:proj-a3-eng:cargo" in str(excinfo.value)
