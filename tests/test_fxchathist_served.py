@@ -144,7 +144,7 @@ def test_history_snapshot_holds_only_turn_fields(tmp_path):
     assert len(rows) == 1, rows
     assert set(rows[0].keys()) == {
         "project_id", "user_text", "assistant_text", "time",
-        "id", "status", "run_id", "error_code"}, rows
+        "id", "status", "run_id", "error_code", "executed"}, rows
     assert rows[0]["id"], rows
     assert rows[0]["status"] == "ok", rows
     assert isinstance(rows[0]["run_id"], str), rows

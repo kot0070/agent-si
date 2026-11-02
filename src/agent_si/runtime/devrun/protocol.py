@@ -9,13 +9,109 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Any
+
+
+def missing_check_targets(parts: Any, folder: Any) -> list:
+    """Script/test paths a check names that exist nowhere.
+
+    A word after argv[0] naming a path (with an extension, or a slash)
+    must exist now or be planned by this or an earlier part. Flag
+    words, ``-c``/``-e`` programs and bare tool names never count;
+    ``pytest tests/a.py::test_b`` checks ``tests/a.py``.
+    """
+    planned: set = set()
+    missing: list = []
+    try:
+        base = os.path.abspath(str(folder))
+    except Exception:
+        base = ""
+    try:
+        for part in parts or []:
+            try:
+                pid = str(part.get("part_id"))
+                argv_list = part.get("check_commands") or []
+                own = {str(item).replace("\\", "/")
+                       for item in (part.get("files") or [])}
+            except Exception:
+                continue
+            for argv in argv_list:
+                try:
+                    words = list(argv or [])
+                except Exception:
+                    continue
+                skip_next = False
+                for word in words[1:]:
+                    try:
+                        text = str(word)
+                    except Exception:
+                        continue
+                    if skip_next:
+                        skip_next = False
+                        continue
+                    if text in ("-c", "-e", "--eval"):
+                        skip_next = True
+                        continue
+                    if text.startswith("-"):
+                        continue
+                    cell = text.split("::")[0].replace("\\", "/")
+                    if not re.search(r"\.[A-Za-z0-9]{1,5}$", cell) \
+                            and "/" not in cell:
+                        continue
+                    if cell in planned or cell in own:
+                        continue
+                    try:
+                        exists = (bool(base) and os.path.exists(
+                            os.path.join(base, cell)))
+                    except Exception:
+                        exists = False
+                    if not exists:
+                        missing.append((pid, cell))
+            planned |= own
+    except Exception:
+        pass
+    return missing
 
 
 class PlanError(ValueError):
     """One Director plan problem, quotable back to the Director."""
 
     code: str = "DEVRUN_PLAN_INVALID"
+
+
+def extract_json_object(text: Any) -> Any:
+    """First complete JSON object in text, or ValueError naming it.
+
+    Real replies arrive as plain JSON, ```json fences, or a sentence
+    then JSON. Empty or reasoning-only text raises "empty reply";
+    text with no object raises "no JSON object in reply: ...".
+    """
+    try:
+        src = (text or "").strip()
+    except Exception:
+        src = ""
+    if not src:
+        raise ValueError("empty reply")
+    start = src.find("{")
+    if start < 0:
+        raise ValueError("no JSON object in reply: %r" % (src[:120],))
+    try:
+        obj, _end = json.JSONDecoder().raw_decode(src[start:])
+    except Exception as exc:
+        raise ValueError("bad JSON object: %s" % (exc,)) from None
+    return obj
+
+
+#: What the worker hears after an empty reply; the attempt is not
+#: burned (retry the call, same attempt).
+EMPTY_REPLY_RETRY = (
+    "Your last reply had no visible content (reasoning only, no action). "
+    "Reply again now with one JSON object for your next action, no prose."
+)
+
+#: Empty-reply retries before the attempt is burned.
+MAX_EMPTY_RETRIES = 2
 
 
 def _clean_path(raw: Any) -> str:
@@ -43,8 +139,8 @@ def parse_director_reply(text: str) -> dict[str, Any]:
     files, non-list argv, unknown or cyclic depends_on).
     """
     try:
-        data = json.loads(text)
-    except Exception as exc:
+        data = extract_json_object(text)
+    except ValueError as exc:
         raise PlanError("director reply is not JSON: %s" % (exc,)) from None
     if not isinstance(data, dict):
         raise PlanError("director reply must be a JSON object")
@@ -82,9 +178,8 @@ def _clean_parts(raw: Any) -> list[dict[str, Any]]:
         if not isinstance(goal, str) or not goal.strip():
             raise PlanError("part %r needs a non-empty goal" % (part_id,))
         files = entry.get("files")
-        if not isinstance(files, list) or not files:
-            raise PlanError("part %r needs a non-empty files list"
-                            % (part_id,))
+        if not isinstance(files, list):
+            raise PlanError("part %r files must be a list" % (part_id,))
         clean_files: list[str] = []
         for path in files:
             cleaned = _clean_path(path)
@@ -172,8 +267,8 @@ def parse_agent_reply(text: str) -> dict[str, Any]:
     Raises AgentError quoting the exact problem.
     """
     try:
-        data = json.loads(text)
-    except Exception as exc:
+        data = extract_json_object(text)
+    except ValueError as exc:
         raise AgentError("agent reply is not JSON: %s" % (exc,)) from None
     if not isinstance(data, dict):
         raise AgentError("agent reply must be a JSON object")
@@ -207,8 +302,8 @@ def parse_auditor_reply(text: str) -> dict[str, Any]:
     that into FAIL, never a silent pass.
     """
     try:
-        data = json.loads(text)
-    except Exception as exc:
+        data = extract_json_object(text)
+    except ValueError as exc:
         raise AuditError("auditor reply is not JSON: %s" % (exc,)) from None
     if not isinstance(data, dict):
         raise AuditError("auditor reply must be a JSON object")
