@@ -2939,14 +2939,23 @@ def _spawn_held(*, project: Any, run_id: str, folder: str,
     from agent_si.runtime.devrun import actions as _spawn_actions
 
     try:
+        # grant_run_id rides only when set: the 6-positional spawn
+        # shape (and its test doubles) keeps working unchanged.
         if lock is not None:
             with lock:
+                if grant_run_id:
+                    return _spawn_actions.spawn_checked(
+                        project, run_id, folder, list(argv), log_path,
+                        log_rel, grant_run_id=grant_run_id)
                 return _spawn_actions.spawn_checked(
                     project, run_id, folder, list(argv), log_path,
-                    log_rel, grant_run_id=grant_run_id)
+                    log_rel)
+        if grant_run_id:
+            return _spawn_actions.spawn_checked(
+                project, run_id, folder, list(argv), log_path, log_rel,
+                grant_run_id=grant_run_id)
         return _spawn_actions.spawn_checked(
-            project, run_id, folder, list(argv), log_path, log_rel,
-            grant_run_id=grant_run_id)
+            project, run_id, folder, list(argv), log_path, log_rel)
     except _spawn_actions.InstallAskNeeded as exc:
         raise _InstallHeld(exc.tool_id, " ".join(
             str(word) for word in (argv or []))) from None
