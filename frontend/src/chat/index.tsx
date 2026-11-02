@@ -30,6 +30,14 @@ import {
 } from "./chatApi";
 import type { ChatRunner } from "./chatApi";
 import {
+  placementForProviderId,
+  placementKey,
+} from "../agents/agentsApi";
+import type { Placement } from "../agents/agentsApi";
+import { listConnectedProviders } from "../settings/ProvidersPage/connectApi";
+import { readRoleProfiles } from "../settings/index";
+import { Icon } from "../ui/icons";
+import {
   askPermission,
   isInstallPermissionAsk,
   pt,
@@ -50,6 +58,10 @@ interface ChatMessage {
   at: number;
   final: boolean;
   decided?: "accepted" | "rejected";
+  // D6(b): the done event of an executed engine turn marks its answer;
+  // the verdict card is withheld under finished engine runs (nothing to
+  // accept: the work already happened) and kept for plain answers.
+  engineRun?: boolean;
 }
 
 interface BlockingError {
@@ -133,6 +145,8 @@ async function readBoundModels(projectId: string): Promise<unknown[] | null> {
 export function ChatArea(props: ChatAreaProps): ReactElement {
   const client = useApiClient();
   const [boundModels, setBoundModels] = useState<unknown[] | null>(null);
+  const [connected, setConnected] = useState<string[] | null>(null);
+  const [directorModel, setDirectorModel] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState(props.initialDraft ?? "");
   const [streaming, setStreaming] = useState(false);
@@ -207,6 +221,58 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
     };
   }, [props.projectId]);
 
+  // FXDESIGN6: the status line under the composer names the same model and
+  // route the hierarchy rows and the top bar show (served records only).
+  useEffect(() => {
+    let alive = true;
+    void listConnectedProviders().then((ids) => {
+      if (alive) {
+        setConnected(ids);
+      }
+    });
+    void readRoleProfiles(props.projectId).then(
+      (profiles) => {
+        if (!alive) {
+          return;
+        }
+        const director = profiles.director;
+        if (
+          director !== undefined &&
+          director.mode === "PINNED" &&
+          director.provider !== undefined &&
+          director.model !== undefined
+        ) {
+          setDirectorModel(`${director.provider} — ${director.model}`);
+        } else {
+          setDirectorModel(null);
+        }
+      },
+      () => {
+        if (alive) {
+          setDirectorModel(null);
+        }
+      },
+    );
+    return () => {
+      alive = false;
+    };
+  }, [props.projectId]);
+
+  function statusRoute(): string {
+    if (connected === null || connected.length === 0) {
+      return t("shell.common.unknown");
+    }
+    const route = new Set<Placement>();
+    for (const id of connected) {
+      route.add(placementForProviderId(id));
+    }
+    if (route.size === 1) {
+      const only = [...route][0];
+      return only === undefined ? t("shell.common.unknown") : t(placementKey(only));
+    }
+    return t(placementKey("SPLIT"));
+  }
+
   const sendPrompt = (text: string): void => {
     const prompt = text.trim();
     if (prompt === "" || streamingRef.current) {
@@ -253,7 +319,7 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
     );
     runnerRef.current = runner;
     runner.done.then(
-      ({ aborted }) => {
+      ({ aborted, executed }) => {
         runnerRef.current = null;
         streamingRef.current = false;
         setStreaming(false);
@@ -263,7 +329,7 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
         setMessages((prev) =>
           prev.map((message) =>
             message.id === assistantId
-              ? { ...message, final: !aborted }
+              ? { ...message, final: !aborted, engineRun: executed }
               : message,
           ),
         );
@@ -575,7 +641,10 @@ ${note}`,
 
   return (
     <section data-testid="chat-area" aria-label={t("shell.sidebar.chat")}>
-      <h1>{t("shell.sidebar.chat")}</h1>
+      {/* FXDESIGN6: the ref centre carries no card and no "Chat" heading;
+          the h1 stays in the DOM for the frozen heading contract but reads
+          as plain conversation (visually hidden). */}
+      <h1 className="fx-vh">{t("shell.sidebar.chat")}</h1>
       <HierarchyRows projectId={props.projectId} />
       <div
         data-testid="chat-layout"
@@ -585,6 +654,7 @@ ${note}`,
           data-testid="chat-messages"
           ref={messagesRef}
           onScroll={handleMessagesScroll}
+          className="fx-chat-column"
         >
           {messages.map((message) => (
             <div
@@ -593,6 +663,11 @@ ${note}`,
                 message.role === "user"
                   ? "chat-user-message"
                   : "chat-assistant-message"
+              }
+              className={
+                message.role === "user"
+                  ? "fx-msg fx-msg-user"
+                  : "fx-msg fx-msg-assistant"
               }
             >
               <p style={{ whiteSpace: "pre-wrap" }}>{message.text}</p>
@@ -606,6 +681,7 @@ ${note}`,
               message.final &&
               message.text !== "" &&
               message.decided === undefined &&
+              message.engineRun !== true &&
               !streaming ? (
                 <ApprovalCard
                   proposal={message.text}
@@ -674,68 +750,92 @@ ${note}`,
             </button>
           </div>
         ) : null}
-        {/* FXDESIGN5 S2: no inline position override; shell.css docks the
-            composer sticky at the bottom of the centre column. */}
-        <div data-testid="chat-composer">
+        {/* FXDESIGN6: one rounded box docked at the bottom: the field
+            inside, the send as an icon button inside right; a small status
+            line under it (model | route | working state). */}
+        <div data-testid="chat-composer" className="fx-composer">
           {draft !== "" ? (
-            <span data-testid="chat-draft-chip">{t("chat.composer.draft")}</span>
+            <span data-testid="chat-draft-chip" className="fx-quiet">{t("chat.composer.draft")}</span>
           ) : null}
           {boundModels !== null && boundModels.length === 0 ? (
-            <>
-              <p data-testid="chat-no-model-hint">{t("chat.composer.noModel")}</p>
-              <a data-testid="chat-no-model-connect" href="/settings/models">
+            <div className="fx-composer-hint">
+              <p data-testid="chat-no-model-hint" className="fx-quiet">{t("chat.composer.noModel")}</p>
+              <a data-testid="chat-no-model-connect" href="/settings/models" className="fx-btn-quiet">
                 {t("chat.hierarchy.connect")}
               </a>
-            </>
+            </div>
           ) : null}
-          <label>
-            {t("chat.composer.prompt")}
-            <input
-              data-testid="chat-prompt"
-              type="text"
-              placeholder={t("chat.composer.prompt")}
-              aria-label={t("chat.composer.prompt")}
-              value={draft}
-              onChange={(event) => {
-                setDraft(event.target.value);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  handleSend();
-                }
-              }}
-            />
-          </label>
-          <button
-            type="button"
-            data-testid="chat-send"
-            disabled={draft.trim() === "" || streaming}
-            onClick={handleSend}
-          >
-            {t("chat.composer.send")}
-          </button>
+          <div className="fx-composer-box">
+            <label className="fx-composer-field">
+              <span className="fx-vh">{t("chat.composer.prompt")}</span>
+              <input
+                data-testid="chat-prompt"
+                type="text"
+                placeholder={t("chat.composer.prompt")}
+                aria-label={t("chat.composer.prompt")}
+                value={draft}
+                onChange={(event) => {
+                  setDraft(event.target.value);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    handleSend();
+                  }
+                }}
+              />
+            </label>
+            <button
+              type="button"
+              data-testid="chat-send"
+              className="fx-send-btn"
+              aria-label={t("chat.composer.send")}
+              title={t("chat.composer.send")}
+              disabled={draft.trim() === "" || streaming}
+              onClick={handleSend}
+            >
+              <Icon name="send" />
+              <span className="fx-vh">{t("chat.composer.send")}</span>
+            </button>
+          </div>
+          <p data-testid="chat-statusline" className="fx-statusline">
+            {/* FXDESIGN6: one span per value; the "|" dividers are CSS
+                (no separator text nodes, so the locale-only contract
+                sees exactly the three locale values). */}
+            <span>{directorModel ?? t("chat.hierarchy.auto")}</span>
+            <span>{statusRoute()}</span>
+            <span>
+              {streaming
+                ? t("chat.composer.statusWorking")
+                : t("chat.composer.statusReady")}
+            </span>
+          </p>
           {streaming ? (
-            <span data-testid="chat-spinner" role="status">
+            <span data-testid="chat-spinner" role="status" className="fx-quiet">
               {t("chat.stream.spinner")}
             </span>
           ) : null}
           {streaming ? (
-            <button type="button" data-testid="chat-abort" onClick={handleAbort}>
+            <button
+              type="button"
+              data-testid="chat-abort"
+              className="fx-btn-quiet"
+              onClick={handleAbort}
+            >
               {t("chat.abort.cancel")}
             </button>
           ) : null}
           {online ? null : (
-            <span data-testid="chat-offline-dot" role="status">
+            <span data-testid="chat-offline-dot" role="status" className="fx-quiet">
               {t("chat.stream.offline")}
             </span>
           )}
           {health === "degraded" ? (
-            <span data-testid="chat-health-degraded" role="status">
+            <span data-testid="chat-health-degraded" role="status" className="fx-quiet">
               {t("errors.generic")}
             </span>
           ) : null}
           {health === "reconnecting" ? (
-            <span data-testid="chat-health-reconnecting" role="status">
+            <span data-testid="chat-health-reconnecting" role="status" className="fx-quiet">
               {t("chat.stream.offline")}
             </span>
           ) : null}

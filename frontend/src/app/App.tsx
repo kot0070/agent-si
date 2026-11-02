@@ -286,8 +286,10 @@ function ChatStartBox(props: {
 
   return (
     <section data-testid="chat-area" aria-label={t("shell.sidebar.chat")}>
-      <h1>{t("shell.sidebar.chat")}</h1>
-      <div data-testid="chat-composer">
+      {/* FXDESIGN6: no visible "Chat" heading; the h1 stays for the
+          frozen heading contract. */}
+      <h1 className="fx-vh">{t("shell.sidebar.chat")}</h1>
+      <div data-testid="chat-composer" className="fx-composer">
         <label>
           {t("chat.composer.prompt")}
           <input

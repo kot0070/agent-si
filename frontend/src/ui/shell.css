@@ -67,6 +67,15 @@ aside[data-testid="inspector"] {
   min-width: 0;
   max-height: none;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* D6(d): the rail column reaches the window bottom; sections scroll
+   inside it as one column. */
+div[data-testid="inspector-scroll"] {
+  flex: 1 1 auto;
+  min-height: 100%;
 }
 
 /* Top bar: one strip; children share one even gap in both axes. */
@@ -475,4 +484,452 @@ nav[data-testid="sidebar"] a.fx-nav-active {
   text-decoration: underline;
   text-underline-offset: 3px;
   color: var(--fx-accent);
+}
+
+/* ===== FXDESIGN6 (Claude-desktop ref 6/7/8): component-matched polish.
+   No literal recolouring of the token system; every colour below is a
+   var(--fx-*) / var(--agent-si-*) token. Pinned FXDESIGN5 rules above
+   (900px centre, static composer, 100vh grid) stay untouched. ===== */
+
+/* Visually-hidden but DOM-present (frozen heading/label/text contracts). */
+.fx-vh {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.fx-icon {
+  flex: none;
+  vertical-align: -3px;
+}
+
+.fx-quiet {
+  opacity: 0.72;
+  font-size: 12px;
+}
+
+/* --- Top bar: one thin strip, project name dropdown left, right group. --- */
+.fx-topbar {
+  flex-wrap: nowrap;
+  overflow: hidden;
+  white-space: nowrap;
+  min-height: 44px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.fx-topbar label {
+  display: inline-flex;
+  align-items: center;
+}
+
+.fx-topbar-project select {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fx-topbar-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.fx-topbar button[data-testid="topbar-stop-all"] {
+  font-weight: 600;
+}
+
+.fx-topbar select,
+.fx-topbar button {
+  white-space: nowrap;
+}
+
+/* --- Left rail: icon + short label rows with a soft selected fill. --- */
+nav[data-testid="sidebar"] a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  color: var(--fx-ink);
+  text-decoration: none;
+}
+
+nav[data-testid="sidebar"] a:hover {
+  color: var(--fx-ink);
+  text-decoration: none;
+}
+
+nav[data-testid="sidebar"] a.fx-nav-active {
+  font-weight: 600;
+  text-decoration: none;
+  color: var(--fx-ink);
+  background-color: var(--fx-card-bg);
+}
+
+.fx-rail-row {
+  display: block;
+  margin: 2px 0;
+}
+
+.fx-rail-purpose {
+  display: block;
+  padding: 0 10px 0 36px;
+  opacity: 0.65;
+  font-size: 12px;
+}
+
+.fx-rail-purpose[hidden] {
+  display: none;
+}
+
+.fx-project-list {
+  margin-top: 12px;
+  border-top: 1px solid var(--fx-card-border);
+  padding-top: 8px;
+}
+
+.fx-project-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--fx-ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.fx-project-row:hover:not(:disabled) {
+  background-color: transparent;
+  border: none;
+}
+
+.fx-project-row .fx-truncate {
+  flex: 1 1 auto;
+}
+
+.fx-project-row.fx-nav-active {
+  background-color: var(--fx-card-bg);
+  font-weight: 600;
+}
+
+/* --- Centre chat: plain conversation, centred reading column. --- */
+section[data-testid="chat-area"] {
+  background: none;
+  border: none;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.fx-chat-column {
+  width: 100%;
+  max-width: 760px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.fx-msg {
+  margin: 10px 0;
+}
+
+.fx-msg-user {
+  max-width: 85%;
+  width: fit-content;
+  margin-left: auto;
+  padding: 8px 14px;
+  border-radius: 16px;
+  background-color: var(--fx-card-bg);
+}
+
+.fx-msg-assistant {
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+div[data-testid="chat-messages"] time {
+  font-size: 12px;
+  opacity: 0.65;
+}
+
+div[data-testid="approval-card"] {
+  margin: 8px 0;
+  padding-left: 10px;
+  border-left: 3px solid var(--fx-btn-primary-bg);
+}
+
+/* --- Composer: one rounded box, icon send inside right, status under. --- */
+.fx-composer {
+  width: 100%;
+  max-width: 760px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.fx-composer-hint {
+  margin: 0 2px 8px;
+}
+
+.fx-composer-hint p {
+  margin: 0 0 4px;
+}
+
+.fx-composer-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 8px 8px 16px;
+  border: 1px solid var(--fx-input-border);
+  border-radius: 16px;
+  background-color: var(--fx-input-bg);
+}
+
+.fx-composer-field {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.fx-composer-field input {
+  width: 100%;
+  border: none;
+  background: none;
+  padding: 6px 0;
+}
+
+.fx-composer-field input:focus-visible {
+  outline: none;
+}
+
+.fx-composer-box:focus-within {
+  outline: 2px solid var(--fx-focus-ring);
+  outline-offset: 2px;
+}
+
+button.fx-send-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+.fx-statusline {
+  margin: 6px 2px 0;
+  text-align: center;
+  font-size: 12px;
+  opacity: 0.65;
+}
+
+.fx-statusline span + span::before {
+  content: "|";
+  margin: 0 6px;
+  opacity: 0.65;
+}
+
+/* --- Right rail: no boxes, thin separators, small headings. --- */
+aside[data-testid="inspector"] > div[data-testid="inspector-scroll"] > section,
+section[data-testid^="kit-metric-"] {
+  background: none;
+  background-color: transparent;
+  border: none;
+  border-top: 1px solid var(--fx-card-border);
+  border-radius: 0;
+  padding: 10px 4px;
+  margin: 0;
+}
+
+aside[data-testid="inspector"]
+  > div[data-testid="inspector-scroll"]
+  > section:first-child {
+  border-top: none;
+}
+
+h2.fx-section-title,
+section[data-testid^="kit-metric-"] h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  margin: 0 0 8px;
+}
+
+.fx-count {
+  margin-left: auto;
+  font-size: 12px;
+  opacity: 0.65;
+}
+
+/* Context meter: "Used x%" left, "a / b" right, one thin stacked bar. */
+.fx-ctx-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.fx-ctx-top p {
+  margin: 0;
+}
+
+div[data-testid="ctx-bar"].fx-ctx-bar {
+  display: flex;
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  background-color: transparent;
+  border: 1px solid var(--fx-card-border);
+  box-sizing: border-box;
+}
+
+.fx-ctx-seg {
+  height: 100%;
+}
+
+.fx-ctx-seg[data-testid="ctx-bar-input"] {
+  background-color: var(--agent-si-chart-a);
+}
+
+.fx-ctx-seg[data-testid="ctx-bar-output"] {
+  background-color: var(--agent-si-chart-b);
+}
+
+ul[data-testid="ctx-legend"].fx-legend {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fx-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+  font-size: 12px;
+}
+
+.fx-legend-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.fx-legend-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fx-legend-tokens,
+.fx-legend-pct {
+  flex: none;
+  opacity: 0.75;
+}
+
+/* Results / background: compact icon + name rows, quiet show-more. */
+.fx-result-list,
+.fx-bg-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fx-result-row,
+.fx-bg-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 5px 0;
+  font-size: 13px;
+}
+
+.fx-result-row .fx-truncate,
+.fx-bg-row .fx-truncate {
+  flex: 1 1 auto;
+}
+
+.fx-show-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  border: none;
+  padding-left: 0;
+}
+
+/* Team placement badges: one chip per live row. */
+.fx-place-badge {
+  flex: none;
+  padding: 1px 8px;
+  border: 1px solid var(--fx-card-border);
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+/* D6(e): live agents read plain: no card box on the panel, the project
+   line and status/badge rows keep a quiet label plus an even gap. */
+section[data-testid="kit-card-agents-live"].fx-live-panel {
+  background: none;
+  background-color: transparent;
+  border: none;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.fx-live-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* D6(f): the hierarchy collapsed line is quiet text, not a boxed button. */
+button[data-testid="hierarchy-collapsed"] {
+  border: none;
+  background: none;
+  background-color: transparent;
+  padding-left: 0;
+  padding-right: 0;
+  opacity: 0.8;
+  font-size: 12px;
+}
+
+button[data-testid="hierarchy-collapsed"]:hover:not(:disabled) {
+  border: none;
+  background: none;
+  background-color: transparent;
+}
+
+/* D6A: collapsed hierarchy summary: one span per locale value. The ": "
+   after each role label and the middle dot between roles are CSS, so no
+   separator renders as a text node (locale-only contract). */
+.fx-hsummary-item > span:first-child::after {
+  content: ": ";
+}
+
+.fx-hsummary-item + .fx-hsummary-item::before {
+  content: "\00B7";
+  margin: 0 0.45em;
 }
