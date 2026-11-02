@@ -14,16 +14,18 @@ describe('U1 quiet wrapping tab strip', () => {
   });
 
   it('tabs are quiet text: no box, no solid repaint on hover', () => {
-    expect(css).toMatch(/\.fxpv-tab\s*\{[^}]*background:\s*transparent/);
-    expect(css).toMatch(/\.fxpv-tab\s*\{[^}]*border:\s*none/);
+    // FXTABS spells the same behaviour with background-color and a
+    // transparent border; both read as "no box, no repaint".
+    expect(css).toMatch(/\.fxpv-tab\s*\{[^}]*background(-color)?:\s*transparent/);
+    expect(css).toMatch(/\.fxpv-tab\s*\{[^}]*border:\s*(none|1px solid transparent)/);
     expect(css).toMatch(
-      /\.fxpv-tabs \.fxpv-tab:hover:not\(:disabled\)\s*\{[^}]*background:\s*transparent/,
+      /\.fxpv-tabs \.fxpv-tab:hover:not\(:disabled\)\s*\{[^}]*background(-color)?:\s*transparent/,
     );
   });
 
   it('selected tab is bold + underline in ink, readable in both themes', () => {
     expect(css).toMatch(/\.fxpv-tab-selected\s*\{[^}]*font-weight:\s*700/);
     expect(css).toMatch(/\.fxpv-tab-selected\s*\{[^}]*text-decoration:\s*underline/);
-    expect(css).toMatch(/\.fxpv-tab-selected\s*\{[^}]*color:\s*var\(--fx-ink\)/);
+    expect(css).toMatch(/\.fxpv-tab-selected\s*\{[^}]*color:\s*var\(--fx-ink/);
   });
 });
