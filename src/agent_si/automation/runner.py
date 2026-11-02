@@ -64,7 +64,7 @@ def set_journal_hook(hook):
 
 
 def set_budget_hook(hook):
-    """Set the budget guard hook (or None to allow every resume)."""
+    """Set the budget guard hook (None refuses every resume, fail-closed)."""
     global _budget
     _budget = hook
 
@@ -386,7 +386,13 @@ def resume(project_id, run_id, now=None):
             code="AUTOMATION_PAUSED",
             detail="automation paused for %s" % project_id,
         )
-    if _budget is not None and not _budget(project_id):
+    if _budget is None:
+        raise _auto_iface().AutomationError(
+            code="AUTOMATION_PAUSED",
+            detail="budget guard refused resume for %s: no budget hook "
+                   "bound" % project_id,
+        )
+    if not _budget(project_id):
         raise _auto_iface().AutomationError(
             code="AUTOMATION_PAUSED",
             detail="budget guard refused resume for %s" % project_id,
