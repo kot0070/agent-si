@@ -1055,6 +1055,37 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
       }
       case "cost": {
         const usage = budget === null ? null : contextUsage(budget);
+        // FXTELEM: a run cost is known when any served run carries a real
+        // cost cell; with no cost evidence and nothing spent or reserved,
+        // spent and remaining read the unknown-price line, never 0.
+        const runsCostKnown = (runs ?? []).some((run) => {
+          if (typeof run.cost === "number" && Number.isFinite(run.cost)) {
+            return true;
+          }
+          return (
+            typeof run.cost === "string" &&
+            run.cost !== "" &&
+            run.cost !== "UNKNOWN" &&
+            !Number.isNaN(Number(run.cost))
+          );
+        });
+        const spentUnknownCost =
+          budget !== null &&
+          !runsCostKnown &&
+          budget.spent === 0 &&
+          budget.reserved === 0;
+        const spentValue =
+          budget === null
+            ? ""
+            : spentUnknownCost
+              ? t("shell.cards.budget.unknownPrice")
+              : `${budget.spent} ${budget.currency}`;
+        const remainingValue =
+          budget === null
+            ? ""
+            : spentUnknownCost
+              ? t("shell.cards.budget.unknownPrice")
+              : `${remainingBudget(budget)} ${budget.currency}`;
         return (
           <div>
             {budgetError !== null ? (
@@ -1072,7 +1103,7 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
                 <Fact
                   testId="cost-spent"
                   labelKey="projectView.cost.spent"
-                  value={`${budget.spent} ${budget.currency}`}
+                  value={spentValue}
                 />
                 <Fact
                   testId="cost-reserved"
@@ -1087,7 +1118,7 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
                 <Fact
                   testId="cost-remaining"
                   labelKey="projectView.cost.remaining"
-                  value={`${remainingBudget(budget)} ${budget.currency}`}
+                  value={remainingValue}
                 />
                 <p data-testid="cost-limit-explainer" className="fxpv-note">
                   {t("projectView.cost.limitExplainer")}

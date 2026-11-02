@@ -464,9 +464,20 @@ def _linked_value(
 
 def _accumulate_usage(
     store_dir: str | None = None,
+    project_id: str | None = None,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
-    """Per-model and per-provider call/token/cost evidence from the store."""
+    """Per-model and per-provider call/token/cost evidence from the store.
+
+    With project_id set, only that project's PROVIDER_USAGE_REPORTED events
+    count, so a project rail never shows another project's totals.
+    """
     usage, by_id = _usage_events(store_dir=store_dir)
+    if project_id is not None:
+        wanted = str(project_id)
+        usage = [
+            event for event in usage
+            if str(event.get("project_id")) == wanted
+        ]
     models: dict[str, dict[str, Any]] = {}
     providers: dict[str, dict[str, Any]] = {}
     for event in usage:
@@ -538,14 +549,17 @@ def get_project_aggregates(
 
 def get_model_aggregates(
     store_dir: str | None = None,
+    project_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Per-model calls/tokens/cost from store usage events, sorted by model.
 
     calls counts PROVIDER_USAGE_REPORTED events; tokens sums the linked
     MEASURED tokens_total rows; cost sums the linked MEASURED/CALCULATED
     cost rows. Unevidenced tokens/cost read "UNAVAILABLE", never 0.
+    With project_id set, only that project's events count.
     """
-    models, _providers = _accumulate_usage(store_dir=store_dir)
+    models, _providers = _accumulate_usage(
+        store_dir=store_dir, project_id=project_id)
     return [
         _finish_usage_row(model, "model", models[model])
         for model in sorted(models)
@@ -554,9 +568,13 @@ def get_model_aggregates(
 
 def get_provider_aggregates(
     store_dir: str | None = None,
+    project_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Per-provider calls/tokens/cost from store usage events, sorted."""
-    _models, providers = _accumulate_usage(store_dir=store_dir)
+    """Per-provider calls/tokens/cost from store usage events, sorted.
+
+    With project_id set, only that project's events count."""
+    _models, providers = _accumulate_usage(
+        store_dir=store_dir, project_id=project_id)
     return [
         _finish_usage_row(provider, "provider", providers[provider])
         for provider in sorted(providers)
