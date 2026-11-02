@@ -312,7 +312,7 @@ D15_IFACE_SPECS = (
     ("ConnectDialogProps", "ConnectDialog.tsx", "ConnectDialogProps",
      ["preset_id"],
      ["preset", "open", "store", "onClose", "onConnected"],
-     ["timeoutMs"]),
+     ["timeoutMs", "initialStep", "initialTicked", "onModelsDone"]),
     ("DisconnectDialogProps", "DisconnectDialog.tsx",
      "DisconnectDialogProps",
      ["provider_id"],
@@ -323,7 +323,7 @@ D15_IFACE_SPECS = (
      "LeftoverKeyFinderProps",
      [],
      ["store", "sessionToken", "linkedSecretIds"],
-     ["refreshKey", "loadEntries"]),
+     ["refreshKey", "loadEntries", "deleteEntry"]),
 )
 
 D15_BEHAVIOUR_CASES = ("match:", "mismatch:", "token-less", "token-ok")
@@ -738,6 +738,52 @@ def _served_entry(method, path, tmp_path=None):
     return client
 
 
+def _live_transport(monkeypatch):
+    """Fake ONLY the urlopen transport: /models lists, probes evidence."""
+    import json as _json
+    import urllib.request as _urlreq
+
+    class _Resp:
+        def __init__(self, payload):
+            self._raw = payload
+
+        def read(self):
+            return self._raw
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def _fake(request, timeout=None):
+        try:
+            url = getattr(request, "full_url", "")
+            from urllib.parse import urlparse as _parse
+            path = _parse(url).path
+        except Exception:
+            path = ""
+        if path.rstrip("/").endswith("/models"):
+            return _Resp(b'{"data": [{"id": "m-k04"}]}')
+        return _Resp(_json.dumps(
+            {"choices": [{"message": {"content": "ok"},
+                          "finish_reason": "stop"}],
+             "usage": {"input_tokens": 1,
+                       "output_tokens": 1}}).encode("utf-8"))
+
+    monkeypatch.setattr(_urlreq, "urlopen", _fake)
+
+
+def _save_for_connect(client, headers, preset_id):
+    """Save a key through the real route (transport faked by caller)."""
+    resp = client.post(
+        "/api/v1/providers/keys",
+        json={"preset_id": preset_id, "key_value": "K04-IFACE-KEY"},
+        headers=headers)
+    assert resp.status_code == 201, resp.text
+    return resp.json()["key_ref"]
+
+
 def _b_ctx(tmp_path):
     return PR.RoutingCtx(store=_RoutingStore(str(tmp_path)),
                          role_table=_RL.RoleTable(), kb=None)
@@ -758,23 +804,24 @@ def test_c02_connect_entry(tmp_path):
     assert resp.status_code != 404, resp.text
 
 
-def test_c03_disconnect_entry(tmp_path):
+def test_c03_disconnect_entry(tmp_path, monkeypatch):
     # K04.md row 66 -> frozen POST /api/v1/providers/{id}/disconnect
     # via the served app. HD RULING K04 TESTS (owner 2026-10-27): the
     # provider is seeded through the REAL import/write path at setup
-    # (served key-only connect, then explicit credential provisioning
-    # exactly like w03's store.seed), so the probe hits a real id and
-    # the forwarded {id} disconnects it (200).
+    # (served key save, then served key-only connect, then explicit
+    # credential provisioning exactly like w03's store.seed), so the
+    # probe hits a real id and the forwarded {id} disconnects it (200).
+    _live_transport(monkeypatch)
     headers = {"x-actor": "ui-test-c03",
                "x-ui-session-token": "ui-test-c03"}
     client = _served_entry(
         "POST", "/api/v1/providers/{id}/disconnect", tmp_path)
+    _save_for_connect(client, headers, "openai")
     setup = client.post("/api/v1/providers/connect", json={
         "preset_id": "openai", "model": "m-c03",
-        "key_ref": {"secret_id": "s-c03", "provider_id": "openai"}},
+        "key_ref": {"secret_id": "openai", "provider_id": "openai"}},
         headers=headers)
     assert setup.status_code == 200, setup.text
-    client.app.state.k04_ctx.credential_store.seed("s-c03")
     resp = client.post("/api/v1/providers/openai/disconnect", json={},
                        headers=headers)
     assert resp.status_code == 200, resp.text
@@ -786,25 +833,28 @@ def test_c03_disconnect_entry(tmp_path):
     assert "ui-test-c03" not in qry.text
 
 
-def test_c04_models_entry(tmp_path):
+def test_c04_models_entry(tmp_path, monkeypatch):
     # K04.md row 67 -> frozen GET /api/v1/providers/{id}/models?query
     # via the served app. HD RULING K04 TESTS (owner 2026-10-27): the
     # provider is seeded through the REAL import/write path at setup
-    # (served key-only connect), so the probe hits a real id whose
-    # models come from the real bound-catalog KB (200).
+    # (served key save, then served key-only connect), so the probe
+    # hits a real id whose models come from the real bound-catalog
+    # KB (200).
+    _live_transport(monkeypatch)
     headers = {"x-actor": "ui-test-c04",
                "x-ui-session-token": "ui-test-c04"}
     client = _served_entry(
         "GET", "/api/v1/providers/{id}/models", tmp_path)
+    _save_for_connect(client, headers, "openai")
     setup = client.post("/api/v1/providers/connect", json={
         "preset_id": "openai", "model": "m-c04",
-        "key_ref": {"secret_id": "s-c04", "provider_id": "openai"}},
+        "key_ref": {"secret_id": "openai", "provider_id": "openai"}},
         headers=headers)
     assert setup.status_code == 200, setup.text
     qry = client.post("/api/v1/providers/connect"
                       "?session_token=ui-test-c04",
                       json={"preset_id": "openai", "model": "m-c04",
-                            "key_ref": {"secret_id": "s-c04",
+                            "key_ref": {"secret_id": "openai",
                                         "provider_id": "openai"}})
     assert qry.status_code == 401, qry.text
     assert "ui-test-c04" not in qry.text

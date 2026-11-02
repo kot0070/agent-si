@@ -159,7 +159,11 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    # FXR2E-6: the frozen K02 contract stub
+    # (src/agent_si/backend/orchestration/interface.py) ships in source
+    # for the contract test only; zero product modules import it, so it
+    # stays out of the frozen exe. Never delete the file.
+    excludes=["agent_si.backend.orchestration.interface"],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,

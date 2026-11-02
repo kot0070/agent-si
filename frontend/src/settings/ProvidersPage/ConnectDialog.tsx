@@ -9,6 +9,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  checkKey,
   connectCloud,
   connectLocal,
   saveKey,
@@ -64,6 +65,23 @@ export function saveWithTimeout(task: Promise<void>, timeoutMs: number): Promise
 
 function connectFailure(err: unknown): string {
   if (err instanceof ApiError) {
+    // FXR2E wrong key: the refused key and the unreachable provider
+    // read as fixed plain strings, never a machine code. Anything
+    // else shows the served plain text when the route sent one.
+    const code = String(err.code);
+    if (err.status === 401 || err.status === 403
+      || code === "PROVIDER_KEY_REFUSED") {
+      return t("providers.connect.refusedKey");
+    }
+    if (err.status === 0 || err.status === 503
+      || code === "EVIDENCE_PROBE_NETWORK") {
+      return t("providers.connect.unreachable");
+    }
+    if (typeof err.details?.message === "string"
+      && err.details.message.length > 0) {
+      return t("providers.connect.failedMessage",
+        { message: err.details.message });
+    }
     return t("providers.connect.failedCode", { code: err.code, status: String(err.status) });
   }
   if (err instanceof Error && err.message.length > 0) {
@@ -86,6 +104,8 @@ export function ConnectDialog({
 }: ConnectDialogProps) {
   const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [checked, setChecked] = useState(false);
   const [result, setResult] = useState<ConnectResult | null>(null);
   // Step 2: the model list inside the same dialog (Connected line, loading
   // state, tickable rows, Done closes). The key is already cleared.
@@ -148,6 +168,8 @@ export function ConnectDialog({
     setApiKey("");
     setResult(null);
     setSaving(false);
+    setChecking(false);
+    setChecked(false);
     setModelQuery("");
     setModelSource(null);
     setRefreshNote(null);
@@ -202,8 +224,47 @@ export function ConnectDialog({
   const showHintWarning =
     apiKey.length > 0 && preset.keyStartsWith.length > 0 && !apiKey.startsWith(preset.keyStartsWith);
 
+  async function handleCheck(): Promise<void> {
+    // Step 1 of the two-step dialog: paste + Check, then Save. The check
+    // hits the read-only route (same live preflight, never stores), so a
+    // wrong key reports the plain reason and leaves every store alone.
+    if (apiKey.length === 0 || checking || saving || preset === null) {
+      return;
+    }
+    const activePreset: ProviderPreset = preset;
+    if (activePreset.id !== preset_id) {
+      setResult({ kind: "error", text: t("providers.connect.refusedMismatch", { id: preset_id }) });
+      return;
+    }
+    if (activePreset.kind === "local") {
+      setChecked(true);
+      setResult({ kind: "success", text: t("providers.connect.checked") });
+      return;
+    }
+    setChecking(true);
+    setResult(null);
+    try {
+      await checkKey(preset_id, apiKey);
+      setChecked(true);
+      setResult({ kind: "success", text: t("providers.connect.checked") });
+    } catch (err: unknown) {
+      setChecked(false);
+      setResult({ kind: "error", text: connectFailure(err) });
+    } finally {
+      setChecking(false);
+    }
+  }
+
   async function handleSave(): Promise<void> {
     if (apiKey.length === 0 || saving || preset === null) {
+      return;
+    }
+    // Two-step: Save runs only after a successful Check for cloud
+    // presets (local presets need no key check). The save itself
+    // re-checks before storing, so a key swapped after Check still
+    // cannot store a refused value.
+    if (preset.kind !== "local" && !checked) {
+      setResult({ kind: "error", text: t("providers.connect.checkFirst") });
       return;
     }
     const activePreset: ProviderPreset = preset;
@@ -409,7 +470,7 @@ export function ConnectDialog({
           aria-label={t("providers.connect.apiKey")}
           value={apiKey}
           autoComplete="off"
-          onChange={(event) => setApiKey(event.target.value)}
+          onChange={(event) => { setApiKey(event.target.value); setChecked(false); }}
         />
       </label>
       <p>{t("providers.connect.keyFormat", { hint: preset.keyHint })}</p>
@@ -423,9 +484,19 @@ export function ConnectDialog({
       </button>
       <button
         type="button"
+        data-variant="quiet"
+        disabled={apiKey.length === 0 || checking || saving}
+        onClick={() => {
+          void handleCheck();
+        }}
+      >
+        {checking ? t("providers.connect.checking") : t("providers.connect.check")}
+      </button>
+      <button
+        type="button"
         data-variant="primary"
         style={{ fontWeight: 700 }}
-        disabled={apiKey.length === 0 || saving}
+        disabled={apiKey.length === 0 || saving || (preset.kind !== "local" && !checked)}
         onClick={() => {
           void handleSave();
         }}

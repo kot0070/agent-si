@@ -98,7 +98,40 @@ def test_apply_succeeds_with_confirmation():
     assert kb.validate_catalog(updated) == []
 
 
-def test_key_delete_removes_store_entry(tmp_path):
+def test_key_delete_removes_store_entry(tmp_path, monkeypatch):
+    import urllib.request as _urlreq
+
+    class _Resp:
+        def read(self):
+            return (b'{"data": [{"id": "m-k04r3b"}]}')
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def _fake_models(request, timeout=None):
+        try:
+            from urllib.parse import urlparse as _parse
+
+            path = _parse(getattr(request, "full_url", "")).path
+        except Exception:
+            path = ""
+        if path.rstrip("/").endswith("/models"):
+            return _Resp()
+        import json as _json
+
+        class _Usage(_Resp):
+            def read(self):
+                return _json.dumps(
+                    {"choices": [{"message": {"content": "ok"}}],
+                     "usage": {"input_tokens": 1,
+                               "output_tokens": 1}}).encode("utf-8")
+
+        return _Usage()
+
+    monkeypatch.setattr(_urlreq, "urlopen", _fake_models)
     settings = {"store_dir": str(tmp_path / "appdata"),
                 "ui_session_token": APP_TOKEN,
                 "secret_store": "memory"}
