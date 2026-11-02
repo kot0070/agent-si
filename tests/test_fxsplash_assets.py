@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import struct
 import sys
+from pathlib import Path
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _SRC = os.path.abspath(os.path.join(_HERE, "..", "src"))
@@ -64,8 +65,7 @@ def test_icon_bundle_sizes_and_spec_and_frozen():
     widths = {blob[6 + 16 * i] or 256 for i in range(count)}
     for need in (16, 24, 32, 48, 64, 128, 256):
         assert need in widths, f"ico missing size {need}"
-    spec = open(
-        os.path.join(_ROOT, "packaging", "sidecar", "agent_si_sidecar.spec"),
-        encoding="utf-8",
-    ).read()
+    spec = Path(
+        _ROOT, "packaging", "sidecar", "agent_si_sidecar.spec").read_text(
+        encoding="utf-8")
     assert "icon.ico" in spec

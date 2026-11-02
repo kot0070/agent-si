@@ -202,7 +202,7 @@ def main(argv=None):
     ap.add_argument("--preview", default=None)
     args = ap.parse_args(argv)
     entries = build(preview_path=args.preview)
-    print("wrote icon.ico sizes=%s" % sorted(s for s, _ in entries))
+    print(f"wrote icon.ico sizes={sorted(s for s, _ in entries)}")
     return 0
 
 
