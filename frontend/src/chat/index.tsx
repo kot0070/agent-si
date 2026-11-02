@@ -2475,6 +2475,19 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
               >
                 {t("chat.error.retry")}
               </button>
+              {/* A2: the no-provider notice carries one action that gets
+                  the user connected, next to Retry (same target as the
+                  composer hint). */}
+              {blocking.code === "NO_PROVIDER_BOUND" ||
+              blocking.errorKey === "firstrun.steps.connectProvider" ? (
+                <a
+                  data-testid="kit-error-connect"
+                  className="fx-btn-quiet"
+                  href="/settings/models"
+                >
+                  {t("chat.hierarchy.connect")}
+                </a>
+              ) : null}
             </div>
           ) : null}
           {blocking === null && health === "degraded" && !streaming ? (
