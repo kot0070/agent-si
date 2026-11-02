@@ -116,18 +116,18 @@ describe("FXPROV P1 save moves to step 2 in the same dialog", () => {
     });
     fireEvent.click(within(dialog).getByText("Save"));
     // Step 2 in the same dialog: Connected line, tickable list, key gone.
-    expect(await within(dialog).findByText("Connected OpenAI. Reference saved.")).toBeTruthy();
+    expect(await within(dialog).findByText("Connected OpenAI.")).toBeTruthy();
     expect(screen.queryByLabelText("API key")).toBeNull();
     // Fresh connect ticks only the default model, never everything.
     const ticks = within(dialog).getAllByRole("checkbox") as HTMLInputElement[];
     expect(ticks.length).toBeGreaterThan(1);
     expect(ticks.filter((box) => box.checked).map((box) => box.getAttribute("aria-label"))).toEqual([
-      "OpenAI Standard",
+      "openai/gpt-4o-mini",
     ]);
     fireEvent.click(within(dialog).getByText("Done"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(screen.getByLabelText("Disconnect OpenAI")).toBeTruthy();
-    expect(screen.getByText("Connected OpenAI. Reference saved.")).toBeTruthy();
+    expect(screen.getByText("Connected OpenAI.")).toBeTruthy();
     expect(screen.getByText("1 enabled")).toBeTruthy();
   });
 });

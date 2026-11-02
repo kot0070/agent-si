@@ -135,7 +135,7 @@ describe("k04-iface ConnectDialog contract", () => {
       );
       fireEvent.change(screen.getByLabelText("API key"), { target: { value: "sk-test" } });
       fireEvent.click(screen.getByText("Save"));
-      expect(await screen.findByText(/Reference saved/)).toBeTruthy();
+      expect(await screen.findByText("Connected OpenAI.")).toBeTruthy();
       expect(onConnected).toHaveBeenCalledTimes(1);
       expect(onConnected.mock.calls[0][0]).toBe("openai");
     } finally {

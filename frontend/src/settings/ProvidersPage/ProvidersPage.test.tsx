@@ -134,7 +134,7 @@ describe("ConnectDialog", () => {
     );
     fireEvent.change(screen.getByLabelText("API key"), { target: { value: "sk-test" } });
     fireEvent.click(screen.getByText("Save"));
-    expect(await screen.findByText(/Reference saved/)).toBeTruthy();
+    expect(await screen.findByText("Connected OpenAI.")).toBeTruthy();
     expect(onConnected).toHaveBeenCalledTimes(1);
     expect(await store.list("agent_si/provider/")).toHaveLength(1);
   });
@@ -148,7 +148,7 @@ describe("ConnectDialog", () => {
     );
     fireEvent.change(screen.getByLabelText("API key"), { target: { value: "sk-test" } });
     fireEvent.click(screen.getByText("Save"));
-    expect(await screen.findByText(/Reference saved/)).toBeTruthy();
+    expect(await screen.findByText("Connected OpenAI.")).toBeTruthy();
     expect(onConnected).toHaveBeenCalledTimes(1);
     expect(onConnected.mock.calls[0][0]).toBe("openai");
     const rows = await store.list("agent_si/provider/");
@@ -342,7 +342,7 @@ describe("ProvidersPage", () => {
     fireEvent.change(within(connectDialog).getByLabelText("API key"), { target: { value: "sk-test" } });
     fireEvent.click(within(connectDialog).getByText("Save"));
     // Step 2 opens in the same dialog; Done closes it.
-    expect(await within(connectDialog).findByText(/Reference saved/)).toBeTruthy();
+    expect(await within(connectDialog).findByText("Connected OpenAI.")).toBeTruthy();
     fireEvent.click(within(connectDialog).getByText("Done"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     // Fresh connect ticks only the default model (never everything).
@@ -471,7 +471,7 @@ describe("ProvidersPage role pools wiring (page-level)", () => {
     const connectDialog = screen.getByRole("dialog");
     fireEvent.change(within(connectDialog).getByLabelText("API key"), { target: { value: "sk-test" } });
     fireEvent.click(within(connectDialog).getByText("Save"));
-    expect(await within(connectDialog).findByText(/Reference saved/)).toBeTruthy();
+    expect(await within(connectDialog).findByText("Connected OpenAI.")).toBeTruthy();
     fireEvent.click(within(connectDialog).getByText("Done"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     // Fresh connect already ticks the default model; keep it on.
@@ -715,7 +715,7 @@ describe("ProvidersPage chat model save wiring (page-level)", () => {
     const connectDialog = screen.getByRole("dialog");
     fireEvent.change(within(connectDialog).getByLabelText("API key"), { target: { value: "sk-test" } });
     fireEvent.click(within(connectDialog).getByText("Save"));
-    expect(await within(connectDialog).findByText(/Reference saved/)).toBeTruthy();
+    expect(await within(connectDialog).findByText("Connected OpenAI.")).toBeTruthy();
     fireEvent.click(within(connectDialog).getByText("Done"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     // Fresh connect already ticks the default model; keep it on.

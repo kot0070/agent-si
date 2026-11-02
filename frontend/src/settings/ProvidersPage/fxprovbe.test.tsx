@@ -78,7 +78,7 @@ async function openStep2() {
   const dialog = screen.getByRole("dialog");
   fireEvent.change(within(dialog).getByLabelText("API key"), { target: { value: "sk-test-1" } });
   fireEvent.click(within(dialog).getByText("Save"));
-  await within(dialog).findByText("Connected OpenAI. Reference saved.");
+  await within(dialog).findByText("Connected OpenAI.");
   return dialog;
 }
 

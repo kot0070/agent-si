@@ -95,6 +95,8 @@ export function ConnectDialog({
   const [modelsLoading, setModelsLoading] = useState(false);
   const [ticked, setTicked] = useState<string[]>([]);
   const [modelQuery, setModelQuery] = useState("");
+  // Y2: Done with nothing ticked warns instead of closing silently.
+  const [doneNote, setDoneNote] = useState<string | null>(null);
   // Quiet Refresh state: a failed refresh keeps the last list plus one
   // calm line; Done PUT state: a failed save keeps the dialog open.
   const [refreshNote, setRefreshNote] = useState<string | null>(null);
@@ -121,12 +123,15 @@ export function ConnectDialog({
         // The server's enabled list is the routing truth: it wins over the
         // passed-in ticks whenever the route names it.
         setTicked(outcome.servedEnabled.filter((id) => known.has(id)));
-      } else if (fromRoute !== undefined) {
+      } else if (fromRoute !== undefined && fromRoute.length > 0) {
         // Manage models without a served truth: keep the current ticks,
-        // drop ids no longer listed.
+        // drop ids no longer listed. An empty list means no preference,
+        // so fall through to the recommended text model below.
         setTicked(fromRoute.filter((id) => known.has(id)));
       } else {
-        // Fresh connect: only the default (connect) model ticked, never all.
+        // Fresh connect, or Manage opened with nothing ticked: pre-tick
+        // the recommended text model (the connect id), never all and
+        // never an empty selection.
         const first = activePreset.models[0];
         setTicked(first === undefined ? [] : [first.id].filter((id) => known.has(id)));
       }
@@ -273,6 +278,7 @@ export function ConnectDialog({
       );
 
   function toggleTicked(modelId: string): void {
+    setDoneNote(null);
     setTicked((prev) =>
       prev.includes(modelId)
         ? prev.filter((id) => id !== modelId)
@@ -286,11 +292,18 @@ export function ConnectDialog({
     // routing truth: a saved list that differs is reconciled back onto
     // the page, and a failed save re-reads the served ticks so the page
     // never shows ticks the server refused.
+    // Y2: Done with nothing ticked warns and stays open; a silent
+    // close would drop the provider to zero usable models.
     if (preset === null) {
       return;
     }
     const activePreset: ProviderPreset = preset;
     const ids = ticked;
+    if (ids.length === 0) {
+      setDoneNote(t("providers.connect.needOneModel"));
+      return;
+    }
+    setDoneNote(null);
     onModelsDone?.(preset_id, ids);
     closeAndClear();
     void saveEnabledModels(activePreset.id, ids).then(
@@ -507,6 +520,11 @@ export function ConnectDialog({
         Done
       </button>
       </div>
+      {doneNote !== null ? (
+        <p data-testid="connect-done-note" role="alert">
+          {doneNote}
+        </p>
+      ) : null}
       </>
       )}
       </div>

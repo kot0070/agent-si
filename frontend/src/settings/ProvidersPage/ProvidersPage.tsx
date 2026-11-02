@@ -70,7 +70,7 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
   const [showWizard, setShowWizard] = useState(false);
   const [wizardDone, setWizardDone] = useState(false);
   // Last provider connected through the dialog: its card carries the quiet
-  // "Connected {label}. Reference saved." line next to Disconnect.
+  // "Connected {label}." line next to Disconnect.
   const [lastConnectedId, setLastConnectedId] = useState<string | null>(null);
   // Served model listings per preset (GET /api/v1/providers/{id}/models):
   // the provider's own rows the routes know, merged over the KB catalog.
