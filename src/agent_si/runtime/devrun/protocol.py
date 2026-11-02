@@ -82,9 +82,8 @@ def _clean_parts(raw: Any) -> list[dict[str, Any]]:
         if not isinstance(goal, str) or not goal.strip():
             raise PlanError("part %r needs a non-empty goal" % (part_id,))
         files = entry.get("files")
-        if not isinstance(files, list) or not files:
-            raise PlanError("part %r needs a non-empty files list"
-                            % (part_id,))
+        if not isinstance(files, list):
+            raise PlanError("part %r files must be a list" % (part_id,))
         clean_files: list[str] = []
         for path in files:
             cleaned = _clean_path(path)

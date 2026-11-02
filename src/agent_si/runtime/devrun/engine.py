@@ -80,6 +80,216 @@ _PARALLEL_MAX = 4
 # FXPARALLEL END limit.
 
 
+#: Bare filename tokens in a goal ("DATA.csv", "report.md"): letters,
+#: digits and _ - plus one alpha extension of 2+ chars. Single-char
+#: extensions ("e.g", "i.e", "v1.2") never name files.
+_GOAL_FILE_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_\-]*\.[A-Za-z]{2,5}")
+
+#: Backtick spans in a goal.
+_GOAL_BACKTICK_RE = re.compile(r"`([^`\n]+)`")
+
+#: Words that make a goal path a reading criterion.
+_READ_VERB_RE = re.compile(
+    r"\b(read|reads|reading|summarise|summarize|summariz|summaries|"
+    r"summary|contents|parse|parses|parsing|load|loads|loading|"
+    r"open|opens|opening|inspect|inspects|inspection|review|reviews)\b",
+    re.IGNORECASE)
+
+
+def _norm_goal_path(path: Any) -> str:
+    """Normalised goal path (forward slashes, no leading ./)."""
+    try:
+        text = str(path or "").replace("\\", "/").strip()
+    except Exception:
+        return ""
+    while text.startswith("./"):
+        text = text[2:]
+    return text
+
+
+def _same_file(left: Any, right: Any) -> bool:
+    """Exact normalised match or basename match, never a substring."""
+    first, second = _norm_goal_path(left), _norm_goal_path(right)
+    if not first or not second:
+        return False
+    if first == second:
+        return True
+    return first.rsplit("/", 1)[-1] == second.rsplit("/", 1)[-1]
+
+
+def _goal_paths(goal: Any) -> list[str]:
+    """Path tokens the goal names (backticks, slash paths, filenames).
+
+    "e.g."/"i.e." and version numbers never match: bare tokens need
+    an alpha extension of 2+ chars. Order-kept, de-duplicated.
+    """
+    found: list[str] = []
+
+    def _take(token: Any) -> None:
+        text = _norm_goal_path(token).strip("\"'").strip()
+        text = text.rstrip(".,;:!?")
+        if not text or text in found:
+            return
+        if "/" in text:
+            found.append(text)
+            return
+        if _GOAL_FILE_RE.fullmatch(text):
+            found.append(text)
+
+    try:
+        text = str(goal or "")
+    except Exception:
+        return []
+    for span in _GOAL_BACKTICK_RE.findall(text):
+        _take(span)
+    for token in re.split(r"[\s,;:\(\)\[\]\"']+", text):
+        if not token:
+            continue
+        if "/" in token:
+            _take(token)
+        elif _GOAL_FILE_RE.fullmatch(token):
+            _take(token)
+    return found
+
+
+def _has_read_criterion(goal: Any) -> bool:
+    """True when the goal asks to read something (read/summarise/...)."""
+    try:
+        return bool(_READ_VERB_RE.search(str(goal or "")))
+    except Exception:
+        return False
+
+
+def _file_ok(folder: Any, rel: Any) -> bool:
+    """True when a declared file exists and is non-empty."""
+    try:
+        path = os.path.join(str(folder), str(rel))
+        return os.path.isfile(path) and os.path.getsize(path) > 0
+    except Exception:
+        return False
+
+
+def _successful_read(record: Any, path: Any) -> bool:
+    """True when the run log holds a successful read of that file."""
+    try:
+        rows = record.get("reads", []) if isinstance(record, dict) else []
+    except Exception:
+        return False
+    for row in rows or []:
+        try:
+            if not isinstance(row, dict) or not row.get("ok"):
+                continue
+            if _same_file(row.get("path"), path):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _goal_path_present(folder: Any, path: Any,
+                       ws_keys: Any) -> bool:
+    """True when a goal-named path exists (exact normalised, never substring)."""
+    try:
+        if _file_ok(folder, path):
+            return True
+        keys = list(ws_keys or [])
+    except Exception:
+        return False
+    for key in keys:
+        try:
+            if _same_file(key, path):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _wants_runnable_hint(check_rows: Any) -> str:
+    """Plain next step naming the missing/refused tool, if known."""
+    try:
+        for row in check_rows or []:
+            if isinstance(row, dict) and row.get("missing_word"):
+                return ("install '%s' or plan a runnable check"
+                        % (row.get("missing_word"),))
+        for row in check_rows or []:
+            if isinstance(row, dict) and row.get("refused"):
+                return "resolve the refusal or plan a runnable check"
+    except Exception:
+        pass
+    return "plan a runnable check"
+
+
+def _gate_fail_reason(*, spec: Any, goal: Any, files_diff: str,
+                      check_rows: Any, entry_ok: bool,
+                      install_ok: bool, record: Any, folder: Any,
+                      ws_keys: Any, ws_start: Any = None) -> str | None:
+    """Deterministic PASS gate; None when the part may PASS.
+
+    PASS needs the auditor's PASS plus EITHER a real change with every
+    declared file existing and non-empty, OR a verify-only part (no
+    declared files; the outer PASS branch still requires green checks
+    that ran), OR this run's (or a prior run's) install record.
+    Goal-named paths must exist; when the goal asks to read, each
+    pre-existing named input needs a successful read in the run log.
+    A check that never ran is never PASS: the reason names the tool
+    plus a plain next step. A read-only worker with a lenient auditor
+    and no install record fails here too.
+    """
+    if not entry_ok:
+        return None
+    try:
+        declared = [str(item) for item in (spec.get("files") or [])]
+    except Exception:
+        declared = []
+    try:
+        started = [check for check in (check_rows or [])
+                   if not check.get("could_not_start")
+                   and not check.get("refused")]
+    except Exception:
+        started = []
+    try:
+        has_commands = bool(spec.get("check_commands"))
+    except Exception:
+        has_commands = False
+    if has_commands and not started:
+        tails = "; ".join(
+            str(check.get("output_tail") or "")
+            for check in (check_rows or [])) or "no checks"
+        return "check could not run: %s; next step: %s" % (
+            tails, _wants_runnable_hint(check_rows))
+    for name in declared:
+        if not _file_ok(folder, name):
+            return "declared file missing or empty: %s" % (name,)
+    try:
+        goals = _goal_paths(goal)
+    except Exception:
+        goals = []
+    for name in goals:
+        if not _goal_path_present(folder, name, ws_keys):
+            return "goal names missing path: %s" % (name,)
+    if goals and _has_read_criterion(goal):
+        try:
+            started_map = dict(ws_start or {})
+        except Exception:
+            started_map = {}
+        for name in goals:
+            try:
+                existed = started_map.get(name) is not None
+            except Exception:
+                existed = False
+            if existed and not _successful_read(record, name):
+                return ("no successful read of %s in the run log"
+                        % (name,))
+    changed = str(files_diff or "") != "(no changes)"
+    if install_ok:
+        return None
+    if changed:
+        return None
+    if not declared:
+        return None
+    return "no file changes vs attempt start and no installer ran"
+
+
 def _parallel_limit(app: Any, project: str, default: Any) -> int:
     """Effective part-parallelism for one run: stored setting wins.
 
@@ -1381,6 +1591,10 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
     producer_base = "producer-%s-%s" % (run_id, part_id)
     auditor_ref = _roles.new_identity("auditor-%s-%s" % (run_id, part_id))
     before = _audit.snapshot_files(folder, spec["files"])
+    try:
+        ws_run_start = _audit.snapshot_workspace(folder)
+    except Exception:
+        ws_run_start = {}
     failing: list[str] = []
     reasons: list[str] = []
     for attempt in range(1, _EXTRA_ATTEMPTS + 2):
@@ -1456,8 +1670,18 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
                 pass
             files_diff += "\nUndeclared changes " \
                 "(not in the part's files):\n" + undeclared_diff
+        if not spec.get("check_commands") and not spec.get("why"):
+            row["verdict"] = "FAIL"
+            row["reason"] = "no check: part has no check commands"
+            turn += 1
+            yield _run_event(
+                "delta", turn, part_id,
+                "Part %s: FAILED (%s)" % (part_id, row["reason"]),
+                {"run_id": run_id, "part_id": part_id})
+            publish()
+            return "FAIL", turn
         entry = None
-        if spec["check_commands"]:
+        if spec.get("check_commands") or spec.get("why"):
             try:
                 # FXPARALLEL BEGIN judge-lock: auditor charges in-thread.
                 entry = _audit.judge(
@@ -1521,28 +1745,31 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
                     "attempt": attempt,
                 })
             # FXPARALLEL END audits-lock.
+            if entry.get("over_cap"):
+                raise _BudgetOut(
+                    "budget stop: auditor call spent past the cap")
             try:
-                install_evidence = _records.combined_evidence(record)
+                ws_keys = list(ws_after or {})
             except Exception:
-                install_evidence = []
-            if (entry is not None and entry.get("result") == "PASS"
-                    and spec.get("files")
-                    and files_diff == "(no changes)"
-                    and not install_evidence):
-                # Empty work passing is a release blocker: an empty diff
-                # with no real installer run behind it cannot PASS,
-                # even with green checks and a PASS verdict. Earlier
-                # attempts continue (the worker may still write files);
-                # the last attempt fails with this honest line.
-                entry["result"] = "FAIL"
-                entry["reasons"] = [
-                    "no file changes vs attempt start and "
-                    "no installer ran"]
+                ws_keys = []
+            gate_reason = _gate_fail_reason(
+                spec=spec, goal=spec.get("goal", ""),
+                files_diff=files_diff, check_rows=check_rows,
+                entry_ok=bool(
+                    entry is not None and entry.get("result") == "PASS"),
+                install_ok=bool(_records.combined_evidence(record)),
+                record=record, folder=folder, ws_keys=ws_keys,
+                ws_start=ws_run_start)
+            if gate_reason is not None:
+                # The worker gets the gate line back; attempts continue
+                # until the budget is spent, then FAIL with this line.
+                failing.append(gate_reason)
+                for line in (entry or {}).get("reasons", []) or []:
+                    if line not in reasons:
+                        reasons.append(line)
                 if attempt >= _EXTRA_ATTEMPTS + 1:
                     row["verdict"] = "FAIL"
-                    row["reason"] = (
-                        "no file changes vs attempt start and "
-                        "no installer ran")
+                    row["reason"] = gate_reason
                     turn += 1
                     yield _run_event(
                         "delta", turn, part_id,
@@ -1550,6 +1777,15 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
                         {"run_id": run_id, "part_id": part_id})
                     publish()
                     return "FAIL", turn
+                turn += 1
+                yield _run_event(
+                    "delta", turn, part_id,
+                    "Part %s: %s; retrying with attempt %d" % (
+                        part_id, gate_reason, attempt + 1),
+                    {"run_id": run_id, "part_id": part_id,
+                     "attempt": attempt + 1})
+                publish()
+                continue
             first_reason = ((entry or {}).get("reasons", [])
                             or ["auditor gave no reason"])[0]
             turn += 1
@@ -1565,70 +1801,21 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
                    "; ".join((entry or {}).get("reasons", [])
                              or ["auditor gave no reason"]),
                    auditor_ref))
-            if entry.get("over_cap"):
-                raise _BudgetOut(
-                    "budget stop: auditor call spent past the cap")
-        if not spec["check_commands"]:
-            if spec.get("why"):
+        auditor_ok = entry is not None and entry["result"] == "PASS"
+        if auditor_ok and (checks_ok or not spec.get("check_commands")):
+            if checks_ok:
                 row["verdict"] = "PASS"
-                row["reason"] = "no check: director recorded why: %s" % (
-                    spec["why"],)
-                outcome_text = "Part %s: PASS (%s)" % (
-                    part_id, row["reason"])
+                row["reason"] = "checks green, auditor PASS"
+                outcome_text = "Part %s: PASS (checks green, auditor PASS)" % (
+                    part_id,)
             else:
-                row["verdict"] = "FAIL"
-                row["reason"] = "no check: part has no check commands"
-                outcome_text = "Part %s: FAILED (%s)" % (
-                    part_id, row["reason"])
+                row["verdict"] = "PASS"
+                row["reason"] = "auditor PASS, no checks to run"
+                outcome_text = "Part %s: PASS (auditor PASS, no checks)" % (
+                    part_id,)
             turn += 1
             yield _run_event(
                 "delta", turn, part_id, outcome_text,
-                {"run_id": run_id, "part_id": part_id})
-            publish()
-            return row["verdict"], turn
-        auditor_ok = entry is not None and entry["result"] == "PASS"
-        started = [check for check in check_rows
-                   if not check.get("could_not_start")
-                   and not check.get("refused")]
-        if spec["check_commands"] and not started:
-            # No check could start (missing executable): not a red
-            # check, no attempt burn; the auditor alone decides now.
-            no_start_reasons = list(
-                (entry or {}).get("reasons", [])) or [
-                "auditor gave no reason"]
-            if auditor_ok:
-                row["verdict"] = "PASS"
-                row["reason"] = (
-                    "auditor only: check could not run; auditor: %s"
-                    % ("; ".join(no_start_reasons),))
-                turn += 1
-                yield _run_event(
-                    "delta", turn, part_id,
-                    "Part %s: PASS (auditor only: check could not run)"
-                    % (part_id,),
-                    {"run_id": run_id, "part_id": part_id})
-                publish()
-                return "PASS", turn
-            row["verdict"] = "FAIL"
-            row["reason"] = "check could not run: %s; auditor: %s" % (
-                "; ".join(str(check.get("output_tail") or "")
-                          for check in check_rows) or "no checks",
-                "; ".join(no_start_reasons))
-            turn += 1
-            yield _run_event(
-                "delta", turn, part_id,
-                "Part %s: FAILED (needs you: %s)"
-                % (part_id, row["reason"]),
-                {"run_id": run_id, "part_id": part_id})
-            publish()
-            return "FAIL", turn
-        if checks_ok and auditor_ok:
-            row["verdict"] = "PASS"
-            row["reason"] = "checks green, auditor PASS"
-            turn += 1
-            yield _run_event(
-                "delta", turn, part_id,
-                "Part %s: PASS (checks green, auditor PASS)" % (part_id,),
                 {"run_id": run_id, "part_id": part_id})
             publish()
             return "PASS", turn
@@ -1640,7 +1827,12 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
                         " ".join(check.get("argv", [])),
                         check.get("output_tail"),
                         str(check.get("output_tail") or "")[:2000]))
-            else:
+            elif check.get("refused"):
+                failing.append(
+                    "$ %s: refused: %s" % (
+                        " ".join(check.get("argv", [])),
+                        check.get("refusal") or check.get("output_tail")))
+            elif check.get("exit_code") != 0:
                 failing.append("$ %s -> exit %s\n%s" % (
                     " ".join(check.get("argv", [])),
                     check.get("exit_code"),
@@ -1649,17 +1841,24 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
             "auditor gave no reason"]
         if attempt < _EXTRA_ATTEMPTS + 1:
             turn += 1
+            if failing:
+                outcome_line = "Part %s: checks red, attempt %d" % (
+                    part_id, attempt + 1)
+            else:
+                outcome_line = "Part %s: auditor failed, attempt %d" % (
+                    part_id, attempt + 1)
             yield _run_event(
-                "delta", turn, part_id,
-                "Part %s: checks red, attempt %d" % (
-                    part_id, attempt + 1),
+                "delta", turn, part_id, outcome_line,
                 {"run_id": run_id, "part_id": part_id,
                  "attempt": attempt + 1})
             publish()
             continue
         row["verdict"] = "FAIL"
-        row["reason"] = "checks red: %s; auditor: %s" % (
-            "; ".join(failing) or "no checks", "; ".join(reasons))
+        if failing:
+            row["reason"] = "checks red: %s; auditor: %s" % (
+                "; ".join(failing) or "no checks", "; ".join(reasons))
+        else:
+            row["reason"] = "auditor failed: %s" % ("; ".join(reasons),)
         turn += 1
         yield _run_event(
             "delta", turn, part_id,
@@ -1823,6 +2022,10 @@ def _apply_actions(*, record: Any, row: Any, folder: str, project: str,
                     folder, str(action.get("path", "")))
                 notes.append("read_file %s: %s" % (
                     action.get("path"), out[:2000]))
+                with contextlib.suppress(Exception):
+                    record.setdefault("reads", []).append({
+                        "path": str(action.get("path", "")),
+                        "ok": True})
             elif name == "list_dir":
                 out = _actions.list_dir(
                     folder, str(action.get("path", ".") or "."))
