@@ -13,8 +13,7 @@ import type {
 } from "../api/iface";
 import { ApiError, apiErrorLocaleKey } from "../api/errors";
 import { useApiClient } from "../app/ApiClientProvider";
-import { t, useLocale } from "../locale/index";
-import { Card } from "../ui/Card";
+import { formatNumber, t, useLocale } from "../locale/index";
 import { EmptyState } from "../ui/EmptyState";
 import { ErrorPanel } from "../ui/ErrorPanel";
 import { LoadingState } from "../ui/LoadingState";
@@ -24,6 +23,14 @@ import {
   resolveStatusHuman,
 } from "../agents/agentsApi";
 import { humanRunRef, buildRunRecords } from "./viewsApi";
+import {
+  formatRunMoment,
+  humanDuration,
+  readRuns,
+  runStatusText,
+  runWallS,
+} from "./viewsApi";
+import type { DevrunRun } from "./viewsApi";
 import "./projectview.css";
 
 export interface RunHistoryProps {
@@ -40,13 +47,13 @@ export function RunHistory(props: RunHistoryProps): ReactElement {
   const { locale } = useLocale();
   const [ledger, setLedger] = useState<LedgerRow[] | null>(null);
   const [parts, setParts] = useState<PartRow[] | null>(null);
+  const [runs, setRuns] = useState<DevrunRun[] | null>(null);
   const [report, setReport] = useState<PackageReport | "missing" | null>(null);
   const [failure, setFailure] = useState<{
     errorKey: string;
     code: string;
   } | null>(null);
   const [nonce, setNonce] = useState(0);
-  const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -90,15 +97,23 @@ export function RunHistory(props: RunHistoryProps): ReactElement {
     };
   }, [client, props.projectId, props.packageId, nonce]);
 
+  // FXVIEWS3: the same route serves devrun run rows under the "runs" key
+  // (FXVIEWS2); readRuns reads that key. A missing doc reads [] (honestly
+  // empty) so a failing enrichment never hides the ledger rows.
+  useEffect(() => {
+    let alive = true;
+    void readRuns(props.projectId).then((rows) => {
+      if (alive) {
+        setRuns(rows);
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, [props.projectId, nonce]);
+
   return (
-    <Card
-      cardId="run-history"
-      titleKey="projects.runs.title"
-      collapsed={collapsed}
-      onToggle={(expanded) => {
-        setCollapsed(!expanded);
-      }}
-    >
+    <div>
       {failure !== null ? (
         <ErrorPanel
           errorKey={failure.errorKey}
@@ -107,9 +122,9 @@ export function RunHistory(props: RunHistoryProps): ReactElement {
             setNonce((value) => value + 1);
           }}
         />
-      ) : ledger === null || parts === null ? (
+      ) : ledger === null || parts === null || runs === null ? (
         <LoadingState loadingKey="ui.loading.more" />
-      ) : ledger.length === 0 ? (
+      ) : ledger.length === 0 && runs.length === 0 ? (
         <EmptyState
           stateKey="projects.list.empty"
           actionKey={null}
@@ -117,6 +132,53 @@ export function RunHistory(props: RunHistoryProps): ReactElement {
         />
       ) : (
         <div>
+          {runs.map((run) => {
+            const short = humanRunRef(run.run_id);
+            const wall = runWallS(run);
+            const duration = humanDuration(wall);
+            return (
+              <div
+                key={run.run_id}
+                data-testid={`devrun-card-${run.run_id}`}
+                className="fxpv-run"
+              >
+                <div>
+                  {runStatusText(run)} · {formatRunMoment(run.start, locale)} ·{" "}
+                  {duration ?? "not known"}
+                </div>
+                <div>
+                  {run.parts.length === 0
+                    ? "not known"
+                    : run.parts
+                        .map(
+                          (part) =>
+                            `${part.part_id}: ${part.verdict ?? "not known"}`,
+                        )
+                        .join(", ")}
+                </div>
+                <div>
+                  Tokens{" "}
+                  {run.tokens === "UNKNOWN"
+                    ? "not known"
+                    : formatNumber(run.tokens, locale)}{" "}
+                  · Cost {run.cost === "UNKNOWN" ? "not known" : run.cost}
+                </div>
+                {run.summary === "" ? null : <div>{run.summary}</div>}
+                {run.files.length === 0 ? null : (
+                  <ul>
+                    {run.files.map((file) => (
+                      <li key={file} title={file}>
+                        {humanRunRef(file).text}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <div className="fxpv-quiet" title={short.title}>
+                  {short.text}
+                </div>
+              </div>
+            );
+          })}
           {ledger.map((row) => {
             const short = humanRunRef(row.package_id);
             return (
@@ -137,7 +199,7 @@ export function RunHistory(props: RunHistoryProps): ReactElement {
             );
           })}
           <div>
-            <span>{t("agents.live.title")}</span>
+            <p>Team</p>
             {parts.map((part) => {
               const short = humanRunRef(part.agent);
               return (
@@ -160,7 +222,6 @@ export function RunHistory(props: RunHistoryProps): ReactElement {
             })}
           </div>
           <div>
-            <span>{t("projectView.runs.verdict")}</span>
             {buildRunRecords({ ledger, live: parts }).map((record) => {
               const short = humanRunRef(record.packageId);
               return (
@@ -180,7 +241,6 @@ export function RunHistory(props: RunHistoryProps): ReactElement {
             })}
           </div>
           <div>
-            <span>{t("projects.reports.title")}</span>
             {report === null || report === "missing" ? null : (
               <div data-testid="runhistory-install" className="fxpv-row">
                 <span>{t("projectView.runs.package")}</span>
@@ -194,6 +254,6 @@ export function RunHistory(props: RunHistoryProps): ReactElement {
           </div>
         </div>
       )}
-    </Card>
+    </div>
   );
 }

@@ -77,8 +77,12 @@ describe('LIVE0-05 first-run wizard setup steps', () => {
     expect(done).toBe(false);
   });
 
-  it('lists the optional steps as skippable', () => {
+  it('lists the optional steps as one quiet skippable list on the last step', () => {
     render(<FirstRunFlow onComplete={() => undefined} />);
+    expect(screen.queryAllByRole('button', { name: en.firstrun.skip }).length).toBe(1);
+    fireEvent.click(screen.getByRole('button', { name: en.firstrun.next }));
+    fireEvent.click(screen.getByRole('button', { name: en.firstrun.next }));
+    fireEvent.click(screen.getByRole('button', { name: en.firstrun.next }));
     expect(screen.getAllByRole('button', { name: en.firstrun.skip }).length).toBe(4);
     for (const title of Object.values(en.firstrun.optional)) {
       expect(screen.getByText(title)).toBeTruthy();

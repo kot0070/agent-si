@@ -84,7 +84,14 @@ describe("fxconnect save posts the connect route with the operator token", () =>
     const dialog = screen.getByRole("dialog");
     fireEvent.change(within(dialog).getByLabelText("API key"), { target: { value: FX_KEY } });
     fireEvent.click(within(dialog).getByText("Save"));
-    await waitFor(() => expect(screen.getByLabelText("Disconnect OpenAI")).toBeTruthy());
+    // Step 1 done: the same dialog moves to step 2 (Connected line plus
+    // the tickable list); the key field is gone with step 1.
+    expect(await within(dialog).findByText("Connected OpenAI. Reference saved.")).toBeTruthy();
+    expect(screen.queryByLabelText("API key")).toBeNull();
+    fireEvent.click(within(dialog).getByText("Done"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByLabelText("Disconnect OpenAI")).toBeTruthy();
+    expect(screen.getByText("Connected OpenAI. Reference saved.")).toBeTruthy();
 
     const keyPosts = callsTo(seen, "/api/v1/providers/keys");
     expect(keyPosts).toHaveLength(1);
@@ -107,7 +114,8 @@ describe("fxconnect save posts the connect route with the operator token", () =>
     expect(connectBody["key_ref"]).toEqual({ secret_id: "openai", provider_id: "openai" });
     expect(JSON.stringify(connectBody)).not.toContain("session_token");
 
-    expect((within(dialog).getByLabelText("API key") as HTMLInputElement).value).toBe("");
+    // The key leaves with step 1: no key field stays on screen.
+    expect(screen.queryByLabelText("API key")).toBeNull();
   });
 
   it("connect 400 shows the reason and leaves the card disconnected", async () => {
@@ -158,11 +166,18 @@ describe("fxconnect cards state follows the GET answer and disconnect follows th
   });
 
   it("Disconnect posts the disconnect route and the card follows the answer", async () => {
+    // Stateful fake: the real route drops the provider, so later GETs no
+    // longer list it (the page re-reads served state after disconnect).
+    const dropped = new Set<string>();
     const seen = programFetch((url) => {
       if (url === "/api/v1/providers") {
-        return ok({ providers: [{ provider_id: "openai", type: "cloud", base_url: "https://api.openai.com/v1", health: "ONLINE", evidenced: true }] });
+        const providers = dropped.has("openai")
+          ? []
+          : [{ provider_id: "openai", type: "cloud", base_url: "https://api.openai.com/v1", health: "ONLINE", evidenced: true }];
+        return ok({ providers });
       }
       if (url === "/api/v1/providers/openai/disconnect") {
+        dropped.add("openai");
         return ok({ removed: true, provider_id: "openai" });
       }
       return ok({});

@@ -5,11 +5,11 @@
 // the first paint stays chat-first. Production entry:
 // frontend/src/app/main.tsx.
 
-import { Suspense, lazy, useEffect, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import {
-  Link,
   Navigate,
+  NavLink,
   Route,
   Routes,
   useNavigate,
@@ -18,6 +18,7 @@ import {
 } from "react-router-dom";
 import type { RouteTable } from "./iface";
 import type { ApiClient } from "../api/iface";
+import type { ProjectRecord } from "../api/iface";
 import { ENDPOINTS } from "../api/endpoints";
 import { ApiError, apiErrorLocaleKey } from "../api/errors";
 import {
@@ -25,6 +26,7 @@ import {
   useCurrentProject,
 } from "./ApiClientProvider";
 import type { CurrentProject } from "./ApiClientProvider";
+import { ProjectListProvider, useProjectList } from "../projects/projectList";
 import {
   DEFAULT_LOCALE,
   LOCALE_STORAGE_KEY,
@@ -86,6 +88,12 @@ export const ROUTES: RouteTable = {
 // it) because the frozen RouteTable in app/iface.ts is owned by another
 // lane; the literal path below matches the merged project route shape.
 export const TESTS_ROUTE_PATH = "/projects/:projectId/tests";
+
+// FXCHATHIST Part 2: the Chat tab route path, same pattern as the Tests
+// tab above (frozen RouteTable untouched). Every project entry point
+// (Sidebar, TopBar, ProjectsPage) lands here: the mounted ChatArea reads
+// the store slice plus the served history for that project.
+export const CHAT_TAB_ROUTE_PATH = "/projects/:projectId/chat";
 
 const ChatAreaView = lazy(() =>
   import("../chat/index").then((module) => ({ default: module.ChatArea })),
@@ -206,32 +214,6 @@ function readStoredLocale(): SupportedLocale {
   return DEFAULT_LOCALE;
 }
 
-function useEnsureProjectSelection(): void {
-  const client = useApiClient();
-  const current = useCurrentProject();
-  useEffect(() => {
-    if (current.projectId !== null) {
-      return;
-    }
-    let alive = true;
-    client.listProjects().then(
-      (rows) => {
-        if (!alive) {
-          return;
-        }
-        const first = rows[0];
-        if (first !== undefined) {
-          current.select(first.project_id);
-        }
-      },
-      () => undefined,
-    );
-    return () => {
-      alive = false;
-    };
-  }, [client, current]);
-}
-
 // Chat-first start box for the no-project case (kit PRODUCT_SPEC:4154):
 // the / route always mounts a working message box; the first sent message
 // creates the first project and starts a task in it, then selects it so the
@@ -243,6 +225,10 @@ function ChatStartBox(props: {
 }): ReactElement {
   const client = useApiClient();
   const current = useCurrentProject();
+  // FXPROJ J1: the first message creates the project after every list
+  // mounted; refresh the shared list so the left rows and the Projects
+  // page show it at once.
+  const { refresh } = useProjectList();
   const [draft, setDraft] = useState(props.initialDraft ?? "");
   const [busy, setBusy] = useState(false);
   const [blocking, setBlocking] = useState<{
@@ -264,6 +250,7 @@ function ChatStartBox(props: {
         folder_ref: compact,
       });
       current.select(project.project_id);
+      refresh();
       await client.createTask(project.project_id, {
         title: message,
         scope: [],
@@ -500,6 +487,24 @@ function LocalAiRoute(props: { projectId: string }): ReactElement {
   );
 }
 
+// FXCHATHIST Part 2: the project Chat tab. Renders the same ChatArea as
+// the root chat route, bound to the URL project; selects it into the
+// current project so the shell (TopBar, Sidebar, Inspector) follows.
+function ChatTabRoute(): ReactElement {
+  const params = useParams();
+  const current = useCurrentProject();
+  const projectId = params.projectId;
+  useEffect(() => {
+    if (projectId !== undefined && projectId !== current.projectId) {
+      current.select(projectId);
+    }
+  }, [projectId, current]);
+  if (projectId === undefined) {
+    return <ProjectsPageView />;
+  }
+  return <ChatAreaView projectId={projectId} />;
+}
+
 function ProjectSubview(props: { view: ProjectViewName }): ReactElement {
   const params = useParams();
   const [search] = useSearchParams();
@@ -529,6 +534,32 @@ function ProjectSubview(props: { view: ProjectViewName }): ReactElement {
   );
 }
 
+function SettingsTabs(): ReactElement {
+  return (
+    <nav data-testid="settings-tabs">
+      {SETTINGS_ROUTES.map((route) => (
+        <NavLink
+          key={route.path}
+          to={`/settings/${route.path}`}
+          data-testid={`settings-link-${route.path}`}
+          end
+          className={({ isActive }) => (isActive ? "fx-tab-active" : undefined)}
+        >
+          {t(route.titleKey)}
+        </NavLink>
+      ))}
+      <NavLink
+        key="diagnostics"
+        to="/settings/diagnostics"
+        data-testid="settings-link-diagnostics"
+        className={({ isActive }) => (isActive ? "fx-tab-active" : undefined)}
+      >
+        {t("diagnostics.title")}
+      </NavLink>
+    </nav>
+  );
+}
+
 function SettingsIndexRoute(): ReactElement {
   const general = SETTINGS_ROUTES[0];
   if (general === undefined) {
@@ -542,24 +573,7 @@ function SettingsIndexRoute(): ReactElement {
       purposeKey={general.purposeKey}
       needItNowKey={general.needItNowKey}
     >
-      <nav>
-        {SETTINGS_ROUTES.map((route) => (
-          <Link
-            key={route.path}
-            to={`/settings/${route.path}`}
-            data-testid={`settings-link-${route.path}`}
-          >
-            {t(route.titleKey)}
-          </Link>
-        ))}
-        <Link
-          key="diagnostics"
-          to="/settings/diagnostics"
-          data-testid="settings-link-diagnostics"
-        >
-          {t("diagnostics.title")}
-        </Link>
-      </nav>
+      <SettingsTabs />
     </SettingsLayout>
   );
 }
@@ -591,6 +605,7 @@ function SettingsSectionRoute(): ReactElement {
       purposeKey={route.purposeKey}
       needItNowKey={route.needItNowKey}
     >
+      <SettingsTabs />
       {route.path === "project" ? (
         // FXPOINT1 P1: the role editor stays mounted even with no project
         // selected so its labelled Mode/Role controls always resolve; the
@@ -673,7 +688,7 @@ function FirstRunRoute(props: {
   );
 }
 
-function AppShell(): ReactElement {
+function AppShellInner(): ReactElement {
   const current = useCurrentProject();
   const projectId = current.projectId;
   const [chatPrefill, setChatPrefill] = useState<string | null>(null);
@@ -681,7 +696,6 @@ function AppShell(): ReactElement {
     projectId: string;
     text: string;
   } | null>(null);
-  useEnsureProjectSelection();
   return (
     <div data-testid="app-shell">
       {/* FXKITUI-FIRSTRUN-BEGIN */}
@@ -773,6 +787,7 @@ function AppShell(): ReactElement {
                 path={TESTS_ROUTE_PATH}
                 element={<ProjectSubview view="tests" />}
               />
+              <Route path={CHAT_TAB_ROUTE_PATH} element={<ChatTabRoute />} />
               <Route path="/settings" element={<SettingsIndexRoute />} />
               <Route
                 path="/settings/:section"
@@ -807,6 +822,35 @@ function AppShell(): ReactElement {
         live={null}
       />
     </div>
+  );
+}
+
+function AppShell(): ReactElement {
+  const current = useCurrentProject();
+  // FXPROJ J1: first selection rides the shared list load in the same
+  // tick (no extra fetch, no extra render hop). Later loads never
+  // reselect: the ref guards the null case at call time.
+  const selectionRef = useRef(current.projectId);
+  selectionRef.current = current.projectId;
+  const selectFirst = useCallback(
+    (rows: ProjectRecord[]) => {
+      if (selectionRef.current !== null) {
+        return;
+      }
+      const first = rows[0];
+      if (first !== undefined) {
+        current.select(first.project_id);
+      }
+    },
+    [current],
+  );
+  // FXPROJ J1: the one shared project list for the whole shell
+  // (Sidebar, Projects page, first-message create). It reads the route,
+  // so it mounts inside the router, around the shell content.
+  return (
+    <ProjectListProvider onLoad={selectFirst}>
+      <AppShellInner />
+    </ProjectListProvider>
   );
 }
 

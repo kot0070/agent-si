@@ -341,12 +341,14 @@ describe("ProvidersPage", () => {
     const connectDialog = screen.getByRole("dialog");
     fireEvent.change(within(connectDialog).getByLabelText("API key"), { target: { value: "sk-test" } });
     fireEvent.click(within(connectDialog).getByText("Save"));
+    // Step 2 opens in the same dialog; Done closes it.
     expect(await within(connectDialog).findByText(/Reference saved/)).toBeTruthy();
-    fireEvent.click(within(connectDialog).getByLabelText("Close"));
+    fireEvent.click(within(connectDialog).getByText("Done"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    // Fresh connect ticks only the default model (never everything).
     const box = screen.getByLabelText("OpenAI Standard") as HTMLInputElement;
     expect(box.disabled).toBe(false);
-    fireEvent.click(box);
-    expect((screen.getByLabelText("OpenAI Standard") as HTMLInputElement).checked).toBe(true);
+    expect(box.checked).toBe(true);
     expect(screen.getByRole("combobox").textContent ?? "").toContain("Standard");
     fireEvent.click(screen.getByLabelText("Disconnect OpenAI"));
     const disconnectDialog = screen.getByRole("dialog");
@@ -470,8 +472,9 @@ describe("ProvidersPage role pools wiring (page-level)", () => {
     fireEvent.change(within(connectDialog).getByLabelText("API key"), { target: { value: "sk-test" } });
     fireEvent.click(within(connectDialog).getByText("Save"));
     expect(await within(connectDialog).findByText(/Reference saved/)).toBeTruthy();
-    fireEvent.click(within(connectDialog).getByLabelText("Close"));
-    fireEvent.click(screen.getByLabelText("OpenAI Standard"));
+    fireEvent.click(within(connectDialog).getByText("Done"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    // Fresh connect already ticks the default model; keep it on.
     expect((screen.getByLabelText("OpenAI Standard") as HTMLInputElement).checked).toBe(true);
     return fetchMock;
   }
@@ -713,8 +716,9 @@ describe("ProvidersPage chat model save wiring (page-level)", () => {
     fireEvent.change(within(connectDialog).getByLabelText("API key"), { target: { value: "sk-test" } });
     fireEvent.click(within(connectDialog).getByText("Save"));
     expect(await within(connectDialog).findByText(/Reference saved/)).toBeTruthy();
-    fireEvent.click(within(connectDialog).getByLabelText("Close"));
-    fireEvent.click(screen.getByLabelText("OpenAI Standard"));
+    fireEvent.click(within(connectDialog).getByText("Done"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    // Fresh connect already ticks the default model; keep it on.
     expect((screen.getByLabelText("OpenAI Standard") as HTMLInputElement).checked).toBe(true);
     return fetchMock;
   }

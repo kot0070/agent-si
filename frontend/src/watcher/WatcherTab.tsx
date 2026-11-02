@@ -90,6 +90,17 @@ function readCardModels(): Record<string, string> {
  */
 export const WATCHER_TIMEOUT_MS = 500;
 
+/** Human short name for a watcher model enum; the raw enum never renders. */
+export function watcherModelName(model: WatcherSettings["model"]): string {
+  if (model === "local") {
+    return t("watcher.tab.modelLocal");
+  }
+  if (model === "API") {
+    return t("watcher.tab.modelApi");
+  }
+  return t("watcher.tab.modelOff");
+}
+
 /** Watcher tab: live status plus journal head, settings, and rule cards. */
 export function WatcherTab({ projectId }: { projectId: string }) {
   const [status, setStatus] = useState<WatcherStatusData | null>(null);
@@ -200,10 +211,11 @@ export function WatcherTab({ projectId }: { projectId: string }) {
           >
             {WATCHER_MODELS.map((model) => (
               <option key={model} value={model}>
-                {model}
+                {watcherModelName(model)}
               </option>
             ))}
           </select>
+          <span data-testid="watcher-model-name">{watcherModelName(settings.model)}</span>
         </label>
         <label>
           {t("watcher.tab.cloudFallback")}
@@ -211,6 +223,7 @@ export function WatcherTab({ projectId }: { projectId: string }) {
             data-testid="watcher-cloud-fallback"
             type="checkbox"
             checked={settings.cloudFallback}
+            aria-describedby="watcher-fallback-note"
             onChange={(event) => {
               const next: WatcherSettings = {
                 ...settings,
@@ -221,6 +234,9 @@ export function WatcherTab({ projectId }: { projectId: string }) {
             }}
           />
         </label>
+        <p data-testid="watcher-fallback-note" id="watcher-fallback-note">
+          {t("watcher.tab.fallbackNote")}
+        </p>
       </fieldset>
 
       <div data-testid="watcher-rule-cards">
@@ -253,7 +269,7 @@ export function WatcherTab({ projectId }: { projectId: string }) {
               >
                 {RULE_CARD_MODELS.map((model) => (
                   <option key={model} value={model}>
-                    {model}
+                    {watcherModelName(model)}
                   </option>
                 ))}
               </select>

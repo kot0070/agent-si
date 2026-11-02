@@ -933,3 +933,279 @@ button[data-testid="hierarchy-collapsed"]:hover:not(:disabled) {
   content: "\00B7";
   margin: 0 0.45em;
 }
+
+/* FXDESIGN7: red Stop-all (danger colour both themes, >=4.5:1 on the
+   surface; the only red control in the bar) + quiet selects + quiet
+   watcher shortcut (not a blue inline link). Specificity beats the
+   generic .fx-topbar control rule below. */
+.fx-topbar button.fx-stop-danger {
+  background-color: transparent;
+  background-image: none;
+  color: var(--fx-danger);
+  border: 1px solid var(--fx-danger);
+  border-radius: 6px;
+  font-weight: 700;
+  min-height: 32px;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+
+.fx-topbar button.fx-stop-danger:hover:not(:disabled) {
+  background-color: var(--fx-danger-fill);
+  border-color: var(--fx-danger-fill);
+  color: var(--fx-danger-ink);
+}
+
+.fx-topbar button.fx-stop-danger:focus-visible {
+  outline: 2px solid var(--fx-focus-ring);
+  outline-offset: 2px;
+}
+
+.fx-topbar button.fx-stop-danger:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.fx-topbar-quiet {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0.9;
+  font-size: 13px;
+}
+
+.fx-topbar select.fx-topbar-control {
+  background: none;
+  background-image: none;
+  border: none;
+  color: var(--fx-ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  min-height: 32px;
+  cursor: pointer;
+}
+
+.fx-topbar button.fx-btn-quiet {
+  background: none;
+  background-image: none;
+}
+
+a.fx-topbar-watcher {
+  color: var(--fx-ink);
+  text-decoration: none;
+  font-size: 13px;
+  opacity: 0.85;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+}
+
+a.fx-topbar-watcher:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* FXDESIGN7 item 8: route counts read as four badge chips; the UNKNOWN
+   chip stays muted and is never counted as active. Attribute selectors so
+   no testid or behaviour changes. */
+span[data-testid^="agent-badge-"] {
+  display: inline-block;
+  padding: 2px 10px;
+  margin: 2px 4px 2px 0;
+  border: 1px solid var(--fx-card-border);
+  border-radius: 999px;
+  background-color: var(--fx-card-bg);
+  color: var(--fx-ink);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+span[data-testid="agent-badge-UNKNOWN"] {
+  opacity: 0.6;
+  border-style: dashed;
+}
+
+/* FXDESIGN7 item 18: active tab = underline + bold, never colour alone;
+   quiet nav links keep >=4.5:1 token blues. */
+.fx-tab-active {
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+nav a.fx-tab-active {
+  color: var(--fx-accent);
+}
+
+/* FXDESIGN7 item 24: one primary per view; quiet secondary actions. */
+.fx-btn-primary {
+  background-color: var(--fx-btn-primary-bg);
+  color: var(--fx-btn-primary-ink);
+  border: 1px solid var(--fx-btn-primary-bg);
+  border-radius: 6px;
+  min-height: 32px;
+  padding: 6px 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.fx-btn-primary:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.fx-btn-quiet {
+  background: none;
+  color: var(--fx-btn-quiet-ink);
+  border: 1px solid var(--fx-input-border);
+  border-radius: 6px;
+  min-height: 32px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.fx-btn-quiet:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+button.fx-why-quiet {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--fx-link);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  font-size: 13px;
+  cursor: pointer;
+  min-height: 32px;
+}
+
+/* FXDESIGN7 item 15: KB rows wrap on word boundaries (never mid-token);
+   long values scroll inside their own cell, never the page. */
+div[data-testid="kb-status"] table,
+div[data-testid="kb-update-result"] table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+div[data-testid="kb-status"] th,
+div[data-testid="kb-status"] td,
+div[data-testid="kb-update-result"] th,
+div[data-testid="kb-update-result"] td {
+  overflow-wrap: normal;
+  word-break: normal;
+  max-width: 60ch;
+  text-align: left;
+  vertical-align: top;
+  padding: 4px 8px;
+}
+
+/* FXDESIGN7 item 16/22: quiet secondary lines (cap line, not-set hints). */
+.fx-cap-line,
+.fx-quiet-line {
+  opacity: 0.8;
+  font-size: 13px;
+  margin: 4px 0;
+}
+
+.fx-notset {
+  opacity: 0.85;
+  font-size: 13px;
+  margin: 4px 0;
+}
+
+/* FXDESIGN7 items 5/25: card rhythm — one title style, 8px spacing,
+   labels muted 12px, values regular 13px. */
+aside[data-testid="inspector"] section > h2,
+aside[data-testid="inspector"] section > span:first-child {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+aside[data-testid="inspector"] section > section,
+aside[data-testid="inspector"] section + section {
+  margin-top: 8px;
+}
+
+.fx-team-field {
+  font-size: 13px;
+}
+
+/* FXDESIGN7 item 19: centre column keeps a usable minimum; side tracks
+   keep theirs; every column keeps its own scroll. */
+div[data-testid="app-shell"]:has(> nav[data-testid="sidebar"]) {
+  grid-template-columns: 240px minmax(280px, 1fr) 320px;
+}
+
+@media (max-width: 1100px) {
+  div[data-testid="app-shell"]:has(> nav[data-testid="sidebar"]) {
+    grid-template-columns: 200px minmax(280px, 1fr) 260px;
+  }
+}
+
+/* FXDESIGN7 item 19: at or below 1024px the right rail collapses to
+   one-line rows (ref 7 pattern); content re-opens at wider widths. */
+@media (max-width: 1024px) {
+  div[data-testid="app-shell"]:has(> nav[data-testid="sidebar"]) {
+    grid-template-columns: 200px minmax(0, 1fr) 240px;
+  }
+
+  aside[data-testid="inspector"] section[data-testid^="inspector-card-"] > *:not(:first-child) {
+    display: none;
+  }
+}
+
+/* FXDESIGN7 item 20: uk strings never clip — wrap or ellipsis with the
+   full text in the title; buttons grow to fit at >=32px targets. */
+div[data-testid="app-shell"] button {
+  min-height: 32px;
+  max-width: 100%;
+}
+
+nav[data-testid="sidebar"] a,
+nav[data-testid="sidebar"] button {
+  overflow-wrap: break-word;
+  white-space: normal;
+}
+
+.fx-topbar select,
+.fx-topbar button {
+  max-width: 40vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* FXDESIGN7: every control shows a token focus ring (both themes). */
+div[data-testid="app-shell"] :focus-visible {
+  outline: 2px solid var(--fx-focus-ring);
+  outline-offset: 2px;
+}
+
+/* FXDESIGN7 deferred: Tokens/Tests metric cards — the chevron lives in
+   the heading row (inline, quiet), never a lone bordered box. */
+section[data-testid^="kit-metric-"] > h2 {
+  display: inline;
+  margin-right: 8px;
+}
+
+section[data-testid^="kit-metric-"] > button[class*="fx-kit-toggle"] {
+  display: inline-flex;
+  border: none;
+  background: none;
+  vertical-align: baseline;
+}
+
+section[data-testid^="kit-card-"] > h2 {
+  display: inline;
+  margin-right: 8px;
+}
+
+section[data-testid^="kit-card-"] > button[class*="fx-kit-toggle"] {
+  display: inline-flex;
+  border: none;
+  background: none;
+  vertical-align: baseline;
+}

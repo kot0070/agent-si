@@ -5,6 +5,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getUiToken } from "../../api/errors";
 import { deleteLeftoverKey, listConnectedProviders, listLeftoverKeys } from "./connectApi";
+import { listServedModels, mergeModelList, modelPriceText } from "./modelsApi";
+import type { ServedModelRow } from "./modelsApi";
 import { PROVIDER_CATALOG } from "./catalog";
 import { ChatModelSelector } from "./ChatModelSelector";
 import { enabledChatChoices } from "./ChatSelector";
@@ -62,15 +64,62 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
   const [connectId, setConnectId] = useState<string | null>(null);
   const [disconnectId, setDisconnectId] = useState<string | null>(null);
   const [finderKey, setFinderKey] = useState(0);
+  // Step-2 Manage models: reopens the same dialog at the model list with
+  // the current ticks (no key asked twice).
+  const [manageId, setManageId] = useState<string | null>(null);
   const [showWizard, setShowWizard] = useState(false);
   const [wizardDone, setWizardDone] = useState(false);
+  // Last provider connected through the dialog: its card carries the quiet
+  // "Connected {label}. Reference saved." line next to Disconnect.
+  const [lastConnectedId, setLastConnectedId] = useState<string | null>(null);
+  // Served model listings per preset (GET /api/v1/providers/{id}/models):
+  // the provider's own rows the routes know, merged over the KB catalog.
+  const [servedModels, setServedModels] = useState<Record<string, ServedModelRow[]>>({});
+
+  // Served state is the truth: mark the providers the routes already know
+  // as connected (union only, never clears local picks on a partial read).
+  // It never throws and never disturbs the page when no route answers.
+  async function refreshConnected(): Promise<void> {
+    const ids = await listConnectedProviders();
+    if (ids.length === 0) {
+      return;
+    }
+    const known = new Set(ids);
+    setStates((prev) => {
+      const next: Record<string, ProviderState> = { ...prev };
+      for (const id of Object.keys(next)) {
+        if (known.has(id)) {
+          const current = next[id] as ProviderState;
+          next[id] = { ...current, connected: true };
+        }
+      }
+      return next;
+    });
+  }
+
+  // Served model listings for the given presets (never throws).
+  async function loadServedModels(presetIds: string[]): Promise<void> {
+    if (presetIds.length === 0) {
+      return;
+    }
+    const entries = await Promise.all(
+      presetIds.map(async (id) => ({ id, rows: await listServedModels(id) })),
+    );
+    setServedModels((prev) => {
+      const next: Record<string, ServedModelRow[]> = { ...prev };
+      for (const entry of entries) {
+        next[entry.id] = entry.rows;
+      }
+      return next;
+    });
+  }
 
   // Cards state on open: a background GET marks the providers the routes
-  // already know as connected. It never throws and never disturbs the page
-  // when no route answers.
+  // already know as connected, then their served model listings merge in.
   useEffect(() => {
     let cancelled = false;
-    void listConnectedProviders().then((ids) => {
+    void (async () => {
+      const ids = await listConnectedProviders();
       if (cancelled || ids.length === 0) {
         return;
       }
@@ -85,30 +134,67 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
         }
         return next;
       });
-    });
+      const entries = await Promise.all(
+        ids.map(async (id) => ({ id, rows: await listServedModels(id) })),
+      );
+      if (cancelled) {
+        return;
+      }
+      setServedModels((prev) => {
+        const next: Record<string, ServedModelRow[]> = { ...prev };
+        for (const entry of entries) {
+          next[entry.id] = entry.rows;
+        }
+        return next;
+      });
+    })();
     return () => {
       cancelled = true;
     };
   }, []);
 
+  // Display models per preset: the served provider listing (the rows the
+  // routes know for this provider) first, then the KB-derived catalog
+  // entries not already listed. Role pickers, the chat picker and search
+  // all read this same merged list; nothing outside these two sources.
+  const displayModels = useMemo(() => {
+    const out: Record<string, Array<{ id: string; label: string; kb: unknown }>> = {};
+    for (const preset of catalog) {
+      out[preset.id] = mergeModelList(preset.models, servedModels[preset.id] ?? [], preset.id);
+    }
+    return out;
+  }, [catalog, servedModels]);
+
+  // Same merged list in catalog shape for the pickers (chat, roles, setup).
+  const displayCatalog = useMemo(
+    () =>
+      catalog.map((preset) => ({
+        ...preset,
+        models: (displayModels[preset.id] ?? []).map((model) => ({
+          id: model.id,
+          label: model.label,
+        })),
+      })),
+    [catalog, displayModels],
+  );
+
   // Stable order: the catalog array order, captured once. Never re-sorted,
   // so connecting, toggling or refreshing never reorders or flickers rows.
-  const ordered = useMemo(() => catalog.slice(), [catalog]);
-
+  // Groups follow the merged catalog so cards and pickers share one order.
   const groups = useMemo(() => {
     const names: string[] = [];
-    for (const preset of ordered) {
+    for (const preset of displayCatalog) {
       if (!names.includes(preset.group)) {
         names.push(preset.group);
       }
     }
     return names.map((name) => ({
       name,
-      presets: ordered.filter((preset) => preset.group === name),
+      presets: displayCatalog.filter((preset) => preset.group === name),
     }));
-  }, [ordered]);
+  }, [displayCatalog]);
 
-  const choices = useMemo(() => enabledChatChoices(ordered, states), [ordered, states]);
+  const choices = useMemo(() => enabledChatChoices(displayCatalog, states), [displayCatalog, states]);
   const poolOptions = useMemo(() => choicesToPoolOptions(choices), [choices]);
   const [poolSaveMessage, setPoolSaveMessage] = useState("");
   const [chatSaveMessage, setChatSaveMessage] = useState("");
@@ -139,7 +225,12 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
     if (preset.label.toLowerCase().includes(needle)) {
       return true;
     }
-    return preset.models.some((model) => model.label.toLowerCase().includes(needle));
+    const models = displayModels[preset.id] ?? preset.models;
+    return models.some(
+      (model) =>
+        model.label.toLowerCase().includes(needle) ||
+        model.id.toLowerCase().includes(needle),
+    );
   }
 
   function toggleModel(presetId: string, modelId: string): void {
@@ -162,11 +253,45 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
   }
 
   function handleConnected(presetId: string): void {
+    // Fresh connect ticks only the default model (the connect id): never
+    // everything, even when the account lists 100+ models.
+    const defaultId = catalog.find((entry) => entry.id === presetId)?.models[0]?.id;
+    setStates((prev) => {
+      const current = prev[presetId] as ProviderState | undefined;
+      const enabled = current !== undefined && current.enabledModels.length > 0
+        ? current.enabledModels
+        : defaultId === undefined
+          ? []
+          : [defaultId];
+      return {
+        ...prev,
+        [presetId]: {
+          ...(current ?? { presetId, connected: false, enabledModels: [] }),
+          presetId,
+          connected: true,
+          enabledModels: enabled,
+        },
+      };
+    });
+    // The dialog stays open and moves to step 2 itself; the card keeps a
+    // quiet Connected line. Served state re-validates in the background.
+    setLastConnectedId(presetId);
+    setFinderKey((key) => key + 1);
+    void loadServedModels([presetId]);
+    void refreshConnected();
+  }
+
+  // Done in step 2 (or Manage models) commits the ticked ids for the card,
+  // the chat picker, Auto and the role pickers. Tick persistence through a
+  // route waits on the backend naming one (no provider-models write route
+  // exists yet); until then the served `enabled` list, when the route names
+  // it, is the truth the dialog starts from.
+  function handleModelsDone(presetId: string, modelIds: string[]): void {
     setStates((prev) => ({
       ...prev,
-      [presetId]: { ...(prev[presetId] as ProviderState), presetId, connected: true },
+      [presetId]: { ...(prev[presetId] as ProviderState), presetId, connected: true, enabledModels: modelIds },
     }));
-    setFinderKey((key) => key + 1);
+    setManageId(null);
   }
 
   function handleDisconnected(secretId: string): void {
@@ -180,17 +305,24 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
       return next;
     });
     setDisconnectId(null);
+    setLastConnectedId((prev) =>
+      prev !== null && secretIdForProvider(prev) === secretId ? null : prev,
+    );
     setFinderKey((key) => key + 1);
+    // Served re-read after disconnect: the route no longer lists the
+    // provider, so the union refresh keeps the card disconnected.
+    void refreshConnected();
   }
 
   function handleWizardDone(): void {
     setWizardDone(true);
   }
 
-  const connectPreset = connectId === null ? null : (ordered.find((p) => p.id === connectId) ?? null);
+  const dialogId = connectId ?? manageId;
+  const connectPreset = dialogId === null ? null : (catalog.find((p) => p.id === dialogId) ?? null);
   const disconnectPreset =
-    disconnectId === null ? null : (ordered.find((p) => p.id === disconnectId) ?? null);
-  const linkedSecretIds = ordered
+    disconnectId === null ? null : (catalog.find((p) => p.id === disconnectId) ?? null);
+  const linkedSecretIds = catalog
     .filter((preset) => states[preset.id]?.connected === true)
     .map((preset) => secretIdForProvider(preset.id));
 
@@ -240,13 +372,28 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
                 <article key={preset.id} data-testid="provider-card" data-provider-id={preset.id}>
                   <h3>{preset.label}</h3>
                   {state.connected ? (
-                    <button
-                      type="button"
-                      aria-label={t("providers.page.disconnectCta", { label: preset.label })}
-                      onClick={() => setDisconnectId(preset.id)}
-                    >
-                      {t("providers.page.disconnectLabel")}
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        aria-label={t("providers.page.disconnectCta", { label: preset.label })}
+                        onClick={() => setDisconnectId(preset.id)}
+                      >
+                        {t("providers.page.disconnectLabel")}
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Manage ${preset.label} models`}
+                        onClick={() => setManageId(preset.id)}
+                      >
+                        Manage models
+                      </button>
+                      <p data-variant="quiet">{`${state.enabledModels.length} enabled`}</p>
+                      {lastConnectedId === preset.id ? (
+                        <p role="status" data-variant="quiet">
+                          {t("providers.connect.connected", { label: preset.label })}
+                        </p>
+                      ) : null}
+                    </>
                   ) : (
                     <button
                       type="button"
@@ -256,27 +403,38 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
                       {t("providers.page.connectLabel")}
                     </button>
                   )}
+                  <p
+                    data-testid={`provider-caps-${preset.id}`}
+                    className="fx-cap-line"
+                    title={preset.caps ?? t("shell.common.unknown")}
+                  >
+                    {preset.caps ?? "—"}
+                  </p>
+                  <p data-testid={`provider-keynote-${preset.id}`} className="fx-quiet-line">
+                    {preset.keyHint}
+                  </p>
                   <ul>
-                    {preset.models.map((model) => (
+                    {(displayModels[preset.id] ?? []).map((model) => (
                       <li key={model.id} data-testid="model-row">
-                        <label>
-                          <input
-                            type="checkbox"
-                            aria-label={`${preset.label} ${model.label}`}
-                            title={
-                              state.connected
-                                ? undefined
-                                : t("chat.hierarchy.connect")
-                            }
-                            checked={state.enabledModels.includes(model.id)}
-                            disabled={!state.connected}
-                            onChange={() => toggleModel(preset.id, model.id)}
-                          />
-                          {model.label}
-                        </label>{" "}
+                        <span>{model.label}</span>{" "}
                         <small data-testid={`model-id-${model.id}`}>
                           {model.id}
-                        </small>
+                        </small>{" "}
+                        <span data-testid={`model-price-${model.id}`}>
+                          {modelPriceText(model.kb)}
+                        </span>{" "}
+                        <input
+                          type="checkbox"
+                          aria-label={`${preset.label} ${model.label}`}
+                          title={
+                            state.connected
+                              ? undefined
+                              : t("chat.hierarchy.connect")
+                          }
+                          checked={state.enabledModels.includes(model.id)}
+                          disabled={!state.connected}
+                          onChange={() => toggleModel(preset.id, model.id)}
+                        />
                       </li>
                     ))}
                   </ul>
@@ -320,6 +478,7 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
         <ChatModelSelector
           project_id={project}
           states={states}
+          catalog={displayCatalog}
           onChange={(modelId) => void handleChatModelChange(modelId)}
         />
         {chatSaveMessage ? <p role="status">{chatSaveMessage}</p> : null}
@@ -336,12 +495,20 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
         />
       </section>
       <ConnectDialog
-        preset_id={connectId ?? ""}
+        preset_id={dialogId ?? ""}
         preset={connectPreset}
-        open={connectId !== null}
+        open={dialogId !== null}
         store={storeInstance}
-        onClose={() => setConnectId(null)}
+        initialStep={manageId !== null ? 2 : 1}
+        initialTicked={
+          manageId !== null ? (states[manageId]?.enabledModels ?? []) : undefined
+        }
+        onClose={() => {
+          setConnectId(null);
+          setManageId(null);
+        }}
         onConnected={handleConnected}
+        onModelsDone={handleModelsDone}
       />
       <DisconnectDialog
         provider_id={disconnectId ?? ""}

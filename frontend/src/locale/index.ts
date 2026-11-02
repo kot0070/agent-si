@@ -121,6 +121,34 @@ export function formatDate(date: Date, locale?: SupportedLocale): string {
   }).format(date);
 }
 
+/** Long locale date ("11 Feb 2026" / "11 лют. 2026"); invalid input falls back to the raw value. */
+export function formatDateLong(value: string, locale?: SupportedLocale): string {
+  const stamp = new Date(value);
+  if (Number.isNaN(stamp.getTime())) {
+    return value;
+  }
+  return new Intl.DateTimeFormat(bcp47(locale ?? currentLocale), {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  }).format(stamp);
+}
+
+/** Local date+time ("11 Feb 2026, 06:42"); invalid input falls back to raw. */
+export function formatDateTime(value: string, locale?: SupportedLocale): string {
+  const stamp = new Date(value);
+  if (Number.isNaN(stamp.getTime())) {
+    return value;
+  }
+  return new Intl.DateTimeFormat(bcp47(locale ?? currentLocale), {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(stamp);
+}
+
 export function formatNumber(value: number, locale?: SupportedLocale): string {
   return new Intl.NumberFormat(bcp47(locale ?? currentLocale)).format(value);
 }

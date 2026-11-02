@@ -45,6 +45,8 @@ export type ProviderPreset = {
   keyHint: string;
   keyStartsWith: string;
   models: ModelOption[];
+  /** Per-provider cap line (e.g. "0.30/1.50 caps"); absent when unreported. */
+  caps?: string;
 };
 
 export type ProviderState = {

@@ -45,13 +45,13 @@ describe('K07F1 first-run walk', () => {
 
   it('Next advances and Back retreats under the previous step title', () => {
     render(<FirstRunFlow onComplete={() => undefined} />);
-    expect(screen.getAllByRole('button').length).toBe(5);
+    expect(screen.getAllByRole('button').length).toBe(6);
     fireEvent.click(screen.getByRole('button', { name: en.firstrun.next }));
     const back = screen.getByRole('button', { name: en.firstrun.steps.connectProvider });
     expect(back).toBeTruthy();
     fireEvent.click(back);
     expect(screen.getByRole('heading', { name: en.firstrun.steps.connectProvider })).toBeTruthy();
-    expect(screen.getAllByRole('button').length).toBe(5);
+    expect(screen.getAllByRole('button').length).toBe(6);
   });
 
   it('respects the initialStep prop', () => {
@@ -62,8 +62,12 @@ describe('K07F1 first-run walk', () => {
     expect(screen.getByRole('heading', { name: en.firstrun.steps.projectFolder })).toBeTruthy();
   });
 
-  it('skip hides an optional step, 4 -> 3', () => {
+  it('skip hides an optional step on the last step, 4 -> 3', () => {
     render(<FirstRunFlow onComplete={() => undefined} />);
+    expect(screen.queryAllByRole('button', { name: en.firstrun.skip }).length).toBe(1);
+    fireEvent.click(screen.getByRole('button', { name: en.firstrun.next }));
+    fireEvent.click(screen.getByRole('button', { name: en.firstrun.next }));
+    fireEvent.click(screen.getByRole('button', { name: en.firstrun.next }));
     expect(screen.getAllByRole('button', { name: en.firstrun.skip }).length).toBe(4);
     fireEvent.click(screen.getAllByRole('button', { name: en.firstrun.skip })[0]!);
     expect(screen.getAllByRole('button', { name: en.firstrun.skip }).length).toBe(3);
@@ -104,11 +108,14 @@ describe('K07F1 first-run walk', () => {
     expect(screen.getByRole('heading', { name: en.firstrun.steps.connectProvider })).toBeTruthy();
   });
 
-  it('each required step before the task shows a locale-named control and Next still advances empty', () => {
+  it('step 1 shows provider rows with Connect; later steps show their locale-named controls', () => {
     render(<FirstRunFlow onComplete={() => undefined} />);
-    expect(screen.getByRole('textbox', { name: en.settings.roleProfile.providerLabel })).toBeTruthy();
+    for (const name of ['Meta', 'OpenAI', 'Anthropic', 'Ollama']) {
+      expect(screen.getByRole('button', { name: `Connect ${name}` })).toBeTruthy();
+    }
     fireEvent.click(screen.getByRole('button', { name: en.firstrun.next }));
-    expect(screen.getByRole('checkbox', { name: en.settings.roleProfile.modeLabel })).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: en.shell.topbar.project })).toBeTruthy();
+    expect(screen.getByRole('button', { name: en.settings.roleProfile.title })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: en.firstrun.next }));
     expect(screen.getByRole('textbox', { name: en.settings.localbench.pathLabel })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: en.firstrun.next }));

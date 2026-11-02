@@ -4,7 +4,7 @@
 // locale surface: setLocale updates the module plus persistence, then a
 // window event carries the new locale to App for a full re-render.
 
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import type { PartRow, ProjectRecord } from "../api/iface";
@@ -61,6 +61,7 @@ export function TopBar(props: TopBarProps): ReactElement {
   const client = useApiClient();
   const current = useCurrentProject();
   const location = useLocation();
+  const navigate = useNavigate();
   const [locale, setLocaleUi] = useState<SupportedLocale>(readStoredLocale);
   const [projects, setProjects] = useState<ProjectRecord[] | null>(null);
   const [stopArmed, setStopArmed] = useState(false);
@@ -315,12 +316,19 @@ export function TopBar(props: TopBarProps): ReactElement {
         <span className="fx-vh">{t("shell.topbar.project")}</span>
         <select
           data-testid="topbar-project"
+          className="fx-topbar-control"
           /* FXDESIGN5 S3/S7: explicit accessible name on the project
              dropdown (the visible label text stays unchanged). */
           aria-label={t("shell.topbar.project")}
           value={effective ?? ""}
           onChange={(event) => {
-            current.select(event.target.value);
+            // FXCHATHIST Part 2 (H3): switching projects opens that
+            // project's chat with its history (the root chat route
+            // renders the selected project).
+            if (event.target.value !== "") {
+              current.select(event.target.value);
+              navigate("/");
+            }
           }}
         >
           {effective === null ? (
@@ -346,7 +354,11 @@ export function TopBar(props: TopBarProps): ReactElement {
       <div data-testid="topbar-right" className="fx-topbar-right">
         <div data-testid="pairing-strip">
           <span data-testid="pairing-label">
-            <Link data-testid="topbar-watcher" to="/watcher">
+            <Link
+              data-testid="topbar-watcher"
+              to="/watcher"
+              className="fx-topbar-watcher"
+            >
               {t("shell.topbar.watcher")}
             </Link>
           </span>{" "}
@@ -359,32 +371,34 @@ export function TopBar(props: TopBarProps): ReactElement {
         <button
           type="button"
           data-testid="topbar-stop-all"
+          className="fx-stop-danger"
           onClick={() => {
             void stopAll();
           }}
         >
           {stopArmed ? t("shell.closing.confirm") : t("shell.topbar.stop_all")}
         </button>
-        {stopText === null ? null : (
-          <>
-            <span data-testid="stop-all-result">{stopText}</span>
-            <button
-              type="button"
-              data-testid="stop-all-clear"
-              className="fx-btn-quiet"
-              aria-label={t("shell.topbar.stop_clear")}
-              onClick={() => {
-                setStopText(null);
-              }}
-            >
-              {t("shell.topbar.stop_clear")}
-            </button>
-          </>
-        )}
+      {stopText === null ? null : (
+        <>
+          <span data-testid="stop-all-result">{stopText}</span>
+          <button
+            type="button"
+            data-testid="stop-all-clear"
+            className="fx-btn-quiet"
+            aria-label={t("shell.topbar.stop_clear")}
+            onClick={() => {
+              setStopText(null);
+            }}
+          >
+            {t("shell.topbar.stop_clear")}
+          </button>
+        </>
+      )}
         <label className="fx-topbar-language">
           <span className="fx-vh">{t("shell.topbar.language")}</span>
           <select
             data-testid="topbar-language"
+            className="fx-topbar-control"
             aria-label={t("shell.topbar.language")}
             value={locale}
             onChange={(event) => {

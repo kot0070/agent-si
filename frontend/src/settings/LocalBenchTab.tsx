@@ -333,6 +333,7 @@ export function LocalBenchTab(props: LocalBenchTabProps): ReactElement {
         <button
           type="button"
           data-testid="localbench-scan"
+          className="fx-btn-quiet"
           disabled={path.trim().length === 0 || scan.status === "scanning"}
           onClick={() => {
             void handleScan();
@@ -393,6 +394,7 @@ export function LocalBenchTab(props: LocalBenchTabProps): ReactElement {
         <button
           type="button"
           data-testid="localbench-run"
+          className="fx-btn-primary"
           disabled={!canRun}
           onClick={() => {
             void handleRun();

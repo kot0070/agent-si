@@ -31,7 +31,12 @@ function WhyChipWithRouter(): ReactElement {
     );
   }
   return (
-    <button type="button" data-testid="settings-why-chip" onClick={open}>
+    <button
+      type="button"
+      data-testid="settings-why-chip"
+      className="fx-why-quiet"
+      onClick={open}
+    >
       {t('projects.why_this_model.title')}
     </button>
   );
@@ -47,7 +52,11 @@ export function SettingsLayout(props: SettingsLayoutProps): ReactElement {
       {inRouter ? (
         <WhyChipWithRouter />
       ) : (
-        <button type="button" data-testid="settings-why-chip">
+        <button
+          type="button"
+          data-testid="settings-why-chip"
+          className="fx-why-quiet"
+        >
           {t('projects.why_this_model.title')}
         </button>
       )}

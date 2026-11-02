@@ -8,12 +8,15 @@
 // input stays editable and submits the typed path exactly as before, and
 // the control hides itself when no native dialog exists (409).
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { FormEvent, ReactElement } from "react";
+import { useNavigate } from "react-router-dom";
+import { useProjectList } from "./projectList";
 import type { ProjectRecord } from "../api/iface";
 import { ApiError, apiErrorLocaleKey, requestResponse } from "../api/errors";
 import { useApiClient, useCurrentProject } from "../app/ApiClientProvider";
-import { formatDate, t } from "../locale/index";
+import { hasChatUnseen, useUnseenVersion } from "../chat/index";
+import { formatDateLong, t } from "../locale/index";
 import { Card } from "../ui/Card";
 import { EmptyState } from "../ui/EmptyState";
 import { ErrorPanel } from "../ui/ErrorPanel";
@@ -81,56 +84,54 @@ function isPaused(paused: ReadonlySet<string>, id: string): boolean {
   return paused.has(id);
 }
 
-function formatProjectDate(value: string): string {
-  const stamp = new Date(value);
-  if (Number.isNaN(stamp.getTime())) {
-    return value;
+// FXCHATHIST Part 2 (H3): isolated tests mount this page without a
+// Router; open still selects there, navigation applies only with one.
+function useOptionalNavigate(): ((to: string) => void) | null {
+  try {
+    return useNavigate();
+  } catch {
+    return null;
   }
-  return formatDate(stamp);
+}
+
+function formatProjectDate(value: string): string {
+  return formatDateLong(value);
+}
+
+/** Deduplicate served rows by project id; a repeated id renders one row. */
+export function dedupeProjects(rows: ProjectRecord[]): ProjectRecord[] {
+  const seen = new Set<string>();
+  return rows.filter((row) => {
+    if (seen.has(row.project_id)) {
+      return false;
+    }
+    seen.add(row.project_id);
+    return true;
+  });
 }
 
 export function ProjectsPage(): ReactElement {
   const client = useApiClient();
   const current = useCurrentProject();
-  const [projects, setProjects] = useState<ProjectRecord[] | null>(null);
-  const [failure, setFailure] = useState<{
+  const navigate = useOptionalNavigate();
+  // H4 quiet dot: re-renders rows when any slice flags unseen activity.
+  const unseenTick = useUnseenVersion();
+  void unseenTick;
+  // FXPROJ J1: the one shared project list (refetch on create, delete
+  // and route change). Null is loading, never an empty list. Add and
+  // archive refresh the shared list; their own failures stay local so a
+  // failed write never hides the served rows.
+  const { projects, failure: listFailure, refresh } = useProjectList();
+  const [opFailure, setOpFailure] = useState<{
     errorKey: string;
     code: string;
   } | null>(null);
-  const [nonce, setNonce] = useState(0);
+  const failure = listFailure ?? opFailure;
   const [collapsed, setCollapsed] = useState(false);
   const [paused, setPaused] = useState<ReadonlySet<string>>(new Set());
   const [name, setName] = useState("");
   const [folder, setFolder] = useState("");
   const [pickOpen, setPickOpen] = useState(true);
-
-  useEffect(() => {
-    let alive = true;
-    async function load(): Promise<void> {
-      try {
-        const next = await client.listProjects();
-        if (alive) {
-          setProjects(next);
-          setFailure(null);
-        }
-      } catch (error) {
-        if (alive) {
-          if (error instanceof ApiError) {
-            setFailure({
-              errorKey: apiErrorLocaleKey(error.code),
-              code: error.code,
-            });
-          } else {
-            setFailure({ errorKey: "errors.generic", code: "CONTEXT_MISSING" });
-          }
-        }
-      }
-    }
-    void load();
-    return () => {
-      alive = false;
-    };
-  }, [client, nonce]);
 
   async function submitAdd(event: FormEvent): Promise<void> {
     event.preventDefault();
@@ -140,15 +141,16 @@ export function ProjectsPage(): ReactElement {
         setName("");
         setFolder("");
       }
-      setNonce((value) => value + 1);
+      setOpFailure(null);
+      refresh();
     } catch (error) {
       if (error instanceof ApiError) {
-        setFailure({
+        setOpFailure({
           errorKey: apiErrorLocaleKey(error.code),
           code: error.code,
         });
       } else {
-        setFailure({ errorKey: "errors.generic", code: "CONTEXT_MISSING" });
+        setOpFailure({ errorKey: "errors.generic", code: "CONTEXT_MISSING" });
       }
     }
   }
@@ -165,12 +167,12 @@ export function ProjectsPage(): ReactElement {
           setPickOpen(false);
           return;
         }
-        setFailure({
+        setOpFailure({
           errorKey: apiErrorLocaleKey(error.code),
           code: error.code,
         });
       } else {
-        setFailure({ errorKey: "errors.generic", code: "CONTEXT_MISSING" });
+        setOpFailure({ errorKey: "errors.generic", code: "CONTEXT_MISSING" });
       }
     }
   }
@@ -178,15 +180,16 @@ export function ProjectsPage(): ReactElement {
   async function archive(id: string): Promise<void> {
     try {
       await client.deleteProject(id);
-      setNonce((value) => value + 1);
+      setOpFailure(null);
+      refresh();
     } catch (error) {
       if (error instanceof ApiError) {
-        setFailure({
+        setOpFailure({
           errorKey: apiErrorLocaleKey(error.code),
           code: error.code,
         });
       } else {
-        setFailure({ errorKey: "errors.generic", code: "CONTEXT_MISSING" });
+        setOpFailure({ errorKey: "errors.generic", code: "CONTEXT_MISSING" });
       }
     }
   }
@@ -217,7 +220,8 @@ export function ProjectsPage(): ReactElement {
           errorKey={failure.errorKey}
           code={failure.code}
           onRetry={() => {
-            setNonce((value) => value + 1);
+            setOpFailure(null);
+            refresh();
           }}
         />
       ) : projects === null ? (
@@ -281,19 +285,33 @@ export function ProjectsPage(): ReactElement {
             />
           ) : (
             <ul>
-              {projects.map((row) => (
+              {dedupeProjects(projects).map((row) => (
                 <li key={row.project_id} data-testid={`project-row-${row.project_id}`}>
                   <button
                     type="button"
                     data-testid={`project-open-${row.project_id}`}
                     onClick={() => {
+                      // FXCHATHIST Part 2 (H3): opening a project
+                      // selects it and lands on its chat history.
                       current.select(row.project_id);
+                      navigate?.(`/projects/${row.project_id}/chat`);
                     }}
                   >
                     {row.name}
                   </button>
+                  {/* FXCHATHIST Part 2 (H4): quiet dot while this
+                      project's chat holds unseen activity. */}
+                  {hasChatUnseen(client, row.project_id) ? (
+                    <span
+                      data-testid={`project-chat-dot-${row.project_id}`}
+                      className="fx-quiet"
+                      aria-hidden="true"
+                    >
+                      {"\u2022"}
+                    </span>
+                  ) : null}
                   <span data-testid={`project-created-${row.project_id}`}>
-                    {formatProjectDate(row.created_at)}
+                    {t("projects.list.created")} {formatProjectDate(row.created_at)}
                   </span>
                   {isPaused(paused, row.project_id) ? (
                     <button
