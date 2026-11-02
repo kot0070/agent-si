@@ -7,6 +7,7 @@
 import { useEffect, useState } from "react";
 import type { ReactElement } from "react";
 import type { PartRow } from "../api/iface";
+import { apiErrorLocaleKey } from "../api/errors";
 import { useApiClient } from "../app/ApiClientProvider";
 import { refreshLive, useLiveRows } from "./liveStore";
 import { t, useLocale } from "../locale/index";
@@ -91,7 +92,10 @@ export function AgentsLive(props: AgentsLiveProps): ReactElement {
 
   const failure =
     snapshot.failed && (rows === null || rows.length === 0)
-      ? { errorKey: "errors.generic", code: "CONTEXT_MISSING" }
+      ? {
+          errorKey: apiErrorLocaleKey(snapshot.code ?? "CONTEXT_MISSING"),
+          code: snapshot.code ?? "CONTEXT_MISSING",
+        }
       : null;
 
   useEffect(() => {
