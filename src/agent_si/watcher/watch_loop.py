@@ -243,10 +243,16 @@ def tick_once(app: Any = None) -> Dict[str, Any]:
 
 
 async def _run() -> None:
-    """Pass forever until cancelled; a pass failure never stops the loop."""
+    """Pass forever until cancelled; a pass failure never stops the loop.
+
+    The pass runs off the event loop (to_thread): service probes and
+    engine ticks are synchronous blocking work, and inline execution
+    stalled every request for the whole pass (~10 s per 30 s pass with
+    slow declared services). Off-loop passes never stall a request.
+    """
     while True:
         try:
-            tick_once(_APP)
+            await asyncio.to_thread(tick_once, _APP)
         except Exception as err:
             log.warning("watch loop pass failed: %s", err)
         await asyncio.sleep(_INTERVAL_S)

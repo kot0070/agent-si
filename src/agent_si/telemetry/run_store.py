@@ -45,6 +45,14 @@ _TOKEN_KEYS = (
 _lock = threading.Lock()
 _BOUND_DIR: str | None = None
 
+#: Parse memo per store path: ((mtime_ns, size) -> parsed rows).
+#: Coalesces the fan-out reads of one UI poll (the analytics route reads
+#: the same file five times per poll) into a single parse. The key moves
+#: on every append (the atomic temp-file replace bumps mtime and size),
+#: so a changed file never serves stale rows. Copies go out; the cached
+#: rows themselves are never shared, so no caller can poison the memo.
+_LOAD_MEMO: dict[str, tuple[tuple[int, int], list, list]] = {}
+
 
 def bind_store_dir(path: str | None) -> None:
     """Bind the app store dir for manager-time recording (create_app calls)."""
@@ -136,11 +144,30 @@ def _write_store_atomic(path: str, metrics: list, events: list) -> None:
 
 
 def load_store(store_dir: str | None = None) -> dict[str, Any]:
-    """Load the JSON store; missing file replays as empty (restart-safe)."""
+    """Load the JSON store; missing file replays as empty (restart-safe).
+
+    Parses are memoized per path on (mtime_ns, size): the analytics
+    route fans out to five reads of the same file per poll, which now
+    cost one parse. Callers get copies, never the cached rows.
+    """
     path = store_path_for(store_dir)
     if path is None:
         return _empty_store()
-    return _read_store(path)
+    try:
+        stat = os.stat(path)
+    except FileNotFoundError:
+        _LOAD_MEMO.pop(path, None)
+        return _empty_store()
+    key = (stat.st_mtime_ns, stat.st_size)
+    hit = _LOAD_MEMO.get(path)
+    if hit is not None and hit[0] == key:
+        return {"metric_records": list(hit[1]),
+                "telemetry_events": list(hit[2])}
+    stored = _read_store(path)
+    _LOAD_MEMO[path] = (key, stored["metric_records"],
+                        stored["telemetry_events"])
+    return {"metric_records": list(stored["metric_records"]),
+            "telemetry_events": list(stored["telemetry_events"])}
 
 
 def append_records(
