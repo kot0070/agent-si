@@ -10,6 +10,7 @@ still serves an empty agents list.
 import os
 import sys
 
+import pytest
 from fastapi.testclient import TestClient
 
 _WS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -35,6 +36,32 @@ from agent_si.runtime.manager import run_task_streamed  # noqa: E402
 
 TEST_TOKEN = "fxpanel-live-token"
 TEST_SETTINGS = {"testing": True, "ui_session_token": TEST_TOKEN}
+
+
+# -- FXLOC C5: real budget gate (fail-closed product gate) --------------------
+_FXLOC_GATE_PROJECTS = ("fxp-live", "fxp-refused")
+
+
+def _fxloc_gate():
+    """Real gate with this file's projects configured (generous limits)."""
+    from agent_si.budget.gate import BudgetGate
+
+    gate = BudgetGate()
+    for project in _FXLOC_GATE_PROJECTS:
+        gate.configure_project(
+            project, "USD", "1000000.00", "900000.00", "1000000.00")
+    return gate
+
+
+@pytest.fixture(autouse=True)
+def _fxloc_real_budget_gate():
+    """Fail-closed gate needs a real gate: generous limits, restored after."""
+    from agent_si.runtime import manager as _mgr
+
+    prev = _mgr._BUDGET_GATE
+    _mgr.set_budget_gate(_fxloc_gate())
+    yield
+    _mgr.set_budget_gate(prev)
 
 FULL_ROW = {
     "agent": "fxp-agent",
