@@ -553,11 +553,16 @@ def get_project_aggregates(
     project_id: str,
     store_dir: str | None = None,
 ) -> dict[str, Any]:
-    """Task/audit counts for one project from the store events only.
+    """Task/audit counts plus token sum for one project from store events.
 
     tasks = distinct task ids across this project's telemetry events;
-    audits = AUDIT_COMPLETED events for this project. Either is None when
-    the store holds no evidence for it, never 0/invented.
+    audits = AUDIT_COMPLETED events for this project. tokens sums the
+    linked MEASURED tokens_total rows of this project's own
+    PROVIDER_USAGE_REPORTED events (the same events, the same scope,
+    as the per-model rows, so the rail adds up to this total). Any of
+    the three is None when the store holds no evidence for it;
+    tokens reads UNAVAILABLE (never 0) when the project has events
+    but no evidenced token rows.
     """
     stored = load_store(store_dir=store_dir)
     events = stored.get("telemetry_events", [])
@@ -567,14 +572,24 @@ def get_project_aggregates(
         if isinstance(event, dict) and event.get("project_id") == pid
     ]
     if not scoped:
-        return {"tasks": None, "audits": None}
+        return {"tasks": None, "audits": None, "tokens": None}
     task_ids = sorted(
         {str(event.get("task_id")) for event in scoped if event.get("task_id")})
     audits = sum(
         1 for event in scoped if event.get("event_type") == "AUDIT_COMPLETED")
+    usage, by_id = _usage_events(store_dir=store_dir)
+    token_values = []
+    for event in usage:
+        if str(event.get("project_id")) != pid:
+            continue
+        tokens, tokens_ok = _linked_value(
+            by_id, event, TOKENS_TOTAL_NAME, (MetricState.MEASURED.value,))
+        if tokens_ok:
+            token_values.append(tokens)
     return {
         "tasks": len(task_ids) if task_ids else None,
         "audits": audits if audits else None,
+        "tokens": sum(token_values) if token_values else UNAVAILABLE,
     }
 
 
