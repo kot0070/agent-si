@@ -49,6 +49,17 @@ DIRTY_DIR_LEAVES = frozenset(
 DIRTY_FILE_NAMES = frozenset({".env"})
 DIRTY_FILE_SUFFIXES = (".db", ".sqlite", ".sqlite3", ".pem")
 
+# FXDIR: the PyInstaller one-dir dependency subtree (fixed name
+# `_internal` since PyInstaller 6) rides the stage verbatim: package
+# dirs legitimately named `data` (boto3, botocore) and product CA
+# bundles (*.pem from certifi/botocore, required for TLS) live there.
+# User data cannot originate in that tree (its bytes come from the
+# frozen third-party packages plus the staged lane inputs the build
+# provenance gate already covers), so the scan skips it. Everything
+# else stays recursive: a `data/` or `.env` anywhere outside
+# `_internal/` still fails the setup build.
+_FROZEN_INTERNAL_DIR = "_internal"
+
 
 def scan_stage_clean(stage_dir) -> list:
     """List payload violations under a stage folder; [] means clean."""
@@ -58,6 +69,9 @@ def scan_stage_clean(stage_dir) -> list:
     violations = []
     for path in sorted(stage.rglob("*")):
         rel = path.relative_to(stage).as_posix()
+        if rel == _FROZEN_INTERNAL_DIR or rel.startswith(
+                _FROZEN_INTERNAL_DIR + "/"):
+            continue
         leaf = path.name.lower()
         if path.is_dir():
             if leaf in DIRTY_DIR_LEAVES:

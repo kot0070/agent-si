@@ -250,6 +250,31 @@ def test_stage_scan_clean_fixture_passes(tmp_path):
     assert violations == [], f"clean stage flagged: {violations}"
 
 
+def test_stage_scan_onedir_internal_tree_passes(tmp_path):
+    """FXDIR: the one-dir freeze tree is product, not user data."""
+    build = _load_build_module()
+    stage = _stage_fixture(tmp_path)
+    internal = stage / "_internal"
+    (internal / "boto3" / "data").mkdir(parents=True)
+    (internal / "boto3" / "data" / "endpoints.json").write_text("{}")
+    (internal / "botocore").mkdir(parents=True)
+    (internal / "botocore" / "cacert.pem").write_text("PRODUCT-CA-BUNDLE")
+    (internal / "certifi").mkdir(parents=True)
+    (internal / "certifi" / "cacert.pem").write_text("PRODUCT-CA-BUNDLE")
+    violations = build.scan_stage_clean(stage)
+    assert violations == [], f"one-dir product tree flagged: {violations}"
+
+
+def test_stage_scan_still_refuses_root_user_data(tmp_path):
+    """FXDIR: the exemption changes nothing at the stage root."""
+    build = _load_build_module()
+    stage = _stage_fixture(tmp_path)
+    (stage / "data").mkdir()
+    (stage / "data" / "projects.db").write_text("user rows")
+    violations = build.scan_stage_clean(stage)
+    assert violations, "root data/ passed the scan"
+
+
 def test_stage_scan_dirty_fixtures_fail(tmp_path):
     build = _load_build_module()
     for dirty in ("data-dir", "key-file", "test-data"):
