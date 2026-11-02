@@ -433,6 +433,33 @@ def _windows_findstr_files(words: list[str]) -> list[str]:
     return out
 
 
+def _installer_name(words: list[str]) -> str:
+    """Installer name for the ask ledger: the effective installer head.
+
+    A ``-m`` launcher form names its module (``python -m pip install``
+    asks as ``pip``, never ``python``); every other installer names
+    argv[0]. Only called for the install class, so bare interpreters
+    (never install) keep no ask. Matches classify_argv's effective
+    head exactly.
+    """
+    try:
+        items = [str(word) for word in list(words or [])]
+        if not items:
+            return ""
+        head = _bare_head(items[0])
+        rest = items[1:]
+        if head in _PYTHON_LAUNCHERS and "-m" in rest:
+            module = str(rest[rest.index("-m") + 1])
+            if module and module.strip().lower() in _INSTALL_PROGRAMS:
+                return module.strip().lower()
+    except Exception:
+        pass
+    try:
+        return str(list(words or [""])[0])
+    except Exception:
+        return ""
+
+
 def _deny_shape(argv: list[str]) -> str:
     """Refusal reason for a DETAILS A denied shape, or empty."""
     if not argv:
@@ -670,8 +697,9 @@ def spawn_checked(
     if kind == "install":
         from agent_si.toolguard import permissions as _ask_permissions
 
+        _ask_name = _installer_name(words)
         _ask_tool_id = _ask_permissions.install_tool_id(
-            str(project_id), words[0])
+            str(project_id), _ask_name)
         _ask_decision = _ask_permissions.get_decision(
             tool_id=_ask_tool_id)
         if _ask_decision is None:
@@ -682,12 +710,12 @@ def spawn_checked(
                     project_id=str(project_id))
             raise InstallAskNeeded(
                 _ask_tool_id,
-                f"refused: install-class command {words[0]!r} needs "
+                f"refused: install-class command {_ask_name!r} needs "
                 "install permission (ungranted runs continue without "
                 "the install)")
         if _ask_decision != "allow":
             raise PermissionError(
-                f"refused: install-class command {words[0]!r} needs "
+                f"refused: install-class command {_ask_name!r} needs "
                 "install permission (ungranted runs continue without "
                 "the install)")
         _ask_approved = _ask_permissions.get_install_argv(
