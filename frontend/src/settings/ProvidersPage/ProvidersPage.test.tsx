@@ -743,8 +743,15 @@ describe("ProvidersPage project setup", () => {
 describe("ProvidersPage chat model save wiring (page-level)", () => {
   async function connectOpenaiAndEnableStandardForChat() {
     const fetchMock = vi.fn(
-      async (input: unknown) => {
-        const url = String(input);
+      async (
+        _url: string,
+        _init: {
+          method?: string;
+          headers?: Record<string, string>;
+          body?: string;
+        },
+      ) => {
+        const url = String(_url);
         const body = (data: unknown, status = 200): Response =>
           new Response(JSON.stringify(data), {
             status,
