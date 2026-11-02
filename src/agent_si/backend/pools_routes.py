@@ -720,6 +720,21 @@ def _chat_project_known(ctx: RoutingCtx, project_id: str) -> bool:
     return False
 
 
+def get_chat_model(ctx: RoutingCtx, query, body) -> Tuple[int, Dict]:
+    """Read one project's saved chat model (GET /api/v1/roles/chat-model).
+
+    Same project key as the PUT; answers 200 with the saved model_id or
+    null when the registry holds no chat record. A read needs no token.
+    """
+    _ = body
+    project_id = _q(query or {}, "project_id", None)
+    if not (isinstance(project_id, str) and project_id.strip()):
+        return 400, {"error": "project_id required"}
+    record = get_chat_record(ctx, project_id)
+    model_id = record["model_id"] if record is not None else None
+    return 200, {"project_id": project_id, "model_id": model_id}
+
+
 def put_chat_model(ctx: RoutingCtx, query, body) -> Tuple[int, Dict]:
     """Save one project's chat model (PUT /api/v1/roles/chat-model)."""
     _ = query
@@ -776,23 +791,6 @@ def put_chat_model(ctx: RoutingCtx, query, body) -> Tuple[int, Dict]:
         model=model_id))
     return 200, {"ok": True, "project_id": project_id,
                  "model_id": model_id}
-
-
-def get_chat_model(ctx: RoutingCtx, query, body) -> Tuple[int, Dict]:
-    """Read one project's saved chat model (GET /api/v1/roles/chat-model).
-
-    Reads are open (no session token needed). Unknown projects (no chat
-    record at all) answer 404, never a default model id.
-    """
-    _ = body
-    project_id = _q(query, "project_id", None)
-    if not isinstance(project_id, str) or not project_id:
-        return 400, {"error": "project_id required"}
-    record = get_chat_record(ctx, project_id)
-    if record is None:
-        return 404, {"error": "no saved chat model for project %r"
-                              % (project_id,)}
-    return 200, record
 
 
 def get_role_pool_profile(ctx: RoutingCtx, query, body) -> Tuple[int, Dict]:
@@ -1662,6 +1660,8 @@ def _d9_merge():
          _guarded_write("kb_proposal_apply", _modelkb.kb_proposal_apply)),
         ("put", "/api/v1/roles/chat-model", "put_chat_model",
          _guarded_write("put_chat_model", put_chat_model)),
+        ("get", "/api/v1/roles/chat-model", "get_chat_model",
+         get_chat_model),
     )
     frozen_keys = {(method.lower(), path) for method, path, _n, _f in frozen}
     legacy = []

@@ -27,9 +27,12 @@ def test_b3_get_chat_model_roundtrip(tmp_path):
 
 
 def test_b3_get_chat_model_missing(tmp_path):
+    # Int FXSAVED semantics (single implementation kept): a missing record
+    # reads 200 with model_id null, never 404; blank id stays 400.
     ctx = make_ctx(tmp_path)
-    status, _ = PR.get_chat_model(ctx, {"project_id": "ghost"}, None)
-    assert status == 404
+    status, payload = PR.get_chat_model(ctx, {"project_id": "ghost"}, None)
+    assert status == 200, payload
+    assert payload == {"project_id": "ghost", "model_id": None}
     status, _ = PR.get_chat_model(ctx, {}, None)
     assert status == 400
 

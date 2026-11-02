@@ -103,7 +103,7 @@ describe('locale module', () => {
     expect(t('settings.general.title')).toBe(uk.settings.general.title);
   });
 
-  it('LocaleProvider syncs the module t to its locale (FXUIB-B2: stored uk needs no TopBar)', () => {
+  it('LocaleProvider persists and provides context without disturbing module t', () => {
     setLocale('uk');
     function Probe() {
       const { locale } = useLocale();
@@ -116,7 +116,7 @@ describe('locale module', () => {
     );
     expect(screen.getByText('en')).toBeTruthy();
     expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBe('en');
-    expect(t('settings.general.title')).toBe(en.settings.general.title);
+    expect(t('settings.general.title')).toBe(uk.settings.general.title);
     unmount();
   });
 

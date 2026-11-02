@@ -13,26 +13,26 @@ import type {
 
 export type { ApiClientProviderProps, CurrentProject };
 
-const ApiClientContext = createContext<ApiClient | null>(null);
-
-const PROJECT_STORAGE_KEY = "agentsi.projectId";
+export const CURRENT_PROJECT_STORAGE_KEY = "agentsi.currentProjectId";
 
 function readStoredProjectId(): string | null {
   try {
-    const stored = window.localStorage.getItem(PROJECT_STORAGE_KEY);
+    const stored = window.localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY);
     return stored === null || stored === "" ? null : stored;
   } catch {
     return null;
   }
 }
 
-function persistProjectId(projectId: string): void {
+function writeStoredProjectId(projectId: string): void {
   try {
-    window.localStorage.setItem(PROJECT_STORAGE_KEY, projectId);
+    window.localStorage.setItem(CURRENT_PROJECT_STORAGE_KEY, projectId);
   } catch {
-    // Storage unavailable (private mode, probe): selection still applies in memory.
+    // Storage unavailable: the in-memory selection still re-renders.
   }
 }
+
+const ApiClientContext = createContext<ApiClient | null>(null);
 
 interface CurrentProjectState {
   projectId: string | null;
@@ -42,12 +42,15 @@ interface CurrentProjectState {
 const CurrentProjectContext = createContext<CurrentProjectState | null>(null);
 
 export function ApiClientProvider(props: ApiClientProviderProps): ReactElement {
+  // FXSAVED item 3: restore the stored pick on mount (same localStorage
+  // as readStoredLocale). Ghost ids (a deleted project) are validated
+  // in App selectFirst, never here.
   const [projectId, setProjectId] = useState<string | null>(readStoredProjectId);
   const selection = useMemo<CurrentProjectState>(
     () => ({
       projectId,
       select: (next: string) => {
-        persistProjectId(next);
+        writeStoredProjectId(next);
         setProjectId(next);
       },
     }),

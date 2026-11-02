@@ -10,6 +10,7 @@
 import { useEffect, useState } from "react";
 import { PROVIDER_CATALOG } from "./catalog";
 import { ChatSelector, withConnectedSeed } from "./ChatSelector";
+import { readChatModel } from "./modelsApi";
 import { t } from "../../locale/index";
 import type { ProviderPreset, ProviderState } from "./types";
 
@@ -71,32 +72,18 @@ export function ChatModelSelector({ project_id = "local", states = {}, catalog, 
   // falls back to the static KB catalog.
   const resolvedCatalog = effectiveCatalog;
   const [value, setValue] = useState("");
-  // FXUIB-B3: the saved pick shows after mount (read-only GET at the
-  // network boundary only; a missing record keeps the default).
+  // FXSAVED item 1: on mount read the saved model and show it. The load
+  // never fires onChange and never PUTs: it only sets local state, and
+  // only while still mounted (cancelled flag).
   useEffect(() => {
-    let alive = true;
-    void (async () => {
-      try {
-        const response = await fetch(
-          `/api/v1/roles/chat-model?project_id=${encodeURIComponent(project_id)}`,
-        );
-        if (!alive || !response.ok) {
-          return;
-        }
-        const data = (await response.json()) as { model_id?: unknown };
-        if (
-          alive &&
-          typeof data.model_id === "string" &&
-          data.model_id !== ""
-        ) {
-          setValue(data.model_id);
-        }
-      } catch {
-        return;
+    let cancelled = false;
+    void readChatModel(project_id).then((saved) => {
+      if (!cancelled && saved !== null && saved !== "") {
+        setValue(saved);
       }
-    })();
+    });
     return () => {
-      alive = false;
+      cancelled = true;
     };
   }, [project_id]);
   function handleChange(modelId: string): void {

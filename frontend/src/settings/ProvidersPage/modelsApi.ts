@@ -22,6 +22,33 @@
 
 import { requestResponse } from "../../api/errors";
 
+// Project chat-model save/read (K04P2-CHATSAVE plus FXSAVED item 1).
+// The PUT persists one project's chat model; the GET reads it back
+// (200 {project_id, model_id | null}). Reads need no token and never
+// throw: a failed read yields null so the picker keeps its placeholder.
+export const CHAT_MODEL_ROUTE = "/api/v1/roles/chat-model";
+
+export async function readChatModel(projectId: string): Promise<string | null> {
+  try {
+    const response = await requestResponse(
+      `${CHAT_MODEL_ROUTE}?project_id=${encodeURIComponent(projectId)}`,
+      { method: "GET" },
+    );
+    const data: unknown = await response.json();
+    if (
+      typeof data === "object" &&
+      data !== null &&
+      typeof (data as Record<string, unknown>)["model_id"] === "string"
+    ) {
+      const modelId = (data as Record<string, unknown>)["model_id"] as string;
+      return modelId !== "" ? modelId : null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export type ServedModelRow = {
   model: string;
   enabled: boolean;

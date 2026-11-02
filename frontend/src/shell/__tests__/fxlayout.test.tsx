@@ -125,6 +125,9 @@ function stubServed(): void {
         integrity_ok: true,
         journal_head: "jh-1",
         generated_at: "t-0",
+        last_action:
+          "rule-tamper BLOCK model=fx-local-1 action=scripts/tamper_check.py",
+        last_check_at: "2026-02-11T06:42:44Z",
       });
     }
     if (url === "/api/v1/watcher/journal?project_id=p-1") {
@@ -300,7 +303,9 @@ describe("fxlayout shell over the real app", () => {
       t("watcher.tab.modelApi"),
     );
     const action = screen.getByTestId("watcher-action");
-    expect(action.textContent).toContain(t("shell.cards.watcher.lastCheck"));
+    expect(action.textContent).toContain(
+      t("watcher.tab.actionBlocked"),
+    );
     expect(action.textContent).not.toContain("e-1");
     expect(action.getAttribute("title")).toBe("e-1");
     expect(screen.getByTestId("watcher-open").getAttribute("href")).toBe(

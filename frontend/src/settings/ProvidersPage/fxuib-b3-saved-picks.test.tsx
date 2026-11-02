@@ -69,15 +69,16 @@ describe("FXUIB-B3 saved picks show after mount", () => {
     vi.stubGlobal(
       "fetch",
       async (url: unknown) =>
-        String(url).startsWith("/api/v1/roles/pools/profile")
+        String(url).startsWith("/api/v1/routing/role")
           ? jsonBody({
-              role: "worker",
-              project_id: "local",
-              mode: "PINNED",
-              provider: "pa",
-              model: "pa/a-1",
-              pool: [],
-              strategy: "AUTO",
+              profile: {
+                role: "worker",
+                project_id: "local",
+                mode: "PINNED",
+                provider: "pa",
+                model: "pa/a-1",
+              },
+              binding: { strategy: "AUTO", members: [] },
             })
           : jsonBody({}, 404),
     );
@@ -97,15 +98,17 @@ describe("FXUIB-B3 saved picks show after mount", () => {
     vi.stubGlobal(
       "fetch",
       async (url: unknown) =>
-        String(url).startsWith("/api/v1/roles/pools/profile")
+        String(url).startsWith("/api/v1/routing/role")
           ? jsonBody({
-              role: "worker",
-              project_id: "local",
-              mode: "pool",
-              provider: null,
-              model: null,
-              pool: [{ provider_id: "pa", model: "pa/a-1" }],
-              strategy: "FALLBACK_ORDER",
+              profile: {
+                role: "worker",
+                project_id: "local",
+                mode: "pool",
+              },
+              binding: {
+                strategy: "FALLBACK_ORDER",
+                members: [{ provider: "pa", model: "pa/a-1" }],
+              },
             })
           : jsonBody({}, 404),
     );
