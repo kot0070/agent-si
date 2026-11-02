@@ -24,6 +24,8 @@
   --fx-link: #6aa8ff;
   --fx-btn-primary-bg: #2f6fed;
   --fx-btn-primary-ink: #ffffff;
+  /* Y1: hover/active stay >=4.5:1 against white ink in the dark theme. */
+  --fx-btn-primary-hover: #2052c8;
   --fx-btn-quiet-ink: #f2f4f8;
   --fx-focus-ring: #6aa8ff;
   --fx-danger: #ff8a80;
@@ -50,6 +52,8 @@
   --fx-link: #2456c6;
   --fx-btn-primary-bg: #2456c6;
   --fx-btn-primary-ink: #ffffff;
+  /* Y1: hover/active stay >=4.5:1 against white ink in the light theme. */
+  --fx-btn-primary-hover: #1a44a6;
   --fx-btn-quiet-ink: #16181d;
   --fx-focus-ring: #2456c6;
   --fx-danger: #b3261e;

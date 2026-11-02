@@ -92,9 +92,19 @@ button {
   border-radius: 6px;
 }
 
-button:hover:not(:disabled) {
-  background-color: var(--fx-accent);
-  border-color: var(--fx-accent);
+/* Y1: hover/active repaint with the darker hover token, never bright
+   accent under white ink (white on bright cyan is unreadable). Applies
+   to plain buttons and both data-variant dialects used by dialogs. */
+button:hover:not(:disabled),
+button[data-variant="primary"]:hover:not(:disabled) {
+  background-color: var(--fx-btn-primary-hover);
+  border-color: var(--fx-btn-primary-hover);
+}
+
+button:active:not(:disabled),
+button[data-variant="primary"]:active:not(:disabled) {
+  background-color: var(--fx-btn-primary-hover);
+  border-color: var(--fx-btn-primary-hover);
 }
 
 button:focus-visible {
@@ -113,9 +123,43 @@ button:disabled {
   border: 1px solid var(--fx-input-border);
 }
 
-.fx-btn-quiet:hover:not(:disabled) {
+/* Y1: dialog Cancel buttons ride data-variant="quiet": same quiet look
+   as the class dialect, never a white block with no text. */
+button[data-variant="quiet"] {
+  background-color: transparent;
+  color: var(--fx-btn-quiet-ink);
+  border: 1px solid var(--fx-input-border);
+  border-radius: 6px;
+}
+
+.fx-btn-quiet:hover:not(:disabled),
+button[data-variant="quiet"]:hover:not(:disabled) {
   background-color: transparent;
   border-color: var(--fx-accent);
+}
+
+.fx-btn-quiet:active:not(:disabled),
+button[data-variant="quiet"]:active:not(:disabled) {
+  background-color: transparent;
+  border-color: var(--fx-accent);
+}
+
+.fx-btn-quiet:disabled,
+button[data-variant="quiet"]:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+button[data-variant="primary"] {
+  background-color: var(--fx-btn-primary-bg);
+  color: var(--fx-btn-primary-ink);
+  border: 1px solid var(--fx-btn-primary-bg);
+  border-radius: 6px;
+}
+
+button[data-variant="primary"]:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 input,
