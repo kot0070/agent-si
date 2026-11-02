@@ -1666,10 +1666,12 @@ def main(argv: list[str] | None = None) -> int:
     # starts behind it. No window (headless) keeps the old path:
     # serve, then open the browser. background_color matches the splash
     # so no white flash paints before it.
+    window_error: Exception | None = None
     try:
         import webview as _webview
-    except Exception:
+    except Exception as exc:
         _webview = None
+        window_error = exc
     window = None
     # pywebview 6.2.1 create_window takes no icon: the exe resource
     # (_ICON in the spec) owns the window + taskbar icon on Windows.
@@ -1683,8 +1685,9 @@ def main(argv: list[str] | None = None) -> int:
                 width=width, height=height, text_select=True,
                 background_color=_SPLASH_BG)
         except Exception as exc:
+            window_error = exc
             _log("agent-si-sidecar: window unavailable "
-                 f"({exc}); continuing headless")
+                 f"({type(exc).__name__}: {exc}); continuing headless")
             window = None
 
     port = resolve_start_port(data_root)
@@ -1761,15 +1764,16 @@ def main(argv: list[str] | None = None) -> int:
         else:
             raise RuntimeError("no native window")
     except Exception as exc:
+        cause = window_error if window_error is not None else exc
+        detail = f"{type(cause).__name__}: {cause}"
         _log(
             "agent-si-sidecar: webview unavailable "
-            f"({exc}); opened in default browser, serving until stopped"
+            f"({detail}); opened in default browser, serving until stopped"
         )
         _open_in_browser(url)
         if _webview2_runtime_installed():
             _note_window_open_failed(
-                url, str(exc) or "unknown error",
-                _log_file_for_failure(data_root))
+                url, detail, _log_file_for_failure(data_root))
         else:
             _note_webview_missing(url)
         stop.wait()
