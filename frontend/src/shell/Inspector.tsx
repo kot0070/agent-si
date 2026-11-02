@@ -17,6 +17,7 @@ import type {
 import type { InspectorProps as InspectorBaseProps } from "../app/iface";
 import { useApiClient } from "../app/ApiClientProvider";
 import { formatNumber, t } from "../locale/index";
+import { formatDateTime } from "../locale/index";
 import { shortenLiveRef } from "../agents/agentsApi";
 import {
   placementForRow,
@@ -30,6 +31,7 @@ import type { AppsCardData } from "../watcher/AppsCard";
 import {
   fetchWatcherJournal,
   fetchWatcherStatus,
+  watcherModelName,
 } from "../watcher/WatcherTab";
 import { WATCHER_JOURNAL_ROUTE } from "../watcher/WatcherTab";
 import type {
@@ -490,12 +492,15 @@ export function Inspector(props: InspectorProps): ReactElement {
   const reportsHref =
     projectId === null ? "/projects" : `/projects/${projectId}/reports`;
 
-  const watcherModel = loadWatcherSettings().model;
+  const watcherSettings = loadWatcherSettings();
+  const watcherModel = watcherSettings.model;
   const latestJournal = (journal ?? [])[0];
-  const watcherAction =
+  const watcherActionId =
     latestJournal === undefined
       ? (watcherStatus?.journal_head ?? DASH)
-      : `${latestJournal.entry_id} ${latestJournal.timestamp}`;
+      : latestJournal.entry_id;
+  const watcherActionAt =
+    latestJournal === undefined ? "" : latestJournal.timestamp;
 
   const spent = budget?.spent ?? 0;
   const reserved = budget?.reserved ?? 0;
@@ -565,7 +570,7 @@ export function Inspector(props: InspectorProps): ReactElement {
                     </span>
                     <span className="fx-team-field">{row.agent}</span>
                     <span className="fx-team-field">
-                      {t("agents.row.scope")}{" "}
+                      {t("agents.row.scope")}{": "}
                       <span
                         className="fx-team-value fx-truncate"
                         title={scopeRef.title}
@@ -574,7 +579,7 @@ export function Inspector(props: InspectorProps): ReactElement {
                       </span>
                     </span>
                     <span className="fx-team-field">
-                      {t("agents.row.deliverable")}{" "}
+                      {t("agents.row.deliverable")}{": "}
                       <span
                         className="fx-team-value fx-truncate"
                         title={deliverableRef.title}
@@ -583,23 +588,23 @@ export function Inspector(props: InspectorProps): ReactElement {
                       </span>
                     </span>
                     <span className="fx-team-field">
-                      {t("settings.roleProfile.roleLabel")}{" "}
+                      {t("settings.roleProfile.roleLabel")}{": "}
                       {readRoleText(readExtra(row, "role"))}
                     </span>
                     <span className="fx-team-field">
-                      {t("settings.roleProfile.providerLabel")}{" "}
+                      {t("settings.roleProfile.providerLabel")}{": "}
                       {readText(readExtra(row, "provider"))}
                     </span>
                     <span className="fx-team-field">
-                      {t("settings.roleProfile.modelLabel")}{" "}
+                      {t("settings.roleProfile.modelLabel")}{": "}
                       {readText(readExtra(row, "model"))}
                     </span>
                     <span className="fx-team-field">
-                      {t("shell.cards.team.step")}{" "}
+                      {t("shell.cards.team.step")}{": "}
                       {readText(readExtra(row, "step"))}
                     </span>
                     <span className="fx-team-field">
-                      {t("shell.cards.team.file")}{" "}
+                      {t("shell.cards.team.file")}{": "}
                       <span
                         className="fx-team-value fx-truncate"
                         title={fileRef.title}
@@ -608,7 +613,7 @@ export function Inspector(props: InspectorProps): ReactElement {
                       </span>
                     </span>
                     <span className="fx-team-field">
-                      {t("shell.cards.team.lastAction")}{" "}
+                      {t("shell.cards.team.lastAction")}{": "}
                       <span
                         className="fx-team-value fx-truncate"
                         title={lastActionRef.title}
@@ -620,7 +625,7 @@ export function Inspector(props: InspectorProps): ReactElement {
                       {readSilent(readExtra(row, "silent_min"))}
                     </span>
                     <span className="fx-team-field">
-                      {t("shell.cards.team.waiting")}{" "}
+                      {t("shell.cards.team.waiting")}{": "}
                       {readWaiting(readExtra(row, "waits"))}
                     </span>
                   </li>
@@ -644,71 +649,38 @@ export function Inspector(props: InspectorProps): ReactElement {
           {liveRows === null ? (
             <p data-testid="context-empty">{t("empty.generic")}</p>
           ) : newest === null ? (
-            <>
-              <div data-testid="ctx-top" className="fx-ctx-top">
-                <p data-testid="ctx-percent">
-                  {t("shell.cards.context.percentValue", { value: unknown })}
-                </p>
-                <p data-testid="ctx-window">{unknown}</p>
-              </div>
-              <div data-testid="ctx-bar" className="fx-ctx-bar">
-                <div
-                  data-testid="ctx-bar-input"
-                  className="fx-ctx-seg"
-                  style={{
-                    width: `${fractionOf(tokenIn, tokenTotal) * 100}%`,
-                  }}
-                />
-                <div
-                  data-testid="ctx-bar-output"
-                  className="fx-ctx-seg"
-                  style={{
-                    width: `${fractionOf(tokenOut, tokenTotal) * 100}%`,
-                  }}
-                />
-              </div>
-              <ul data-testid="ctx-legend" className="fx-legend">
-                {roleSlices.map((slice, index) => (
-                  <li
-                    key={slice.key}
-                    data-testid={`ctx-legend-role-${slice.key}`}
-                    className="fx-legend-row"
-                  >
-                    <span
-                      className="fx-legend-dot"
-                      style={{
-                        backgroundColor:
-                          LEGEND_COLORS[index % LEGEND_COLORS.length] ??
-                          "var(--agent-si-chart-a)",
-                      }}
-                    />
-                    <span className="fx-legend-name">{slice.label}</span>
-                    <span className="fx-legend-tokens">
-                      {formatNumber(slice.tokens)}
-                    </span>
-                    <span className="fx-legend-pct">
-                      {slicePercent(slice)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </>
+            <p
+              data-testid="context-empty"
+              className="fx-quiet-line"
+              title={t("shell.common.unknown")}
+            >
+              {t("shell.cards.context.noUsage")}
+            </p>
           ) : (
             <>
-              <div data-testid="ctx-top" className="fx-ctx-top">
-                <p data-testid="ctx-percent">
-                  {t("shell.cards.context.percentValue", { value: percentText })}
+              {usedCount !== null && windowCount !== null ? (
+                <>
+                  <div data-testid="ctx-top" className="fx-ctx-top">
+                    <p data-testid="ctx-percent">
+                      {t("shell.cards.context.percentValue", { value: percentText })}
+                    </p>
+                    <p data-testid="ctx-window">
+                      {usedText} / {windowText}
+                    </p>
+                  </div>
+                  <p data-testid="ctx-source" className="fx-quiet">
+                    {t("shell.cards.context.source")} last call
+                  </p>
+                </>
+              ) : (
+                <p
+                  data-testid="ctx-unknown"
+                  className="fx-quiet-line"
+                  title={unknown}
+                >
+                  &mdash;
                 </p>
-                <p data-testid="ctx-window">
-                  {usedText} / {windowText}
-                </p>
-              </div>
-              <p data-testid="ctx-used" hidden>
-                {t("shell.cards.context.percentValue", { value: usedText })}
-              </p>
-              <p data-testid="ctx-source" className="fx-quiet">
-                {t("shell.cards.context.source")} last call
-              </p>
+              )}
               <div data-testid="ctx-bar" className="fx-ctx-bar">
                 <div
                   data-testid="ctx-bar-input"
@@ -725,7 +697,8 @@ export function Inspector(props: InspectorProps): ReactElement {
                   }}
                 />
               </div>
-              <ul data-testid="ctx-legend" className="fx-legend">
+              {roleTotal > 0 ? (
+                <ul data-testid="ctx-legend" className="fx-legend">
                 {roleSlices.map((slice, index) => (
                   <li
                     key={slice.key}
@@ -750,6 +723,7 @@ export function Inspector(props: InspectorProps): ReactElement {
                   </li>
                 ))}
               </ul>
+              ) : null}
             </>
           )}
         </section>
@@ -888,18 +862,23 @@ export function Inspector(props: InspectorProps): ReactElement {
           ) : (
             <>
               <p data-testid="watcher-state">
-                {t("shell.cards.watcher.state")}{" "}
+                {t("shell.cards.watcher.state")}{": "}
                 {watcherStatus.integrity_ok
                   ? t("shell.cards.watcher.ok")
                   : t("shell.cards.watcher.failed")}
               </p>
               <p data-testid="watcher-model">
-                {watchDecided === true
-                  ? `${t("settings.roleProfile.modelLabel")}: ${watcherModel}`
-                  : `Configured model: ${watcherModel}`}
+                {t("watcher.tab.model")}: {watcherModelName(watcherModel)}
+                {" \u00b7 "}
+                {t("watcher.tab.cloudFallback")}{" "}
+                {watcherSettings.cloudFallback
+                  ? t("projects.tests.local.on")
+                  : t("projects.tests.local.off")}
               </p>
               <p data-testid="watcher-action">
-                {t("shell.cards.team.lastAction")} {watcherAction}
+                {t("shell.cards.team.lastAction")}: {watcherActionId}
+                {" \u00b7 "}
+                {formatDateTime(watcherActionAt)}
               </p>
               <Link data-testid="watcher-open" to="/watcher">
                 {t("shell.cards.watcher.open")}

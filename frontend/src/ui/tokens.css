@@ -25,6 +25,9 @@
   --fx-btn-primary-ink: #ffffff;
   --fx-btn-quiet-ink: #f2f4f8;
   --fx-focus-ring: #6aa8ff;
+  --fx-danger: #ff8a80;
+  --fx-danger-ink: #ffffff;
+  --fx-danger-fill: #b3261e;
 }
 
 [data-theme="light"] {
@@ -47,4 +50,7 @@
   --fx-btn-primary-ink: #ffffff;
   --fx-btn-quiet-ink: #16181d;
   --fx-focus-ring: #2456c6;
+  --fx-danger: #b3261e;
+  --fx-danger-ink: #ffffff;
+  --fx-danger-fill: #b3261e;
 }

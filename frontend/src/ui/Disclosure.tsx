@@ -17,6 +17,7 @@ export function Disclosure(props: DisclosureProps): ReactElement {
         type="button"
         data-testid={`kit-toggle-${props.disclosureId}`}
         aria-label={summary}
+        aria-expanded={expanded}
         onClick={toggle}
       >
         {summary}

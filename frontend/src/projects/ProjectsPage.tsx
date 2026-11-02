@@ -13,7 +13,7 @@ import type { FormEvent, ReactElement } from "react";
 import type { ProjectRecord } from "../api/iface";
 import { ApiError, apiErrorLocaleKey, requestResponse } from "../api/errors";
 import { useApiClient, useCurrentProject } from "../app/ApiClientProvider";
-import { formatDate, t } from "../locale/index";
+import { formatDateLong, t } from "../locale/index";
 import { Card } from "../ui/Card";
 import { EmptyState } from "../ui/EmptyState";
 import { ErrorPanel } from "../ui/ErrorPanel";
@@ -82,11 +82,19 @@ function isPaused(paused: ReadonlySet<string>, id: string): boolean {
 }
 
 function formatProjectDate(value: string): string {
-  const stamp = new Date(value);
-  if (Number.isNaN(stamp.getTime())) {
-    return value;
-  }
-  return formatDate(stamp);
+  return formatDateLong(value);
+}
+
+/** Deduplicate served rows by project id; a repeated id renders one row. */
+export function dedupeProjects(rows: ProjectRecord[]): ProjectRecord[] {
+  const seen = new Set<string>();
+  return rows.filter((row) => {
+    if (seen.has(row.project_id)) {
+      return false;
+    }
+    seen.add(row.project_id);
+    return true;
+  });
 }
 
 export function ProjectsPage(): ReactElement {
@@ -281,7 +289,7 @@ export function ProjectsPage(): ReactElement {
             />
           ) : (
             <ul>
-              {projects.map((row) => (
+              {dedupeProjects(projects).map((row) => (
                 <li key={row.project_id} data-testid={`project-row-${row.project_id}`}>
                   <button
                     type="button"
@@ -293,7 +301,7 @@ export function ProjectsPage(): ReactElement {
                     {row.name}
                   </button>
                   <span data-testid={`project-created-${row.project_id}`}>
-                    {formatProjectDate(row.created_at)}
+                    {t("projects.list.created")} {formatProjectDate(row.created_at)}
                   </span>
                   {isPaused(paused, row.project_id) ? (
                     <button

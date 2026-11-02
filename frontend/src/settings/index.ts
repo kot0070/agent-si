@@ -2,7 +2,7 @@ import { createElement, useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { t } from '../locale/index';
-import { ApiError, requestResponse } from '../api/errors';
+import { ApiError, apiErrorLocaleKey, requestResponse } from '../api/errors';
 import {
   readRoleProfileFromServer,
   readRoleProfilesFromServer,
@@ -263,10 +263,12 @@ export function RoleProfileEditor(props: RoleProfileEditorProps): ReactElement {
     );
   }
   const validation = validateRoleProfile({ role: roleText, mode, provider, model });
+  const saveMessage =
+    saveError === null ? null : t(apiErrorLocaleKey(saveError));
   const errors =
-    saveError === null
+    saveMessage === null
       ? validation.errors
-      : [...validation.errors, `${t('errors.generic')} (${saveError})`];
+      : [...validation.errors, `${t('errors.generic')} — ${saveMessage}`];
   const baseId = `role-profile-${props.projectId}-${props.role}`;
   return createElement(
     'form',
@@ -304,23 +306,41 @@ export function RoleProfileEditor(props: RoleProfileEditorProps): ReactElement {
       id: `${baseId}-provider`,
       type: 'text',
       value: provider,
+      placeholder: provider.length === 0 ? t('settings.roleProfile.notSet') : undefined,
       onChange: (event: { target: { value: string } }) => {
         const next = event.target.value;
         setProvider(next);
         persist({ role: roleText, mode, provider: next, model });
       },
     }),
+    provider.length === 0
+      ? createElement(
+          'p',
+          { className: 'fx-notset', 'data-testid': `${baseId}-provider-notset` },
+          `${t('settings.roleProfile.providerLabel')}: ${t('settings.roleProfile.notSet')} — `,
+          createElement('a', { href: '/settings/models' }, t('providers.page.title')),
+        )
+      : null,
     createElement('label', { htmlFor: `${baseId}-model` }, t('settings.roleProfile.modelLabel')),
     createElement('input', {
       id: `${baseId}-model`,
       type: 'text',
       value: model,
+      placeholder: model.length === 0 ? t('settings.roleProfile.notSet') : undefined,
       onChange: (event: { target: { value: string } }) => {
         const next = event.target.value;
         setModel(next);
         persist({ role: roleText, mode, provider, model: next });
       },
     }),
+    model.length === 0
+      ? createElement(
+          'p',
+          { className: 'fx-notset', 'data-testid': `${baseId}-model-notset` },
+          `${t('settings.roleProfile.modelLabel')}: ${t('settings.roleProfile.notSet')} — `,
+          createElement('a', { href: '/settings/models' }, t('providers.page.title')),
+        )
+      : null,
     createElement(
       'ul',
       null,
