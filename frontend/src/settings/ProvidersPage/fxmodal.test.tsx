@@ -120,6 +120,9 @@ describe("F08 connect opens a real centred modal", () => {
     fireEvent.change(within(dialog).getByLabelText("API key"), {
       target: { value: "sk-test" },
     });
+    // FXR2E two-step (416ddaa, merged 0661228): Check before Save.
+    fireEvent.click(within(dialog).getByText("Check"));
+    expect(await within(dialog).findByText("Key checked. Save to connect.")).toBeTruthy();
     fireEvent.click(within(dialog).getByText("Save"));
     expect(await screen.findByLabelText("Disconnect Meta")).toBeTruthy();
     // Step 2 stays open: Done closes it before opening the disconnect modal.
@@ -152,8 +155,10 @@ describe("L2 success only after a real save", () => {
     fireEvent.change(within(dialog).getByLabelText("API key"), {
       target: { value: "sk-test" },
     });
-    fireEvent.click(within(dialog).getByText("Save"));
-    expect(await within(dialog).findByText(/Connect failed/)).toBeTruthy();
+    // FXR2E two-step: the unreachable store fails at Check (Save never
+    // enables), with the same honest error and nothing stored.
+    fireEvent.click(within(dialog).getByText("Check"));
+    expect(await within(dialog).findByText("Could not reach the provider.")).toBeTruthy();
     expect(screen.queryByText(/Reference saved/)).toBeNull();
     // Nothing was saved: the Meta card still offers Connect, never
     // Disconnect (the open dialog shares the accessible name, so the
@@ -179,6 +184,11 @@ describe("L2 success only after a real save", () => {
     fireEvent.change(within(dialog).getByLabelText("API key"), {
       target: { value: "sk-test" },
     });
+    // FXR2E two-step (416ddaa, merged 0661228): Check before Save.
+    fireEvent.click(within(dialog).getByText("Check"));
+    expect(
+      await within(dialog).findByText("Key checked. Save to connect."),
+    ).toBeTruthy();
     fireEvent.click(within(dialog).getByText("Save"));
     // Step 2 in the same dialog: Connected line plus the tickable list.
     // Done closes it; the card keeps the quiet Connected line.

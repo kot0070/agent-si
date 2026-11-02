@@ -302,7 +302,24 @@
       "modelLocal": "Local",
       "modelApi": "API",
       "modelOff": "Off",
-      "fallbackNote": "Off means the watcher never uses cloud models."
+      "fallbackNote": "Off means the watcher never uses cloud models.",
+      "notKnown": "not known",
+      "checks": "Rule checks",
+      "alerts": "Alerts",
+      "lastCheck": "Last check",
+      "modelCalls": "Model calls",
+      "modelTokens": "Model tokens",
+      "watches": "Watches now",
+      "lastAction": "Last action",
+      "rulesTitle": "Rules",
+      "journalTitle": "Journal",
+      "fired": "fired",
+      "looksHang": "Looks for hung agents with no fresh heartbeat",
+      "looksGuard": "Looks for workspace escapes",
+      "looksTamper": "Looks for tampered files",
+      "actionBlocked": "Blocked a problem",
+      "actionEscalated": "Escalated for review",
+      "actionAllowed": "Checked, all quiet"
     }
   },
   "firstrun": {
@@ -405,7 +422,12 @@
         "ok": "Watching",
         "failed": "Attention needed",
         "open": "Open watcher",
-        "lastCheck": "Watcher check"
+        "lastCheck": "Last check",
+        "watches": "Watches",
+        "checks": "Checks",
+        "alerts": "Alerts",
+        "calls": "Model calls",
+        "notKnown": "not known"
       },
       "tokens": {
         "title": "Tokens",
@@ -718,7 +740,7 @@
       "reports": "Readable totals from served records; the raw export stays behind Show more."
     },
     "attempts": "{count} attempts",
-    "blockedNote": "Blocked at run end.",
+    "blockedNote": "Blocked at run end: the row waits on a failed guard. Open the Errors tab for the served reason.",
     "overview": {
       "created": "Created",
       "ageDays": "Age (days)"

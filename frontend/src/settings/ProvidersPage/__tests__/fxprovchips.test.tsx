@@ -81,6 +81,9 @@ describe("FXPROVCHIPS two quiet chips, no glued sentence", () => {
     fireEvent.change(within(dialog).getByLabelText("API key"), {
       target: { value: "sk-fxprovchips" },
     });
+    // FXR2E two-step (416ddaa, merged 0661228): Check before Save.
+    fireEvent.click(within(dialog).getByText("Check"));
+    await within(dialog).findByText("Key checked. Save to connect.");
     fireEvent.click(within(dialog).getByText("Save"));
     const rows = await within(dialog).findAllByTestId("connect-model-row");
     expect(rows).toHaveLength(2);

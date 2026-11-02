@@ -444,6 +444,14 @@ def _run_selected(profile, project_dir, budgets):
 
 def _refresh_trace_block(python_line, node_line):
     path = Path(TRACE)
+    # WIPE/FXRED: _task/ is git-excluded, so a fresh clone has no TRACE.md;
+    # seed the marker block locally instead of failing (counts below still assert).
+    if not path.is_file():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "<!-- FXCATALOG-COUNTS-START -->\nseed\n<!-- FXCATALOG-COUNTS-END -->\n",
+            encoding="utf-8",
+        )
     assert path.is_file(), "counts record missing"
     text = path.read_text(encoding="utf-8")
     start = "<!-- FXCATALOG-COUNTS-START -->"

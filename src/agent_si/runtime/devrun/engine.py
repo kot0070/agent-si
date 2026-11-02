@@ -2311,6 +2311,8 @@ def _director_prompt(message: str, history: str = "") -> str:
         "result (for example a check that runs the installed tool or "
         "reads the real lock file), never a stub.%s" % (
             message or "(no task text)", _platform_guidance()))
+    from agent_si.runtime.devrun import roles as _roles
+    base = "%s %s" % (base, _roles.reply_language_line())
     if history:
         return "%s\n\n%s" % (base, history)
     return base
@@ -2735,13 +2737,14 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
         except Exception:
             last_fail = ""
         ws_before = _audit.snapshot_workspace(folder)
-        worker_adapter = _roles.build_adapter(app, _resolve_worker(
-            app, project))
+        worker_spec = _resolve_worker(app, project)
+        worker_adapter = _roles.build_adapter(app, worker_spec)
         producer_ref = "%s-a%d" % (producer_base, attempt)
         turn += 1
         outcome = _agent_loop(
             record=record, app=app, spec=spec, row=row,
-            adapter=worker_adapter, folder=folder, project=project,
+            adapter=worker_adapter, worker_spec=worker_spec,
+            folder=folder, project=project,
             run_id=run_id, part_id=part_id, attempt=attempt,
             turn=turn, turn_cap=turn_cap, state=state, procs=procs,
             failing=failing, reasons=reasons, message=message,
@@ -3335,7 +3338,8 @@ def _looks_like_build_task(message: Any) -> bool:
 
 
 def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
-                adapter: Any, folder: str, project: str, run_id: str,
+                adapter: Any, worker_spec: dict, folder: str,
+                project: str, run_id: str,
                 part_id: str, attempt: int, turn: int, turn_cap: int,
                 state: Any, procs: list, failing: list, reasons: list,
                 message: str, publish: Any, check_stop: Any, live: Any,
@@ -3356,7 +3360,6 @@ def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
     from agent_si.runtime.devrun import protocol as _protocol
     from agent_si.runtime.devrun import roles as _call_roles
 
-    worker_spec = _resolve_worker(app, project)
     try:
         cap_chars = _history_cap_chars(
             worker_spec.get("provider"), worker_spec.get("model"))
@@ -3573,6 +3576,8 @@ def _worker_prompt(spec: dict, message: str, attempt: int,
                          ", ".join(known) if known else "(none)",
                          last_text[:2000] if last_text else "(none)"))
     head += _platform_guidance()
+    from agent_si.runtime.devrun import roles as _roles
+    head = "%s %s" % (head, _roles.reply_language_line())
     return head
 
 

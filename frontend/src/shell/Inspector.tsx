@@ -38,6 +38,7 @@ import { fetchAppsCard } from "../watcher/AppsCard";
 import type { AppsCardData } from "../watcher/AppsCard";
 import { backoffForFailures, isHiddenTick, onVisible } from "../api/polling";
 import {
+  describeLastAction,
   fetchWatcherJournal,
   fetchWatcherStatus,
   watcherModelName,
@@ -1486,14 +1487,44 @@ export function Inspector(props: InspectorProps): ReactElement {
                   ? t("shell.cards.watcher.ok")
                   : t("shell.cards.watcher.failed")}
               </p>
+              <p data-testid="watcher-watches">
+                {t("shell.cards.watcher.watches")}{": "}
+                {typeof watcherStatus.watched_runs === "number"
+                  ? formatNumber(watcherStatus.watched_runs)
+                  : t("watcher.tab.notKnown")}{" "}
+                runs ·{" "}
+                {typeof watcherStatus.watched_agents === "number"
+                  ? formatNumber(watcherStatus.watched_agents)
+                  : t("watcher.tab.notKnown")}{" "}
+                agents
+              </p>
+              <p data-testid="watcher-checks">
+                {t("shell.cards.watcher.checks")}{": "}
+                {typeof watcherStatus.checks_done === "number"
+                  ? formatNumber(watcherStatus.checks_done)
+                  : t("watcher.tab.notKnown")}{" "}
+                · {t("shell.cards.watcher.alerts")}{": "}
+                {typeof watcherStatus.alerts_raised === "number"
+                  ? formatNumber(watcherStatus.alerts_raised)
+                  : t("watcher.tab.notKnown")}{" "}
+                · {t("shell.cards.watcher.lastCheck")}{": "}
+                {watcherStatus.last_check_at
+                  ? formatDateTime(watcherStatus.last_check_at)
+                  : t("watcher.tab.notKnown")}
+              </p>
               <p data-testid="watcher-model">
                 {t("watcher.tab.model")}:{" "}
                 {watcherModelName(effectiveWatcherModel)}
                 {" \u00b7 "}
-                {t("watcher.tab.cloudFallback")}{" "}
-                {watcherSettings.cloudFallback
-                  ? t("projects.tests.local.on")
-                  : t("projects.tests.local.off")}
+                {t("shell.cards.watcher.calls")}{": "}
+                {typeof watcherStatus.watcher_calls === "number"
+                  ? formatNumber(watcherStatus.watcher_calls)
+                  : t("watcher.tab.notKnown")}{" "}
+                ·{" "}
+                {typeof watcherStatus.watcher_tokens === "number"
+                  ? formatNumber(watcherStatus.watcher_tokens)
+                  : t("watcher.tab.notKnown")}{" "}
+                tokens
               </p>
               {/* FXTABS T9: the last action reads as plain words plus the
                   local time; the raw journal id rides the tooltip only. */}
@@ -1501,8 +1532,8 @@ export function Inspector(props: InspectorProps): ReactElement {
                 data-testid="watcher-action"
                 title={watcherActionId === DASH ? undefined : watcherActionId}
               >
-                {t("shell.cards.team.lastAction")}{": "}
-                {t("shell.cards.watcher.lastCheck")}
+                {t("shell.cards.team.lastAction")}:{" "}
+                {describeLastAction(watcherStatus.last_action)}
                 {watcherActionAt === "" ? null : (
                   <>
                     {" \u00b7 "}

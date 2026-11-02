@@ -128,6 +128,9 @@ describe("chat cancel uses the server stream id", () => {
           headers: { "content-type": "application/json" },
         });
       }
+      // BOTH behaviours kept: FXTURN 5da7197 fresh stream per chat open
+      // (no locked share) + FXRED route-aware JSON for incidental reads
+      // (history/models must not consume the chat stream).
       if (target.includes("/api/v1/chat/stream")) {
         const streamBody = new ReadableStream<Uint8Array>({
           start(entry) {
@@ -142,7 +145,19 @@ describe("chat cancel uses the server stream id", () => {
           },
         });
       }
-      // Incidental reads (history, hierarchy, models) answer on their
+      if (target.includes("/api/v1/chat/history")) {
+        return new Response(JSON.stringify({ turns: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (target.includes("/api/v1/chat/models")) {
+        return new Response(JSON.stringify({ models: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      // Incidental reads (hierarchy and anything else) answer on their
       // own body: sharing one stream across responses locks it and the
       // stream reader throws, which this cancel test never covers.
       return new Response(
