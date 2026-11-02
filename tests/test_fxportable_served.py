@@ -111,10 +111,24 @@ def test_fxportable_p1_unfrozen_stays_none(tmp_path, monkeypatch):
 
 def test_fxportable_p1_key_save_201_with_default_dir(tmp_path, monkeypatch):
     """Frozen + no env: K04 configured off the default dir, key save 201."""
+    import urllib.request as _urlreq
+
     from fastapi.testclient import TestClient
 
     from agent_si.backend.app import create_app
 
+    class _Resp:
+        def read(self):
+            return b'{"data": [{"id": "gpt-4o"}]}'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(
+        _urlreq, "urlopen", lambda request, timeout=None: _Resp())
     monkeypatch.delenv("AGENT_SI_DATA_DIR", raising=False)
     _freeze(monkeypatch, _fake_exe(tmp_path))
     app = create_app({"secret_store": "memory", "testing": True})

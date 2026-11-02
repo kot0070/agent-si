@@ -2,6 +2,7 @@ import logging
 import os
 import sys
 import time
+import urllib.request as _urlreq
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _SRC = os.path.abspath(os.path.join(_HERE, "..", "src"))
@@ -20,6 +21,36 @@ BAIT2 = "FAKE-K04KEY1-BAIT-1111-yyyy-not-a-real-key"
 HEADERS = {"x-actor": "ui-probe", "x-ui-session-token": APP_TOKEN}
 
 
+def _models_ok(monkeypatch):
+    """Stub the save preflight (/models 200) plus connect evidence."""
+
+    class _Resp:
+        def __init__(self, payload):
+            import json as _json
+
+            self._raw = _json.dumps(payload).encode("utf-8")
+
+        def read(self):
+            return self._raw
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def _fake(request, timeout=None):
+        url = getattr(request, "full_url", str(request))
+        if url.rstrip("/").endswith("/models"):
+            return _Resp({"data": [{"id": "m-k04key1"}]})
+        return _Resp({"choices": [{"message": {"content": "ok"},
+                                   "finish_reason": "stop"}],
+                     "usage": {"input_tokens": 1,
+                               "output_tokens": 1}})
+
+    monkeypatch.setattr(_urlreq, "urlopen", _fake)
+
+
 def make_client(tmp_path, **extra):
     settings = {"store_dir": str(tmp_path / "appdata"),
                 "ui_session_token": APP_TOKEN,
@@ -29,8 +60,10 @@ def make_client(tmp_path, **extra):
     return fastapi.testclient.TestClient(app), app
 
 
-def test_save_connect_list_disconnect_roundtrip(tmp_path, caplog):
+def test_save_connect_list_disconnect_roundtrip(tmp_path, caplog,
+                                                 monkeypatch):
     client, app = make_client(tmp_path)
+    _models_ok(monkeypatch)
     assert KEY_SAVE_TIMEOUT == "KEY_SAVE_TIMEOUT"
     assert app.state.k04_ctx.credential_store is not None
     with caplog.at_level(logging.INFO):
@@ -66,8 +99,10 @@ def test_save_connect_list_disconnect_roundtrip(tmp_path, caplog):
     assert BAIT not in str(app.state.k04_ctx.audit_sink.records)
 
 
-def test_save_never_echoes_value_and_audit_clean(tmp_path, caplog):
+def test_save_never_echoes_value_and_audit_clean(tmp_path, caplog,
+                                                  monkeypatch):
     client, app = make_client(tmp_path)
+    _models_ok(monkeypatch)
     with caplog.at_level(logging.INFO):
         resp = client.post("/api/v1/providers/keys",
                            json={"preset_id": "openai", "key_value": BAIT2},
@@ -125,8 +160,9 @@ def test_save_bad_shapes_400(tmp_path):
         assert BAIT not in resp.text
 
 
-def test_save_timeout_answers_code(tmp_path):
+def test_save_timeout_answers_code(tmp_path, monkeypatch):
     client, app = make_client(tmp_path)
+    _models_ok(monkeypatch)
 
     class HangingStore:
         def set_secret(self, secret_id, value):

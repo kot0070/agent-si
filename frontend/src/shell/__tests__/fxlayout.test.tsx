@@ -297,7 +297,9 @@ describe("fxlayout shell over the real app", () => {
     expect(screen.getByTestId("watcher-state").textContent).toContain(
       t("shell.cards.watcher.ok"),
     );
-    expect(screen.getByTestId("watcher-model").textContent).toContain("local");
+    expect(screen.getByTestId("watcher-model").textContent).toContain(
+      t("watcher.tab.modelLocal"),
+    );
     expect(screen.getByTestId("watcher-action").textContent).toContain("e-1");
     expect(screen.getByTestId("watcher-open").getAttribute("href")).toBe(
       "/watcher",

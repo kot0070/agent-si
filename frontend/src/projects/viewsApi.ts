@@ -530,7 +530,41 @@ export function humanDuration(totalS: number | null): string | null {
   return restMin === 0 ? `${hours} h` : `${hours} h ${restMin} min`;
 }
 
+// Plain run status from the served cells: any FAIL part forces "failed"
+// even when a legacy success cell says true, so `done` never sits beside
+// a FAIL verdict on any surface (served run row, header, final card).
+// One shared map: every surface reads this word for the same run.
+export const RUN_WORD_DONE = "done" as const;
+export const RUN_WORD_FAILED = "failed" as const;
+
+export type RunWord = typeof RUN_WORD_DONE | typeof RUN_WORD_FAILED;
+
+export function runStatusWord(input: {
+  success: boolean;
+  parts: Array<{ verdict?: string | null; part_id?: string; reason?: string }>;
+  verdicts?: Record<string, string | null>;
+}): RunWord {
+  const seen: Array<string | null | undefined> = [
+    ...input.parts.map((part) => part.verdict),
+    ...Object.values(input.verdicts ?? {}),
+  ];
+  for (const verdict of seen) {
+    if (verdict !== undefined && verdict !== null && verdict !== "" && verdict !== "PASS") {
+      return RUN_WORD_FAILED;
+    }
+  }
+  if (input.parts.length > 0) {
+    const allPass =
+      input.parts.length > 0 &&
+      input.parts.every((part) => part.verdict === "PASS");
+    if (!allPass) {
+      return RUN_WORD_FAILED;
+    }
+  }
+  return input.success ? RUN_WORD_DONE : RUN_WORD_FAILED;
+}
+
 // Plain run status from the served success cell.
 export function runStatusText(run: DevrunRun): string {
-  return run.success ? "done" : "failed";
+  return runStatusWord(run);
 }

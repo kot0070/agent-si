@@ -58,6 +58,9 @@ function stubServed(routes: MutableRoutes): void {
     if (match !== null) {
       return json({ provider_id: match[1], models: routes.models[match[1] as string] ?? [] });
     }
+    if (url === "/api/v1/providers/keys/check") {
+      return json({ ok: true }, 200);
+    }
     if (url === "/api/v1/providers/keys") {
       return json({ key_ref: { secret_id: "fx", provider_id: "fx" } }, 201);
     }
@@ -114,6 +117,8 @@ describe("FXPROV P1 save moves to step 2 in the same dialog", () => {
     fireEvent.change(within(dialog).getByLabelText("API key"), {
       target: { value: "sk-fxprov" },
     });
+    fireEvent.click(within(dialog).getByText("Check"));
+    await within(dialog).findByText("Key checked. Save to connect.");
     fireEvent.click(within(dialog).getByText("Save"));
     // Step 2 in the same dialog: Connected line, tickable list, key gone.
     expect(await within(dialog).findByText("Connected OpenAI. Reference saved.")).toBeTruthy();

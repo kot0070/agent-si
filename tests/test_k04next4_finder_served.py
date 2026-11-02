@@ -131,9 +131,40 @@ def test_m_p4_145_finder_dates_only_projection_seam():
 
 
 # M-P4-146: live-provider-linked entry never deletable.
-def test_m_p4_146_finder_live_linked_never_deletable_served(tmp_path):
+def test_m_p4_146_finder_live_linked_never_deletable_served(
+        tmp_path, monkeypatch):
     """Row M-P4-146: deleting a live-provider-linked entry refuses with
     LIVE_LINKED (CODER-B seam)."""
+    import json as _json
+    import urllib.request as _urlreq
+
+    class _Resp:
+        def __init__(self, payload):
+            self._raw = payload
+
+        def read(self):
+            return self._raw
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def _fake(request, timeout=None):
+        from urllib.parse import urlparse as _parse
+
+        try:
+            path = _parse(getattr(request, "full_url", "")).path
+        except Exception:
+            path = ""
+        if path.rstrip("/").endswith("/models"):
+            return _Resp(b'{"data": [{"id": "m-next4-146"}]}')
+        return _Resp(_json.dumps(
+            {"usage": {"input_tokens": 1,
+                        "output_tokens": 1}}).encode("utf-8"))
+
+    monkeypatch.setattr(_urlreq, "urlopen", _fake)
     client = _client(tmp_path)
     saved = client.post(
         "/api/v1/providers/keys",
