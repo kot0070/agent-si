@@ -826,21 +826,35 @@ function AppShellInner(): ReactElement {
   );
 }
 
+// FXUIB-B1: the stored pick survives reload (the provider boots from
+// localStorage); it is kept exactly when the rows still serve it,
+// otherwise the first row wins. Null means keep the current pick.
+export function resolveFirstProject(
+  rows: ProjectRecord[],
+  currentId: string | null,
+): string | null {
+  if (
+    currentId !== null &&
+    rows.some((row) => row.project_id === currentId)
+  ) {
+    return null;
+  }
+  const first = rows[0];
+  return first === undefined ? null : first.project_id;
+}
+
 function AppShell(): ReactElement {
   const current = useCurrentProject();
   // FXPROJ J1: first selection rides the shared list load in the same
-  // tick (no extra fetch, no extra render hop). Later loads never
-  // reselect: the ref guards the null case at call time.
+  // tick (no extra fetch, no extra render hop). Later loads reselect
+  // only when the stored pick is no longer served (resolveFirstProject).
   const selectionRef = useRef(current.projectId);
   selectionRef.current = current.projectId;
   const selectFirst = useCallback(
     (rows: ProjectRecord[]) => {
-      if (selectionRef.current !== null) {
-        return;
-      }
-      const first = rows[0];
-      if (first !== undefined) {
-        current.select(first.project_id);
+      const next = resolveFirstProject(rows, selectionRef.current);
+      if (next !== null) {
+        current.select(next);
       }
     },
     [current],

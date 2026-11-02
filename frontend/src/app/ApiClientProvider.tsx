@@ -15,6 +15,25 @@ export type { ApiClientProviderProps, CurrentProject };
 
 const ApiClientContext = createContext<ApiClient | null>(null);
 
+const PROJECT_STORAGE_KEY = "agentsi.projectId";
+
+function readStoredProjectId(): string | null {
+  try {
+    const stored = window.localStorage.getItem(PROJECT_STORAGE_KEY);
+    return stored === null || stored === "" ? null : stored;
+  } catch {
+    return null;
+  }
+}
+
+function persistProjectId(projectId: string): void {
+  try {
+    window.localStorage.setItem(PROJECT_STORAGE_KEY, projectId);
+  } catch {
+    // Storage unavailable (private mode, probe): selection still applies in memory.
+  }
+}
+
 interface CurrentProjectState {
   projectId: string | null;
   select: (projectId: string) => void;
@@ -23,11 +42,12 @@ interface CurrentProjectState {
 const CurrentProjectContext = createContext<CurrentProjectState | null>(null);
 
 export function ApiClientProvider(props: ApiClientProviderProps): ReactElement {
-  const [projectId, setProjectId] = useState<string | null>(null);
+  const [projectId, setProjectId] = useState<string | null>(readStoredProjectId);
   const selection = useMemo<CurrentProjectState>(
     () => ({
       projectId,
       select: (next: string) => {
+        persistProjectId(next);
         setProjectId(next);
       },
     }),
