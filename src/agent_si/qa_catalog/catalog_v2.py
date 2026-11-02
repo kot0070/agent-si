@@ -682,8 +682,20 @@ def run_code_test(test_id: str, project_root: str, evidence_dir: str, budgets=No
         "budgets": {"timeout_s": timeout_s, "evidence_dir": evidence},
     }
     try:
+        if getattr(sys, "frozen", False):
+            # Frozen exe: sys.executable is the app itself, so spawning
+            # [exe, host, runner] would start a second full app (window
+            # + single-instance lock + folder picker). Route through the
+            # sidecar flag instead: main() handles --qa-runner before
+            # any window, lock, port pick or server start. The literal
+            # must stay equal to agent_si.sidecar._QA_RUNNER_FLAG
+            # (pinned by test; literal here keeps catalog_v2 stdlib-only
+            # with no sidecar import).
+            argv = [sys.executable, "--qa-runner", runner]
+        else:
+            argv = [sys.executable, host, runner]
         proc = subprocess.Popen(
-            [sys.executable, host, runner],
+            argv,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
