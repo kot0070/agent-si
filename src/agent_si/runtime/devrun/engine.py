@@ -2572,6 +2572,7 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
                     goal=spec["goal"], files_diff=files_diff,
                     part_diff=part_diff,
                     checks=check_rows,
+                    part_files=after,
                     artifact_refs=["%s/%s" % (part_id, path)
                                    for path in spec["files"]],
                     lock=lock, stop_seen=stop_seen,
