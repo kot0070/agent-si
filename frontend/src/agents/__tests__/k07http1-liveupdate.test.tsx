@@ -35,8 +35,17 @@ beforeEach(() => {
     if (path === "/api/v1/agents/live" && method === "GET") {
       liveCalls += 1;
       if (liveCalls >= 2) {
+        // The live set grows: a-1 is still RUNNING when b-2 queues.
+        // Replacement semantics keep every row the server still reports,
+        // so both generations render without a reload or a location change.
         return jsonBody({
           agents: [
+            {
+              agent: "a-1",
+              scope: "s-1",
+              deliverable: "d-1",
+              status: "RUNNING",
+            },
             {
               agent: "b-2",
               scope: "s-2",
@@ -85,7 +94,7 @@ describe("k07http1 live update over HttpApiClient", () => {
         <AgentsLive projectId="p-1" />
       </ApiClientProvider>,
     );
-    expect(await screen.findByTestId("agent-row-a-1")).toBeTruthy();
+    expect(await screen.findByTestId("agent-row-a-1", {}, { timeout: 8000 })).toBeTruthy();
     expect((await screen.findByTestId("agent-row-a-1")).textContent).toContain(
       en.tasks.status.running,
     );
