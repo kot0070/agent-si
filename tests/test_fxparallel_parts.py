@@ -136,7 +136,14 @@ def _terminal_types(events):
 
 
 class _ScriptedAdapter(MockProviderAdapter):
-    """Network-boundary fake only: scripted text per call, spy records."""
+    """Network-boundary fake only: scripted text per call, spy records.
+
+    The per-call index is a per-instance counter: the engine builds one
+    fresh adapter per part attempt and drops it after, so deriving the
+    index from id(self) over the shared spy misfires when CPython reuses
+    a freed id (a fresh adapter then observes stale calls and e.g. skips
+    its write, which flakes T4 p3 / T9 across orders).
+    """
 
     def __init__(self, config, role, script, spy, usage=None):
         super().__init__(config, transport=None, canned=("standby",))
@@ -144,6 +151,7 @@ class _ScriptedAdapter(MockProviderAdapter):
         self.script = script
         self.spy = spy
         self.forced_usage = usage
+        self.calls_made = 0
 
     def _usage_for(self, messages):
         if callable(self.forced_usage):
@@ -156,15 +164,15 @@ class _ScriptedAdapter(MockProviderAdapter):
     def invoke(self, messages, params=None, max_turns=8):
         self._check_messages(messages)
         request = self._resolve_request(messages, params)
-        calls = [entry for entry in self.spy
-                 if entry.get("adapter_id") == id(self)]
+        n_calls = self.calls_made
+        self.calls_made += 1
         if callable(self.script):
-            text = self.script(len(calls), copy.deepcopy(messages))
+            text = self.script(n_calls, copy.deepcopy(messages))
         else:
-            text = self.script[min(len(calls), len(self.script) - 1)]
+            text = self.script[min(n_calls, len(self.script) - 1)]
             if callable(text):
                 try:
-                    text = text(len(calls), copy.deepcopy(messages))
+                    text = text(n_calls, copy.deepcopy(messages))
                 except TypeError:
                     text = text(copy.deepcopy(messages))
         self.turns_served += 1
