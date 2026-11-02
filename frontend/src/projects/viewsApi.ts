@@ -7,6 +7,7 @@
 // from here, never the reverse.
 
 import { z } from "zod";
+import { ENDPOINTS, withProject } from "../api/endpoints";
 import { requestJson } from "../api/errors";
 import type {
   BudgetState,
@@ -377,4 +378,125 @@ export function changedFiles(live: PartRow[]): string[] {
     }
   }
   return out;
+}
+
+// FXVIEWS3: devrun run rows served on the same runs ledger route (app.py
+// runs_ledger "runs" key, FXVIEWS2 additions-only). The ledger row path
+// keeps reading rows only; readRuns reads the runs key. Every cell is
+// served: run id, start/end stamps, parts, verdicts, tokens, cost or
+// UNKNOWN, files, success, summary.
+
+const DevrunPartSchema = z.object({
+  part_id: z.string(),
+  verdict: z.union([z.string(), z.null()]).optional(),
+  attempts: z.number().int().optional(),
+  reason: z.string().optional(),
+});
+
+export type DevrunPart = z.infer<typeof DevrunPartSchema>;
+
+const DevrunRunSchema = z.object({
+  run_id: z.string(),
+  start: z.string(),
+  end: z.string(),
+  parts: z.array(DevrunPartSchema),
+  verdicts: z.record(z.string(), z.union([z.string(), z.null()])),
+  tokens: z.union([z.number().int(), z.literal("UNKNOWN")]),
+  cost: z.union([z.string(), z.literal("UNKNOWN")]),
+  files: z.array(z.string()),
+  success: z.boolean(),
+  summary: z.string(),
+});
+
+export type DevrunRun = z.infer<typeof DevrunRunSchema>;
+
+const RunsLedgerResponseSchema = z.object({
+  rows: z.array(z.unknown()).optional(),
+  runs: z.array(DevrunRunSchema).optional(),
+});
+
+// Same route the row readers use; a missing/unparseable runs doc reads []
+// (honestly empty tabs) so one failing enrichment never hides siblings.
+export async function readRuns(projectId: string): Promise<DevrunRun[]> {
+  try {
+    return await requestJson(
+      withProject(ENDPOINTS.ledger, projectId),
+      { method: "GET", kind: "read" },
+      RunsLedgerResponseSchema,
+    ).then((body) => body.runs ?? []);
+  } catch {
+    return [];
+  }
+}
+
+// Wall seconds from served start/end stamps; UNKNOWN or inverted stamps
+// read null (UNKNOWN in the view), never a guessed duration.
+export function runWallS(run: DevrunRun): number | null {
+  const start = Date.parse(run.start);
+  const end = Date.parse(run.end);
+  if (Number.isNaN(start) || Number.isNaN(end) || end < start) {
+    return null;
+  }
+  return Math.round((end - start) / 1000);
+}
+
+export function sumRunsWall(runs: DevrunRun[]): number | null {
+  let total = 0;
+  let served = false;
+  for (const run of runs) {
+    const wall = runWallS(run);
+    if (wall !== null) {
+      total += wall;
+      served = true;
+    }
+  }
+  return served ? total : null;
+}
+
+// Served stamps render as local date + time; UNKNOWN or unparseable
+// stamps stay raw so provenance assertions keep working.
+export function formatRunMoment(
+  value: string,
+  locale: SupportedLocale,
+): string {
+  if (value === "UNKNOWN" || !STAMP_LIKE.test(value.trim())) {
+    return value;
+  }
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) {
+    return value;
+  }
+  const tag = locale === "uk" ? "uk-UA" : "en-US";
+  return new Intl.DateTimeFormat(tag, {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "numeric",
+  }).format(new Date(parsed));
+}
+
+// Human wall-clock units from served seconds (rounded): "45 s",
+// "1 min 30 s", "2 h 5 min". Served cells only; null stays null.
+export function humanDuration(totalS: number | null): string | null {
+  if (totalS === null) {
+    return null;
+  }
+  const total = Math.max(0, Math.round(totalS));
+  if (total < 60) {
+    return `${total} s`;
+  }
+  const minutes = Math.floor(total / 60);
+  const rest = total % 60;
+  if (minutes < 60) {
+    return rest === 0 ? `${minutes} min` : `${minutes} min ${rest} s`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const restMin = minutes % 60;
+  return restMin === 0 ? `${hours} h` : `${hours} h ${restMin} min`;
+}
+
+// Plain run status from the served success cell.
+export function runStatusText(run: DevrunRun): string {
+  return run.success ? "done" : "failed";
 }
