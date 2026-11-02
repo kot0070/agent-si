@@ -226,6 +226,8 @@ def auditor_messages(
         'Return ONLY JSON: {"result": "PASS"|"FAIL", '
         '"reasons": ["..."]}. Judge the real files and real outputs '
         "above, nothing else.")
+    from agent_si.runtime.devrun import roles as _roles
+    lines.append(_roles.reply_language_line())
     return [{"role": "user", "content": "\n".join(lines)}]
 
 
