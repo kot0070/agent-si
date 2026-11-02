@@ -118,6 +118,9 @@ describe("fxmodelid catalog carries real ids, connect sends them", () => {
         target: { value: FX_KEY },
       });
       fireEvent.click(within(dialog).getByText("Save"));
+      // Step 2 opens in the same dialog; Done closes it before the next card.
+      expect(await within(dialog).findByText(/Reference saved/)).toBeTruthy();
+      fireEvent.click(within(dialog).getByText("Done"));
       await waitFor(() =>
         expect(
           screen.getByLabelText(`Disconnect ${entry.label}`),
@@ -156,6 +159,8 @@ describe("fxmodelid catalog carries real ids, connect sends them", () => {
       target: { value: "local-dev-key" },
     });
     fireEvent.click(within(dialog).getByText("Save"));
+    expect(await within(dialog).findByText(/Reference saved/)).toBeTruthy();
+    fireEvent.click(within(dialog).getByText("Done"));
     await waitFor(() =>
       expect(screen.getByLabelText("Disconnect Ollama")).toBeTruthy(),
     );
@@ -197,8 +202,8 @@ describe("fxmodelid TestsTab empty branch renders zeros", () => {
   });
 });
 
-describe("fxmodelid approval-card mounts after a real completed ask", () => {
-  it("completed assistant text mounts the card and Accept decides it inline", async () => {
+describe("fxmodelid executed run renders the answer inline with no card", () => {
+  it("completed executed text renders inline and withholds the verdict card", async () => {
     programFetch((url, init) => {
       const method = (init?.method ?? "GET").toUpperCase();
       if (String(url).startsWith("/api/v1/chat/models") && method === "GET") {
@@ -236,16 +241,12 @@ describe("fxmodelid approval-card mounts after a real completed ask", () => {
       target: { value: "please do the thing" },
     });
     fireEvent.click(screen.getByTestId("chat-send"));
-    const card = await screen.findByTestId("approval-card");
-    expect(card).toBeTruthy();
-    expect(screen.getByTestId("approval-text").textContent).toBe(
-      "do the thing",
-    );
-    expect(screen.getByTestId("approval-accept")).toBeTruthy();
-    fireEvent.click(screen.getByTestId("approval-accept"));
-    await waitFor(() => {
-      expect(screen.queryByTestId("approval-card")).toBeNull();
-    });
+    // D6(b): executed:true marks a finished engine run, so the verdict
+    // card is withheld and the answer renders inline instead.
+    const assistant = await screen.findByTestId("chat-assistant-message");
+    expect(assistant.textContent).toContain("do the thing");
+    expect(screen.queryByTestId("approval-card")).toBeNull();
+    expect(screen.queryByTestId("approval-accept")).toBeNull();
   });
 });
 
@@ -317,9 +318,11 @@ describe("fxmodelid collapsed hierarchy line carries the Director text", () => {
     );
     const collapsed = await screen.findByTestId("hierarchy-collapsed");
     expect(collapsed).toBeTruthy();
+    // FXDESIGN6-D6A: label and value are separate spans with CSS
+    // dividers, so there is no "Director:" colon in the text.
     await waitFor(() => {
-      expect(collapsed.textContent).toContain("Director:");
+      expect(collapsed.textContent).toContain("Anthropic");
     });
-    expect(collapsed.textContent).toContain("Anthropic");
+    expect(collapsed.textContent).toContain("Director");
   });
 });

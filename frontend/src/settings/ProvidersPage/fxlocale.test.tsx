@@ -51,6 +51,9 @@ async function connectOpenaiThroughDialog(): Promise<void> {
     target: { value: "sk-test" },
   });
   fireEvent.click(within(dialog).getByText("Save"));
+  expect(await within(dialog).findByText("Connected OpenAI. Reference saved.")).toBeTruthy();
+  fireEvent.click(within(dialog).getByText("Done"));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 }
 
 describe("fxlocale provider connect screens", () => {
@@ -76,7 +79,11 @@ describe("fxlocale provider connect screens", () => {
       target: { value: "sk-test" },
     });
     fireEvent.click(within(dialog).getByText("Зберегти"));
+    // Step 2 in the same dialog carries the quiet line; the card shows it
+    // too once Done closes the dialog.
     expect(await within(dialog).findByText("Під'єднано OpenAI. Посилання збережено.")).toBeTruthy();
+    fireEvent.click(within(dialog).getByText("Done"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await waitFor(() => expect(screen.getByLabelText("Від'єднати OpenAI")).toBeTruthy());
   });
 });
