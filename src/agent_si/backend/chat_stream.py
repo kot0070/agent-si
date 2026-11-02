@@ -557,18 +557,17 @@ class ManagerSdkBridge:
                 {"type": "cancelled", "stream_id": stream_id})
             return
         self._finish(stream_id)
-        # K04BIND1: append the verbatim last failure reason (never secret).
-        base = ("no provider is connected; "
-                "connect a provider to enable chat")
-        reason = state.get("no_provider_reason")
-        if isinstance(reason, str) and reason.strip():
-            base = base + " (last error: " + reason.strip() + ")"
+        # FXCLASS CA-1/CA-3/CA-4: one plain line, same words on chat +
+        # Tasks, no role word. The verbatim last failure stays server-side
+        # only when explicitly passed; the wire message stays plain.
+        base = "Connect a provider first"
         yield sse_bytes({
             "type": "error",
             "stream_id": stream_id,
             "run_id": run_id,
             "code": NO_PROVIDER_BOUND,
             "message": base,
+            "connectHref": "/providers",
         })
 
     def _devrun_folder(
