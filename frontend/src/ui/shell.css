@@ -159,6 +159,21 @@ div[data-testid^="inspector-card-"] > p[data-testid$="-sub"] {
   }
 }
 
+/* FXDESIGN5 S1: at 1000px the three columns persist with slimmer side
+    tracks and no page horizontal scroll; each column keeps its own
+    overflow (row 861). Lengths only, no colours. */
+@media (max-width: 1000px) {
+  div[data-testid="app-shell"]:has(> nav[data-testid="sidebar"]) {
+    grid-template-columns: 200px minmax(0, 1fr) 240px;
+    column-gap: 12px;
+    overflow-x: clip;
+  }
+
+  nav[data-testid="sidebar"] {
+    padding-right: 12px;
+  }
+}
+
 /* Small screens: the main column goes full width; nav and cards collapse
    behind the top-bar panels button and open as stacked sections. */
 @media (max-width: 800px) {
@@ -448,8 +463,7 @@ div[data-testid="chat-messages"] {
 }
 
 div[data-testid="chat-composer"] {
-  position: sticky;
-  bottom: 0;
+  position: static;
   background-color: var(--fx-surface);
   padding-top: 8px;
   padding-bottom: 8px;

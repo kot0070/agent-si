@@ -3,7 +3,8 @@
 // replaced; served shapes quoted from src/agent_si/backend/*). RED before
 // the fix, GREEN after. S1 shell fills the viewport (min-height rule plus
 // token scrollbar rules, regions present); S2 chat list fills the centre
-// column with the composer docked last (sticky bottom rule); S3 exactly one
+// column with the composer in flow last (in-flow, after messages, never
+// sticky/fixed/absolute/overlapping); S3 exactly one
 // visible Watcher string while topbar-watcher still navigates to /watcher;
 // S4 one primary per form (folder-choose quiet) with the kit chevron intact;
 // S5 the active rail entry exposes aria-current; S6 served UNKNOWN evidence
@@ -168,9 +169,14 @@ describe("fxdesign3 S1 shell fills the viewport", () => {
 });
 
 describe("fxdesign3 S2 chat fills the centre column", () => {
-  it("lists messages above a bottom-docked composer with a width rule", async () => {
-    expect(SHELL_CSS).toMatch(/chat-composer[^}]*position:\s*sticky/);
-    expect(SHELL_CSS).toMatch(/chat-composer[^}]*bottom:\s*0/);
+  it("lists messages above an in-flow composer with a width rule", async () => {
+    // Ruled meaning (P3): composer in normal flow after chat-messages,
+    // never sticky/fixed/absolute/overlapping. Supersedes the old
+    // sticky+bottom:0 dock pin, which contradicts shell.css position:static.
+    expect(SHELL_CSS).toMatch(/chat-composer[^}]*position:\s*static/);
+    expect(SHELL_CSS).not.toMatch(
+      /chat-composer[^}]*position:\s*(sticky|fixed|absolute)/,
+    );
     expect(SHELL_CSS).toMatch(/chat-messages[^}]*overflow-y:\s*auto/);
     renderAppAt("/");
     const layout = await screen.findByTestId("chat-layout");

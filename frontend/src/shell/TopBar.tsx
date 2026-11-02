@@ -324,6 +324,9 @@ export function TopBar(props: TopBarProps): ReactElement {
         {t("shell.topbar.project")}
         <select
           data-testid="topbar-project"
+          /* FXDESIGN5 S3/S7: explicit accessible name on the project
+             dropdown (the visible label text stays unchanged). */
+          aria-label={t("shell.topbar.project")}
           value={effective ?? ""}
           onChange={(event) => {
             current.select(event.target.value);
