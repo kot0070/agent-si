@@ -10,6 +10,7 @@ import { HttpApiClient } from "../../api/client";
 import { ApiClientProvider } from "../../app/ApiClientProvider";
 import { resetLocaleForTests, setLocale } from "../../locale/index";
 import { Inspector } from "../Inspector";
+import { ProjectView } from "../../projects/ProjectView";
 
 const PROJECT = {
   project_id: "p-1",
@@ -60,12 +61,12 @@ const RUNS_LEDGER_TWO_RUNS = {
 const TELEMETRY_PROJECT = {
   metric_records: 6,
   telemetry_events: 2,
-  totals: { tokens_total: 19080, cloud_calls: 2 },
+  totals: { tokens_total: 33180, cloud_calls: 2 },
   tasks: ["t-1", "t-2"],
   models: [
-    { model: "muse-spark-1.3-contributor", calls: 2, tokens: 19080, cost: "UNAVAILABLE" },
+    { model: "muse-spark-1.3-contributor", calls: 2, tokens: 33180, cost: "UNAVAILABLE" },
   ],
-  providers: [{ provider: "meta", calls: 2, tokens: 19080, cost: "UNAVAILABLE" }],
+  providers: [{ provider: "meta", calls: 2, tokens: 33180, cost: "UNAVAILABLE" }],
 };
 
 function stubTwoRuns(): void {
@@ -180,12 +181,47 @@ describe("fxtelem two-run truth", () => {
     const lastRun = await screen.findByTestId("tokens-last-run");
     expect(lastRun.textContent).toContain("13,938");
     expect(lastRun.textContent).toContain("Last run");
+    // Rail "This project" is the project-scoped telemetry total: the same
+    // number the project Tokens tab shows, and the per-model rows add up
+    // to it.
     const project = await screen.findByTestId("tokens-project");
-    expect(project.textContent).toContain("19,080");
+    expect(project.textContent).toContain("33,180");
     expect(project.textContent).toContain("This project");
     const ctxProject = await screen.findByTestId("ctx-used");
-    expect(ctxProject.textContent).toContain("19,080");
+    expect(ctxProject.textContent).toContain("33,180");
     expect(ctxProject.textContent).toContain("This project");
+    const chatLine = await screen.findByTestId("tokens-chat");
+    expect(chatLine.textContent).toContain("19,080");
+    expect(chatLine.textContent).toContain("In chat answers");
+    const ctxChat = await screen.findByTestId("ctx-chat");
+    expect(ctxChat.textContent).toContain("19,080");
+    // Per-model rows add up to the rail number.
+    const kindRows = await screen.findAllByTestId(/^tokens-kind-/);
+    let kindSum = 0;
+    for (const row of kindRows) {
+      const tail = (row.textContent ?? "").match(/([\d,]+)\s*$/);
+      kindSum += Number((tail?.[1] ?? "0").replace(/,/g, ""));
+    }
+    expect(kindSum).toBe(33180);
+  });
+
+  it("rail number equals the project Tokens tab number", async () => {
+    stubTwoRuns();
+    const router = createMemoryRouter(
+      [{ path: "*", element: <ProjectView projectId="p-1" view="tokens" /> }],
+      { initialEntries: ["/"] },
+    );
+    render(
+      <ApiClientProvider client={new HttpApiClient()}>
+        <RouterProvider router={router} />
+      </ApiClientProvider>,
+    );
+    const spent = await screen.findByTestId("tokens-spent");
+    expect(spent.textContent).toContain("33,180");
+    cleanup();
+    renderInspector();
+    const project = await screen.findByTestId("tokens-project");
+    expect(project.textContent).toContain("33,180");
   });
 
   it("never renders spent 0 when the price is unknown", async () => {

@@ -643,25 +643,15 @@ export function Inspector(props: InspectorProps): ReactElement {
   const liveTokenTotal = tokenIn + tokenOut;
   const unknown = t("shell.common.unknown");
 
-  // FXDESIGN8 exact cause: readTokenSum/tokensOfRow read only live extras,
-  // which end with the run. Tokens + Context legend read live rows while a
-  // run is live, otherwise the project's served totals: the last run's
-  // tokens from the runs key first (the chat Total line shows the same
-  // number), then telemetry tokens_total. No invented zero, no chip.
+  // Token totals read live rows while a run is live, otherwise the
+  // project's served totals. No invented zero, no chip.
   const runLive = useMemo(
     () => rows.some((row) => String(row.status).toUpperCase() === "RUNNING"),
     [rows],
   );
-  const telemetryTotals = telemetry?.totals ?? null;
-  const telemetryTokensTotal =
-    telemetryTotals !== null &&
-    typeof telemetryTotals["tokens_total"] === "number" &&
-    Number.isFinite(telemetryTotals["tokens_total"])
-      ? (telemetryTotals["tokens_total"] as number)
-      : null;
-  // FXTELEM: legacy global totals stay out of every project number; the
-  // project-scoped telemetry models (read_routes passes ?project_id=) and
-  // the runs key carry the project truth instead.
+  // FXTELEM round 2: the legacy global totals never render as a project
+  // number; the project-scoped telemetry models (read_routes passes
+  // ?project_id=) carry the project truth, with the runs key as fallback.
   // Served per-model tokens for the idle legend (raw model names, never a
   // locale lookup; UNAVAILABLE rows carry no number and stay out).
   const modelSlices = useMemo(() => {
@@ -676,11 +666,17 @@ export function Inspector(props: InspectorProps): ReactElement {
     return slices;
   }, [telemetry]);
   const modelTotal = modelSlices.reduce((sum, slice) => sum + slice.tokens, 0);
-  // FXTELEM: the project total prefers the runs key sum (chat Total
-  // numbers), then the project-scoped telemetry models; the legacy global
-  // totals never render as a project number.
+  // FXTELEM round 2: "This project" is the project-scoped telemetry
+  // total (the same doc the project Tokens tab reads, so the numbers are
+  // one). Fallback to the runs-key sum only when telemetry has no row.
+  // The runs-key (chat answers) sum renders as its own quiet line only
+  // when it differs from the telemetry total.
   const projectTotal =
-    projectRunsTotal ?? (modelTotal > 0 ? modelTotal : telemetryTokensTotal);
+    modelTotal > 0 ? modelTotal : (projectRunsTotal ?? null);
+  const chatDiffers =
+    projectRunsTotal !== null &&
+    projectTotal !== null &&
+    projectRunsTotal !== projectTotal;
   const tokenTotal = runLive ? liveTokenTotal : (projectTotal ?? liveTokenTotal);
   const tokensKnown =
     liveRows === null
@@ -1129,6 +1125,12 @@ export function Inspector(props: InspectorProps): ReactElement {
                   {formatNumber(lastRunTokens)}
                 </p>
               ) : null}
+              {chatDiffers ? (
+                <p data-testid="ctx-chat" className="fx-quiet">
+                  {t("shell.cards.context.chatAnswers")}:{" "}
+                  {formatNumber(projectRunsTotal ?? 0)}
+                </p>
+              ) : null}
               {modelTotal > 0 ? (
                 <ul data-testid="ctx-legend" className="fx-legend">
                   {modelSlices.map((slice, index) => (
@@ -1431,6 +1433,12 @@ export function Inspector(props: InspectorProps): ReactElement {
                   <p data-testid="tokens-project" className="fx-quiet">
                     {t("shell.cards.context.projectTotal")}:{" "}
                     {formatNumber(projectTotal)}
+                  </p>
+                ) : null}
+                {chatDiffers ? (
+                  <p data-testid="tokens-chat" className="fx-quiet">
+                    {t("shell.cards.context.chatAnswers")}:{" "}
+                    {formatNumber(projectRunsTotal ?? 0)}
                   </p>
                 ) : null}
               </>
