@@ -115,6 +115,8 @@ export function ConnectDialog({
   const [modelsLoading, setModelsLoading] = useState(false);
   const [ticked, setTicked] = useState<string[]>([]);
   const [modelQuery, setModelQuery] = useState("");
+  // Y2: Done with nothing ticked warns instead of closing silently.
+  const [doneNote, setDoneNote] = useState<string | null>(null);
   // Quiet Refresh state: a failed refresh keeps the last list plus one
   // calm line; Done PUT state: a failed save keeps the dialog open.
   const [refreshNote, setRefreshNote] = useState<string | null>(null);
@@ -141,12 +143,15 @@ export function ConnectDialog({
         // The server's enabled list is the routing truth: it wins over the
         // passed-in ticks whenever the route names it.
         setTicked(outcome.servedEnabled.filter((id) => known.has(id)));
-      } else if (fromRoute !== undefined) {
+      } else if (fromRoute !== undefined && fromRoute.length > 0) {
         // Manage models without a served truth: keep the current ticks,
-        // drop ids no longer listed.
+        // drop ids no longer listed. An empty list means no preference,
+        // so fall through to the recommended text model below.
         setTicked(fromRoute.filter((id) => known.has(id)));
       } else {
-        // Fresh connect: only the default (connect) model ticked, never all.
+        // Fresh connect, or Manage opened with nothing ticked: pre-tick
+        // the recommended text model (the connect id), never all and
+        // never an empty selection.
         const first = activePreset.models[0];
         setTicked(first === undefined ? [] : [first.id].filter((id) => known.has(id)));
       }
@@ -315,8 +320,10 @@ export function ConnectDialog({
     } catch (err: unknown) {
       // Any failure (route or mirror write) shows an honest error: the
       // key never reached a store, so the provider stays disconnected.
+      // H3: never a bare generic — always the reason plus what to do.
       setApiKey("");
-      setResult({ kind: "error", text: connectFailure(err) });
+      const hint = t("providers.connect.retryHint", { label: activePreset.label });
+      setResult({ kind: "error", text: `${connectFailure(err)} ${hint}` });
     } finally {
       setSaving(false);
     }
@@ -332,6 +339,7 @@ export function ConnectDialog({
       );
 
   function toggleTicked(modelId: string): void {
+    setDoneNote(null);
     setTicked((prev) =>
       prev.includes(modelId)
         ? prev.filter((id) => id !== modelId)
@@ -345,11 +353,18 @@ export function ConnectDialog({
     // routing truth: a saved list that differs is reconciled back onto
     // the page, and a failed save re-reads the served ticks so the page
     // never shows ticks the server refused.
+    // Y2: Done with nothing ticked warns and stays open; a silent
+    // close would drop the provider to zero usable models.
     if (preset === null) {
       return;
     }
     const activePreset: ProviderPreset = preset;
     const ids = ticked;
+    if (ids.length === 0) {
+      setDoneNote(t("providers.connect.needOneModel"));
+      return;
+    }
+    setDoneNote(null);
     onModelsDone?.(preset_id, ids);
     closeAndClear();
     void saveEnabledModels(activePreset.id, ids).then(
@@ -408,7 +423,7 @@ export function ConnectDialog({
       style={{
         position: "fixed",
         inset: 0,
-        backgroundColor: "#000",
+        backgroundColor: "rgba(0, 0, 0, 0.5)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -459,8 +474,11 @@ export function ConnectDialog({
         />
       </label>
       <p>{t("providers.connect.keyFormat", { hint: preset.keyHint })}</p>
+      <p data-variant="quiet">{t("providers.connect.storeNote")}</p>
       {showHintWarning ? <p>{t("providers.connect.hintMismatch")}</p> : null}
       {result !== null ? <p role="status">{result.text}</p> : null}
+      {/* U7: Cancel + Save share one spaced action row. */}
+      <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
       <button type="button" data-variant="quiet" onClick={closeAndClear}>
         {t("providers.connect.cancel")}
       </button>
@@ -485,6 +503,7 @@ export function ConnectDialog({
       >
         {saving ? t("providers.connect.saving") : t("providers.connect.save")}
       </button>
+      </div>
       </>
       ) : (
       <>
@@ -518,6 +537,13 @@ export function ConnectDialog({
       {modelSource === "catalog" ? (
         <p data-variant="quiet">showing the known list</p>
       ) : null}
+      {/* J10: one header line names the unknown models; the per-row
+          chips stay, but the repetition reads once up front. */}
+      {shownRows.some((row) => row.kbKnown !== true) ? (
+        <p data-testid="connect-models-unknown-note" data-variant="quiet">
+          {t("providers.connect.unknownModelsNote")}
+        </p>
+      ) : null}
       <div
         data-testid="connect-model-list"
         style={{ maxHeight: 240, overflowY: "auto" }}
@@ -527,12 +553,13 @@ export function ConnectDialog({
             <li key={row.id} data-testid="connect-model-row">
               <input
                 type="checkbox"
-                aria-label={`${preset.label} ${row.label}`}
+                aria-label={row.id}
+                title={row.id}
                 checked={ticked.includes(row.id)}
                 onChange={() => toggleTicked(row.id)}
               />{" "}
-              <span>{row.label}</span>{" "}
-              <small data-testid={`connect-model-id-${row.id}`}>{row.id}</small>{" "}
+              <>{row.label === row.id ? null : (<span>{row.label}{" "}</span>)}</>
+              <small data-testid={`connect-model-id-${row.id}`} title={row.id}>{row.id}</small>{" "}
               <span data-testid={`connect-model-price-${row.id}`} data-variant="quiet">
                 {modelPriceText(row.kb, row.price)}
               </span>
@@ -550,6 +577,8 @@ export function ConnectDialog({
       </div>
       </>
       )}
+      {/* U7: Cancel + Done share one spaced action row. */}
+      <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
       <button type="button" data-variant="quiet" onClick={closeAndClear}>
         {t("providers.connect.cancel")}
       </button>
@@ -561,6 +590,12 @@ export function ConnectDialog({
       >
         Done
       </button>
+      </div>
+      {doneNote !== null ? (
+        <p data-testid="connect-done-note" role="alert">
+          {doneNote}
+        </p>
+      ) : null}
       </>
       )}
       </div>

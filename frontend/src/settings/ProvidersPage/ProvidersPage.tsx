@@ -70,7 +70,7 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
   const [showWizard, setShowWizard] = useState(false);
   const [wizardDone, setWizardDone] = useState(false);
   // Last provider connected through the dialog: its card carries the quiet
-  // "Connected {label}. Reference saved." line next to Disconnect.
+  // "Connected {label}." line next to Disconnect.
   const [lastConnectedId, setLastConnectedId] = useState<string | null>(null);
   // Served model listings per preset (GET /api/v1/providers/{id}/models):
   // the provider's own rows the routes know, merged over the KB catalog.
@@ -386,7 +386,11 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
                       >
                         Manage models
                       </button>
-                      <p data-variant="quiet">{`${state.enabledModels.length} enabled`}</p>
+                      <p data-testid={`provider-enabled-${preset.id}`} data-variant="quiet">
+                        {state.enabledModels.length === 0
+                          ? t("providers.page.noneEnabled")
+                          : `${state.enabledModels.length} enabled`}
+                      </p>
                       {lastConnectedId === preset.id ? (
                         <p role="status" data-variant="quiet">
                           {t("providers.connect.connected", { label: preset.label })}
@@ -394,6 +398,7 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
                       ) : null}
                     </>
                   ) : (
+                    <>
                     <button
                       type="button"
                       aria-label={t("providers.page.connectCta", { label: preset.label })}
@@ -401,22 +406,28 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
                     >
                       {t("providers.page.connectLabel")}
                     </button>
+                    {preset.kind === "local" ? null : (
+                      <p
+                        data-testid={`provider-getkey-${preset.id}`}
+                        className="fx-quiet-line"
+                      >
+                        {t("providers.connect.getKey", { label: preset.label })}
+                      </p>
+                    )}
+                    </>
                   )}
-                  <p
-                    data-testid={`provider-caps-${preset.id}`}
-                    className="fx-cap-line"
-                    title={preset.caps ?? t("shell.common.unknown")}
-                  >
-                    {preset.caps ?? "—"}
-                  </p>
                   <p data-testid={`provider-keynote-${preset.id}`} className="fx-quiet-line">
                     {preset.keyHint}
                   </p>
                   <ul>
                     {(displayModels[preset.id] ?? []).map((model) => (
                       <li key={model.id} data-testid="model-row">
-                        <span>{model.label}</span>{" "}
-                        <small data-testid={`model-id-${model.id}`}>
+                        {model.label === model.id ? null : (
+                          <>
+                            <span>{model.label}</span>{" "}
+                          </>
+                        )}
+                        <small data-testid={`model-id-${model.id}`} title={model.id}>
                           {model.id}
                         </small>{" "}
                         <span data-testid={`model-price-${model.id}`}>

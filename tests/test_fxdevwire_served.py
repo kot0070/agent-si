@@ -830,3 +830,51 @@ def test_s9_telemetry_row_per_call(tmp_path):
     finally:
         _kb.bind_catalog(previous)
 
+
+# -- U8: repeats stay quiet across turns; J4: no bare UNKNOWN ----------
+
+def _u8_two_turns(tmp_path):
+    project = "fxdw-u8"
+    folder = _project_dir(tmp_path, project)
+    factory = _green_factory()
+    app = _served_app(tmp_path, project, factory)
+    client = TestClient(app, raise_server_exceptions=False)
+    pid = _make_project(app, client, "u8 build it", str(folder))
+    first = _delta_texts(_parse_sse(
+        _post_chat(client, pid, "build it").text))
+    assert any(d.startswith("Working folder: ") for d in first), first
+    assert any(d.startswith("Team:") for d in first), first
+    assert any("Director: plan of" in d for d in first), first
+    second = _delta_texts(_parse_sse(
+        _post_chat(client, pid, "again").text))
+    assert second, "second turn still answers"
+    return first, second
+
+
+def test_u8_second_turn_hides_folder_and_team(tmp_path):
+    first, second = _u8_two_turns(tmp_path)
+    assert not any(
+        d.startswith("Working folder: ") for d in second), second
+    assert not any(d.startswith("Team:") for d in second), second
+    assert any("Director: plan of" in d for d in second), second
+
+
+def test_u8_check_line_names_tool_not_path(tmp_path):
+    first, _second = _u8_two_turns(tmp_path)
+    checks = [d for d in first if d.startswith("Check p1 $")]
+    assert checks, first
+    for line in checks:
+        assert ":\\" not in line, line
+        assert "findstr" not in line.lower(), line
+
+
+def test_j4_total_line_no_bare_unknown(tmp_path):
+    first, _second = _u8_two_turns(tmp_path)
+    totals = [d for d in first if "tokens; cost:" in d]
+    assert totals, first
+    assert totals == [
+        "Total: 0 input + 0 output = 0 tokens; "
+        "cost: cost not known (no price)\n"], totals
+    joined = "\n".join(first)
+    assert "UNKNOWN" not in joined, joined
+

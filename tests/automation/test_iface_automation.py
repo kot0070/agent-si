@@ -425,7 +425,13 @@ def test_launch_entry():
 
 
 def test_resume_entry():
-    run = iface.resume("proj-a", "run-0001", session_token="token-live")
+    # FXHIGH-2: resume is fail-closed on budget; bind an allow hook so
+    # this entry-wiring test proves dispatch (not the budget guard).
+    _runner_home.set_budget_hook(lambda project_id: True)
+    try:
+        run = iface.resume("proj-a", "run-0001", session_token="token-live")
+    finally:
+        _runner_home.set_budget_hook(None)
     assert isinstance(run, iface.AutomationRun)
     assert run.run_id == "run-0001"
 
@@ -640,9 +646,15 @@ def test_route_post_launch_via_entry_point():
 
 
 def test_route_post_resume_via_entry_point():
-    run = _dispatch("POST", "/api/v1/automations/runs/{id}/resume",
-                    project_id="proj-a", run_id="run-0001",
-                    session_token="token-live")
+    # FXHIGH-2: fail-closed resume needs a bound hook; this test proves
+    # route dispatch, so it binds the allow hook explicitly.
+    _runner_home.set_budget_hook(lambda project_id: True)
+    try:
+        run = _dispatch("POST", "/api/v1/automations/runs/{id}/resume",
+                        project_id="proj-a", run_id="run-0001",
+                        session_token="token-live")
+    finally:
+        _runner_home.set_budget_hook(None)
     assert isinstance(run, iface.AutomationRun)
     assert run.run_id == "run-0001"
 
@@ -773,9 +785,21 @@ def test_app_route_post_launch_via_app():
 
 
 def test_app_route_post_resume_via_app():
-    response = _app_client().post("/api/v1/automations/runs/run-0001/resume",
-                                  json={"project_id": "proj-a",
-                                        "session_token": "token-live"})
+    # FXHIGH-2: the served app wires the real gate-backed budget check;
+    # bind a real gate with remaining budget so the full chain allows.
+    from agent_si.budget.gate import BudgetGate as _RealGate
+    from agent_si.runtime import manager as _manager_home
+
+    gate = _RealGate()
+    gate.configure_project("proj-a", "USD", "1000.00", "900.00", "1000.00")
+    prev = getattr(_manager_home, "_BUDGET_GATE", None)
+    _manager_home.set_budget_gate(gate)
+    try:
+        response = _app_client().post("/api/v1/automations/runs/run-0001/resume",
+                                      json={"project_id": "proj-a",
+                                            "session_token": "token-live"})
+    finally:
+        _manager_home.set_budget_gate(prev)
     assert response.status_code == 200
 
 

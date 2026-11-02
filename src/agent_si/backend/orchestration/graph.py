@@ -210,6 +210,8 @@ class TaskPlanner:
             raise ValueError("package_id must be non-empty")
         if not goal.strip():
             raise ValueError("goal must be non-empty")
+        if not specs:
+            raise ValueError("subtask specs must be non-empty")
         goal_hash = sha256(goal.encode("utf-8")).hexdigest()
         key = (package_id, goal_hash)
         if key in self._plans:

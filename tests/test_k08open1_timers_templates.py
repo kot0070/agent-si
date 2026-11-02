@@ -79,6 +79,9 @@ def _reset_lane():
 
 def setup_function(_func):
     _reset_lane()
+    # FXHIGH-2: resume is fail-closed on budget; these tests prove resume
+    # mechanics (restart/outage), so they bind the allow hook explicitly.
+    runner.set_budget_hook(lambda project_id: True)
 
 
 def teardown_function(_func):
@@ -269,6 +272,10 @@ def test_r363_templates_resume_register():
             templates.import_template("k08open1-preset", dict(PRESET_SPEC))
             runner.load_state(runner_path)
             scheduler.load_state(sched_path)
+            # FXHIGH-2: reset/load clears hooks; resume mechanics tests
+            # keep the explicit allow hook (budget refusal is covered
+            # in tests/test_fxhigh_budget.py).
+            runner.set_budget_hook(lambda project_id: True)
             resumed = client.post(
                 "/api/v1/automations/runs/%s/resume" % run_id,
                 json={"project_id": PROJ},

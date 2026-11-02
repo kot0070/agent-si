@@ -461,6 +461,9 @@ class ManagerSdkBridge:
         self._run_task_streamed = run_task_streamed
         self._agents_live_rows = agents_live_rows
         self._live: dict[str, dict[str, Any]] = {}
+        # U8: per-chat memory (by project): last shown folder + team
+        # signature, so repeats stay quiet across turns.
+        self._chat_seen: dict[str, dict[str, str]] = {}
 
     def run(
         self,
@@ -689,14 +692,26 @@ class ManagerSdkBridge:
         except Exception:
             return None
         working = "Working folder: %s\n" % (resolved,)
+        project_key = str(getattr(request, "project", "") or "")
 
         def _entry(dev_request: ChatStreamRequest, **kwargs: Any) -> Any:
-            yield {"type": "delta", "text": working}
+            # U8: the folder line reads only on the first run of this
+            # chat or when the folder changed; repeats hid the answer.
+            seen = self._chat_seen.setdefault(project_key, {})
+            state["chat_team_last"] = seen.get("team")
+            if seen.get("folder") != resolved:
+                seen["folder"] = resolved
+                yield {"type": "delta", "text": working}
             # FXCTX: _manager_events threads app through run kwargs; the
             # engine already takes it explicitly, so drop the duplicate.
             kwargs.pop("app", None)
             yield from _devrun.run_dev_task(
                 effective, stream_state=state, app=app, **kwargs)
+            # Remember the team this run showed, so the next turn stays
+            # quiet unless the team changed.
+            sig = state.get("chat_team_sig")
+            if isinstance(sig, str) and sig:
+                seen["team"] = sig
 
         return _entry
 

@@ -41,7 +41,8 @@
       "chatSaveError": "save chat model failed: {status}",
       "leftoverTitle": "Leftover keys",
       "connectLabel": "Connect",
-      "disconnectLabel": "Disconnect"
+      "disconnectLabel": "Disconnect",
+      "noneEnabled": "None enabled — open Manage models to choose."
     },
     "role": {
       "director": "Director",
@@ -63,14 +64,19 @@
       "cancel": "Cancel",
       "save": "Save",
       "saving": "Saving...",
-      "connected": "Connected {label}. Reference saved.",
+      "connected": "Connected {label}.",
       "refusedMismatch": "Refused: preset mismatch for {id}.",
       "refusedNoModel": "Refused: no model for preset {id}.",
       "timeout": "Save timed out after {ms} ms.",
-      "saveFailed": "Save failed.",
+      "saveFailed": "The key was not saved: the store gave no answer.",
       "failedCode": "Connect failed: {code} (status {status}).",
       "failedMessage": "Connect failed: {message}",
-      "failedGeneric": "Connect failed.",
+      "failedGeneric": "Connect failed before the server answered.",
+      "getKey": "Get a key from your {label} account.",
+      "storeNote": "The key stays in your Windows store.",
+      "retryHint": "Re-paste the full key and make sure you picked the matching provider.",
+      "unknownModelsNote": "Some models are not in the capability base.",
+      "needOneModel": "Tick at least one model, or Cancel to keep the current list.",
       "refusedKey": "The provider refused this key. Paste the full key again.",
       "unreachable": "Could not reach the provider.",
       "check": "Check",
@@ -82,7 +88,7 @@
       "title": "Disconnect {label}",
       "close": "Close",
       "closeGlyph": "X",
-      "body": "This removes the saved key reference {id}.",
+      "body": "Removes the saved key for {label}.",
       "cancel": "Cancel",
       "confirm": "Disconnect",
       "busy": "Disconnecting...",
@@ -120,7 +126,8 @@
       "strategyHelpDirectorPerTask": "The Director chooses a pool member per task.",
       "strategyHelpAuto": "Pool members are chosen automatically on task fit, price and quality.",
       "strategyHelpFallbackOrder": "Pool members are tried in listed order; on failure the next member takes over.",
-      "strategyHelpSplitParallel": "A local draft is verified in the cloud."
+      "strategyHelpSplitParallel": "A local draft is verified in the cloud.",
+      "emptyPoolHint": "Pick at least one model: an empty pool never saves."
     },
     "leftover": {
       "listFailed": "Could not list entries.",
@@ -219,7 +226,11 @@
       "title": "Project",
       "parallel": "Parts running at the same time",
       "limitsBlank": "Enter a whole number of 1 or more.",
-      "save": "Save"
+      "save": "Save",
+      "taskStepsLabel": "Task step limit (steps)",
+      "chatStepsLabel": "Chat step limit (steps)",
+      "stepsHint": "Each limit caps how many steps one task or chat reply may take.",
+      "spendCaps": "Spend caps per provider"
     },
     "providers": {
       "searchPlaceholder": "Search providers or models"
@@ -255,6 +266,10 @@
       "title": "Install grants",
       "empty": "No install grants for this project. Choose “For this project” on the next install ask to add one.",
       "remove": "Remove"
+    },
+    "hub": {
+      "about": "About",
+      "howItWorks": "How it works"
     }
   },
   "diagnostics": {
@@ -337,6 +352,9 @@
       "watcherPreset": "Watcher preset",
       "automations": "Automations",
       "kbs": "Knowledge bases"
+    },
+    "provider": {
+      "localNote": "Runs on this PC, no key"
     }
   },
   "migration": {
@@ -355,6 +373,7 @@
       "panels": "Panels",
       "stop_result": "{status}",
       "stop_clear": "Clear",
+      "noProject": "No project yet",
       "langEn": "English",
       "langUk": "Українська"
     },
@@ -407,7 +426,8 @@
         "title": "Results",
         "subtitle": "Latest reports with open links.",
         "open": "Open",
-        "next": "Next"
+        "next": "Next",
+        "openFolder": "Open folder"
       },
       "background": {
         "title": "Background work",
@@ -472,7 +492,8 @@
     },
     "common": {
       "unknown": "Unknown"
-    }
+    },
+    "skipToComposer": "Skip to composer"
   },
   "chat": {
     "hierarchy": {
@@ -557,13 +578,15 @@
       "subtitle": "Every project in one list; open one to work.",
       "empty": "No projects yet.",
       "create": "Create project",
-      "created": "Created"
+      "created": "Created",
+      "duplicate": "A project with this name already exists."
     },
     "overview": {
       "title": "Overview"
     },
     "runs": {
-      "title": "Runs"
+      "title": "Runs",
+      "empty": "No runs yet."
     },
     "time": {
       "title": "Time"
@@ -760,7 +783,8 @@
       "reserved": "Money reserved",
       "limit": "Budget limit (total)",
       "remaining": "Money left to spend",
-      "limitExplainer": "Total N means the budget limit: spending stops there."
+      "limitExplainer": "Total N is the budget limit: spending stops when it is reached.",
+      "notKnown": "cost not known (no price)"
     },
     "time": {
       "package": "Package",
@@ -804,6 +828,12 @@
     },
     "models": {
       "liveTitle": "Models from served runs"
+    },
+    "live": {
+      "role": "Role",
+      "model": "Model",
+      "tokens": "Tokens",
+      "cost": "Cost"
     },
     "routing": {
       "autoWhy": "Auto: cheapest known price among connected providers."

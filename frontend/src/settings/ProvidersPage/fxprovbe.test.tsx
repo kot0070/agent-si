@@ -81,7 +81,7 @@ async function openStep2() {
   fireEvent.click(within(dialog).getByText("Check"));
   await within(dialog).findByText("Key checked. Save to connect.");
   fireEvent.click(within(dialog).getByText("Save"));
-  await within(dialog).findByText("Connected OpenAI. Reference saved.");
+  await within(dialog).findByText("Connected OpenAI.");
   return dialog;
 }
 

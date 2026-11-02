@@ -54,7 +54,7 @@ async function connectOpenaiThroughDialog(): Promise<void> {
   fireEvent.click(within(dialog).getByText("Check"));
   expect(await within(dialog).findByText("Key checked. Save to connect.")).toBeTruthy();
   fireEvent.click(within(dialog).getByText("Save"));
-  expect(await within(dialog).findByText("Connected OpenAI. Reference saved.")).toBeTruthy();
+  expect(await within(dialog).findByText("Connected OpenAI.")).toBeTruthy();
   fireEvent.click(within(dialog).getByText("Done"));
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 }
@@ -67,7 +67,7 @@ describe("fxlocale provider connect screens", () => {
     expect(screen.getByText("Providers")).toBeTruthy();
     expect(screen.getByLabelText("Connect OpenAI")).toBeTruthy();
     await connectOpenaiThroughDialog();
-    expect(await screen.findByText("Connected OpenAI. Reference saved.")).toBeTruthy();
+    expect(await screen.findByText("Connected OpenAI.")).toBeTruthy();
   });
 
   it("renders Ukrainian labels and result messages under uk", async () => {
@@ -86,7 +86,7 @@ describe("fxlocale provider connect screens", () => {
     fireEvent.click(within(dialog).getByText("Зберегти"));
     // Step 2 in the same dialog carries the quiet line; the card shows it
     // too once Done closes the dialog.
-    expect(await within(dialog).findByText("Під'єднано OpenAI. Посилання збережено.")).toBeTruthy();
+    expect(await within(dialog).findByText("Під’єднано OpenAI.")).toBeTruthy();
     fireEvent.click(within(dialog).getByText("Done"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await waitFor(() => expect(screen.getByLabelText("Від'єднати OpenAI")).toBeTruthy());

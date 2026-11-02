@@ -56,7 +56,6 @@ import {
   PROJECT_VIEWS,
   buildDerivedSplit,
   computeAgeDays,
-  CONTEXT_SOURCE,
   contextUsage,
   exportProjectReport,
   projectMenuTestId,
@@ -114,15 +113,17 @@ function Fact(props: {
   );
 }
 
-// One deduped agent row: short human name, served role plus model plus
-// tokens, attempt count when repeated, finished wording for passed rows,
-// and the served reason note for blocked ends. No scope-kind verdict.
+// One deduped agent row: short human name, labelled role plus model plus
+// tokens plus cost cells that wrap instead of chopping mid-word, attempt
+// count when repeated, finished wording for passed rows. Blocked rows share
+// one note above the list (never one per row). No scope-kind verdict.
 function AgentPlacementRow(props: {
   testId: string;
   agent: string;
   role?: string;
   model?: string;
   tokensTotal: number | null;
+  costText: string | null;
   attempts: number;
   status: PartRow["status"];
   statusHuman: unknown;
@@ -131,14 +132,29 @@ function AgentPlacementRow(props: {
   const { locale } = useLocale();
   const short = humanRunRef(props.agent);
   return (
-    <div key={props.testId} data-testid={props.testId} className="fxpv-row">
-      <span title={short.title}>{short.text}</span>
-      <span>{props.role ?? t("shell.common.unknown")}</span>
-      <span>{props.model ?? t("shell.common.unknown")}</span>
-      <span>
+    <div key={props.testId} data-testid={props.testId} className="fxpv-row fxpv-place">
+      <span className="fxpv-place-name" title={short.title}>{short.text}</span>
+      <span className="fxpv-place-cell">
+        <span className="fxpv-place-label">{t("projectView.live.role")}</span>
+        {": "}
+        {props.role ?? t("shell.common.unknown")}
+      </span>
+      <span className="fxpv-place-cell">
+        <span className="fxpv-place-label">{t("projectView.live.model")}</span>
+        {": "}
+        {props.model ?? t("shell.common.unknown")}
+      </span>
+      <span className="fxpv-place-cell">
+        <span className="fxpv-place-label">{t("projectView.live.tokens")}</span>
+        {": "}
         {props.tokensTotal === null
           ? t("shell.common.unknown")
           : formatNumber(props.tokensTotal, locale)}
+      </span>
+      <span className="fxpv-place-cell">
+        <span className="fxpv-place-label">{t("projectView.live.cost")}</span>
+        {": "}
+        {props.costText ?? t("projectView.cost.notKnown")}
       </span>
       {props.attempts > 1 ? (
         <span>{t("projectView.attempts", { count: props.attempts })}</span>
@@ -148,9 +164,6 @@ function AgentPlacementRow(props: {
           ? t("projectView.finished")
           : resolveStatusHuman(props.statusHuman, props.status, locale)}
       </span>
-      {props.status === "BLOCKED" ? (
-        <span className="fxpv-note">{t("projectView.blockedNote")}</span>
-      ) : null}
       <span className="fxpv-note">{props.placementLabel}</span>
     </div>
   );
@@ -1179,7 +1192,6 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
                   <span>{t("projects.tokens.title")}</span>
                   <span data-testid="context-remaining">{usage.remaining}</span>
                   <span data-testid="context-total">{usage.total}</span>
-                  <span data-testid="context-source">{CONTEXT_SOURCE}</span>
                 </div>
                 <Fact
                   testId="cost-spent"
@@ -1212,7 +1224,7 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
               panelError(ledgerError)
             ) : budget === null || ledger === null || runs === null ? (
               <LoadingState loadingKey="ui.loading.more" />
-            ) : ledger.length === 0 && runs.length === 0 ? (
+            ) : ledger.length === 0 && runs.length === 0 && budget === null ? (
               <span className="fxpv-note">{t("projectView.noLedger")}</span>
             ) : (
               <HealthView ledger={ledger} budget={budget} />
@@ -1257,8 +1269,14 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
         for (const row of rows) {
           agentCounts.set(row.agent, (agentCounts.get(row.agent) ?? 0) + 1);
         }
+        const hasBlocked = rows.some((row) => row.status === "BLOCKED");
         return (
           <div>
+            {hasBlocked ? (
+              <p data-testid="live-blocked-note" className="fxpv-note">
+                {t("projectView.blockedNote")}
+              </p>
+            ) : null}
             {rows.map((row, index) => (
               <AgentPlacementRow
                 key={`${row.agent}-${row.status}-${row.role ?? ""}-${row.model ?? ""}`}
@@ -1271,6 +1289,7 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
                 role={row.role}
                 model={row.model}
                 tokensTotal={row.tokensTotal}
+                costText={row.costText}
                 attempts={row.attempts}
                 status={row.status}
                 statusHuman={readStatusHuman(

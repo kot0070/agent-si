@@ -459,6 +459,7 @@ export type DevrunPart = z.infer<typeof DevrunPartSchema>;
 
 const DevrunRunSchema = z.object({
   run_id: z.string(),
+  folder: z.string().optional(),
   start: z.string(),
   end: z.string(),
   // FXR2B: short per-run title (first 80 chars of the user task),

@@ -56,19 +56,74 @@ _auth_hook: Optional[Callable[[str], bool]] = None
 _rate_hook: Optional[Callable[[str], bool]] = None
 
 
+def _state_number(state: Any, name: str) -> Optional[str]:
+    """Read one numeric budget field off an object-like or dict state."""
+    try:
+        if isinstance(state, dict):
+            value = state.get(name)
+        else:
+            value = getattr(state, name, None)
+    except Exception:
+        return None
+    if value is None or isinstance(value, bool):
+        return None
+    return str(value)
+
+
+def real_budget_check(project_id: str) -> bool:
+    """Gate-backed resume guard: True only while budget remains.
+
+    Fail-closed like ``admit_budget_call`` (runtime/manager.py): no bound
+    gate, an unknown project, a non-positive hard limit, or
+    spent-plus-reserved at or over the hard limit all refuse (False).
+    The served resume route enforces this; unit doubles never replace
+    it. Late import: the manager module stays out of route import time.
+    """
+    try:
+        from agent_si.runtime import manager as _manager
+
+        gate = _manager._BUDGET_GATE
+    except Exception:
+        return False
+    if gate is None:
+        return False
+    pid = str(project_id or "")
+    try:
+        state = gate.get_state(pid)
+    except (KeyError, LookupError):
+        return False
+    except Exception:
+        return False
+    try:
+        from decimal import Decimal as _Dec
+
+        hard = _Dec(str(_state_number(state, "hard_limit") or "0"))
+        spent = _Dec(str(_state_number(state, "spent") or "0"))
+        reserved = _Dec(str(_state_number(state, "reserved") or "0"))
+    except Exception:
+        return False
+    if hard <= 0:
+        return False
+    return (hard - spent - reserved) > 0
+
+
 def configure(
     auth_hook: Optional[Callable[[str], bool]] = None,
     rate_hook: Optional[Callable[[str], bool]] = None,
     model_factory: Optional[Callable[[str], Any]] = None,
+    budget_hook: Optional[Callable[[str], bool]] = None,
 ) -> Dict[str, Any]:
     """Install composition-root hooks (K02 owns auth/rate/model policy)."""
     global _auth_hook, _rate_hook
     _auth_hook = auth_hook
     _rate_hook = rate_hook
+    if budget_hook is not None:
+        runner.set_budget_hook(budget_hook)
     return {
         "auth_hook": _auth_hook is not None,
         "rate_hook": _rate_hook is not None,
         "model_factory": model_factory is not None,
+        "budget_hook": budget_hook is not None,
     }
 
 

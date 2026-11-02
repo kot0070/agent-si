@@ -161,10 +161,10 @@ export async function fetchWatcherJournal(
 }
 
 /** Read every rule card's stored model choice for one render. */
-function readCardModels(): Record<string, string> {
+function readCardModels(projectId: string): Record<string, string> {
   const models: Record<string, string> = {};
   for (const card of RULE_CARDS) {
-    models[card.cardId] = cardModel(card.cardId);
+    models[card.cardId] = cardModel(card.cardId, projectId);
   }
   return models;
 }
@@ -197,11 +197,16 @@ export function WatcherTab({ projectId }: { projectId: string }) {
   } | null>(null);
   const [nonce, setNonce] = useState(0);
   const [settings, setSettings] = useState<WatcherSettings>(() =>
-    loadWatcherSettings(),
+    loadWatcherSettings(projectId),
   );
   const [models, setModels] = useState<Record<string, string>>(() =>
-    readCardModels(),
+    readCardModels(projectId),
   );
+
+  useEffect(() => {
+    setSettings(loadWatcherSettings(projectId));
+    setModels(readCardModels(projectId));
+  }, [projectId]);
 
   useEffect(() => {
     let live = true;
@@ -319,7 +324,7 @@ export function WatcherTab({ projectId }: { projectId: string }) {
                 return;
               }
               setSettings(next);
-              saveWatcherSettings(next);
+              saveWatcherSettings(next, projectId);
             }}
           >
             {WATCHER_MODELS.map((model) => (
@@ -343,7 +348,7 @@ export function WatcherTab({ projectId }: { projectId: string }) {
                 cloudFallback: event.target.checked,
               };
               setSettings(next);
-              saveWatcherSettings(next);
+              saveWatcherSettings(next, projectId);
             }}
           />
         </label>
@@ -385,6 +390,7 @@ export function WatcherTab({ projectId }: { projectId: string }) {
                   setCardModel(
                     card.cardId,
                     model as (typeof RULE_CARD_MODELS)[number],
+                    projectId,
                   );
                   setModels((prev) => ({ ...prev, [card.cardId]: model }));
                 }}

@@ -20,6 +20,7 @@ import json
 import os
 import queue
 import re
+import shlex
 import sys
 import threading
 import uuid
@@ -219,6 +220,72 @@ def _wants_runnable_hint(check_rows: Any) -> str:
     return "plan a runnable check"
 
 
+#: Trivial `python -c` bodies that verify nothing (no I/O, no reads).
+_EMPTY_PYTHON_BODIES = frozenset(
+    ["", "pass", "...", "0", "1", "0.0", "True", "False", "None"])
+
+#: Shell metacharacters: with any of these an echo/printf line may have
+#: an effect beyond printing, so it is NOT treated as empty (fail open).
+_EMPTY_ECHO_META_RE = re.compile(r"[><|&;`$]")
+
+
+def _check_command_is_empty(command: Any) -> bool:
+    """True when a check command verifies nothing (argv list or string).
+
+    `exit [n]`, bare `true`/`:` , any `cd`, `echo`/`printf` text with
+    no redirection/pipe/substitution, and `python -c <trivial>` never
+    touch the goal's files, so a green exit from them is not evidence.
+    Anything ambiguous is NOT empty (fail open: the old green counts).
+    """
+    try:
+        if isinstance(command, str):
+            words = shlex.split(command, posix=True)
+        elif isinstance(command, (list, tuple)):
+            words = [str(word) for word in command]
+        else:
+            return False
+    except Exception:
+        return False
+    if not words or any(not word for word in words):
+        return False
+    head = os.path.basename(words[0]).lower()
+    if head == "exit":
+        return True
+    if head in ("true", ":"):
+        return True
+    if head == "cd":
+        return True
+    if head in ("echo", "printf"):
+        tail = " ".join(words[1:])
+        if _EMPTY_ECHO_META_RE.search(tail):
+            return False
+        return True
+    if head in ("python", "python2", "python3", "py"):
+        try:
+            flag_at = [str(word) for word in words[1:]].index("-c") + 1
+            body = words[flag_at + 1] if flag_at + 1 < len(words) else ""
+        except ValueError:
+            return False
+        return str(body).strip().strip("\"'").strip() in _EMPTY_PYTHON_BODIES
+    return False
+
+
+def _check_row_is_empty(check: Any) -> bool:
+    """True when a green check row ran an empty no-op command."""
+    try:
+        if not isinstance(check, dict):
+            return False
+        argv = check.get("argv")
+        if isinstance(argv, (list, tuple)) and argv:
+            return _check_command_is_empty(list(argv))
+        command = check.get("command")
+        if isinstance(command, str) and command.strip():
+            return _check_command_is_empty(command)
+    except Exception:
+        return False
+    return False
+
+
 def _gate_fail_reason(*, spec: Any, goal: Any, files_diff: str,
                       check_rows: Any, entry_ok: bool,
                       install_ok: bool, record: Any, folder: Any,
@@ -320,7 +387,8 @@ def _gate_fail_reason(*, spec: Any, goal: Any, files_diff: str,
                 and not check.get("refused")
                 and isinstance(check.get("exit_code"), int)
                 and not isinstance(check.get("exit_code"), bool)
-                and check.get("exit_code") == 0]
+                and check.get("exit_code") == 0
+                and not _check_row_is_empty(check)]
         except Exception:
             green = []
         if green:
@@ -779,7 +847,8 @@ def _ledger_total_line(record: Any) -> str:
             priced = amount if priced is None else priced + amount
     except Exception:
         unknown = True
-    cost_text = "UNKNOWN" if unknown or priced is None else str(priced)
+    cost_text = ("cost not known (no price)"
+                 if unknown or priced is None else str(priced))
     return ("Total: %d input + %d output = %d tokens; cost: %s"
             % (total_in, total_out, total_in + total_out, cost_text))
 
@@ -1245,12 +1314,28 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                               "code": "NO_PROVIDER_BOUND",
                               "connectHref": "/providers"})
             return
-        for line in _team_lines([
-                ("director", director), ("manager", manager),
-                ("worker", worker), ("auditor", auditor)]):
-            yield _run_event("delta", turn, task_id, line,
-                             {"run_id": run_id, "part_id": None})
-            turn += 1
+        # U8: the team line reads once per team, not every turn: a
+        # repeat run with the same roles/providers shows no Team line.
+        team_pairs = [("director", director), ("manager", manager),
+                      ("worker", worker), ("auditor", auditor)]
+        try:
+            team_sig = json.dumps(
+                [[role, (res or {}).get("provider"),
+                  (res or {}).get("model"),
+                  (res or {}).get("mode")]
+                 for role, res in team_pairs],
+                sort_keys=True, default=str)
+        except Exception:
+            team_sig = ""
+        if team_sig and team_sig == state.get("chat_team_last"):
+            pass
+        else:
+            for line in _team_lines(team_pairs):
+                yield _run_event("delta", turn, task_id, line,
+                                 {"run_id": run_id, "part_id": None})
+                turn += 1
+            if team_sig:
+                state["chat_team_sig"] = team_sig
         _check_stop()
 
         def _context_dead() -> Any:
@@ -2426,14 +2511,22 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
             stop_seen=stop_seen, lock=lock)
         turn, check_rows, checks_ok = checks
         for check in check_rows:
-            command = " ".join(
-                str(word) for word in (check.get("argv") or []))
+            argv = [str(word) for word in (check.get("argv") or [])]
+            command = " ".join(argv)
+            # U8: the chat check line names the tool, never a resolved
+            # executable path; the rows above keep the full argv (the
+            # log keeps the path). A trailing .exe reads as the bare
+            # tool name (findstr.EXE shows as findstr).
+            tool = os.path.basename(argv[0]) if argv else "?"
+            if tool.lower().endswith(".exe"):
+                tool = tool[:-4]
+            short = " ".join([tool] + argv[1:]) if argv else command
             if check.get("could_not_start") or check.get("refused"):
                 line = "Check %s $ %s: %s" % (
-                    part_id, command, check.get("output_tail"))
+                    part_id, short, check.get("output_tail"))
             else:
                 line = "Check %s $ %s -> exit %s" % (
-                    part_id, command, check.get("exit_code"))
+                    part_id, short, check.get("exit_code"))
             log_path = os.path.join(
                 str(folder), str(check.get("output_file") or ""))
             if not os.path.exists(log_path):
@@ -2504,6 +2597,7 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
                     goal=spec["goal"], files_diff=files_diff,
                     part_diff=part_diff,
                     checks=check_rows,
+                    part_files=after,
                     artifact_refs=["%s/%s" % (part_id, path)
                                    for path in spec["files"]],
                     lock=lock, stop_seen=stop_seen,
@@ -2792,6 +2886,29 @@ def _cap_run_tail(tail: Any) -> str:
     return text
 
 
+#: Long model replies in loop history: head + tail kept verbatim.
+_REPLY_HISTORY_HEAD = 8192
+_REPLY_HISTORY_TAIL = 8192
+
+
+def _cap_reply_text(text: Any) -> str:
+    """Cap one model reply for loop history: head + tail, never the middle.
+
+    Over-long replies keep the first 8 KB and the last 8 KB verbatim with
+    one line naming the cut size; the current turn still parses the full
+    text and the run log keeps the whole text. Never raises.
+    """
+    try:
+        body = str(text or "")
+    except Exception:
+        return ""
+    if len(body) > _REPLY_HISTORY_HEAD + _REPLY_HISTORY_TAIL:
+        cut = len(body) - _REPLY_HISTORY_HEAD - _REPLY_HISTORY_TAIL
+        return "%s\n[...reply cut: %d chars omitted...]\n%s" % (
+            body[:_REPLY_HISTORY_HEAD], cut, body[-_REPLY_HISTORY_TAIL:])
+    return body
+
+
 def _cap_read_note(out: Any) -> str:
     """Cap read_file output for the worker note: head plus a marker."""
     text = str(out or "")
@@ -3031,13 +3148,12 @@ def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
 
     def _log_reply(kind: str, reply_text: Any) -> None:
         try:
-            tail = str(reply_text or "")
-            if len(tail) > 2000:
-                tail = tail[-2000:]
+            # The run log keeps the whole reply text (history trimming
+            # never touches this file); failures here never fail the run.
             with open(log_path, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps({"part": part_id, "attempt": attempt,
                                      "reply": reply_no, "kind": kind,
-                                     "tail": tail}) + "\n")
+                                     "tail": str(reply_text or "")}) + "\n")
         except OSError:
             pass
 
@@ -3079,7 +3195,8 @@ def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
                         return turn, False, None
                     empty_retries += 1
                     history.append({"role": "assistant",
-                                    "content": response.output_text or ""})
+                                    "content": _cap_reply_text(
+                                        response.output_text or "")})
                     history.append({"role": "user",
                                     "content": _protocol.EMPTY_REPLY_RETRY})
                     check_stop()
@@ -3119,7 +3236,8 @@ def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
                     return turn, False, None
                 retried_bad = True
                 history.append({"role": "assistant",
-                                "content": response.output_text or ""})
+                                "content": _cap_reply_text(
+                                    response.output_text or "")})
                 history.append({"role": "user", "content": (
                     "Your last reply was not valid JSON: %s "
                     "Return ONLY {\"actions\": [...], \"done\": bool}, "
@@ -3162,7 +3280,8 @@ def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
             attached=attached, stop_seen=stop_seen,
             repeat_counts=repeat_counts, lock=lock)
         history.append({"role": "assistant",
-                        "content": response.output_text or ""})
+                        "content": _cap_reply_text(
+                            response.output_text or "")})
         history.append({"role": "user", "content": notes})
         if stop_note is not None:
             row["reason"] = stop_note
