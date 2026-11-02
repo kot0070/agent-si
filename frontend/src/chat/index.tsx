@@ -31,7 +31,7 @@ import {
   requestJson,
   requestResponse,
 } from "../api/errors";
-import { DEFAULT_LOCALE, formatDate, t } from "../locale/index";
+import { DEFAULT_LOCALE, t } from "../locale/index";
 import enTable from "../locale/en.json";
 import { ErrorPanel } from "../ui/ErrorPanel";
 import { ApprovalCard } from "./ApprovalCard";
@@ -316,6 +316,18 @@ async function loadHistoryOnce(key: string, projectId: string): Promise<void> {
   } finally {
     historyLoading.delete(key);
     historyLoaded.add(key);
+  }
+}
+
+/** Bubble timestamps read time-only ("14:32"), never the date. */
+function formatChatTime(at: number): string {
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(at));
+  } catch {
+    return new Date(at).toLocaleTimeString();
   }
 }
 
@@ -1019,7 +1031,7 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
                 data-testid="chat-timestamp"
                 title={t("chat.stream.timestamp")}
               >
-                {formatDate(new Date(message.at))}
+                {formatChatTime(message.at)}
               </time>
               {message.role === "assistant" &&
               message.final &&
