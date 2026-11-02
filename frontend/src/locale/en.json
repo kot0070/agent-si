@@ -225,12 +225,15 @@
       "purpose": "Project settings and accepted risk.",
       "title": "Project",
       "parallel": "Parts running at the same time",
+      "limitsBlank": "Enter a whole number of 1 or more.",
+      "team": "Team: on / off",
+      "teamOn": "On",
+      "teamOff": "Off",
       "save": "Save",
       "taskStepsLabel": "Task step limit (steps)",
       "chatStepsLabel": "Chat step limit (steps)",
       "stepsHint": "Each limit caps how many steps one task or chat reply may take.",
-      "spendCaps": "Spend caps per provider",
-      "limitsBlank": "Enter a whole number of 1 or more."
+      "spendCaps": "Spend caps per provider"
     },
     "providers": {
       "searchPlaceholder": "Search providers or models"

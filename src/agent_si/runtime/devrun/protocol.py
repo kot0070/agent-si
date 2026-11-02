@@ -131,6 +131,54 @@ def _clean_path(raw: Any) -> str:
     return normalized
 
 
+def _clean_managers(raw: Any, part_ids: set[str]) -> list[dict[str, Any]]:
+    """Validate the optional managers wish; raise PlanError on bad shape.
+
+    Structural checks only (ids, goals, known parts): exact coverage
+    (every part exactly once) is checked by the engine so it can re-ask
+    once then fall back to one Manager instead of failing the run.
+    """
+    if not isinstance(raw, list) or not raw:
+        raise PlanError("director managers must be a non-empty list")
+    if len(raw) > 4:
+        # Over the max: allowed through so the deterministic check caps
+        # to one Manager (never a silent 5-manager run).
+        pass
+    seen: set[str] = set()
+    out: list[dict[str, Any]] = []
+    for index, entry in enumerate(raw):
+        where = "manager %d" % (index,)
+        if not isinstance(entry, dict):
+            raise PlanError("%s must be an object" % (where,))
+        mid = entry.get("manager_id")
+        if not isinstance(mid, str) or not mid.strip():
+            raise PlanError("%s needs a non-empty manager_id" % (where,))
+        mid = mid.strip()
+        if mid in seen:
+            raise PlanError("duplicate manager_id %r" % (mid,))
+        seen.add(mid)
+        goal = entry.get("goal")
+        if not isinstance(goal, str) or not goal.strip():
+            raise PlanError("manager %r needs a non-empty goal" % (mid,))
+        plist = entry.get("parts")
+        if not isinstance(plist, list) or not plist:
+            raise PlanError("manager %r parts must be a non-empty list"
+                            % (mid,))
+        clean_pids: list[str] = []
+        for pid in plist:
+            if not isinstance(pid, str) or not pid.strip():
+                raise PlanError("manager %r parts must be part ids"
+                                % (mid,))
+            pid = pid.strip()
+            if pid not in part_ids:
+                raise PlanError("manager %r names unknown part %r"
+                                % (mid, pid))
+            clean_pids.append(pid)
+        out.append({"manager_id": mid, "goal": goal.strip(),
+                    "parts": clean_pids})
+    return out
+
+
 def parse_director_reply(text: str) -> dict[str, Any]:
     """Parse one Director reply into {"answer"} or {"parts"}.
 
@@ -145,7 +193,15 @@ def parse_director_reply(text: str) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise PlanError("director reply must be a JSON object")
     if "parts" in data and data["parts"] is not None:
-        return {"parts": _clean_parts(data.get("parts"))}
+        has_managers = ("managers" in data
+                        and data["managers"] is not None)
+        parts = _clean_parts(data.get("parts"),
+                             skip_overlap=bool(has_managers))
+        if not has_managers:
+            return {"parts": parts}
+        managers = _clean_managers(
+            data.get("managers"), {part["part_id"] for part in parts})
+        return {"parts": parts, "managers": managers}
     if "answer" in data and data["answer"] is not None:
         answer = data.get("answer")
         if not isinstance(answer, str) or not answer.strip():
@@ -156,7 +212,7 @@ def parse_director_reply(text: str) -> dict[str, Any]:
         "{\"parts\": [...]}")
 
 
-def _clean_parts(raw: Any) -> list[dict[str, Any]]:
+def _clean_parts(raw: Any, skip_overlap: bool = False) -> list[dict[str, Any]]:
     """Validate the parts list; raise PlanError on the first problem."""
     if not isinstance(raw, list) or not raw:
         raise PlanError("director parts must be a non-empty list")
@@ -187,11 +243,18 @@ def _clean_parts(raw: Any) -> list[dict[str, Any]]:
                 raise PlanError(
                     "part %r file %r is outside the project folder"
                     % (part_id, path))
-            if cleaned in claimed:
-                raise PlanError(
-                    "file %r claimed by parts %r and %r" % (
-                        cleaned, claimed[cleaned], part_id))
-            claimed[cleaned] = part_id
+            if not skip_overlap:
+                if cleaned in claimed:
+                    raise PlanError(
+                        "file %r claimed by parts %r and %r" % (
+                            cleaned, claimed[cleaned], part_id))
+                claimed[cleaned] = part_id
+            else:
+                # Managers wish may share files across groups; the
+                # deterministic check collapses to one Manager. Within
+                # one part duplicates still collapse via the list.
+                if cleaned not in claimed:
+                    claimed[cleaned] = part_id
             clean_files.append(cleaned)
         commands = entry.get("check_commands", [])
         if not isinstance(commands, list):

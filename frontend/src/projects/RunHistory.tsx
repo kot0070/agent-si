@@ -176,6 +176,21 @@ export function RunHistory(props: RunHistoryProps): ReactElement {
                     ? t("projectView.cost.notKnown")
                     : run.cost}
                 </div>
+                {run.manager_why == null || run.manager_why === "" ? null : (
+                  <div>
+                    {run.manager_count != null && run.manager_count > 1
+                      ? `Managers: ${run.manager_count} (${run.manager_why})`
+                      : `Manager: ${run.manager_why}`}
+                    {run.managers != null && run.managers.length > 1
+                      ? ` · ${run.managers
+                          .map(
+                            (group) =>
+                              `${group.manager_id}: ${group.parts.join(", ")}`,
+                          )
+                          .join(" · ")}`
+                      : null}
+                  </div>
+                )}
                 {run.folder ? (
                   <div
                     data-testid={`devrun-folder-${run.run_id}`}

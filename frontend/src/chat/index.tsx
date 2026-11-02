@@ -66,6 +66,7 @@ import {
 import type { Placement } from "../agents/agentsApi";
 import { listConnectedProviders } from "../settings/ProvidersPage/connectApi";
 import { readRoleProfiles } from "../settings/index";
+import { readTeamMode, saveTeamMode } from "../settings/projectLimitsApi";
 import { Icon } from "../ui/icons";
 import {
   askPermission,
@@ -1385,6 +1386,24 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
     setChatDraft(key, next);
     setDraft(next);
   }
+  const [teamMode, setTeamMode] = useState<"on" | "off">("on");
+  useEffect(() => {
+    let alive = true;
+    void readTeamMode(props.projectId)
+      .then((stored) => {
+        if (alive) {
+          setTeamMode(stored.team);
+        }
+      })
+      .catch(() => {
+        if (alive) {
+          setTeamMode("on");
+        }
+      });
+    return () => {
+      alive = false;
+    };
+  }, [props.projectId]);
   // FXCHATV (a): mirror for the batched no-provider restore below.
   const draftRef = useRef(draft);
   draftRef.current = draft;
@@ -2281,6 +2300,30 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
             inside, the send as an icon button inside right; a small status
             line under it (model | route | working state). */}
         <div data-testid="chat-composer" className="fx-composer">
+          <div>
+            <span>{t("settings.project.team")}</span>
+            <button
+              type="button"
+              data-testid="composer-team-toggle"
+              aria-label={t("settings.project.team")}
+              title={t("settings.project.team")}
+              onClick={() => {
+                const next = teamMode === "on" ? "off" : "on";
+                setTeamMode(next);
+                void saveTeamMode(props.projectId, next)
+                  .then((saved) => {
+                    setTeamMode(saved.team);
+                  })
+                  .catch(() => {
+                    setTeamMode(next);
+                  });
+              }}
+            >
+              {teamMode === "on"
+                ? t("settings.project.teamOn")
+                : t("settings.project.teamOff")}
+            </button>
+          </div>
           {/* FXCHATV (b): single Connect CTA for one state — the rows
               above already offer it when expanded and empty. */}
           {boundModels !== null &&
