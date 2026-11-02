@@ -50,6 +50,9 @@ function installFetch(): void {
         const preset = (body as { preset_id: string }).preset_id;
         return ok({ key_ref: { secret_id: preset, provider_id: preset } }, 201);
       }
+      if (url === '/api/v1/providers/keys/check' && method === 'POST') {
+        return ok({ ok: true });
+      }
       if (url === '/api/v1/providers/connect' && method === 'POST') {
         connected.add((body as { preset_id: string }).preset_id);
         return ok({ provider: { provider_id: (body as { preset_id: string }).preset_id } });
@@ -131,6 +134,9 @@ describe('U14 provider rows name the connect action', () => {
     fireEvent.change(within(dialog).getByLabelText(en.providers.connect.apiKey), {
       target: { value: 'fx-fake-key' },
     });
+    // Two-step dialog: Check first (read-only route), then Save.
+    fireEvent.click(within(dialog).getByRole('button', { name: en.providers.connect.check }));
+    await within(dialog).findByText(en.providers.connect.checked);
     fireEvent.click(within(dialog).getByRole('button', { name: en.providers.connect.save }));
     await waitFor(() => {
       expect(

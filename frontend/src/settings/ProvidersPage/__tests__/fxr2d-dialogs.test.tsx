@@ -87,7 +87,9 @@ describe('U7 translucent dialogs with a human body', () => {
       async (input: unknown, init?: { method?: string }) => {
         const url = String(input);
         const method = (init?.method ?? 'GET').toUpperCase();
-        if (url === '/api/v1/providers/keys' && method === 'POST') {
+        // Two-step dialog (FXR2E): paste + Check hits the read-only
+        // route and refuses here; Save never runs for a bad key.
+        if (url === '/api/v1/providers/keys/check' && method === 'POST') {
           return new Response(JSON.stringify({ code: 'KEY_REFUSED' }), {
             status: 401,
             headers: { 'content-type': 'application/json' },
@@ -115,14 +117,13 @@ describe('U7 translucent dialogs with a human body', () => {
     fireEvent.change(within(dialog).getByLabelText('API key'), {
       target: { value: 'wrong-key' },
     });
-    fireEvent.click(within(dialog).getByText('Save'));
+    fireEvent.click(within(dialog).getByText('Check'));
     const status = await within(dialog).findByRole('status');
-    // Specific refusal, never a bare generic line.
-    expect(status.textContent).toContain('KEY_REFUSED');
-    expect(status.textContent).toContain('401');
-    expect(status.textContent).toContain('Re-paste the full key');
-    expect(status.textContent).toContain('matching provider');
-    expect(status.textContent).not.toContain('Save failed.');
+    // Specific refusal plus what to do, never a machine code.
+    expect(status.textContent).toContain('The provider refused this key.');
+    expect(status.textContent).toContain('Paste the full key again.');
+    expect(dialog.textContent).not.toContain('Connected');
+    expect(status.textContent).not.toContain('KEY_REFUSED');
     expect(status.textContent).not.toContain('Something went wrong');
   });
 });
