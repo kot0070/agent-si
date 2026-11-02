@@ -3949,6 +3949,7 @@ def create_app(settings: Any = None,
         _demof13w_permissions.load_asked_once(_demof13w_store_dir))
     _demof13w_decisions = _demof13w_permissions.bind_decision_store(
         _demof13w_store_dir)
+    _demof13w_grants = _demof13w_permissions._BOUND_GRANTS
 
     @app.post(_demof13w_permissions.PERMISSIONS_CHECK_ROUTE)
     async def _demof13w_permissions_check(
@@ -4073,6 +4074,199 @@ def create_app(settings: Any = None,
             "decisions": _demof13w_permissions.list_decisions(
                 _demof13w_store_dir, _demof13w_decisions,
                 _demof13w_list_project),
+        }
+
+    @app.get(_demof13w_permissions.PERMISSIONS_INSTALL_REQUEST_ROUTE)
+    async def _demof13w_permissions_install_request(
+            request: Request, tool_id: str = "") -> dict[str, Any]:
+        _demof13w_request_token = request.headers.get("x-ui-session-token")
+        if not _k08_token_live(_demof13w_request_token or ""):
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "SESSION_TOKEN_INVALID",
+                    "message": "unknown session token",
+                },
+            )
+        try:
+            _demof13w_request_tool = (
+                _demof13w_permissions.require_tool_id({"tool_id": tool_id}))
+        except _demof13w_permissions.PermissionCheckError as exc:
+            raise HTTPException(
+                status_code=exc.status,
+                detail={"code": exc.code,
+                        "message": str(exc)}) from None
+        _demof13w_pinned = _demof13w_permissions.get_install_argv(
+            _demof13w_store_dir, _demof13w_decisions,
+            _demof13w_request_tool)
+        if _demof13w_pinned is None:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "code": "INSTALL_REQUEST_UNKNOWN",
+                    "message": "no pending install ask for that tool",
+                },
+            )
+        return {
+            "tool_id": _demof13w_request_tool,
+            "argv": _demof13w_pinned,
+        }
+
+    @app.get(_demof13w_permissions.PERMISSIONS_PROJECT_GRANTS_ROUTE)
+    async def _demof13w_permissions_project_grants(
+            project_id: str = "") -> dict[str, Any]:
+        try:
+            _demof13w_grants_project = (
+                _demof13w_permissions.require_project_id(
+                    {"project_id": project_id}))
+        except _demof13w_permissions.PermissionCheckError as exc:
+            raise HTTPException(
+                status_code=exc.status,
+                detail={"code": exc.code,
+                        "message": str(exc)}) from None
+        return {
+            "grants": _demof13w_permissions.list_project_grants(
+                _demof13w_store_dir, _demof13w_grants,
+                _demof13w_grants_project),
+        }
+
+    def _demof13w_grant_token_live(request: Request,
+                                   payload: Any) -> None:
+        _demof13w_grant_token = request.headers.get("x-ui-session-token")
+        if not isinstance(_demof13w_grant_token, str) or not _demof13w_grant_token:
+            _demof13w_grant_body_token = (
+                payload.get("session_token")
+                if isinstance(payload, dict) else None)
+            if (isinstance(_demof13w_grant_body_token, str)
+                    and _demof13w_grant_body_token):
+                _demof13w_grant_token = _demof13w_grant_body_token
+            else:
+                raise HTTPException(
+                    status_code=401,
+                    detail={
+                        "code": "SESSION_TOKEN_MISSING",
+                        "message": "grant needs a live session token",
+                    },
+                )
+        if not _k08_token_live(_demof13w_grant_token):
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "SESSION_TOKEN_INVALID",
+                    "message": "unknown session token",
+                },
+            )
+
+    @app.post(_demof13w_permissions.PERMISSIONS_PROJECT_GRANT_ROUTE)
+    async def _demof13w_permissions_project_grant(
+            request: Request) -> dict[str, Any]:
+        try:
+            _demof13w_grant_payload = await request.json()
+        except Exception:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "BAD_JSON_BODY",
+                        "message": "permissions grant needs a JSON body"}
+            ) from None
+        _demof13w_grant_token_live(request, _demof13w_grant_payload)
+        try:
+            _demof13w_grant_tool = (
+                _demof13w_permissions.require_tool_id(
+                    _demof13w_grant_payload))
+            _demof13w_grant_project = (
+                _demof13w_permissions.require_project_id(
+                    _demof13w_grant_payload))
+        except _demof13w_permissions.PermissionCheckError as exc:
+            raise HTTPException(
+                status_code=exc.status,
+                detail={"code": exc.code,
+                        "message": str(exc)}) from None
+        if not _demof13w_grant_tool.startswith(
+                "install:%s:" % (_demof13w_grant_project,)):
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "GRANT_TOOL_PROJECT_MISMATCH",
+                    "message": "grant tool does not belong to that project",
+                },
+            )
+        _demof13w_grant_argv = _demof13w_permissions.get_install_argv(
+            _demof13w_store_dir, _demof13w_decisions,
+            _demof13w_grant_tool)
+        if not _demof13w_grant_argv or len(_demof13w_grant_argv) < 2:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "GRANT_NO_PINNED_ARGV",
+                    "message": "no pending install ask pins words to grant",
+                },
+            )
+        _demof13w_grant_head = str(_demof13w_grant_argv[0])
+        _demof13w_grant_second = str(_demof13w_grant_argv[1])
+        if not _demof13w_grant_second or _demof13w_grant_second.startswith(
+                "-"):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "GRANT_NO_PINNED_ARGV",
+                    "message": "no pending install ask pins words to grant",
+                },
+            )
+        try:
+            _demof13w_granted = _demof13w_permissions.record_project_grant(
+                _demof13w_store_dir, _demof13w_grants,
+                _demof13w_grant_project, _demof13w_grant_head,
+                _demof13w_grant_second)
+        except _demof13w_permissions.PermissionCheckError as exc:
+            raise HTTPException(
+                status_code=exc.status,
+                detail={"code": exc.code,
+                        "message": str(exc)}) from None
+        # No exact allow decision is recorded: the parked run replays
+        # through the grant itself, and later installs with other words
+        # under the same installer+subcommand do not ask again.
+        return {
+            "project_id": _demof13w_granted["project"],
+            "installer": _demof13w_granted["installer"],
+            "subcommand": _demof13w_granted["subcommand"],
+            "time": _demof13w_granted["time"],
+        }
+
+    @app.delete(_demof13w_permissions.PERMISSIONS_PROJECT_GRANT_ROUTE)
+    async def _demof13w_permissions_project_grant_remove(
+            request: Request) -> dict[str, Any]:
+        try:
+            _demof13w_ungrant_payload = await request.json()
+        except Exception:
+            _demof13w_ungrant_payload = {}
+        _demof13w_grant_token_live(request, _demof13w_ungrant_payload)
+        try:
+            _demof13w_ungrant_project = (
+                _demof13w_permissions.require_project_id(
+                    _demof13w_ungrant_payload
+                    if isinstance(_demof13w_ungrant_payload, dict) else {}))
+            _demof13w_ungrant_installer = (
+                _demof13w_permissions.require_grant_word(
+                    (_demof13w_ungrant_payload.get("installer")
+                     if isinstance(_demof13w_ungrant_payload, dict)
+                     else None),
+                    "installer"))
+            _demof13w_ungrant_sub = (
+                _demof13w_permissions.require_grant_word(
+                    (_demof13w_ungrant_payload.get("subcommand")
+                     if isinstance(_demof13w_ungrant_payload, dict)
+                     else None),
+                    "subcommand"))
+        except _demof13w_permissions.PermissionCheckError as exc:
+            raise HTTPException(
+                status_code=exc.status,
+                detail={"code": exc.code,
+                        "message": str(exc)}) from None
+        return {
+            "removed": _demof13w_permissions.remove_project_grant(
+                _demof13w_store_dir, _demof13w_grants,
+                _demof13w_ungrant_project, _demof13w_ungrant_installer,
+                _demof13w_ungrant_sub),
         }
 
     # FXASKB B3: one journal row per recorded chat answer. The A2 decide
