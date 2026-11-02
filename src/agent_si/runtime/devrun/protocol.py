@@ -152,6 +152,40 @@ class PlanError(ValueError):
     code: str = "DEVRUN_PLAN_INVALID"
 
 
+def extract_json_object(text: Any) -> Any:
+    """First complete JSON object in text, or ValueError naming it.
+
+    Real replies arrive as plain JSON, ```json fences, or a sentence
+    then JSON. Empty or reasoning-only text raises "empty reply";
+    text with no object raises "no JSON object in reply: ...".
+    """
+    try:
+        src = (text or "").strip()
+    except Exception:
+        src = ""
+    if not src:
+        raise ValueError("empty reply")
+    start = src.find("{")
+    if start < 0:
+        raise ValueError("no JSON object in reply: %r" % (src[:120],))
+    try:
+        obj, _end = json.JSONDecoder().raw_decode(src[start:])
+    except Exception as exc:
+        raise ValueError("bad JSON object: %s" % (exc,)) from None
+    return obj
+
+
+#: What the worker hears after an empty reply; the attempt is not
+#: burned (retry the call, same attempt).
+EMPTY_REPLY_RETRY = (
+    "Your last reply had no visible content (reasoning only, no action). "
+    "Reply again now with one JSON object for your next action, no prose."
+)
+
+#: Empty-reply retries before the attempt is burned.
+MAX_EMPTY_RETRIES = 2
+
+
 def _clean_path(raw: Any) -> str:
     """Normalized relative path, or empty when the raw value is bad."""
     if not isinstance(raw, str) or not raw.strip():
@@ -177,8 +211,8 @@ def parse_director_reply(text: str) -> dict[str, Any]:
     files, non-list argv, unknown or cyclic depends_on).
     """
     try:
-        data = json.loads(text)
-    except Exception as exc:
+        data = extract_json_object(text)
+    except ValueError as exc:
         raise PlanError("director reply is not JSON: %s" % (exc,)) from None
     if not isinstance(data, dict):
         raise PlanError("director reply must be a JSON object")
@@ -305,8 +339,8 @@ def parse_agent_reply(text: str) -> dict[str, Any]:
     Raises AgentError quoting the exact problem.
     """
     try:
-        data = json.loads(text)
-    except Exception as exc:
+        data = extract_json_object(text)
+    except ValueError as exc:
         raise AgentError("agent reply is not JSON: %s" % (exc,)) from None
     if not isinstance(data, dict):
         raise AgentError("agent reply must be a JSON object")
@@ -340,8 +374,8 @@ def parse_auditor_reply(text: str) -> dict[str, Any]:
     that into FAIL, never a silent pass.
     """
     try:
-        data = json.loads(text)
-    except Exception as exc:
+        data = extract_json_object(text)
+    except ValueError as exc:
         raise AuditError("auditor reply is not JSON: %s" % (exc,)) from None
     if not isinstance(data, dict):
         raise AuditError("auditor reply must be a JSON object")

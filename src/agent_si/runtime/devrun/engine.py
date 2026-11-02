@@ -2344,6 +2344,27 @@ def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
             "with a smaller next step, restating what you still need."
             % (exc,))}
 
+    log_path = os.path.join(
+        str(folder), ".devrun", "agent",
+        "%s-a%d.jsonl" % (part_id, attempt))
+    try:
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    except OSError:
+        pass
+    reply_no = 0
+
+    def _log_reply(kind: str, reply_text: Any) -> None:
+        try:
+            tail = str(reply_text or "")
+            if len(tail) > 2000:
+                tail = tail[-2000:]
+            with open(log_path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps({"part": part_id, "attempt": attempt,
+                                     "reply": reply_no, "kind": kind,
+                                     "tail": tail}) + "\n")
+        except OSError:
+            pass
+
     for _ in range(max(1, int(turn_cap))):
         check_stop()
         try:
@@ -2353,31 +2374,62 @@ def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
         except _call_roles.ModelTimeout as exc:
             history.append(_timed_out_note(exc))
             continue
-        try:
-            parsed = _protocol.parse_agent_reply(
-                response.output_text or "")
-        except _protocol.AgentError as exc:
-            history.append({"role": "assistant",
-                            "content": response.output_text or ""})
-            history.append({"role": "user", "content": (
-                "Your last reply was not valid JSON: %s "
-                "Return ONLY {\"actions\": [...], \"done\": bool}, "
-                "no prose.") % (exc,)})
-            check_stop()
-            try:
-                response = call("worker", worker_spec, adapter, history,
-                                part_id, attempt,
-                                waits=["agent:%s" % (part_id,)])
-            except _call_roles.ModelTimeout as exc:
-                history.append(_timed_out_note(exc))
-                continue
+        reply_no += 1
+        _log_reply("reply", response.output_text)
+        empty_retries = 0
+        retried_bad = False
+        while True:
             try:
                 parsed = _protocol.parse_agent_reply(
                     response.output_text or "")
-            except _protocol.AgentError as exc2:
-                row["reason"] = "agent output malformed twice: %s" % (
-                    exc2,)
-                return turn, False, None
+                break
+            except _protocol.AgentError as exc:
+                if "empty reply" in str(exc):
+                    # Reasoning-only reply: retry the call, same
+                    # attempt, up to MAX_EMPTY_RETRIES times.
+                    if empty_retries >= _protocol.MAX_EMPTY_RETRIES:
+                        row["reason"] = (
+                            "agent reply empty %d times in a row; "
+                            "attempt burned" % (empty_retries + 1,))
+                        return turn, False, None
+                    empty_retries += 1
+                    history.append({"role": "assistant",
+                                    "content": response.output_text or ""})
+                    history.append({"role": "user",
+                                    "content": _protocol.EMPTY_REPLY_RETRY})
+                    check_stop()
+                    try:
+                        response = call(
+                            "worker", worker_spec, adapter, history,
+                            part_id, attempt,
+                            waits=["agent:%s" % (part_id,)])
+                    except _call_roles.ModelTimeout as exc:
+                        history.append(_timed_out_note(exc))
+                        break
+                    reply_no += 1
+                    _log_reply("empty-retry", response.output_text)
+                    continue
+                if retried_bad:
+                    row["reason"] = (
+                        "agent output malformed twice: %s" % (exc,))
+                    return turn, False, None
+                retried_bad = True
+                history.append({"role": "assistant",
+                                "content": response.output_text or ""})
+                history.append({"role": "user", "content": (
+                    "Your last reply was not valid JSON: %s "
+                    "Return ONLY {\"actions\": [...], \"done\": bool}, "
+                    "no prose.") % (exc,)})
+                check_stop()
+                try:
+                    response = call("worker", worker_spec, adapter,
+                                    history, part_id, attempt,
+                                    waits=["agent:%s" % (part_id,)])
+                except _call_roles.ModelTimeout as exc:
+                    history.append(_timed_out_note(exc))
+                    break
+                reply_no += 1
+                _log_reply("repair-retry", response.output_text)
         notes, stop_note = _apply_actions(
             record=record, row=row, folder=folder, project=project,
             run_id=run_id, part_id=part_id, attempt=attempt,
@@ -2414,7 +2466,9 @@ def _worker_prompt(spec: dict, message: str, attempt: int,
             "text and never write stub lock files or dependency folders "
             "to look installed. "
             "Return ONLY {\"actions\": [...], \"done\": bool}: done "
-            "true only when the part is complete." % (
+            "true only when the part is complete. Run the project's own "
+            "test command when it exists (package.json scripts, the "
+            "listed test files); never invent wrapper scripts." % (
                 spec["part_id"], attempt, spec["goal"],
                 message or "(no task text)",
                 ", ".join(spec["files"]),))
