@@ -21,6 +21,8 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any
 
+from .common import is_compact_english
+
 SPLIT_BAD_REQUEST = "SPLIT_BAD_REQUEST"
 INTEGRATED_BY = "manager"
 PART_STATUS_SPLIT = "split"
@@ -112,7 +114,16 @@ def _record_settings_decision(settings: object, actor: object) -> dict[str, str]
     global _SEQ
     if not isinstance(settings, dict) or not settings:
         raise SplitRefused("settings must be a non-empty mapping")
-    keys = sorted(_compact(str(key)) for key in settings)
+    # SG-03: keys are recorded verbatim, never folded: a non-compact
+    # key (e.g. Cyrillic) refuses cleanly naming the rule instead of
+    # persisting a falsified `-----` decision row.
+    raw_keys = [str(key) for key in settings]
+    for key in raw_keys:
+        if not is_compact_english(key):
+            raise SplitRefused(
+                "settings keys must be compact English "
+                "(ascii, trimmed, single spaces): %r" % (key,))
+    keys = sorted(raw_keys)
     if not all(keys):
         raise SplitRefused("settings keys must be non-empty strings")
     authority = actor if isinstance(actor, str) and actor.strip() \

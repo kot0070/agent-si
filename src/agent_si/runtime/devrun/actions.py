@@ -676,6 +676,11 @@ def scrub_env() -> dict[str, str]:
     env.pop("PYTHONHOME", None)
     env["PYTHONNOUSERSITE"] = "1"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    # SG-01: Python children always speak UTF-8, whatever console code
+    # page the juror's box uses (cp866/cp1251/cp1252 otherwise mojibake
+    # or crash a Ukrainian print). Non-Python tools ignore these.
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
     return env
 
 
