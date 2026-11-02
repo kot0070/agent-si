@@ -42,6 +42,16 @@ class _BudgetOut(Exception):
     code: str = "DEVRUN_BUDGET_STOP"
 
 
+class _OutagePaused(Exception):
+    """The run paused: a provider stayed unreachable (outage signalled).
+
+    Never a silent provider switch, never an "internal" class name to
+    the user: the chat line names the provider in plain words.
+    """
+
+    code: str = "DEVRUN_OUTAGE_PAUSED"
+
+
 class _InstallHeld(Exception):
     """An install ask holds the run: status line plus terminal approval."""
 
@@ -595,6 +605,11 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
             # FXPARALLEL END own-row.
         except _roles.ModelStopped:
             raise _Stopped()
+        except _roles.ProviderUnreachable as exc:
+            with contextlib.suppress(Exception):
+                if part is not None and isinstance(record, dict):
+                    record["outage_part"] = part
+            raise _OutagePaused(str(exc)) from None
         except _roles._BudgetOut as exc:
             raise _BudgetOut(str(exc)) from None
         usage = getattr(response, "usage", {}) or {}
@@ -880,6 +895,63 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         turn += 1
         yield _run_event("budget_stop", turn, task_id, stop_text,
                          {"run_id": run_id})
+    except _OutagePaused as exc:
+        record["success"] = False
+        try:
+            kept = [str(path) for path in (record.get("files", []) or [])]
+        except Exception:
+            kept = []
+        try:
+            failed_part = record.get("outage_part")
+        except Exception:
+            failed_part = None
+        for prow in record.get("parts", []) or []:
+            try:
+                if not isinstance(prow, dict):
+                    continue
+                if prow.get("verdict") != "PENDING":
+                    continue
+                if failed_part is not None and str(prow.get("part_id")) \
+                        == str(failed_part):
+                    prow["verdict"] = "FAIL"
+                    prow["reason"] = "provider unreachable: %s" % (exc,)
+                else:
+                    prow["verdict"] = "BLOCKED"
+                    prow["reason"] = "part never ran: run paused"
+            except Exception:
+                continue
+        try:
+            import logging as _outage_log
+
+            _logging = _outage_log.getLogger(__name__)
+        except Exception:
+            _logging = None
+        try:
+            if _logging is not None:
+                _logging.warning(
+                    "provider outage paused run %s: %s: %s",
+                    run_id, type(exc).__name__, exc)
+        except Exception:
+            pass
+        record["summary"] = "run paused: %s. Files kept: %s. " \
+            "Send the task again." % (
+                exc, ", ".join(kept) if kept else "none")
+        record["paused"] = True
+        _finish_task()
+        _publish()
+        _close_live("BLOCKED")
+        _journal("DEVRUN_END", record.get("summary") or "run ended")
+        yield _run_event(
+            "delta", turn, task_id,
+            "Paused: %s. Files kept: %s." % (
+                exc, ", ".join(kept) if kept else "none"),
+            {"run_id": run_id})
+        turn += 1
+        yield _run_event(
+            "done", turn, task_id,
+            "Provider did not answer in time. Files are kept. "
+            "Send the task again.",
+            {"run_id": run_id, "success": False, "paused": True})
     except _InstallHeld as exc:
         record["success"] = False
         record["summary"] = ("run held: install permission needed for %s"
@@ -1376,6 +1448,10 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
                 # FXPARALLEL END judge-lock.
             except _roles._BudgetOut as exc:
                 raise _BudgetOut(str(exc)) from None
+            except _roles.ProviderUnreachable as exc:
+                with contextlib.suppress(Exception):
+                    record["outage_part"] = part_id
+                raise _OutagePaused(str(exc)) from None
             except _roles.ModelTimeout as exc:
                 entry = {
                     "producer_ref": str(producer_ref),
