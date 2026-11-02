@@ -3,7 +3,7 @@
 // doubles are injected into any component under test.
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { FirstRunFlow } from '../FirstRunFlow';
 import { resetLocaleForTests, setLocale } from '../../../locale/index';
@@ -21,6 +21,7 @@ interface SeenCall {
 let seen: SeenCall[] = [];
 let projects: Array<{ project_id: string; name: string; created_at: string }> = [];
 let failTasks = false;
+const connected = new Set<string>();
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -33,6 +34,7 @@ function installFetch(): void {
   seen = [];
   projects = [];
   failTasks = false;
+  connected.clear();
   vi.stubGlobal(
     'fetch',
     async (input: unknown, init?: { method?: string; body?: string }) => {
@@ -45,6 +47,20 @@ function installFetch(): void {
         body = null;
       }
       seen.push({ url, method, body });
+      if (url === '/api/v1/providers' && method === 'GET') {
+        return json({ providers: [...connected].map((provider_id) => ({ provider_id })) });
+      }
+      if (url === '/api/v1/providers/keys' && method === 'POST') {
+        const preset = (body as { preset_id: string }).preset_id;
+        return new Response(
+          JSON.stringify({ key_ref: { secret_id: preset, provider_id: preset } }),
+          { status: 201, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (url === '/api/v1/providers/connect' && method === 'POST') {
+        connected.add((body as { preset_id: string }).preset_id);
+        return json({ provider: { provider_id: (body as { preset_id: string }).preset_id } });
+      }
       if (url === '/api/v1/projects' && method === 'GET') {
         return json({ projects });
       }
@@ -128,9 +144,29 @@ describe('K10FIRSTRUN served first run at the real /firstrun route', () => {
     const router = renderFirstrun();
     expect(await screen.findByText(en.firstrun.title)).toBeTruthy();
 
-    // connectProvider: the step links to the existing providers settings route.
-    const providersLink = screen.getByRole('link', { name: en.settings.models.title });
-    expect(providersLink.getAttribute('href')).toBe('/settings/models');
+    // connectProvider: the Next gate opens only for a served connection.
+    // Connect OpenAI through the real modal with a fake key.
+    expect(
+      (screen.getByRole('button', { name: en.firstrun.next }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    const openaiRow = await screen.findByTestId('firstrun-provider-openai');
+    fireEvent.click(
+      within(openaiRow).getByRole('button', { name: `Connect OpenAI` }),
+    );
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(
+      within(dialog).getByLabelText(en.providers.connect.apiKey),
+      { target: { value: 'fx-fake-key' } },
+    );
+    fireEvent.click(
+      within(dialog).getByRole('button', { name: en.providers.connect.save }),
+    );
+    await waitFor(() => {
+      expect(
+        (screen.getByRole('button', { name: en.firstrun.next }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false);
+    });
     clickNext();
 
     // oneClickTeam: one click provisions the team project plus role profiles.
@@ -179,7 +215,9 @@ describe('K10FIRSTRUN served first run at the real /firstrun route', () => {
 
     // Finished state continues into the app via the route onComplete.
     fireEvent.click(screen.getByRole('button', { name: en.shell.sidebar.chat }));
-    expect(router.state.location.pathname).toBe('/');
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/');
+    });
   });
 
   it('foreign route renders no firstrun evidence', async () => {
@@ -200,7 +238,7 @@ describe('K10FIRSTRUN served first run at the real /firstrun route', () => {
     failTasks = true;
     const router = renderFirstrun();
     expect(await screen.findByText(en.firstrun.title)).toBeTruthy();
-    clickNext();
+    fireEvent.click(screen.getByRole('button', { name: en.firstrun.skip }));
     clickNext();
     clickNext();
     fireEvent.change(
