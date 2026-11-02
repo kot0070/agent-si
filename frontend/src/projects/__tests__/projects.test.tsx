@@ -192,7 +192,7 @@ describe("project views", () => {
         <ProjectView projectId="p-9" view="overview" decisionId="d-9" />
       </ApiClientProvider>,
     );
-    expect((await screen.findByTestId("overview-wall-total")).textContent).toContain("90");
+    expect((await screen.findByTestId("overview-wall-total")).textContent).toContain("1 min 30 s");
     expect((await screen.findByTestId("overview-agents-total")).textContent).toContain("3");
     expect((await screen.findByTestId("overview-task-count")).textContent).toContain("2");
     expect((await screen.findByTestId("overview-package-count")).textContent).toContain("1");
@@ -258,7 +258,7 @@ describe("project views", () => {
         <ProjectView projectId="p-9" view="time" decisionId="d-9" />
       </ApiClientProvider>,
     );
-    expect((await screen.findByTestId("time-wall-total")).textContent).toContain("90");
+    expect((await screen.findByTestId("time-wall-total")).textContent).toContain("1 min 30 s");
     time.unmount();
     cleanup();
 
@@ -311,12 +311,9 @@ describe("project views", () => {
         <ProjectView projectId="p-9" view="tokens" decisionId="d-9" />
       </ApiClientProvider>,
     );
-    expect((await screen.findByTestId("tokens-spent")).textContent).toContain(
-      "10",
-    );
-    expect((await screen.findByTestId("tokens-limit")).textContent).toContain(
-      "100",
-    );
+    expect(await screen.findByText(en.ui.table.empty)).toBeTruthy();
+    expect(screen.queryByTestId("tokens-spent")).toBeNull();
+    expect(screen.queryByTestId("tokens-limit")).toBeNull();
     shown.unmount();
     cleanup();
 
