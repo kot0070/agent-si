@@ -3,7 +3,9 @@
 Licence metadata: MIT Copyright (c) 2026 Ivan Soprun. The full licence text
 ships as [LICENSE](../../LICENSE) at the checkout root and is shown by the
 About screen, which also lists the third-party titles; installer signing is
-out of scope for unsigned 0.1.0.
+out of scope for unsigned 0.1.0. The build ships UNSIGNED (no code-signing
+certificate in this build): expect one Windows SmartScreen warning on first
+launch and verify the file hash before running.
 
 ## What this bundle contains
 
