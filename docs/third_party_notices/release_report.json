@@ -35,13 +35,13 @@
   "demos": [],
   "fixtures": [],
   "goal": {
-    "source": "absent:DIRECTOR/GOAL.md",
-    "text": "absent:DIRECTOR/GOAL.md"
+    "source": "not recorded in this checkout",
+    "text": "not recorded in this checkout"
   },
   "limitations": [
-    "The report dataset is a paper-lane stand-in; no execution telemetry store exists in this worktree yet, so run-level metrics are zero with stated sources, not measurements.",
-    "No acceptance drive has been run on a packaged build yet (lane C).",
-    "Installer metadata and About-screen wiring are pending (lane A)."
+    "The report dataset is a paper stand-in; no execution telemetry store exists in this worktree yet, so run-level metrics are zero with stated sources, not measurements.",
+    "No acceptance drive has been run on a packaged build yet.",
+    "Installer metadata and About-screen wiring are pending."
   ],
   "managers": {
     "count": 0,
@@ -80,8 +80,8 @@
     "used": []
   },
   "next_steps": [
-    "Paper-lane stand-in generated from stored records only (see `metrics` sources inside the file) until the K13 `ReportDatasetBuilder` lands; it must then be replaced by builder output, not edited by hand.",
-    "Installer packaging and About-screen wiring (lane A) and the acceptance drive with the evidence table (lane C) are separate lanes and are not part of this bundle.",
+    "Paper stand-in generated from stored records only (see `metrics` sources inside the file) until the report builder lands; it must then be replaced by builder output, not edited by hand.",
+    "Installer packaging and About-screen wiring and the acceptance drive with the evidence table are separate work items and are not part of this bundle.",
     "When the installer lane vendors runtime dependencies, this file must be regenerated from the lockfiles before release; an empty table must never ship alongside a bundle that contains third-party code."
   ],
   "phases": [
@@ -111,15 +111,15 @@
   },
   "scope": {
     "excluded": [
-      "Installer packaging and About-screen wiring (lane A) and the acceptance drive with the evidence table (lane C) are separate lanes and are not part of this bundle."
+      "Installer packaging and About-screen wiring and the acceptance drive with the evidence table are separate work items and are not part of this bundle."
     ],
     "included": [
       "LICENSE",
       "docs/third_party_notices/NOTICES.md",
       "docs/third_party_notices/RELEASE_NOTES.md"
     ],
-    "lane": "absent:DIRECTOR/TASK_PACKAGES/K10/TASK.md",
-    "source": "absent:DIRECTOR/TASK_PACKAGES/K10/TASK.md"
+    "lane": "not recorded in this checkout",
+    "source": "not recorded in this checkout"
   },
   "splits": {
     "count": 0,

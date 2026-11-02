@@ -1,5 +1,5 @@
-# CODER-1 Heron: K10 lane B paper release-report generator (stdlib only).
-"""CODER-1 Heron: K10 lane B paper release-report generator (stdlib only).
+# Paper release-report generator (stdlib only).
+"""Paper release-report generator (stdlib only).
 
 Builds docs/third_party_notices/release_report.json from real repo files
 plus one real pytest run. Every value is read from disk or measured by a
@@ -10,10 +10,9 @@ the target folder plus os.replace.
 
 Key to source path plus rule:
 - project: README.md title line plus LICENSE copyright line.
-- goal: DIRECTOR/GOAL.md first two text lines after the heading.
-- scope: DIRECTOR/TASK_PACKAGES/K10/TASK.md E5-LANES lane B line for the
-  lane label; included paths verified present on disk; excluded lines
-  taken from the Scope section of RELEASE_NOTES.md.
+- goal: first two text lines of the goal file after the heading.
+- scope: the scope line for this bundle; included paths verified present
+  on disk; excluded lines taken from the Scope section of RELEASE_NOTES.md.
 - architecture: RECORDS/day0/0C_ARCHITECTURE.md read at run time;
   frozen_manifest_sha256 measured from RECORDS/day0/K13_MANIFEST.md.
 - phases: 0A to 0F record files present under RECORDS/day0 plus
@@ -35,10 +34,10 @@ Key to source path plus rule:
 - ab_evidence: A/B store files present under the checked paths.
 - limitations: Known limitations section of RELEASE_NOTES.md plus the
   bundled-components line of NOTICES.md.
-- next_steps: K13 builder line plus lane A and lane C lines taken from
+- next_steps: builder line plus remaining-work lines taken from
   RELEASE_NOTES.md plus the lockfile-regeneration line of NOTICES.md.
-- demos: live-demo plan items read from DIRECTOR/GOAL.md; provenance
-  stays lane-side until the lane C drive measures them.
+- demos: live-demo plan items read from the goal file; provenance
+  stays out of the bundle until a measured drive records them.
 - fixtures: fixture leg names read from the fixture-leg section of
   tools/drive/run_drive.py; provenance read from its FIXTURE_TAG line.
 """

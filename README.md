@@ -11,6 +11,7 @@ It uses connected model providers for the work and keeps every run, decision, an
 - Windows 10 or 11, 64-bit.
 - WebView2 runtime. If it is missing, the app shows a message with the download link and also opens the app in the default browser.
 - No Python install needed. No administrator rights needed. The portable build runs from its own folder.
+- The bundle carries the licence text and the third-party notices; both are also shown on the About screen.
 
 ## Download and verify
 

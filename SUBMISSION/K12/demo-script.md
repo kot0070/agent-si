@@ -1,13 +1,13 @@
 # Demo script — ONE 3-minute 14-function cut (app page only)
 
 Scope (production note, not visitor text): owned file `SUBMISSION/K12/demo-script.md`.
-Frozen refs: FUNCS = `DIRECTOR/FUNCTIONS_CHECKLIST.md` lines 6-19 (F01-F14, all NOT
-STARTED at write time, so every evidence cell is `PENDING-DRIVE`); KIT =
-`kit/BUILD_PLAN.md:1117-1135`; story arc F04 -> F01, F02, F03, F08 -> F05, F06, F07 ->
+Status: the script stays the play record; claim evidence is tracked in
+`SUBMISSION/ANSWERS_DRAFT.md`. Fourteen functions in one cut, all NOT
+STARTED at write time, so every evidence cell is `PENDING-DRIVE`; story
+arc F04 -> F01, F02, F03, F08 -> F05, F06, F07 ->
 F10 -> F12 -> F09, F11 -> F13, F14. Total 174s (<=180s). Click labels are the
-default-locale strings as rendered (see `frontend/src/locale/en.json:1`), each
-verified by a `t("...")` use in `frontend/src` (hits listed in
-`_task/K12DEMO3/CODER_RETURN.md`). Voice-over lines are Ukrainian and number-free.
+default-locale strings as rendered, each
+verified by a `t("...")` use in `frontend/src`. Voice-over lines are Ukrainian and number-free.
 
 | seconds (start-end) | function # | clicks (page + control label) | on-screen | proves | voice-over | evidence |
 |---|---|---|---|---|---|---|
