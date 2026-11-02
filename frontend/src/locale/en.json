@@ -375,7 +375,8 @@
       "stop_clear": "Clear",
       "noProject": "No project yet",
       "langEn": "English",
-      "langUk": "Українська"
+      "langUk": "Українська",
+      "stop_all_idle": "No runs active"
     },
     "sidebar": {
       "chat": "Chat",

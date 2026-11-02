@@ -375,7 +375,8 @@
       "stop_clear": "Очистити",
       "noProject": "Проєкту поки що немає.",
       "langEn": "English",
-      "langUk": "Українська"
+      "langUk": "Українська",
+      "stop_all_idle": "Немає активних запусків"
     },
     "sidebar": {
       "chat": "Чат",

@@ -6,7 +6,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { HttpApiClient } from "../../api/client";
 import { ApiClientProvider } from "../../app/ApiClientProvider";
-import { resetLocaleForTests, setLocale } from "../../locale/index";
+import { resetLocaleForTests, setLocale, t } from "../../locale/index";
 import { App } from "../../app/App";
 import { dedupeLiveRows } from "../viewsApi";
 
@@ -225,12 +225,15 @@ describe("fxtabs tabs", () => {
     expect(toggle.textContent).toMatch(/темна|світла/);
   });
 
-  it("T10 stop-all is quiet when idle and clickable", async () => {
+  it("T10 stop-all is quiet and disabled with a reason when idle", async () => {
     vi.unstubAllGlobals();
     stubFetch([]);
     renderAppAt("/projects/p9/overview");
     const stop = await screen.findByTestId("topbar-stop-all");
-    expect((stop as HTMLButtonElement).disabled).toBe(false);
+    await waitFor(() => {
+      expect((stop as HTMLButtonElement).disabled).toBe(true);
+    });
+    expect(stop.getAttribute("title")).toBe(t("shell.topbar.stop_all_idle"));
     expect(stop.className).not.toMatch(/danger/);
     expect(stop.className).toMatch(/quiet/);
   });
@@ -241,6 +244,7 @@ describe("fxtabs tabs", () => {
     await waitFor(() => {
       expect(stop.className).toMatch(/danger/);
     });
+    expect((stop as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("T5-D1 no glued Queued2 after runs ended, and tokens tab counts", async () => {
