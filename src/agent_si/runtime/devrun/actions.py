@@ -105,6 +105,32 @@ def jail_abs(folder: str, raw: str) -> str:
     return candidate
 
 
+def describe_binary(folder: str, path: str) -> str:
+    """One-line binary marker for one jailed file; contents never returned.
+
+    Reads ``"<folder>/<path>"`` as bytes only to count and hash it, and
+    reports ``"binary file, N bytes, sha256 <hex>"``. Missing or
+    unreadable files refuse exactly like read_file; secret-class files
+    are never described (the kind refusal wins first).
+    """
+    target = jail_abs(folder, path)
+    secret = _secret_class(os.path.basename(target))
+    if secret:
+        raise ActionRefused("refused: %s are never returned" % (secret,))
+    digest = hashlib.sha256()
+    size = 0
+    try:
+        with open(target, "rb") as handle:
+            for chunk in iter(lambda: handle.read(65536), b""):
+                digest.update(chunk)
+                size += len(chunk)
+    except FileNotFoundError:
+        raise ActionRefused("refused: no such file %r" % (path,)) from None
+    except OSError as exc:
+        raise ActionRefused("refused: cannot read: %s" % (exc,)) from None
+    return "binary file, %d bytes, sha256 %s" % (size, digest.hexdigest())
+
+
 def read_file(folder: str, path: str) -> str:
     """Read one jailed file; caps 256 KiB and 2000 lines."""
     target = jail_abs(folder, path)
