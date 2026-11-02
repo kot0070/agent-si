@@ -3915,6 +3915,98 @@ def create_app(settings: Any = None,
                 _demof13w_list_project),
         }
 
+    # FXASKB B3: one journal row per recorded chat answer. The A2 decide
+    # route records an install allow/deny per tool, which never fits an
+    # answer accept/reject, so this route posts the row instead.
+    _FXASKB_CHAT_DECISION_ROUTE = "/api/v1/chat/decision"
+    _FXASKB_CHAT_DECISION_VALUES = ("accepted", "rejected", "recorded")
+
+    @app.post(_FXASKB_CHAT_DECISION_ROUTE)
+    async def _fxaskb_chat_decision(
+            request: Request) -> dict[str, Any]:
+        try:
+            _fxaskb_body = await request.json()
+        except Exception:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "BAD_JSON_BODY",
+                        "message": "chat decision needs a JSON body"}
+            ) from None
+        _fxaskb_token = request.headers.get("x-ui-session-token")
+        if not isinstance(_fxaskb_token, str) or not _fxaskb_token:
+            _fxaskb_body_token = (
+                _fxaskb_body.get("session_token")
+                if isinstance(_fxaskb_body, dict) else None)
+            if (isinstance(_fxaskb_body_token, str)
+                    and _fxaskb_body_token):
+                _fxaskb_token = _fxaskb_body_token
+            else:
+                raise HTTPException(
+                    status_code=401,
+                    detail={
+                        "code": "SESSION_TOKEN_MISSING",
+                        "message": "chat decision needs a live session token",
+                    },
+                )
+        if not _k08_token_live(_fxaskb_token):
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "SESSION_TOKEN_INVALID",
+                    "message": "unknown session token",
+                },
+            )
+        if _k08_rate is not None:
+            try:
+                _fxaskb_rate_ok = bool(_k08_rate(_fxaskb_token))
+            except Exception:
+                _fxaskb_rate_ok = False
+            if not _fxaskb_rate_ok:
+                raise HTTPException(
+                    status_code=429,
+                    detail={
+                        "code": "RATE_LIMITED",
+                        "message": "rate hook refused",
+                    },
+                )
+        try:
+            _fxaskb_project = (
+                _demof13w_permissions.require_project_id(_fxaskb_body))
+        except _demof13w_permissions.PermissionCheckError as exc:
+            raise HTTPException(
+                status_code=exc.status,
+                detail={"code": exc.code,
+                        "message": str(exc)}) from None
+        _fxaskb_decision = (
+            _fxaskb_body.get("decision")
+            if isinstance(_fxaskb_body, dict) else None)
+        if _fxaskb_decision not in _FXASKB_CHAT_DECISION_VALUES:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "FXASKB_DECISION_INVALID",
+                        "message": ("chat decision needs one of accepted, "
+                                    "rejected, recorded")},
+            )
+        _fxaskb_proposal = (
+            _fxaskb_body.get("proposal")
+            if isinstance(_fxaskb_body, dict) else None)
+        _fxaskb_proposal_text = (
+            str(_fxaskb_proposal)[:500]
+            if isinstance(_fxaskb_proposal, str) else "")
+        _fxaskb_summary = "CHAT_DECISION decision=%s" % (_fxaskb_decision,)
+        if _fxaskb_proposal_text:
+            _fxaskb_summary += " proposal=%s" % (_fxaskb_proposal_text,)
+        from agent_si.watcher import journal as _fxaskb_journal
+        _fxaskb_receipt = _fxaskb_journal.append_event(
+            _fxaskb_project, "chat", "WATCH_DECISION", _fxaskb_summary,
+            (_fxaskb_project,))
+        return {
+            "ok": True,
+            "project_id": _fxaskb_project,
+            "decision": _fxaskb_decision,
+            "time": _fxaskb_receipt.timestamp,
+        }
+
     @app.post(_demof13w_catalog.CATALOG_RUN_ROUTE)
     async def _demof13w_catalog_run(
             request: Request) -> dict[str, Any]:

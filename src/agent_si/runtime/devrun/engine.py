@@ -32,6 +32,18 @@ class _BudgetOut(Exception):
     code: str = "DEVRUN_BUDGET_STOP"
 
 
+class _InstallHeld(Exception):
+    """An install ask holds the run: status line plus terminal approval."""
+
+    code: str = "DEVRUN_INSTALL_ASK_NEEDED"
+
+    def __init__(self, tool_id: str, command: str) -> None:
+        super().__init__(
+            "run held: install permission needed for %s" % (tool_id,))
+        self.tool_id = str(tool_id)
+        self.command = str(command)
+
+
 #: Extra worker attempts after the first, per F-VERDICT.
 _EXTRA_ATTEMPTS = 2
 
@@ -155,7 +167,7 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
     """Stream one autonomous dev run as RunEvents (F-ENTRY).
 
     A generator: start, human progress deltas, then exactly one
-    terminal event (done, cancelled or budget_stop).
+    terminal event (done, cancelled, budget_stop or approval).
     """
     from agent_si.runtime.devrun import actions as _actions
     from agent_si.runtime.devrun import protocol as _protocol
@@ -491,6 +503,30 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         turn += 1
         yield _run_event("budget_stop", turn, task_id, stop_text,
                          {"run_id": run_id})
+    except _InstallHeld as exc:
+        record["success"] = False
+        record["summary"] = ("run held: install permission needed for %s"
+                             % (exc.tool_id,))
+        _publish()
+        if not record.get("stopped"):
+            record["run_end"] = _run_end_tests(
+                project_id=project, run_id=run_id, task_id=task_id)
+        _journal("DEVRUN_END", record.get("summary") or "run ended")
+        status = "Needs your permission to install: %s" % (exc.command,)
+        yield _run_event("delta", turn, task_id, status,
+                         {"run_id": run_id})
+        turn += 1
+        yield _run_event("delta", turn, task_id,
+                         _ledger_total_line(record),
+                         {"run_id": run_id})
+        turn += 1
+        yield _run_event("delta", turn, task_id, record["summary"],
+                         {"run_id": run_id,
+                          "success": bool(record.get("success"))})
+        turn += 1
+        yield _run_event("approval", turn, task_id, status,
+                         {"run_id": run_id, "tool_id": exc.tool_id,
+                          "reason": record["summary"]})
     except GeneratorExit:
         for proc in procs:
             with contextlib.suppress(Exception):
@@ -982,7 +1018,11 @@ def _run_agent_command(*, record: Any, folder: str, project: str,
                        run_id: str, argv: list, state: Any,
                        procs: list, attached: Any = None,
                        stop_seen: Any = None) -> str:
-    """Run one worker command; refusals and failures return as text."""
+    """Run one worker command; refusals and failures return as text.
+
+    An install-class command with no recorded decision raises
+    _InstallHeld (the run ends as held, never as run text).
+    """
     from agent_si.runtime.devrun import actions as _actions
 
     log_dir = os.path.join(str(folder), ".devrun", "agent")
@@ -996,6 +1036,8 @@ def _run_agent_command(*, record: Any, folder: str, project: str,
     try:
         spawn = _actions.spawn_checked(
             project, run_id, folder, argv, log_path, log_rel)
+    except _actions.InstallAskNeeded as exc:
+        raise _InstallHeld(exc.tool_id, " ".join(argv)) from None
     except (PermissionError, ValueError) as exc:
         return "run %s: %s" % (" ".join(argv), exc)
     proc = spawn.get("proc")

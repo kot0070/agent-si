@@ -408,11 +408,14 @@ def invoke(
     part: Any = None,
     attempt: int = 0,
 ) -> Any:
-    """One model call: charge, ledger, budget-cap stop signal.
+    """One model call: charge with a per-call id, ledger, budget-cap stop.
 
-    Returns (response, over_cap): over_cap is True only when the
-    call's own cost exceeds the remaining budget. A reached
-    provider cap or hard limit raises _BudgetOut before the call.
+    The charge id is the run id plus "-c" plus the ledger sequence
+    number, so every call settles its own reservation; repeating the
+    same call id is refused by the gate like any duplicate. The plain
+    manager path is unchanged. Returns (response, over_cap): over_cap
+    is True only when the call's own cost exceeds the remaining budget.
+    A reached provider cap or hard limit raises _BudgetOut before call.
     """
     provider = str(resolution["provider"])
     model = str(resolution["model"])
@@ -424,8 +427,14 @@ def invoke(
     cost: Any = None
     try:
         from agent_si.runtime import manager as _manager
+        try:
+            seq = len(record.get("ledger", []) or []) if isinstance(
+                record, dict) else 0
+        except Exception:
+            seq = 0
+        call_id = "%s-c%d" % (run_id, int(seq) + 1)
         cost = _manager._charge_budget_gate(
-            str(project_id), provider, model, usage, str(run_id))
+            str(project_id), provider, model, usage, str(call_id))
     except Exception:
         cost = None
     try:
