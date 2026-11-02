@@ -462,14 +462,17 @@ export function ConnectDialog({
               />{" "}
               <span>{row.label}</span>{" "}
               <small data-testid={`connect-model-id-${row.id}`}>{row.id}</small>{" "}
-              <span data-testid={`connect-model-price-${row.id}`}>
+              <span data-testid={`connect-model-price-${row.id}`} data-variant="quiet">
                 {modelPriceText(row.kb, row.price)}
               </span>
-              {row.kbKnown === false ? (
-                <span data-testid={`connect-model-kb-${row.id}`}>
-                  {" "}not in capability base
-                </span>
-              ) : null}
+              {" · "}
+              <span data-testid={`connect-model-kb-${row.id}`} data-variant="quiet">
+                {row.kbKnown === false
+                  ? "not in capability base"
+                  : row.kbKnown === true
+                    ? "in capability base"
+                    : "capability unknown"}
+              </span>
             </li>
           ))}
         </ul>

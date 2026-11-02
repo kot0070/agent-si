@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { ApiClientProvider } from "../../app/ApiClientProvider";
 import { FakeApiClient } from "../../api/__tests__/fakeApiClient";
+import type { PartRow } from "../../api/iface";
 import { ENDPOINTS } from "../../api/endpoints";
 import { App } from "../../app/App";
 import { SettingsLayout } from "../../shell/SettingsLayout";
@@ -133,8 +134,8 @@ function renderAppAt(route: string): void {
       client={
         new FakeApiClient({
           liveRows: [
-            { agent: "agent-1", scope: "scope-1", deliverable: "part-1", status: "RUNNING", placement: "LOCAL" },
-            { agent: "agent-2", scope: "scope-2", deliverable: "part-2", status: "QUEUED", placement: "CLOUD" },
+            { agent: "agent-1", scope: "scope-1", deliverable: "part-1", status: "RUNNING", placement: "LOCAL" } as PartRow,
+            { agent: "agent-2", scope: "scope-2", deliverable: "part-2", status: "QUEUED", placement: "CLOUD" } as PartRow,
           ],
         })
       }

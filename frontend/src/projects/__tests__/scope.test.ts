@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { ApiClientProvider } from "../../app/ApiClientProvider";
 import { FakeApiClient } from "../../api/__tests__/fakeApiClient";
+import type { PartRow } from "../../api/iface";
 import { resetLocaleForTests, setLocale } from "../../locale/index";
 import { ProjectView } from "../ProjectView";
 import { classifyScope } from "../scope";
@@ -80,7 +81,7 @@ describe.each([false, true])("scope labels on the served page (dark=%s)", (dark)
           deliverable: "d-1",
           status: "RUNNING",
           placement: "LOCAL",
-        },
+        } as PartRow,
       ],
     });
     render(

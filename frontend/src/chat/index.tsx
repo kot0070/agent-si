@@ -510,6 +510,51 @@ async function loadHistoryOnce(key: string, projectId: string): Promise<string |
   }
 }
 
+/** FXCOPY: quiet clipboard copy (Ctrl+C path untouched, no UI noise). */
+function copyQuiet(text: string): void {
+  try {
+    const nav = navigator as Navigator & {
+      clipboard?: { writeText(value: string): Promise<void> };
+    };
+    if (nav.clipboard !== undefined) {
+      void nav.clipboard.writeText(text).catch(() => undefined);
+      return;
+    }
+  } catch {
+    return;
+  }
+  try {
+    const area = document.createElement("textarea");
+    area.value = text;
+    document.body.appendChild(area);
+    area.select();
+    document.execCommand("copy");
+    document.body.removeChild(area);
+  } catch {
+    return;
+  }
+}
+
+/** FXCOPY: inline copy glyph (icon-only: no locale text node rendered). */
+function CopyGlyph(): ReactElement {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="14"
+      height="14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      aria-hidden="true"
+      focusable="false"
+      className="fx-icon"
+    >
+      <rect x="9" y="9" width="12" height="12" rx="2" />
+      <path d="M5 15V5a2 2 0 0 1 2-2h10" />
+    </svg>
+  );
+}
+
 /** Bubble timestamps read time-only ("14:32"), never the date. */
 function formatChatTime(at: number): string {
   try {
@@ -1437,6 +1482,22 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
               }
             >
               <p style={{ whiteSpace: "pre-wrap" }}>{message.text}</p>
+              {message.role === "assistant" &&
+              message.final &&
+              message.text !== "" ? (
+                <button
+                  type="button"
+                  data-testid="chat-copy"
+                  className="fx-btn-quiet"
+                  title={pt("chat.message.copy", "Copy")}
+                  aria-label={pt("chat.message.copy", "Copy")}
+                  onClick={() => {
+                    copyQuiet(message.text);
+                  }}
+                >
+                  <CopyGlyph />
+                </button>
+              ) : null}
               <time
                 data-testid="chat-timestamp"
                 title={t("chat.stream.timestamp")}
