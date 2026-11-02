@@ -174,11 +174,44 @@ export function patchChatMessage(
   emit(projectId);
 }
 
+// FXUIB-B5: app-level "any stream running" signal for the closing
+// guard. Bumped on every runner transition; read cheaply.
+let runnerVersion = 0;
+const runnerListeners = new Set<() => void>();
+
+export function subscribeAnyChatRunner(notify: () => void): () => void {
+  runnerListeners.add(notify);
+  return () => {
+    runnerListeners.delete(notify);
+  };
+}
+
+export function isAnyChatStreaming(): boolean {
+  for (const state of states.values()) {
+    if (state.runner.streaming) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// FXUIB-B5: app-level closing-guard signal: true while any slice streams.
+export function useAnyChatStreaming(): boolean {
+  return useSyncExternalStore(
+    subscribeAnyChatRunner,
+    isAnyChatStreaming,
+  );
+}
+
 export function setChatRunner(
   projectId: string,
   runner: ChatRunnerSnapshot,
 ): void {
   stateFor(projectId).runner = { ...runner };
+  runnerVersion += 1;
+  for (const notify of [...runnerListeners]) {
+    notify();
+  }
   emit(projectId);
 }
 

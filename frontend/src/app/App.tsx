@@ -98,6 +98,7 @@ export const CHAT_TAB_ROUTE_PATH = "/projects/:projectId/chat";
 const ChatAreaView = lazy(() =>
   import("../chat/index").then((module) => ({ default: module.ChatArea })),
 );
+import { useAnyChatStreaming } from "../chat/chatStore";
 const AgentsLiveView = lazy(() =>
   import("../agents/AgentsLive").then((module) => ({
     default: module.AgentsLive,
@@ -692,6 +693,9 @@ function FirstRunRoute(props: {
 function AppShellInner(): ReactElement {
   const current = useCurrentProject();
   const projectId = current.projectId;
+  // FXUIB-B5: the guard arms while any chat stream runs (the existing
+  // window-closed wording names the reason).
+  const chatStreaming = useAnyChatStreaming();
   const [chatPrefill, setChatPrefill] = useState<string | null>(null);
   const [chatOneShot, setChatOneShot] = useState<{
     projectId: string;
@@ -705,7 +709,7 @@ function AppShellInner(): ReactElement {
       <TopBar projectId={projectId} />
       <Sidebar projectId={projectId} />
       <main data-testid="app-main">
-        <ClosingGuard armed={false} confirmKey="shell.closing.confirm">
+        <ClosingGuard armed={chatStreaming} confirmKey="shell.closing.confirm">
           <Suspense
             fallback={<LoadingState loadingKey="ui.loading.more" />}
           >
