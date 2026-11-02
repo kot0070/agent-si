@@ -14,7 +14,7 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Tuple
 
 from . import types as T
-from .kb_port import KbModelFacts, KbReader
+from .kb_port import KbModelFacts, KbReader, facts_prove_non_text
 from .telemetry_port import TelemetryEmitter, routing_event
 from agent_si.context_keeper.register import DevelopmentBindingScopeError
 from agent_si.context_keeper.register import check_development_binding_use
@@ -329,6 +329,15 @@ def _evaluate(request: RoutingRequest, deps: RoutingDeps,
     required = set(request.required_capabilities or ()) | set(request.required_modalities or ())
     provider_caps = tuple((deps.provider_capabilities or {}).get(candidate.provider, ()))
     effective = _effective_caps(provider_caps, ev.facts)
+
+    # Text/tools-only gate: a candidate whose KB facts prove image,
+    # audio or embedding (or known modalities without text) is never
+    # offered or chosen — a pinned one gets this plain refusal too.
+    if facts_prove_non_text(ev.facts):
+        return fail("HARD_CAPABILITY_FILTER",
+                    "not a text/tools model: %s/%s proves non-text "
+                    "modalities (image/audio/embedding are never offered)"
+                    % (candidate.provider, candidate.model))
 
     # Step 1 — hard capability: effective = provider x model (section 34A).
     if effective is None:

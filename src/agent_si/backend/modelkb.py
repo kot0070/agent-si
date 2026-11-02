@@ -89,6 +89,11 @@ _STAGED_PROPOSALS = {}
 _STAGED_COUNTER = 0
 _STAGED_LOCK = threading.Lock()
 
+#: Proposal ids already applied (one-shot): a repeated apply answers
+#: 200 applied:false "already applied" instead of failing, so a
+#: double-click never shows a fallback error code.
+_APPLIED_PROPOSALS: Dict[str, Dict[str, Any]] = {}
+
 
 def stage_proposal(proposal):
     """Stage a proposal for the user-confirm path; returns proposal_id.
@@ -172,6 +177,13 @@ def apply_proposal(proposal_id: str,
     except Exception:
         pass
     del _STAGED_PROPOSALS[proposal_id]
+    _APPLIED_PROPOSALS[proposal_id] = {
+        "proposal_id": proposal_id,
+        "applied": result["applied"],
+        "version": result["version"],
+        "cost_state": result["cost_state"],
+        "metric": result["metric"],
+    }
     return {"proposal_id": proposal_id, "applied": result["applied"],
             "version": result["version"],
             "cost_state": result["cost_state"], "metric": result["metric"]}
@@ -196,6 +208,12 @@ def kb_status(ctx, query, body):
 def kb_proposal_apply(ctx, query, body):
     """POST /api/v1/kb/proposals/apply: staged proposal, approval only."""
     payload = body or {}
+    proposal_id = payload.get("proposal_id")
+    if isinstance(proposal_id, str) and proposal_id in _APPLIED_PROPOSALS:
+        done = dict(_APPLIED_PROPOSALS[proposal_id])
+        done["applied"] = False
+        done["reason"] = "already applied"
+        return 200, done
     try:
         return 200, apply_proposal(payload.get("proposal_id"),
                                    payload.get("approved_by_user", False))
@@ -206,7 +224,8 @@ def kb_proposal_apply(ctx, query, body):
         return 400, {"error": str(exc), "code": "KB_VALIDATION_FAILED"}
     except KeyError as exc:
         return 404, {"error": "unknown proposal_id: %s" % (
-            exc.args[0] if exc.args else exc,)}
+            exc.args[0] if exc.args else exc,),
+            "code": "KB_VALIDATION_FAILED"}
 
 
 ROUTES = (

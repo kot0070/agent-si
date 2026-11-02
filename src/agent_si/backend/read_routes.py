@@ -257,6 +257,17 @@ def register_read_routes(app: Any) -> Any:
 
     @app.post("/api/v1/teststage/local-tests")
     async def k03ver2_set_local_tests(request: Request) -> dict:
+        actor = (request.headers.get("x-actor") or "").strip()
+        if not actor:
+            raise HTTPException(
+                status_code=401, detail="missing x-actor header")
+        token = request.headers.get("x-ui-session-token")
+        try:
+            allowed = bool(app.state.auth_hook(token, actor, "USER_WRITE"))
+        except Exception:
+            allowed = False
+        if not allowed:
+            raise HTTPException(status_code=403, detail="forbidden")
         try:
             body = await request.json()
         except Exception:
