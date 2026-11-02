@@ -8,6 +8,9 @@ Each entry is a message the app actually shows. Follow the fix next to it.
 - `Connect failed: Save failed.` The local reference write failed. Restart the app and save once more.
 - `Connect failed: KEY_SAVE_TIMEOUT (status 504).` The server key save timed out. Retry once. (Error panels elsewhere word the same condition as `Saving the key timed out.`.)
 - `Connect failed: {code} (status {status}).` The provider refused the connection. Check the key, the network, and the provider status, then retry.
+- `The provider refused this key. Paste the full key again.` The key is wrong or truncated. Nothing was stored — paste the full key, press Check, then Save.
+- `Could not reach the provider.` The provider did not answer the key check. Check the network and the provider status, then press Check again.
+- `Key checked. Save to connect.` The Check step passed, not an error: Save is now enabled — press it to connect.
 - `This key does not match the expected format.` A pre-save warning only; Save still works. Check for extra spaces or a truncated paste, then save.
 - `Refused: preset mismatch for {id}.` The dialog's provider row changed while it was open. Close it and open Connect on the matching provider again.
 - `Refused: no model for preset {id}.` The provider row has no model to connect with. Pick a row with a model and connect again.
@@ -34,7 +37,7 @@ Each entry is a message the app actually shows. Follow the fix next to it.
 
 ## Code tests
 
-- `has no python interpreter: install Python or set AGENT_SI_PYTHON to a python executable` (shown with the test id and folder). Install a real Python on PATH, or point `AGENT_SI_PYTHON` at one. On Windows, a `python` that only opens the Microsoft Store is not enough.
+- `has no python interpreter: install Python or set AGENT_SI_PYTHON to a python executable` (shown with the test id and folder). Install a real Python on PATH, or point `AGENT_SI_PYTHON` at one. On Windows, a `python` that only opens the Microsoft Store never counts (the `py` launcher is tried instead); worker runs word a missing tool as `could not start: {tool} is not installed`.
 
 ## Folders and permissions
 
