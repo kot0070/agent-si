@@ -578,6 +578,22 @@ class ManagerSdkBridge:
             "connectHref": "/providers",
         })
 
+    @staticmethod
+    def _chat_folder_label(path: str) -> str:
+        """Chat-facing folder name: base name only, never a host path.
+
+        FXGAPT (laptop-B 01/05/17): chat text must name the folder,
+        never a host absolute path (no drive prefix, no user name).
+        Empty/blank resolves to the generic "project folder".
+        Work-only values (run jail, tool cwd, stored records) keep
+        using the absolute path; only display strings go through here.
+        """
+        try:
+            name = os.path.basename(str(path or "").rstrip("\\/"))
+        except Exception:
+            name = ""
+        return name or "project folder"
+
     def _devrun_folder(
         self, app: Any, project: str, folder: str
     ) -> tuple:
@@ -610,21 +626,21 @@ class ManagerSdkBridge:
             if os.path.isdir(candidate):
                 return candidate, None
             return "", ("project folder not found: %s; "
-                        "choose in Projects" % (candidate,))
+                        "choose in Projects" % (self._chat_folder_label(candidate),))
         data_dir = getattr(getattr(app, "state", None), "data_dir", None)
         if not data_dir:
             return "", ("project folder not found: %s; "
-                        "choose in Projects" % (candidate,))
+                        "choose in Projects" % (self._chat_folder_label(candidate),))
         managed = os.path.join(
             str(data_dir), "workspaces", str(project))
         try:
             os.makedirs(managed, exist_ok=True)
         except Exception:
             return "", ("project folder not found: %s; "
-                        "choose in Projects" % (candidate,))
+                        "choose in Projects" % (self._chat_folder_label(candidate),))
         if not os.path.isdir(managed):
             return "", ("project folder not found: %s; "
-                        "choose in Projects" % (candidate,))
+                        "choose in Projects" % (self._chat_folder_label(candidate),))
         return managed, None
 
     def _devrun_entry(
@@ -691,7 +707,7 @@ class ManagerSdkBridge:
                 return None
         except Exception:
             return None
-        working = "Working folder: %s\n" % (resolved,)
+        working = "Working folder: %s\n" % (self._chat_folder_label(resolved),)
         project_key = str(getattr(request, "project", "") or "")
 
         def _entry(dev_request: ChatStreamRequest, **kwargs: Any) -> Any:

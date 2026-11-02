@@ -380,7 +380,10 @@ def test_s1b_absolute_missing_folder_honest(tmp_path):
     events = _parse_sse(resp.text)
     text = _all_text(events).lower()
     assert "project folder not found" in text, text
-    assert missing.lower() in text, text
+    # FXGAPT path-label fix: the honest line names the folder, never
+    # the host absolute path.
+    assert os.path.basename(missing).lower() in text, text
+    assert missing.lower() not in text, text
     assert "choose in projects" in text, text
     assert factory.spy == [], "engine never ran for a missing folder"
     # FXOPEN O6 (SH-05): the send refuses with the reason, never green.
