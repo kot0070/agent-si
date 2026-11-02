@@ -33,11 +33,25 @@ def test_splash_uk_and_first_start_gating():
 
 
 def test_failure_page_keeps_fields_and_escapes():
-    html = sidecar._failure_html("<b>&\"x\"", "/tmp/logs here")
+    html = sidecar._failure_html("<b>&\"x\"", "/tmp/logs here", lang="en")
     assert "&lt;b&gt;" in html and "&amp;" in html and "&quot;" in html
     assert "<b>" not in html
     assert "Log files:" in html or "logs" in html.lower()
     assert "Next step" in html or "next step" in html.lower()
+
+
+def test_frozen_asset_ref_resolves_inside_bundle(monkeypatch, tmp_path):
+    meipass = tmp_path / "meipass"
+    (meipass / "assets").mkdir(parents=True)
+    src = os.path.join(_ROOT, "src", "agent_si", "assets", "icon.ico")
+    import shutil
+
+    shutil.copyfile(src, meipass / "assets" / "icon.ico")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "_MEIPASS", str(meipass), raising=False)
+    assert sidecar._asset_ref("icon.ico") == str(
+        meipass / "assets" / "icon.ico")
+    assert os.path.isfile(sidecar._asset_ref("icon.ico"))
 
 
 def test_icon_bundle_sizes_and_spec_and_frozen():
