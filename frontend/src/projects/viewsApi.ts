@@ -399,6 +399,9 @@ const DevrunRunSchema = z.object({
   run_id: z.string(),
   start: z.string(),
   end: z.string(),
+  // FXR2B: short per-run title (first 80 chars of the user task),
+  // served on the runs row so the UI shows it instead of a hash.
+  title: z.string().optional(),
   parts: z.array(DevrunPartSchema),
   verdicts: z.record(z.string(), z.union([z.string(), z.null()])),
   tokens: z.union([z.number().int(), z.literal("UNKNOWN")]),
