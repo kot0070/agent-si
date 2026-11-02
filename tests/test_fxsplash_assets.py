@@ -41,6 +41,14 @@ def test_failure_page_keeps_fields_and_escapes():
     assert "Next step" in html or "next step" in html.lower()
 
 
+def test_mark_svg_has_no_font_dependency():
+    svg = Path(
+        _ROOT, "src", "agent_si", "assets", "mark.svg").read_text(
+        encoding="utf-8")
+    assert "<text" not in svg
+    assert "stroke-linecap" in svg
+
+
 def test_frozen_asset_ref_resolves_inside_bundle(monkeypatch, tmp_path):
     meipass = tmp_path / "meipass"
     (meipass / "assets").mkdir(parents=True)

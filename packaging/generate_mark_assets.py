@@ -4,15 +4,16 @@
 Stdlib only (struct + zlib): no Pillow, no network, no extra tool.
 The SVG is the vector source of truth; this script mirrors its geometry
 (outer rounded square #161b22 + #30363d border, inner square #0d1117,
-blue #2f81f7 "SI" strokes with round caps, small blue bar) in a tiny
-software rasterizer with 2x supersampling, then writes:
+heavy blue #2f81f7 "SI" strokes with round caps at ~47% of icon height,
+small blue bar) in a tiny software rasterizer with 2x supersampling.
+
+Sizes 16/24/32 get their own simplified, pixel-aligned drawing (no inner
+square, no bar: just bold SI on the dark rounded square) so the letters
+stay readable at real size. Emits:
 
   src/agent_si/assets/icon.ico   (PNG-compressed entries 16/24/32/48/64/128/256)
   src/agent_si/assets/mark_256.png
-
-16 px stays readable: strokes are chunky with round caps and the bar is
-kept; verify with the upscaled preview this script can also emit
-(see --preview out.png, nearest-neighbour x8 of the 16 px entry).
+  --preview out.png              (dark + light strips, every size at REAL pixels)
 """
 from __future__ import annotations
 
@@ -31,18 +32,20 @@ INNER_FILL = (13, 17, 23, 255)  # #0d1117
 BLUE = (47, 129, 247, 255)  # #2f81f7
 
 SIZES = (16, 24, 32, 48, 64, 128, 256)
+SMALL_SIZES = (16, 24, 32)
 
 # "SI" strokes in 256-space (mirrors mark.svg path data).
-_S_UPPER = ((138.0, 104.0), (122.0, 104.0), (112.0, 111.0), (112.0, 121.0))
-_S_MID = ((112.0, 121.0), (112.0, 137.0), (144.0, 134.0), (144.0, 151.0))
-_S_LOWER = ((144.0, 151.0), (144.0, 161.0), (134.0, 168.0), (120.0, 168.0))
-_S_TAIL = ((120.0, 168.0), (111.0, 168.0), (103.0, 165.0), (98.0, 160.0))
-_I_SEG = ((162.0, 104.0), (162.0, 168.0))
-_STROKE_W = 17.0
-_BAR = (112.0, 184.0, 48.0, 11.0, 5.5)  # x, y, w, h, r
+_S_UPPER = ((148.0, 62.0), (120.0, 62.0), (98.0, 76.0), (98.0, 102.0))
+_S_MID = ((98.0, 102.0), (98.0, 130.0), (148.0, 120.0), (148.0, 148.0))
+_S_LOWER = ((148.0, 148.0), (148.0, 170.0), (128.0, 182.0), (102.0, 182.0))
+_S_TAIL = ((102.0, 182.0), (92.0, 182.0), (84.0, 178.0), (78.0, 172.0))
+_I_SEG = ((178.0, 62.0), (178.0, 182.0))
+_STROKE_W = 24.0
+_BAR = (104.0, 196.0, 48.0, 10.0, 5.0)  # x, y, w, h, r
+_INNER = (46.0, 46.0, 164.0, 164.0, 38.0)  # x, y, w, h, r
 
 
-def _cubic(p0, c1, c2, p1, n=16):
+def _cubic(p0, c1, c2, p1, n=20):
     pts = []
     for i in range(n + 1):
         t = i / n
@@ -60,6 +63,17 @@ def _si_polyline():
     for seg in (_S_UPPER, _S_MID, _S_LOWER, _S_TAIL):
         pts.extend(_cubic(*seg))
     return pts
+
+_SI_SEGS_256 = None
+
+
+def _si_segs():
+    global _SI_SEGS_256
+    if _SI_SEGS_256 is None:
+        poly = _si_polyline()
+        _SI_SEGS_256 = ([(poly[i], poly[i + 1]) for i in range(len(poly) - 1)]
+                        + [_I_SEG])
+    return _SI_SEGS_256
 
 
 def _in_rounded_rect(px, py, x, y, w, h, r):
@@ -80,28 +94,52 @@ def _dist_seg(px, py, ax, ay, bx, by):
     return ((px - (ax + t * dx)) ** 2 + (py - (ay + t * dy)) ** 2) ** 0.5
 
 
-def _render(size, ss=2):
-    w = size * ss
+def _render(size, ss=2, simple=False):
+    """Render one size. simple=True: pixel-aligned tiny drawing."""
+    import array as _arr
+
     k = 256.0 / size  # target-pixel space -> 256 design space
-    s_poly = _si_polyline()
-    segs = [(s_poly[i], s_poly[i + 1]) for i in range(len(s_poly) - 1)]
-    segs.append(_I_SEG)
-    rad = _STROKE_W / 2.0
-    bx, by, bw, bh, br = _BAR
+    if simple:
+        # Own simple drawing: snapped SI, no inner square, no bar.
+        ksmall = size / 256.0
+        segs = [((round(ax * ksmall), round(ay * ksmall)),
+                 (round(bx * ksmall), round(by * ksmall)))
+                for (ax, ay), (bx, by) in _si_segs()]
+        rad = max(2, round(size * 30 / 256)) / 2.0
+        bw = 1 if size <= 24 else 2
+        rr = round(size * 54 / 256)
+    else:
+        segs = _si_segs()
+        rad = _STROKE_W / 2.0
+    bx, by, bw_, bh, br = _BAR
+    ix, iy, iw, ih, ir = _INNER
 
     def pixel(x, y):
+        if simple:
+            px = (x + 0.5) / ss
+            py = (y + 0.5) / ss
+            if not _in_rounded_rect(px, py, 0, 0, size, size, rr):
+                return (0, 0, 0, 0)
+            col = OUTER_FILL
+            if not _in_rounded_rect(px, py, bw, bw,
+                                    size - 2 * bw, size - 2 * bw,
+                                    max(1, rr - bw)):
+                col = BORDER
+            for (ax, ay), (cx, cy) in segs:
+                if _dist_seg(px, py, ax, ay, cx, cy) <= rad:
+                    col = BLUE
+                    break
+            return col
         px = (x + 0.5) / ss * k
         py = (y + 0.5) / ss * k
-        # Outside the outer tile: transparent.
         if not _in_rounded_rect(px, py, 8, 8, 240, 240, 54):
             return (0, 0, 0, 0)
         col = OUTER_FILL
-        # Border ring: within 2px of the outer edge.
         if not _in_rounded_rect(px, py, 12, 12, 232, 232, 50):
             col = BORDER
-        if _in_rounded_rect(px, py, 52, 52, 152, 152, 34):
+        if _in_rounded_rect(px, py, ix, iy, iw, ih, ir):
             col = INNER_FILL
-        hit = _in_rounded_rect(px, py, bx, by, bw, bh, br)
+        hit = _in_rounded_rect(px, py, bx, by, bw_, bh, br)
         if not hit:
             for (ax, ay), (cx, cy) in segs:
                 if _dist_seg(px, py, ax, ay, cx, cy) <= rad:
@@ -111,9 +149,7 @@ def _render(size, ss=2):
             col = BLUE
         return col
 
-    # Supersampled render then box average.
-    import array as _arr
-
+    w = size * ss
     acc = _arr.array("I", [0]) * (size * size * 4)
     for y in range(w):
         for x in range(w):
@@ -127,14 +163,13 @@ def _render(size, ss=2):
     n = ss * ss
     out = bytearray(size * size * 4)
     for i in range(size * size):
-        # Un-premultiply lightly: colours are opaque except edges.
         a = (acc[i * 4 + 3] + n // 2) // n
         if a == 0:
             out[i * 4:i * 4 + 4] = b"\x00\x00\x00\x00"
             continue
-        for k in range(3):
-            v = (acc[i * 4 + k] + n // 2) // n
-            out[i * 4 + k] = min(255, max(0, v))
+        for kk in range(3):
+            v = (acc[i * 4 + kk] + n // 2) // n
+            out[i * 4 + kk] = min(255, max(0, v))
         out[i * 4 + 3] = min(255, max(0, a))
     return bytes(out)
 
@@ -156,7 +191,6 @@ def _png(rgba, size):
 
 
 def _ico(entries):
-    # entries: list of (size, png_bytes); PNG-compressed ICO (Vista+).
     head = struct.pack("<HHH", 0, 1, len(entries))
     offset = 6 + 16 * len(entries)
     body = b""
@@ -169,12 +203,67 @@ def _ico(entries):
     return head + body + blobs
 
 
+def _paste(canvas, cw, rgba, size, ox, oy):
+    for y in range(size):
+        for x in range(size):
+            o = (y * size + x) * 4
+            sa = rgba[o + 3] / 255.0
+            if sa == 0:
+                continue
+            d = ((oy + y) * cw + (ox + x)) * 4
+            for kk in range(3):
+                canvas[d + kk] = int(rgba[o + kk] * sa
+                                     + canvas[d + kk] * (1 - sa))
+            canvas[d + 3] = 255
+
+
+def _strip_preview(path):
+    """One picture, dark strip + light strip, every size at REAL pixels."""
+    order = (256, 64, 48, 32, 24, 16)
+    pad, gap = 16, 16
+    strip_w = pad * 2 + sum(order) + gap * (len(order) - 1)
+    strip_h = pad * 2 + 256
+    renders = {s: _render(s, simple=(s in SMALL_SIZES)) for s in order}
+    canvas = bytearray(strip_w * strip_h * 2 * 4)
+    for row, bg in enumerate(((13, 17, 23), (255, 255, 255))):
+        base = row * strip_w * strip_h * 4
+        for i in range(strip_w * strip_h):
+            canvas[base + i * 4:base + i * 4 + 4] = bytes(
+                [bg[0], bg[1], bg[2], 255])
+        x = pad
+        for s in order:
+            y = pad + (256 - s) // 2
+            row_arr = bytearray(canvas[base:base + strip_w * strip_h * 4])
+            _paste(row_arr, strip_w, renders[s], s, x, y)
+            canvas[base:base + strip_w * strip_h * 4] = bytes(row_arr)
+            x += s + gap
+    with open(path, "wb") as handle:
+        handle.write(_png_strip(bytes(canvas), strip_w, strip_h * 2))
+    return path
+
+
+def _png_strip(raw_rgba, w, h_total):
+    raw = b"".join(
+        b"\x00" + raw_rgba[y * w * 4:(y + 1) * w * 4]
+        for y in range(h_total)
+    )
+    comp = zlib.compress(raw, 9)
+
+    def chunk(tag, data):
+        out = struct.pack(">I", len(data)) + tag + data
+        return out + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+
+    ihdr = struct.pack(">IIBBBBB", w, h_total, 8, 6, 0, 0, 0)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
+            + chunk(b"IDAT", comp) + chunk(b"IEND", b""))
+
+
 def build(preview_path=None):
     os.makedirs(ASSETS, exist_ok=True)
     entries = []
     png256 = b""
     for size in SIZES:
-        rgba = _render(size)
+        rgba = _render(size, simple=(size in SMALL_SIZES))
         png = _png(rgba, size)
         entries.append((size, png))
         if size == 256:
@@ -184,16 +273,7 @@ def build(preview_path=None):
     with open(os.path.join(ASSETS, "mark_256.png"), "wb") as handle:
         handle.write(png256)
     if preview_path:
-        # Nearest-neighbour x8 upscale of the 16 px entry for eye check.
-        rgba16 = _render(16)
-        big = bytearray(128 * 128 * 4)
-        for y in range(128):
-            for x in range(128):
-                src = ((y // 8) * 16 + (x // 8)) * 4
-                dst = (y * 128 + x) * 4
-                big[dst:dst + 4] = rgba16[src:src + 4]
-        with open(preview_path, "wb") as handle:
-            handle.write(_png(bytes(big), 128))
+        _strip_preview(preview_path)
     return entries
 
 
