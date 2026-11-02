@@ -13,6 +13,25 @@ import type {
 
 export type { ApiClientProviderProps, CurrentProject };
 
+export const CURRENT_PROJECT_STORAGE_KEY = "agentsi.currentProjectId";
+
+function readStoredProjectId(): string | null {
+  try {
+    const stored = window.localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY);
+    return stored === null || stored === "" ? null : stored;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredProjectId(projectId: string): void {
+  try {
+    window.localStorage.setItem(CURRENT_PROJECT_STORAGE_KEY, projectId);
+  } catch {
+    // Storage unavailable: the in-memory selection still re-renders.
+  }
+}
+
 const ApiClientContext = createContext<ApiClient | null>(null);
 
 interface CurrentProjectState {
@@ -24,11 +43,15 @@ interface CurrentProjectState {
 const CurrentProjectContext = createContext<CurrentProjectState | null>(null);
 
 export function ApiClientProvider(props: ApiClientProviderProps): ReactElement {
-  const [projectId, setProjectId] = useState<string | null>(null);
+  // FXSAVED item 3: restore the stored pick on mount (same localStorage
+  // as readStoredLocale). Ghost ids (a deleted project) are validated
+  // in App selectFirst, never here.
+  const [projectId, setProjectId] = useState<string | null>(readStoredProjectId);
   const selection = useMemo<CurrentProjectState>(
     () => ({
       projectId,
       select: (next: string) => {
+        writeStoredProjectId(next);
         setProjectId(next);
       },
       clear: () => {

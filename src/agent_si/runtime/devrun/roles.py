@@ -286,6 +286,16 @@ def waiting_line(role: str, elapsed_s: float) -> str:
         str(role), int(max(0, elapsed_s)))
 
 
+def reply_language_line() -> str:
+    """The reply-language rule every prompt builder carries (FXPICK).
+
+    The reply follows the user's message language; code, file names,
+    commands and JSON keys stay unchanged so protocol replies parse.
+    """
+    return ("Reply in the language of the user's message. "
+            "Keep code, file names, commands and JSON keys unchanged.")
+
+
 def invoke_timed(adapter: Any, messages: list, *,
                  timeout_s: Any = None,
                  first_notice_s: Any = None,

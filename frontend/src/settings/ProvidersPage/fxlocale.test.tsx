@@ -50,6 +50,9 @@ async function connectOpenaiThroughDialog(): Promise<void> {
   fireEvent.change(within(dialog).getByLabelText("API key"), {
     target: { value: "sk-test" },
   });
+  // FXR2E two-step (416ddaa, merged 0661228): Check before Save.
+  fireEvent.click(within(dialog).getByText("Check"));
+  expect(await within(dialog).findByText("Key checked. Save to connect.")).toBeTruthy();
   fireEvent.click(within(dialog).getByText("Save"));
   expect(await within(dialog).findByText("Connected OpenAI. Reference saved.")).toBeTruthy();
   fireEvent.click(within(dialog).getByText("Done"));
@@ -78,6 +81,8 @@ describe("fxlocale provider connect screens", () => {
     fireEvent.change(within(dialog).getByLabelText("Ключ API"), {
       target: { value: "sk-test" },
     });
+    fireEvent.click(within(dialog).getByText("Перевірити"));
+    expect(await within(dialog).findByText("Ключ перевірено. Збережіть, щоб під’єднати.")).toBeTruthy();
     fireEvent.click(within(dialog).getByText("Зберегти"));
     // Step 2 in the same dialog carries the quiet line; the card shows it
     // too once Done closes the dialog.

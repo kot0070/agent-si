@@ -289,7 +289,37 @@ export function TopBar(props: TopBarProps): ReactElement {
 
   return (
     <header data-testid="topbar" className="fx-topbar">
-      <span data-testid="topbar-brand">{t("shell.topbar.brand")}</span>
+      <span data-testid="topbar-brand">
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 256 256"
+          aria-hidden="true"
+          focusable="false"
+          style={{
+            display: "inline-block",
+            width: 16,
+            height: 16,
+            flex: "none",
+            verticalAlign: "-3px",
+            marginRight: 6,
+          }}
+        >
+          <rect x="8" y="8" width="240" height="240" rx="54" fill="#161b22" />
+          <rect x="46" y="46" width="164" height="164" rx="38" fill="#0d1117" />
+          <g
+            fill="none"
+            stroke="#2f81f7"
+            strokeWidth="24"
+            strokeLinecap="round"
+          >
+            <path d="M 148 62 C 120 62 98 76 98 102 C 98 130 148 120 148 148 C 148 170 128 182 102 182 C 92 182 84 178 78 172" />
+            <path d="M 178 62 L 178 182" />
+          </g>
+          <rect x="104" y="196" width="48" height="10" rx="5" fill="#2f81f7" />
+        </svg>
+        {t("shell.topbar.brand")}
+      </span>
       <button
         type="button"
         data-testid="topbar-panels"

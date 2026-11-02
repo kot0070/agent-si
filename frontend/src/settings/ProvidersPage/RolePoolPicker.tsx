@@ -3,10 +3,12 @@
 // A key resolves to (provider, model) through the default in-memory map
 // built from the internally resolved enabled choices.
 
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { PROVIDER_CATALOG } from "./catalog";
 import { enabledChatChoices } from "./ChatSelector";
 import type { ChatChoice } from "./ChatSelector";
+import { readRolePoolState } from "../roleProfilesApi";
+import type { RolePoolSaved } from "../roleProfilesApi";
 import { roleLabel } from "./types";
 import { t } from "../../locale/index";
 
@@ -109,6 +111,83 @@ export function choicesToPoolOptions(choices: ChatChoice[]): PoolOption[] {
   }));
 }
 
+// Map one saved server state onto opaque option keys. A saved
+// provider/model the options no longer list becomes a synthetic
+// `missing:` key with an extra option so it still shows (marked
+// unavailable by the caller) instead of silently falling back to AUTO.
+export function mapSavedToValue(
+  saved: RolePoolSaved,
+  options: PoolOption[],
+): { value: RolePoolValue; extra: PoolOption[] } {
+  const byMember = new Map<string, string>();
+  for (const option of options) {
+    const key = `${option.providerId}\0${option.modelId}`;
+    if (!byMember.has(key)) {
+      byMember.set(key, option.key);
+    }
+  }
+  const extra: PoolOption[] = [];
+  function keyFor(provider: string, model: string): string {
+    const known = byMember.get(`${provider}\0${model}`);
+    if (known !== undefined) {
+      return known;
+    }
+    const synthetic = `missing:${provider}/${model}`;
+    if (!extra.some((option) => option.key === synthetic)) {
+      extra.push({
+        key: synthetic,
+        label: `${provider} — ${model}`,
+        providerId: provider,
+        modelId: model,
+      });
+    }
+    return synthetic;
+  }
+  const strategy =
+    saved.strategy === "DIRECTOR_PER_TASK" ||
+    saved.strategy === "AUTO" ||
+    saved.strategy === "FALLBACK_ORDER" ||
+    saved.strategy === "SPLIT_PARALLEL"
+      ? saved.strategy
+      : "AUTO";
+  if (saved.mode === "PINNED") {
+    const provider = saved.provider ?? "";
+    const model = saved.model ?? "";
+    if (provider === "" || model === "") {
+      return {
+        value: { mode: "PINNED", pinnedKey: "", poolKeys: [], strategy },
+        extra,
+      };
+    }
+    return {
+      value: {
+        mode: "PINNED",
+        pinnedKey: keyFor(provider, model),
+        poolKeys: [],
+        strategy,
+      },
+      extra,
+    };
+  }
+  if (saved.mode === "pool") {
+    return {
+      value: {
+        mode: "pool",
+        pinnedKey: "",
+        poolKeys: saved.pool.map((member) =>
+          keyFor(member.provider, member.model),
+        ),
+        strategy,
+      },
+      extra,
+    };
+  }
+  return {
+    value: { mode: "AUTO", pinnedKey: "", poolKeys: [], strategy },
+    extra,
+  };
+}
+
 type RolePoolPickerProps = {
   role: string;
   project_id: string;
@@ -120,13 +199,56 @@ const DEFAULT_VALUE: RolePoolValue = { mode: "AUTO", pinnedKey: "", poolKeys: []
 
 export function RolePoolPicker({ role, project_id = "local", options, onChange }: RolePoolPickerProps) {
   const project = project_id;
-  const poolOptions = options ?? choicesToPoolOptions(enabledChatChoices(PROVIDER_CATALOG, {}));
+  const baseOptions = useMemo<PoolOption[]>(
+    () => options ?? choicesToPoolOptions(enabledChatChoices(PROVIDER_CATALOG, {})),
+    [options],
+  );
+  // Keys the server saved but the current options no longer list (a
+  // provider/model removed after the save). They still render, marked
+  // unavailable, and the role never silently falls back to AUTO.
+  const [extraOptions, setExtraOptions] = useState<PoolOption[]>([]);
+  const poolOptions = useMemo<PoolOption[]>(
+    () => [...baseOptions, ...extraOptions],
+    [baseOptions, extraOptions],
+  );
   const resolve = defaultPoolResolver(poolOptions);
   const [current, setInner] = useState<RolePoolValue>(DEFAULT_VALUE);
+  // Raw saved state (one GET per mount). Mapping to option keys re-runs
+  // when the options arrive late (served listings load after mount) but
+  // never after the user touches the picker (emit marks touched).
+  const [saved, setSaved] = useState<RolePoolSaved | null>(null);
+  const touchedRef = useRef(false);
+  useEffect(() => {
+    let cancelled = false;
+    void readRolePoolState(project, role).then((state) => {
+      if (!cancelled && state !== undefined) {
+        setSaved(state);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [project, role]);
+  useEffect(() => {
+    // FXSAVED item 2: show the saved PINNED/pool/AUTO after restart.
+    // setInner only: a load never calls onChange and never writes.
+    if (touchedRef.current || saved === null) {
+      return;
+    }
+    const mapped = mapSavedToValue(saved, baseOptions);
+    setExtraOptions(mapped.extra);
+    setInner(mapped.value);
+  }, [saved, baseOptions]);
   const label = roleLabel(role);
   const group = `role-pool-${project}-${role}-mode`;
+  // Synthetic keys for saved-but-unlisted members, for the unavailable mark.
+  const missingKeys = useMemo(
+    () => new Set(extraOptions.map((option) => option.key)),
+    [extraOptions],
+  );
 
   function emit(next: RolePoolValue): void {
+    touchedRef.current = true;
     setInner(next);
     onChange?.(next);
   }
@@ -176,7 +298,9 @@ export function RolePoolPicker({ role, project_id = "local", options, onChange }
             <option value="">{t("providers.rolepool.selectOption")}</option>
             {poolOptions.map((option) => (
               <option key={option.key} value={option.key}>
-                {option.label}
+                {missingKeys.has(option.key)
+                  ? `${option.label} (unavailable)`
+                  : option.label}
               </option>
             ))}
           </select>
@@ -193,7 +317,9 @@ export function RolePoolPicker({ role, project_id = "local", options, onChange }
                     checked={current.poolKeys.includes(option.key)}
                     onChange={() => togglePoolKey(option.key)}
                   />
-                  {option.label}
+                  {missingKeys.has(option.key)
+                    ? `${option.label} (unavailable)`
+                    : option.label}
                 </label>
               </li>
             ))}

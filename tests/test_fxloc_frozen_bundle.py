@@ -90,3 +90,23 @@ def test_spec_ships_licence_notices_catalog():
     assert "NOTICES.md" in text, "spec does not ship NOTICES.md"
     assert "catalog_v2.json" in text, "spec does not ship catalog_v2.json"
     assert "qa_catalog" in text
+
+
+def test_fxsplash_assets_resolve_inside_bundle(monkeypatch, tmp_path):
+    """FXSPLASH: the frozen mark assets ride the bundle via _asset_ref."""
+    meipass = _stage_bundle(tmp_path)
+    assets = meipass / "assets"
+    assets.mkdir(parents=True, exist_ok=True)
+    for name in ("icon.ico", "mark_256.png", "mark.svg"):
+        src = _WS / "src" / "agent_si" / "assets" / name
+        shutil.copyfile(src, assets / name)
+    _freeze(monkeypatch, meipass=meipass)
+    assert sidecar._asset_ref("icon.ico") == str(assets / "icon.ico")
+    assert os.path.isfile(sidecar._asset_ref("icon.ico"))
+    assert os.path.isfile(sidecar._asset_ref("mark_256.png"))
+
+
+def test_spec_ships_fxsplash_icon_and_assets():
+    text = SPEC_PATH.read_text(encoding="utf-8")
+    assert "icon.ico" in text, "spec does not name the exe icon"
+    assert "assets" in text, "spec does not ship the mark assets"
