@@ -752,6 +752,27 @@ def _k04n4_dir_key(ctx):
     return "default"
 
 
+def _k04n4_preset_key(name):
+    """Bare store name known as a provider preset key, or None.
+
+    The key-save route stores values under the bare preset id
+    (``openai``); the page and the leftover routes speak the app
+    namespace (``agent_si/provider/openai``). Only preset-known bare
+    names map, never anything else.
+    """
+    if not isinstance(name, str) or not name or "/" in name:
+        return None
+    try:
+        from agent_si.providers.registry.presets import get_preset
+    except Exception:
+        return None
+    try:
+        get_preset(name)
+    except KeyError:
+        return None
+    return name
+
+
 def _k04n4_real_store_names(store, app_prefix):
     """Real credential-store entry names under app_prefix, names only.
 
@@ -773,8 +794,21 @@ def _k04n4_real_store_names(store, app_prefix):
             names = list(store)
         except Exception:
             return []
-    return [entry for entry in names or []
-            if isinstance(entry, str) and entry.startswith(app_prefix)]
+    out = []
+    for entry in names or []:
+        if not isinstance(entry, str) or not entry:
+            continue
+        if entry.startswith(app_prefix):
+            out.append(entry)
+            continue
+        # Bare provider keys (the key-save route stores the bare
+        # preset id) surface under the app namespace so the page's
+        # leftover finder and disconnect flow see the same entry.
+        if _k04n4_preset_key(entry) is not None:
+            namespaced = "%s%s" % (app_prefix, entry)
+            if namespaced not in out:
+                out.append(namespaced)
+    return out
 
 
 def _k04n4_linked_secret_ids(facade):
@@ -808,7 +842,7 @@ def _k04n4_linked_secret_ids(facade):
     return linked
 
 
-def _k04n4_store_key(store, name):
+def _k04n4_store_key(store, name, app_prefix=None):
     """Map a leftover entry name to a real-store key, or None."""
     if store is None or not isinstance(name, str) or not name:
         return None
@@ -817,6 +851,15 @@ def _k04n4_store_key(store, name):
             return name
     except Exception:
         pass
+    if isinstance(app_prefix, str) and app_prefix \
+            and name.startswith(app_prefix):
+        bare = name[len(app_prefix):]
+        if _k04n4_preset_key(bare) is not None:
+            try:
+                if bare in store:
+                    return bare
+            except Exception:
+                pass
     namespace = getattr(store, "_namespace", "")
     if isinstance(namespace, str) and namespace \
             and name.startswith(namespace):
@@ -839,23 +882,27 @@ class _K04N4DeleteStore:
 
     Membership and removal span both: the seeded bucket first, then the
     real credential store (memory-store remove, or the OS store delete
-    which reaches ``_delete_native``). Only entry names travel here,
+    which reaches ``_delete_native``). Bare provider keys map from
+    their namespaced leftover name. Only entry names travel here,
     never values.
     """
 
-    def __init__(self, bucket_entries, real_store):
+    def __init__(self, bucket_entries, real_store, app_prefix=None):
         self._bucket = bucket_entries
         self._store = real_store
+        self._app_prefix = app_prefix
 
     def __contains__(self, name):
         if isinstance(self._bucket, dict) and name in self._bucket:
             return True
-        return _k04n4_store_key(self._store, name) is not None
+        return _k04n4_store_key(
+            self._store, name, self._app_prefix) is not None
 
     def __delitem__(self, name):
         if isinstance(self._bucket, dict) and name in self._bucket:
             del self._bucket[name]
-        target = _k04n4_store_key(self._store, name)
+        target = _k04n4_store_key(
+            self._store, name, self._app_prefix)
         if target is not None:
             del self._store[target]
 
@@ -1137,7 +1184,8 @@ def k04n4_leftover_delete(ctx, query, body):
         bucket = {"entries": {}, "live": set()}
         _K04N4_LEFTOVER[key] = bucket
     store = _K04N4DeleteStore(
-        bucket["entries"], getattr(ctx, "credential_store", None))
+        bucket["entries"], getattr(ctx, "credential_store", None),
+        app_prefix)
     audit_sink = getattr(ctx, "audit_sink", None)
     if audit_sink is None:
         try:

@@ -106,6 +106,15 @@ def _save_key(client, bait):
     return resp.json()["key_ref"]
 
 
+def _stub_models_ok(monkeypatch, model="m-x"):
+    """Save preflight stub: the /models list answers 200."""
+
+    def _ok(request, timeout=None):
+        return _FakeResp({"data": [{"id": model}]})
+
+    monkeypatch.setattr(_urlreq, "urlopen", _ok)
+
+
 def _connect(client, key_ref, model):
     return client.post("/api/v1/providers/connect",
                        json={"preset_id": "openai", "model": model,
@@ -152,7 +161,11 @@ def test_store_read_transient_retry_recovers(tmp_path, monkeypatch):
 
     def _flaky(secret_id, *args, **kwargs):
         calls["n"] += 1
-        if calls["n"] <= 6:
+        # Budget 12: the connect-lane best-effort refresh read walks the
+        # value port fallbacks first (6 failing reads), so the evidence
+        # preflight fails its whole first attempt (6 more, retrying)
+        # then recovers on attempt 2.
+        if calls["n"] <= 12:
             raise RuntimeError("PROVCK2 simulated transient store outage")
         return orig(secret_id, *args, **kwargs)
 
@@ -179,20 +192,26 @@ def test_store_read_transient_retry_recovers(tmp_path, monkeypatch):
 
 def test_store_read_failure_class_and_no_leak(tmp_path, monkeypatch):
     """Missing store entry: preflight fails (no urlopen), store-read code."""
+    def _models_ok(request, timeout=None):
+        return _FakeResp({"data": [{"id": "m-nostore"}]})
+
     def _must_not_fire(request, timeout=None):
         raise AssertionError("urlopen must not fire before preflight passes")
 
-    monkeypatch.setattr(_urlreq, "urlopen", _must_not_fire)
+    monkeypatch.setattr(_urlreq, "urlopen", _models_ok)
     client, app = _make_client(tmp_path)
     _create_project(client)
     key_ref = _save_key(client, BAIT_STORE)
     app.state.k04_ctx.credential_store.delete(key_ref["secret_id"])
+    monkeypatch.setattr(_urlreq, "urlopen", _must_not_fire)
     conn = _connect(client, key_ref, "m-nostore")
-    assert conn.status_code == 200, conn.text
+    assert conn.status_code == 503, conn.text
+    assert conn.json() == {"code": "CREDENTIAL_STORE_UNAVAILABLE",
+                           "message": "credential store unavailable"}, conn.text
     _assert_no_leak(BAIT_STORE, conn.text)
     rows = _rows(client)
-    assert rows["openai"]["health"] == "ERROR", rows
-    assert rows["openai"].get("error") == "credential store unavailable", rows
+    assert rows == {}, rows
+    assert key_ref["secret_id"] not in app.state.k04_ctx.credential_store
     proof = _evidence(app)
     assert len(proof) == 1, proof
     assert proof[0]["class"] == "store-read", proof
@@ -207,22 +226,26 @@ def test_store_read_failure_class_and_no_leak(tmp_path, monkeypatch):
 
 
 def test_network_failure_class_and_no_leak(tmp_path, monkeypatch):
-    """Status-less transport failure: generic reason, network class."""
+    """Status-less transport failure: 503 unreachable, network class."""
+    _stub_models_ok(monkeypatch, "m-net")
+    client, app = _make_client(tmp_path)
+    _create_project(client)
+    key_ref = _save_key(client, BAIT_NET)
+
     def _fail(request, timeout=None):
         raise _urlreq.URLError(
             "simulated outage carrying %s inside" % BAIT_NET)
 
     monkeypatch.setattr(_urlreq, "urlopen", _fail)
-    client, app = _make_client(tmp_path)
-    _create_project(client)
-    key_ref = _save_key(client, BAIT_NET)
     conn = _connect(client, key_ref, "m-net")
-    assert conn.status_code == 200, conn.text
+    assert conn.status_code == 503, conn.text
+    assert conn.json() == {"code": "EVIDENCE_PROBE_NETWORK",
+                           "message": "Could not reach the provider."}, conn.text
     _assert_no_leak(BAIT_NET, conn.text,
                     "simulated outage carrying")
     rows = _rows(client)
-    assert rows["openai"]["health"] == "ERROR", rows
-    assert rows["openai"].get("error") == "provider check failed", rows
+    assert rows == {}, rows
+    assert key_ref["secret_id"] not in app.state.k04_ctx.credential_store
     proof = _evidence(app)
     assert len(proof) == 1, proof
     assert proof[0]["class"] == "network", proof
@@ -234,22 +257,28 @@ def test_network_failure_class_and_no_leak(tmp_path, monkeypatch):
 
 
 def test_http_failure_class_and_no_leak(tmp_path, monkeypatch):
-    """HTTP status failure: status-only reason, http class + int status."""
+    """HTTP 401: connect refused 401, key removed, audit keeps http class."""
+    _stub_models_ok(monkeypatch, "m-http")
+    client, app = _make_client(tmp_path)
+    _create_project(client)
+    key_ref = _save_key(client, BAIT_HTTP)
+
     def _fail(request, timeout=None):
         raise _urlerror.HTTPError(
             "https://api.openai.com/v1/chat/completions", 401,
             "Unauthorized carrying %s inside" % BAIT_HTTP, {}, None)
 
     monkeypatch.setattr(_urlreq, "urlopen", _fail)
-    client, app = _make_client(tmp_path)
-    _create_project(client)
-    key_ref = _save_key(client, BAIT_HTTP)
     conn = _connect(client, key_ref, "m-http")
-    assert conn.status_code == 200, conn.text
+    assert conn.status_code == 401, conn.text
+    assert conn.json() == {
+        "code": "PROVIDER_KEY_REFUSED",
+        "message": ("The provider refused this key. Paste the full "
+                    "key again.")}, conn.text
     _assert_no_leak(BAIT_HTTP, conn.text, "Unauthorized carrying")
     rows = _rows(client)
-    assert rows["openai"]["health"] == "ERROR", rows
-    assert rows["openai"].get("error") == "provider answered HTTP 401", rows
+    assert rows == {}, rows
+    assert key_ref["secret_id"] not in app.state.k04_ctx.credential_store
     proof = _evidence(app)
     assert len(proof) == 1, proof
     assert proof[0]["class"] == "http", proof
@@ -262,20 +291,24 @@ def test_http_failure_class_and_no_leak(tmp_path, monkeypatch):
 
 
 def test_unknown_statusless_class_and_no_leak(tmp_path, monkeypatch):
-    """Non-network status-less failure: generic reason, unknown class."""
+    """Non-network status-less failure: 400 generic, key removed."""
+    _stub_models_ok(monkeypatch, "m-unknown")
+    client, app = _make_client(tmp_path)
+    _create_project(client)
+    key_ref = _save_key(client, BAIT_UNKNOWN)
+
     def _fail(request, timeout=None):
         raise RuntimeError("weird local failure %s" % BAIT_UNKNOWN)
 
     monkeypatch.setattr(_urlreq, "urlopen", _fail)
-    client, app = _make_client(tmp_path)
-    _create_project(client)
-    key_ref = _save_key(client, BAIT_UNKNOWN)
     conn = _connect(client, key_ref, "m-unknown")
-    assert conn.status_code == 200, conn.text
+    assert conn.status_code == 400, conn.text
+    assert conn.json() == {"code": "PROVIDER_CHECK_FAILED",
+                           "message": "provider check failed"}, conn.text
     _assert_no_leak(BAIT_UNKNOWN, conn.text, "weird local failure")
     rows = _rows(client)
-    assert rows["openai"]["health"] == "ERROR", rows
-    assert rows["openai"].get("error") == "provider check failed", rows
+    assert rows == {}, rows
+    assert key_ref["secret_id"] not in app.state.k04_ctx.credential_store
     proof = _evidence(app)
     assert len(proof) == 1, proof
     assert proof[0]["class"] == "unknown", proof
@@ -307,17 +340,21 @@ def test_truncated_body_maps_to_network_class_and_no_leak(
                 partial=b"\xff\xfe-garbled-%s" % BAIT_TRUNC.encode(),
                 expected=128)
 
-    monkeypatch.setattr(_urlreq, "urlopen",
-                        lambda request, timeout=None: _TruncatedResp())
+    _stub_models_ok(monkeypatch, "m-trunc")
     client, app = _make_client(tmp_path)
     _create_project(client)
     key_ref = _save_key(client, BAIT_TRUNC)
+    monkeypatch.setattr(_urlreq, "urlopen",
+                        lambda request, timeout=None: _TruncatedResp())
     conn = _connect(client, key_ref, "m-trunc")
-    assert conn.status_code == 200, conn.text
+    assert conn.status_code == 503, conn.text
+    assert conn.json() == {
+        "code": "EVIDENCE_PROBE_NETWORK",
+        "message": "Could not reach the provider."}, conn.text
     _assert_no_leak(BAIT_TRUNC, conn.text, "garbled", "unreadable")
     rows = _rows(client)
-    assert rows["openai"]["health"] == "ERROR", rows
-    assert rows["openai"].get("error") == "provider check failed", rows
+    assert rows == {}, rows
+    assert key_ref["secret_id"] not in app.state.k04_ctx.credential_store
     proof = _evidence(app)
     assert len(proof) == 1, proof
     assert proof[0]["class"] == "network", proof
@@ -331,17 +368,21 @@ def test_truncated_body_maps_to_network_class_and_no_leak(
         def read(self):
             return b"\xff\xfe-not-utf8-%s" % BAIT_TRUNC.encode()
 
-    monkeypatch.setattr(_urlreq, "urlopen",
-                        lambda request, timeout=None: _BadBytesResp())
     part2 = tmp_path / "part2"
     part2.mkdir(exist_ok=True)
+    _stub_models_ok(monkeypatch, "m-badbytes")
     client2, app2 = _make_client(part2)
     _create_project(client2)
     key_ref2 = _save_key(client2, BAIT_TRUNC)
+    monkeypatch.setattr(_urlreq, "urlopen",
+                        lambda request, timeout=None: _BadBytesResp())
     conn2 = _connect(client2, key_ref2, "m-badbytes")
-    assert conn2.status_code == 200, conn2.text
+    assert conn2.status_code == 503, conn2.text
+    assert conn2.json() == {
+        "code": "EVIDENCE_PROBE_NETWORK",
+        "message": "Could not reach the provider."}, conn2.text
     rows2 = _rows(client2)
-    assert rows2["openai"].get("error") == "provider check failed", rows2
+    assert rows2 == {}, rows2
     proof2 = [r for r in app2.state.k04_ctx.audit_sink.records
               if isinstance(r, dict) and r.get("event") == "provck2-evidence"
               and r.get("provider_id") == "openai"]

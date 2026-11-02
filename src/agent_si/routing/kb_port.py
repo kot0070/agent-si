@@ -67,3 +67,22 @@ def is_text_code_candidate(facts: KbModelFacts) -> bool:
     if "text" not in modalities:
         return False
     return not (modalities & set(NON_TEXT_CODE_MODALITIES))
+
+
+def facts_prove_non_text(facts: Optional[KbModelFacts]) -> bool:
+    """True when facts prove a pure non-text model (no text token).
+
+    No facts (None) or empty/unknown modalities prove nothing and read
+    False, so unproven models keep their legacy path. Multimodal rows
+    (text plus image/audio) stay eligible: only a proven image, audio
+    or embedding set without text is never offered or chosen; a pinned
+    one gets a plain refusal.
+    """
+    if facts is None:
+        return False
+    modalities = set(facts.modalities or ())
+    if not modalities:
+        return False
+    if not (modalities & set(NON_TEXT_CODE_MODALITIES)):
+        return False
+    return "text" not in modalities

@@ -532,7 +532,20 @@ def resolve(test, project_profile: dict) -> dict:
     if runner == "suite_invoke":
         params = dict(row.get("params") or {})
         tool = params.get("tool", "")
-        if not tool or shutil.which(tool) is None:
+        _hit3 = shutil.which(tool) if isinstance(tool, str) and tool else None
+        _stub3 = False
+        if _hit3 is not None:
+            try:
+                _stub3 = ("windowsapps" in str(_hit3).lower())
+            except Exception:
+                _stub3 = False
+            if not _stub3:
+                try:
+                    if os.path.isfile(_hit3) and os.path.getsize(_hit3) == 0:
+                        _stub3 = True
+                except OSError:
+                    _stub3 = False
+        if not tool or _hit3 is None or _stub3:
             return {
                 "test_id": test_id,
                 "status": "UNSUPPORTED",

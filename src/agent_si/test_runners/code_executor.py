@@ -184,12 +184,28 @@ def frozen_python() -> str:
         except OSError:
             return False
 
+    def _is_stub(path: str) -> bool:
+        try:
+            text = str(path or "")
+        except Exception:
+            return False
+        if not text:
+            return False
+        if "windowsapps" in text.lower():
+            return True
+        try:
+            if os.path.isfile(text) and os.path.getsize(text) == 0:
+                return True
+        except OSError:
+            return False
+        return False
+
     env = os.environ.get("AGENT_SI_PYTHON", "")
-    if env and not _is_exe(env) and os.path.isfile(env):
+    if env and not _is_exe(env) and os.path.isfile(env) and not _is_stub(env):
         return env
     for _name in ("python", "python3"):
         _hit = shutil.which(_name)
-        if _hit and not _is_exe(_hit):
+        if _hit and not _is_exe(_hit) and not _is_stub(_hit):
             return _hit
     raise RuntimeError(
         "no python interpreter for frozen runs: set AGENT_SI_PYTHON "
@@ -245,6 +261,15 @@ def resolve_code_command(
             return [_interp, "-m", "pytest", folder, "-q"], None
         if _node_test_script(folder):
             npm = shutil.which("npm")
+            if npm is not None and "windowsapps" in str(npm).lower():
+                npm = None
+            else:
+                try:
+                    import os as _os2
+                    if npm is not None and _os2.path.isfile(npm) and _os2.path.getsize(npm) == 0:
+                        npm = None
+                except OSError:
+                    pass
             if not npm:
                 return None, (
                     "CODE test %r of folder %r is a node project with "

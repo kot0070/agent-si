@@ -11,6 +11,9 @@ export interface ConnectDialogProps {
   open: boolean;
   store: SecretStorePort;
   timeoutMs?: number;
+  initialStep?: 1 | 2;
+  initialTicked?: string[];
+  onModelsDone?: (presetId: string, modelIds: string[]) => void;
   onClose: () => void;
   onConnected: (presetId: string, ref: SecretRef) => void;
 }
@@ -32,6 +35,7 @@ export interface LeftoverKeyFinderProps {
   linkedSecretIds: string[];
   refreshKey?: number;
   loadEntries?: () => Promise<SecretRef[]>;
+  deleteEntry?: (entry: SecretRef) => Promise<void>;
 }
 
 // K04 CLOSE (chat-model save): JSON body of PUT /api/v1/roles/chat-model

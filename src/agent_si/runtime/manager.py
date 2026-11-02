@@ -356,22 +356,31 @@ def admit_budget_call(gate: Any, project_id: str, provider_id: str,
     on the gate lock (reserve, then settle) instead of passing the
     limit. Any other gate failure propagates to the caller (never
     silently allowed); the post-call charge still reports UNAVAILABLE.
+    An empty task label defaults to "run" exactly like the project id
+    (the gate facade requires a non-empty label; enforcement never
+    reads it).
     A release failure of our own admission hold never blocks the
     admitted call (cleanup only, after admission succeeded).
     """
     from agent_si.budget.gate import BudgetBlockedError as _Blocked
 
+    pid = str(project_id or "run")
+    tid = str(task_id or "run")
     if gate is None:
         raise _Blocked(
             "no budget gate bound: new billable cloud work is refused "
             "until a gate is configured: project %s task %s run %s "
             "[BUDGET_GATE_MISSING]"
-            % (str(project_id or "run"), str(task_id or ""),
+            % (pid, tid,
                str(run_id or "")))
-    pid = str(project_id or "run")
     prov = str(provider_id or "")
     if not prov:
         return None
+    # FXLOC2: the gate facade requires a non-empty task label on the
+    # admission reservation; task-less callers (watcher model calls)
+    # pass "": default it exactly like the project id. Enforcement
+    # (caps, hard limit, reserve) never depends on the label.
+
     try:
         state = gate.get_state(pid)
     except (KeyError, LookupError) as exc:
@@ -379,7 +388,7 @@ def admit_budget_call(gate: Any, project_id: str, provider_id: str,
             "unknown budget project %s: new billable cloud work is "
             "refused until the project is configured: task %s run %s "
             "[BUDGET_PROJECT_UNKNOWN]"
-            % (pid, str(task_id or ""), str(run_id or ""))) from exc
+            % (pid, tid, str(run_id or ""))) from exc
     from decimal import Decimal as _Dec
 
     hard = _Dec(str(getattr(state, "hard_limit", "0") or "0"))
@@ -388,7 +397,7 @@ def admit_budget_call(gate: Any, project_id: str, provider_id: str,
             "hard budget limit blocks new billable cloud work: "
             "project %s task %s run %s requested 0 %s would exceed "
             "hard %s %s (spent %s, reserved %s) [BUDGET_HARD_BLOCKED]"
-            % (pid, str(task_id or ""), str(run_id or ""),
+            % (pid, tid, str(run_id or ""),
                str(getattr(state, "currency", "") or ""),
                getattr(state, "hard_limit", "0"),
                str(getattr(state, "currency", "") or ""),
@@ -406,7 +415,7 @@ def admit_budget_call(gate: Any, project_id: str, provider_id: str,
                str(getattr(state, "currency", "") or "")))
     try:
         gate.compare_and_reserve({
-            "project_id": pid, "task_id": str(task_id or ""),
+            "project_id": pid, "task_id": tid,
             "run_id": str(run_id or ""),
             "reservation_id": str(admission_id),
             "estimated_amount": "0",
@@ -521,6 +530,50 @@ def _telemetry_report_terminated(
             run_id=str(run_id or ""),
             reason=str(reason or ""),
         )
+    except Exception:
+        pass
+
+
+def _close_owner_gone(
+    shape: dict[str, Any],
+    run_id: str,
+    subtask_id: str,
+    agent: str,
+    model: str = "",
+) -> None:
+    """Close an orphaned stream: terminal BLOCKED row + one log line.
+
+    FXCLASS CB-10: the app stays alive but the stream owner is truly
+    gone (tab switch, network drop). Never kill a run for navigation;
+    when the owner of the stream is gone, the live row reaches a
+    terminal state so the page shows it instead of RUNNING forever.
+    """
+    try:
+        record_live_row(
+            f"{run_id}/{subtask_id or shape.get('task_id') or 'run'}",
+            {"agent": agent or "manager",
+             "scope": f"{shape.get('task_id') or 'task'}/{subtask_id or 'run'}",
+             "deliverable": f"artifact://run/{run_id}/output",
+             "status": "BLOCKED",
+             "role": "manager",
+             "model": str(model or ""),
+             "step": 0,
+             "file": "",
+             "cost": COST_UNAVAILABLE,
+             "tokens": {"input": None, "output": None},
+             "context": f"artifact:run/{run_id}/input",
+             "errors": ["owner-gone"],
+             "waits": []},
+        )
+    except Exception:
+        pass
+    try:
+        from agent_si.watcher import journal as _journal
+
+        _journal.append_event(
+            str(shape.get("project_id") or "run"), "manager",
+            "RUN_OWNER_GONE", "owner-gone: stream closed for run %s" % (run_id,),
+            (run_id,))
     except Exception:
         pass
 
@@ -676,6 +729,8 @@ def run_task_streamed(
         ))
     except GeneratorExit:
         _finish("cancelled")
+        _close_owner_gone(shape, active_run_id, validated.subtask_id,
+                           str(manager_id))
         raise
     client_config = SdkClientConfig(max_retries=0)
     captured: dict[str, Any] = {}
@@ -751,6 +806,8 @@ def run_task_streamed(
             ))
         except GeneratorExit:
             _finish("cancelled")
+            _close_owner_gone(shape, active_run_id, validated.subtask_id,
+                               str(manager_id))
             raise
         binding = RoutingDecisionBinding(
             decision_id=decision.decision_id,
@@ -865,6 +922,8 @@ def run_task_streamed(
             ))
         except GeneratorExit:
             _finish("cancelled")
+            _close_owner_gone(shape, active_run_id, validated.subtask_id,
+                               str(manager_id))
             raise
         if str(captured.get("finish_reason", "")) == "stop":
             _finish("done")

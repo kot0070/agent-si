@@ -55,6 +55,35 @@ CHAT_ACTOR_MISSING = "CHAT_ACTOR_MISSING"
 CHAT_FORBIDDEN = "CHAT_FORBIDDEN"
 CHAT_RATE_LIMITED = "CHAT_RATE_LIMITED"
 
+#: The manager run emitted no terminal event: the stream still closes
+#: with exactly one `done`, now carrying this reason code so the UI
+#: can name it, and the server logs why (run id plus forwarded count).
+NO_TERMINAL_EVENT = "NO_TERMINAL_EVENT"
+
+
+def _log_stream_failure(run_id: str, stream_id: str,
+                        err: Exception) -> None:
+    """Log a terminal chat-stream failure with run id and traceback."""
+    try:
+        from agent_si import file_log as _file_log
+
+        _file_log.log_exception("chat-stream %s" % stream_id, run_id, err)
+    except Exception:
+        pass
+
+
+def _log_no_terminal(run_id: str, stream_id: str, forwarded: int) -> None:
+    """Log why a stream closed with no terminal event from the run."""
+    try:
+        import logging as _logging
+
+        _logging.getLogger("agent_si.chat").error(
+            "run %s stream %s closed with no terminal event "
+            "(%d events forwarded); answering synthesized done %s",
+            run_id, stream_id, int(forwarded), NO_TERMINAL_EVENT)
+    except Exception:
+        pass
+
 #: FXKBCHAT KB-context reason code (unknown kb_id on chat open).
 CHAT_KB_UNKNOWN = "CHAT_KB_UNKNOWN"
 
@@ -528,18 +557,17 @@ class ManagerSdkBridge:
                 {"type": "cancelled", "stream_id": stream_id})
             return
         self._finish(stream_id)
-        # K04BIND1: append the verbatim last failure reason (never secret).
-        base = ("no provider is connected; "
-                "connect a provider to enable chat")
-        reason = state.get("no_provider_reason")
-        if isinstance(reason, str) and reason.strip():
-            base = base + " (last error: " + reason.strip() + ")"
+        # FXCLASS CA-1/CA-3/CA-4: one plain line, same words on chat +
+        # Tasks, no role word. The verbatim last failure stays server-side
+        # only when explicitly passed; the wire message stays plain.
+        base = "Connect a provider first"
         yield sse_bytes({
             "type": "error",
             "stream_id": stream_id,
             "run_id": run_id,
             "code": NO_PROVIDER_BOUND,
             "message": base,
+            "connectHref": "/providers",
         })
 
     def _devrun_folder(
@@ -801,6 +829,7 @@ class ManagerSdkBridge:
                 getattr(err, "code", None) or type(err).__name__))
             return
         terminal_emitted = False
+        forwarded = 0
         try:
             for event in run_events:
                 if state["cancelled"]:
@@ -821,6 +850,7 @@ class ManagerSdkBridge:
                 if isinstance(text, str) and text:
                     texts.append(text)
                 yield sse_bytes(payload)
+                forwarded += 1
                 if payload.get("type") in self._TERMINAL_TYPES:
                     terminal_emitted = True
                     kind = str(payload.get("type"))
@@ -845,12 +875,16 @@ class ManagerSdkBridge:
                         _mirror_run_tasks(
                             app, project, task, message, task_status)
             if not terminal_emitted:
+                _log_no_terminal(run_id, stream_id, forwarded)
                 yield sse_bytes({
                     "type": "done",
                     "stream_id": stream_id,
                     "run_id": run_id,
+                    "code": NO_TERMINAL_EVENT,
                 })
-                _close("done")
+                _close("done", error_code=NO_TERMINAL_EVENT)
+            elif not closed:
+                _close("cancelled", error_code="STOPPED")
         except Exception as err:
             self._finish(stream_id)
             if not terminal_emitted:

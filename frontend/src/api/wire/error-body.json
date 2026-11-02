@@ -21,7 +21,8 @@
   },
   "no_provider_error_event": {
     "code": "NO_PROVIDER_BOUND",
-    "message": "no provider is connected; connect a provider to enable chat",
+    "connectHref": "/providers",
+    "message": "Connect a provider first",
     "run_id": "wire-run-001",
     "stream_id": "wire-stream-001",
     "type": "error"

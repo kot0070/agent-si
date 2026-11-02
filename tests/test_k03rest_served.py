@@ -219,6 +219,7 @@ def test_k03rest_m_p4_154_served(client):
         "/api/v1/teststage/local-tests",
         json={"project_id": project, "enabled": False,
               "updated_at": "2026-10-31T00:00:00+00:00"},
+        headers=_auth(),
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["enabled"] is False
@@ -232,6 +233,7 @@ def test_k03rest_m_p4_154_served(client):
         "/api/v1/teststage/local-tests",
         json={"project_id": project, "enabled": True,
               "updated_at": "2026-10-31T00:00:00+00:00"},
+        headers=_auth(),
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["enabled"] is True
