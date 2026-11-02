@@ -125,6 +125,27 @@ def _scrub_bare(text: str) -> str:
     return out
 
 
+#: FXLOC C4 short test-key shape (e.g. sk-abc123): redacted alongside
+#: SCAN_PATTERNS matches so named short keys never persist. The word
+#: boundary keeps ordinary hyphenated words intact.
+_SHORT_KEY_RE = re.compile(r"\bsk-[A-Za-z0-9]{3,}")
+
+
+def _scrub_scan(text: str) -> str:
+    """Substitute SCAN_PATTERNS matches plus short sk- test keys."""
+    try:
+        from agent_si.backend import secretscan as _secretscan
+
+        grouped = _secretscan.SCAN_PATTERNS
+    except Exception:
+        grouped = ()
+    out = text
+    for _code, _patterns in grouped:
+        for _rx in _patterns:
+            out = _rx.sub("[redacted]", out)
+    return _SHORT_KEY_RE.sub("[redacted]", out)
+
+
 def _scrub(text: Any) -> str:
     """Scrub secret-shaped text; never raises, never returns raw text.
 
@@ -143,7 +164,7 @@ def _scrub(text: Any) -> str:
         if _redact is not None:
             with contextlib.suppress(Exception):
                 raw = str(_redact(raw))
-        return _scrub_bare(raw)
+        return _scrub_scan(_scrub_bare(raw))
     except Exception:
         return _SCRUB_FAILED
 
@@ -264,8 +285,11 @@ def record_turn(app: Any, project_id: str, user_text: str,
 
     Atomic under the project's lock: the append plus its snapshot
     rewrite serialize with other appends to the same project. A
-    non-empty run_id upserts the project's running turn with that id,
-    so a run start (running) plus its terminal write leave one turn.
+    non-empty run_id upserts the project's turn with that id (newest
+    match wins), so a run start (running) plus its terminal write
+    leave one turn, and a later client replay with the same run id
+    closes the same row. Empty run ids always append, so legacy rows
+    without a run id still load and never merge.
     """
     project = (project_id or "").strip()
     if not project:
@@ -280,11 +304,23 @@ def record_turn(app: Any, project_id: str, user_text: str,
         project_turns = _memory(app).setdefault(project, [])
         stored: dict | None = None
         if rid:
-            for turn in project_turns:
-                if turn.get("run_id") == rid and (
-                        turn.get("status") == "running"):
-                    turn["user_text"] = _scrub(user_text)
-                    turn["assistant_text"] = _scrub(assistant_text)
+            for turn in reversed(project_turns):
+                if turn.get("run_id") == rid:
+                    # One row per run id: the server terminal write holds
+                    # the full transcript while the client replay carries
+                    # only the last SSE text; keep the fuller text so the
+                    # surviving row still names the file-result line.
+                    # Status/time/error still track the latest write, and
+                    # empty run ids never reach here (always append).
+                    new_user = _scrub(user_text)
+                    new_reply = _scrub(assistant_text)
+                    old_reply = turn.get("assistant_text")
+                    old_reply = (old_reply if isinstance(old_reply, str)
+                                 else "")
+                    if len(new_reply) < len(old_reply):
+                        new_reply = old_reply
+                    turn["user_text"] = new_user
+                    turn["assistant_text"] = new_reply
                     turn["time"] = _utcnow()
                     turn["status"] = status
                     turn["error_code"] = code

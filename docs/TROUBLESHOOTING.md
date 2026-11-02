@@ -19,7 +19,7 @@ Each entry is a message the app actually shows. Follow the fix next to it.
 ## Tasks, routing, budget
 
 - `The required context is missing.` The request arrived without its project or task context. Reload the project and retry.
-- `Something went wrong. Try again.` Generic fallback. Retry; if it repeats, restart and report the step.
+- `Something went wrong. Try again.` Generic fallback. Retry; if it repeats, restart and report the step. The data-dir log folder (`<data>/logs/agent-si.log`, rotating 5 MB x 3) records the run id plus a redacted traceback; Settings > Diagnostics shows the folder path and opens it.
 - `Connect a provider.` No model is bound yet. Go to Settings -> Models and connect one.
 - `Task scopes overlap.` Two tasks claim the same scope. Narrow one scope and create again.
 - `The quality gate did not pass.` The checks refused the result. Open the run and the audits tab for the failing check.

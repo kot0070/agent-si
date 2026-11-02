@@ -192,20 +192,43 @@ interface SliceUI {
 
 const sliceUI = new Map<string, SliceUI>();
 const blockingStash = new Map<string, BlockingError>();
-const askStash = new Map<string, InstallPermissionAsk>();
 
-// FXHARD1: the pending card may mirror in sessionStorage for the live
-// session only (the served store is the server: the origin port changes
-// per launch, so localStorage is never a store here). Leaving the page
-// restores from the stash or the mirror; a restart shows the served
-// running turn as interrupted with a resend instead.
-function askMirrorKey(key: string): string {
-  return `fxchat.ask.${key}`;
+// FXCHATV V3: the pending ask is keyed by PROJECT, not by slice.
+// A slice key changes mid-run (client swap, project switch, remount),
+// so a slice-keyed ask parks where no mounted UI ever reads it: the
+// rail says Blocked while no card is reachable. The project-keyed ask
+// reaches any mounted ChatArea of the same project, survives restart
+// through a stable per-project mirror, and the mount consumes it.
+const askByProject = new Map<string, InstallPermissionAsk>();
+const projectAskListeners = new Map<string, Set<() => void>>();
+
+const sliceProjectId = new Map<string, string>();
+
+function projectMirrorKey(projectId: string): string {
+  return `fxchat.ask.p.${projectId}`;
 }
 
-function readAskMirror(key: string): InstallPermissionAsk | null {
+function writeProjectMirror(
+  projectId: string,
+  ask: InstallPermissionAsk | null,
+): void {
   try {
-    const raw = window.sessionStorage.getItem(askMirrorKey(key));
+    if (ask === null) {
+      window.sessionStorage.removeItem(projectMirrorKey(projectId));
+      return;
+    }
+    window.sessionStorage.setItem(
+      projectMirrorKey(projectId),
+      JSON.stringify({ toolName: ask.toolName, messageId: ask.messageId }),
+    );
+  } catch {
+    return;
+  }
+}
+
+function readProjectMirror(projectId: string): InstallPermissionAsk | null {
+  try {
+    const raw = window.sessionStorage.getItem(projectMirrorKey(projectId));
     if (raw === null) {
       return null;
     }
@@ -227,38 +250,65 @@ function readAskMirror(key: string): InstallPermissionAsk | null {
   }
 }
 
-function writeAskMirror(key: string, ask: InstallPermissionAsk | null): void {
-  try {
-    if (ask === null) {
-      window.sessionStorage.removeItem(askMirrorKey(key));
-      return;
+export function subscribeProjectAsk(
+  projectId: string,
+  listener: () => void,
+): () => void {
+  let watchers = projectAskListeners.get(projectId);
+  if (watchers === undefined) {
+    watchers = new Set();
+    projectAskListeners.set(projectId, watchers);
+  }
+  watchers.add(listener);
+  return () => {
+    const live = projectAskListeners.get(projectId);
+    if (live !== undefined) {
+      live.delete(listener);
+      if (live.size === 0) {
+        projectAskListeners.delete(projectId);
+      }
     }
-    window.sessionStorage.setItem(
-      askMirrorKey(key),
-      JSON.stringify({ toolName: ask.toolName, messageId: ask.messageId }),
-    );
-  } catch {
+  };
+}
+
+function emitProjectAsk(projectId: string): void {
+  const watchers = projectAskListeners.get(projectId);
+  if (watchers === undefined) {
     return;
   }
+  for (const notify of [...watchers]) {
+    notify();
+  }
 }
 
-function stashAsk(key: string, ask: InstallPermissionAsk): void {
-  askStash.set(key, ask);
-  writeAskMirror(key, ask);
+export function readProjectAsk(projectId: string): InstallPermissionAsk | null {
+  return askByProject.get(projectId) ?? null;
 }
 
-function consumeAskStash(key: string): InstallPermissionAsk | null {
-  const stashed = askStash.get(key);
+function stashProjectAsk(projectId: string, ask: InstallPermissionAsk): void {
+  askByProject.set(projectId, ask);
+  writeProjectMirror(projectId, ask);
+  emitProjectAsk(projectId);
+}
+
+function consumeProjectAsk(projectId: string): InstallPermissionAsk | null {
+  const stashed = askByProject.get(projectId);
   if (stashed !== undefined) {
-    askStash.delete(key);
+    askByProject.delete(projectId);
     return stashed;
   }
-  return readAskMirror(key);
+  return readProjectMirror(projectId);
 }
 
-function clearAskStash(key: string): void {
-  askStash.delete(key);
-  writeAskMirror(key, null);
+function clearProjectAsk(projectId: string): void {
+  askByProject.delete(projectId);
+  writeProjectMirror(projectId, null);
+}
+
+/** Park without notifying (unmount path): the next mount consumes it. */
+function parkProjectAsk(projectId: string, ask: InstallPermissionAsk): void {
+  askByProject.set(projectId, ask);
+  writeProjectMirror(projectId, ask);
 }
 
 function consumeBlockingStash(key: string): BlockingError | null {
@@ -285,12 +335,24 @@ function clearSliceBlocking(key: string): void {
 }
 
 function emitAsk(key: string, ask: InstallPermissionAsk): void {
+  // FXCHATV V3: project-keyed delivery. A slice-keyed ask parks where
+  // no mounted UI ever reads it when the slice key changed mid-run, so
+  // the live ask goes to the project: any mounted ChatArea of the same
+  // project shows the card, otherwise the mount consumes the stash.
+  const projectId = sliceProjectId.get(key);
+  if (projectId !== undefined) {
+    const ui = sliceUI.get(key);
+    if (ui !== undefined) {
+      ui.onAsk(ask);
+    }
+    stashProjectAsk(projectId, ask);
+    return;
+  }
   const ui = sliceUI.get(key);
   if (ui !== undefined) {
     ui.onAsk(ask);
     return;
   }
-  stashAsk(key, ask);
 }
 
 // H4 quiet dot: slices whose run finished while no ChatArea showed them.
@@ -405,8 +467,73 @@ function disconnectClosedText(): string {
   );
 }
 
-/** FXR3B: engine-turn verdict from the lines plus the terminal state.
+/** FXCHATV V1: a run-log-looking text renders as one plain verdict line
+plus a collapsed Details disclosure, never twice. Markers are the
+engine's own vocabulary (Working folder, Team, Director, Part, Check,
+Total, run success/fail, cost lines): a juror reads the verdict, the
+full log stays behind Details. Plain answers keep the verdict card. */
+const ENGINE_LOG_MARKERS =
+  /^(?:working folder|team|director|part\s+\S+|check\s+\S+|total|run (?:success|fail)|.*cost:)/im;
 
+export function looksLikeEngineLog(text: string): boolean {
+  return ENGINE_LOG_MARKERS.test(text);
+}
+
+/** FXCHATV (d): check lines name the program only, never a full
+machine path (C:\Windows\..., C:\tool\...); a user profile segment
+(C:\Users\<name>) never reaches the screen. The working-folder line
+itself is untouched: it lives only inside Details. */
+export function shortProgramLine(line: string): string {
+  const redacted = line.replace(/C:\\Users\\[^\\\s"']+/gi, "~");
+  return redacted.replace(
+    /(\$\s+)([A-Za-z]:[\\/][^\s"']+)/g,
+    (_match, head: string, token: string) => {
+      const base = token.split(/[\\/]/).pop() ?? token;
+      const name = base.replace(/\.(exe|cmd|bat|ps1)$/i, "").toLowerCase();
+      return `${head}${name}`;
+    },
+  );
+}
+
+/** FXCHATV V4: one live step line while a run works — the current
+part, the count of check/step rows so far, the last streamed row in
+plain words, and elapsed seconds. Data comes from the streamed
+deltas only (the live store text); no raw machine paths. */
+export function liveStepLine(
+  text: string,
+  startedAt: number,
+  nowMs: number,
+): string {
+  const lines = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
+  const elapsed = Math.max(0, Math.floor((nowMs - startedAt) / 1000));
+  let part: string | null = null;
+  let steps = 0;
+  for (const line of lines) {
+    const found = /Part\s+([A-Za-z0-9_-]+)/.exec(line);
+    if (found !== null && found[1] !== undefined) {
+      part = found[1];
+    }
+    if (/^(Check|Step)\b/i.test(line)) {
+      steps += 1;
+    }
+  }
+  const lastRaw = lines[lines.length - 1] ?? "";
+  const last = shortProgramLine(lastRaw).slice(0, 90);
+  const who = part === null ? "Worker" : `Worker ${part}`;
+  const doing = last !== "" ? last : "waiting for the model";
+  return `${who}, step ${steps}, ${doing}, ${elapsed} s`;
+}
+
+/** FXCHATV V5: the plain layer carries no raw words. cost UNKNOWN
+becomes cost not known; a run-success line becomes the final line. */
+export function costKnown(text: string): boolean {
+  return !/cost:\s*unknown/i.test(text);
+}
+
+/** FXR3B: engine-turn verdict from the lines plus the terminal state.
 No new server events: the text carries the part rows ("Part p1:
 PASS"), "[files: ...]" markers and run lines; the done event (or the
 served executed flag) says it is an engine turn, the terminal state
@@ -468,7 +595,10 @@ export function summarizeEngineTurn(
 }
 
 /** One plain verdict line for a finished engine turn. */
-export function engineVerdictLine(summary: EngineSummary): string {
+export function engineVerdictLine(
+  summary: EngineSummary,
+  costNote = "",
+): string {
   const head = summary.done ? "Done" : "Failed";
   const parts =
     summary.parts === 1
@@ -483,20 +613,25 @@ export function engineVerdictLine(summary: EngineSummary): string {
   const next = summary.done
     ? ""
     : " Next: fix the failing part, then send the task again.";
-  return `${head} — ${parts}, ${passed}, ${files}.${next}`;
+  return `${head} — ${parts}, ${passed}, ${files}${costNote}.${next}`;
 }
 
 /** FXR3B: finished engine turn — verdict line first, steps disclosed. */
+/** FXCHATV V1: the verdict is the one plain reply line; the run log
+lives once, behind a collapsed Details disclosure (V5: plain layer
+carries no raw words, so the cost line becomes cost not known; (d):
+check lines name the program only). */
 export function EngineTurnView(props: {
   text: string;
   status: "ok" | "failed" | "stopped";
 }): ReactElement {
   const summary = summarizeEngineTurn(props.text, props.status);
+  const costNote = costKnown(props.text) ? "" : ", cost not known";
   const [open, setOpen] = useState(!summary.done);
   return (
     <>
       <p data-testid="run-verdict" style={{ whiteSpace: "pre-wrap" }}>
-        {engineVerdictLine(summary)}
+        {shortProgramLine(engineVerdictLine(summary, costNote))}
       </p>
       <button
         type="button"
@@ -507,12 +642,12 @@ export function EngineTurnView(props: {
           setOpen(!open);
         }}
       >
-        {pt("chat.run.steps", "Run steps")}
+        {pt("chat.run.steps", "Details")}
       </button>
       <div data-testid="run-steps" hidden={!open}>
         {summary.lines.map((line, index) => (
           <p key={`${index}`} style={{ whiteSpace: "pre-wrap" }}>
-            {line}
+            {shortProgramLine(line)}
           </p>
         ))}
       </div>
@@ -588,6 +723,18 @@ function buildHistoryBatch(
       if (turn.executed === true) {
         // Served engine mark: the verdict view renders from the lines,
         // never the approval card. Status rides along for Done/Failed.
+        engineTurnStatus.set(
+          assistantId,
+          turn.status === "stopped"
+            ? "stopped"
+            : turn.status === "failed"
+              ? "failed"
+              : "ok",
+        );
+      } else if (looksLikeEngineLog(turn.assistant_text)) {
+        // FXCHATV V1: a served run log without the executed flag is an
+        // engine reply too: verdict plus Details, never the card.
+        // History never marks a proposal: default is no card.
         engineTurnStatus.set(
           assistantId,
           turn.status === "stopped"
@@ -950,6 +1097,7 @@ function startChatRun(
   if (pumps.has(key) || getChatState(key).runner.streaming) {
     return;
   }
+  sliceProjectId.set(key, projectId);
   clearSliceBlocking(key);
   lastSentBySlice.set(key, text);
   const at = Date.now();
@@ -1058,7 +1206,12 @@ function startChatRun(
         // The stream's own clean terminal event marks the waiting
         // proposal — the ONLY card path. Engine turns (executed) never
         // mark: they render the verdict view instead, live or reloaded.
+        // FXCHATV V1: a run-log-looking text without the executed flag
+        // is an engine reply too (legacy terminals): verdict plus
+        // Details, never the card, never twice.
         if (ranEngine) {
+          engineTurnStatus.set(assistantId, "ok");
+        } else if (looksLikeEngineLog(answer)) {
           engineTurnStatus.set(assistantId, "ok");
         } else {
           proposalMessages.add(assistantId);
@@ -1105,6 +1258,9 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
   const [connected, setConnected] = useState<string[] | null>(null);
   const [directorModel, setDirectorModel] = useState<string | null>(null);
   const [draft, setDraft] = useState(props.initialDraft ?? "");
+  // FXCHATV (a): mirror for the batched no-provider restore below.
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
   const [blocking, setBlocking] = useState<BlockingError | null>(() =>
     consumeBlockingStash(key),
   );
@@ -1152,6 +1308,34 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
   // the oldest turn) plus the load-earlier busy flag.
   const [cursor, setCursor] = useState<string | null>(null);
   const [earlierBusy, setEarlierBusy] = useState(false);
+  // FXCHATV (b): one Connect CTA per state. The composer hint hides
+  // while the expanded hierarchy rows already offer the link (same
+  // localStorage expansion the rows read).
+  const [hierExpanded, setHierExpanded] = useState<boolean>(() => {
+    try {
+      return (
+        window.localStorage.getItem(
+          `agentsi.hierarchy.collapsed.${props.projectId}`,
+        ) === "expanded"
+      );
+    } catch {
+      return false;
+    }
+  });
+  // FXCHATV V4: one ticking second hand while a run works; the step
+  // line under the composer derives from the live deltas plus elapsed.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!chatState.runner.streaming) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [chatState.runner.streaming]);
   const pendingAskRef = useRef<InstallPermissionAsk | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   // FXRC1FIX P3: the message list owns the scroll inside the chat card;
@@ -1184,16 +1368,29 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
   // the device online state into the slice, loads served turns (H2) and
   // registers this mount for inline error plus permission UI. Unmount only
   // detaches: the pump keeps streaming into the store (H1).
+  // FXCHATV V3: the pending ask is project-keyed, so a hold that lands
+  // under any slice key of this project (client swap, project switch,
+  // remount) shows the card here without remount; the return restores
+  // it from the stash or the stable per-project mirror.
   useEffect(() => {
     mountedSlices.add(key);
     markSeenByKey(key);
+    try {
+      setHierExpanded(
+        window.localStorage.getItem(
+          `agentsi.hierarchy.collapsed.${props.projectId}`,
+        ) === "expanded",
+      );
+    } catch {
+      setHierExpanded(false);
+    }
     const stashedBlocking = consumeBlockingStash(key);
     if (stashedBlocking !== null) {
       setBlocking(stashedBlocking);
     }
     setPendingAsk(null);
     pendingAskRef.current = null;
-    const stashedAsk = consumeAskStash(key);
+    const stashedAsk = consumeProjectAsk(props.projectId);
     if (stashedAsk !== null) {
       pendingAskRef.current = stashedAsk;
       setPendingAsk(stashedAsk);
@@ -1201,6 +1398,20 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
     const ui: SliceUI = {
       onBlocking: (error) => {
         setBlocking(error);
+        // FXCHATV (a): restore the task into the composer in the SAME
+        // commit as the blocking error, so the draft is already back
+        // when the error line lands. Same conditions as the effect
+        // below (never clobbers text typed after the send); the effect
+        // stays as the net for blocking restored at mount.
+        if (
+          error !== null &&
+          error.code === "NO_PROVIDER_BOUND" &&
+          error.task !== undefined &&
+          error.task.trim() !== "" &&
+          draftRef.current.trim() === ""
+        ) {
+          setDraft(error.task);
+        }
       },
       onAsk: (ask) => {
         pendingAskRef.current = ask;
@@ -1208,16 +1419,24 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
       },
     };
     sliceUI.set(key, ui);
+    const unsubscribeAsk = subscribeProjectAsk(props.projectId, () => {
+      const ask = readProjectAsk(props.projectId);
+      if (ask !== null) {
+        pendingAskRef.current = ask;
+        setPendingAsk(ask);
+      }
+    });
     setChatOnline(key, readOnline());
     void loadHistoryOnce(key, props.projectId).then((next) => {
       setCursor(next);
     });
     return () => {
+      unsubscribeAsk();
       mountedSlices.delete(key);
-      // Leaving the page keeps the pending card: stash (plus the
-      // live-session mirror) so the return restores the same dialog.
+      // Leaving the page keeps the pending card: park it project-keyed
+      // (plus the stable mirror) so the return restores the same dialog.
       if (pendingAskRef.current !== null) {
-        stashAsk(key, pendingAskRef.current);
+        parkProjectAsk(props.projectId, pendingAskRef.current);
       }
       if (sliceUI.get(key) === ui) {
         sliceUI.delete(key);
@@ -1385,8 +1604,11 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
     pump.cancelled = true;
     pump.runner.cancel().then(
       () => undefined,
-      () => {
-        showToast(t("errors.generic"));
+      (err: unknown) => {
+        // FXCLASS CD-8: the toast names the cause (code), never a bare
+        // generic line that vanishes without a cause.
+        const code = err instanceof ApiError ? err.code : "CONTEXT_MISSING";
+        showToast(`${t(apiErrorLocaleKey(code))} (${code})`);
       },
     );
   };
@@ -1452,7 +1674,7 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
     }
     pendingAskRef.current = null;
     setPendingAsk(null);
-    clearAskStash(key);
+    clearProjectAsk(props.projectId);
     const command = installDisplayCommand(
       ask.toolName,
       props.projectId,
@@ -1653,6 +1875,14 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
     message.role === "assistant" ? extractChatTags(message.text) : [],
   );
   const visibleTags = [...new Set(channelTags)];
+  // FXCHATV V4: the live row is the newest unfinished assistant bubble.
+  const liveRow = [...messages]
+    .reverse()
+    .find((message) => message.role === "assistant" && !message.final);
+  const liveStep =
+    streaming && liveRow !== undefined
+      ? liveStepLine(liveRow.text, liveRow.at, nowMs)
+      : null;
 
   return (
     <section data-testid="chat-area" aria-label={t("shell.sidebar.chat")}>
@@ -1660,7 +1890,10 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
           the h1 stays in the DOM for the frozen heading contract but reads
           as plain conversation (visually hidden). */}
       <h1 className="fx-vh">{t("shell.sidebar.chat")}</h1>
-      <HierarchyRows projectId={props.projectId} />
+      <HierarchyRows
+        projectId={props.projectId}
+        onExpandedChange={setHierExpanded}
+      />
       <div
         data-testid="chat-layout"
         style={{ maxHeight: "calc(100vh - 200px)" }}
@@ -1705,7 +1938,9 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
                   status={engineTurnStatus.get(message.id) ?? "ok"}
                 />
               ) : (
-                <p style={{ whiteSpace: "pre-wrap" }}>{message.text}</p>
+                <p style={{ whiteSpace: "pre-wrap" }}>
+                  {shortProgramLine(message.text)}
+                </p>
               )}
               {message.role === "assistant" &&
               message.final &&
@@ -1755,8 +1990,16 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
                   {pt("chat.stream.stopped", "Stopped")}
                 </span>
               ) : null}
+              {/* FXCHATV V2: the card shows ONLY for a live plain
+                  answer waiting for its verdict (Accept / Edit /
+                  Reject): never on an engine turn (verdict view),
+                  never stopped, never interrupted (resend), never
+                  failed, never decided, never while streaming. */}
               {message.role === "assistant" &&
               proposalMessages.has(message.id) &&
+              !engineTurnStatus.has(message.id) &&
+              !stoppedAssistants.has(message.id) &&
+              message.resendPrompt === undefined &&
               message.final &&
               message.text !== "" &&
               message.decided === undefined &&
@@ -1886,9 +2129,16 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
             inside, the send as an icon button inside right; a small status
             line under it (model | route | working state). */}
         <div data-testid="chat-composer" className="fx-composer">
+          {/* FXCHATV (b): single Connect CTA for one state — the rows
+              above already offer it when expanded and empty. */}
           {boundModels !== null &&
           boundModels.length === 0 &&
-          blocking?.code !== "NO_PROVIDER_BOUND" ? (
+          blocking?.code !== "NO_PROVIDER_BOUND" &&
+          !(
+            connected !== null &&
+            connected.length === 0 &&
+            hierExpanded
+          ) ? (
             <div className="fx-composer-hint">
               <p data-testid="chat-no-model-hint" className="fx-quiet">{t("chat.composer.noModel")}</p>
               <a data-testid="chat-no-model-connect" href="/settings/models" className="fx-btn-quiet">
@@ -1939,7 +2189,11 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
             <span>{directorModel ?? t("chat.hierarchy.auto")}</span>
             <span>{statusRoute()}</span>
             <span>
-              {streaming ? (
+              {/* FXCHATV (c): with no provider bound the status names
+                  the blocked state, never Ready. */}
+              {blocking?.code === "NO_PROVIDER_BOUND" ? (
+                pt("chat.composer.statusBlocked", "Blocked")
+              ) : streaming ? (
                 <>
                   <span
                     data-testid="chat-spinner"
@@ -1973,6 +2227,13 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
               {t("chat.abort.cancel")}
             </button>
           ) : null}
+          {/* FXCHATV V4: while a run works, the step line in plain
+              words plus elapsed seconds sits under the composer. */}
+          {liveStep !== null ? (
+            <p data-testid="chat-live-step" role="status" className="fx-quiet">
+              {liveStep}
+            </p>
+          ) : null}
           {online ? null : (
             <span data-testid="chat-offline-dot" role="status" className="fx-quiet">
               {t("chat.stream.offline")}
@@ -1983,7 +2244,6 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
               data-testid="chat-error-line"
               role="alert"
               className="fx-quiet"
-              title={blocking.code}
             >
               <p>
                 {chatErrorText(
@@ -2001,7 +2261,7 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
               </button>
             </div>
           ) : null}
-          {blocking === null && health === "degraded" ? (
+          {blocking === null && health === "degraded" && !streaming ? (
             <span data-testid="chat-health-degraded" role="status" className="fx-quiet">
               {t("errors.generic")}
             </span>

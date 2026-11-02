@@ -130,6 +130,21 @@ def main() -> int:
         _emit(test_id, "BLOCKED", "bad_params args", 0, [RUNNER_ID + ".json"])
         return 0
     resolved = shutil.which(tool)
+    if resolved is not None:
+        try:
+            _low = str(resolved).lower()
+        except Exception:
+            _low = ""
+        _is_stub = ("windowsapps" in _low)
+        if not _is_stub:
+            try:
+                import os as _os
+                if _os.path.isfile(resolved) and _os.path.getsize(resolved) == 0:
+                    _is_stub = True
+            except OSError:
+                _is_stub = False
+        if _is_stub:
+            resolved = None
     if resolved is None:
         path = fail("tool not installed: %s" % tool)
         _emit(

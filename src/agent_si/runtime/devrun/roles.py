@@ -828,10 +828,11 @@ def admit_role_call(gate: Any, *, project_id: str, task_id: str,
 
     The same admission every metered entry shares: a zero-amount
     reserve under ``admit-<run>-<role>`` that raises the gate's own
-    BudgetBlockedError when the provider cap or hard limit is already
-    reached, so the provider is never invoked past a hard cap. A
-    missing gate allows the call (the post-call charge still reports
-    UNAVAILABLE); any other gate failure also allows it.
+    BudgetBlockedError when the gate is missing, the project is
+    unconfigured, or the provider cap or hard limit is already
+    reached, so the provider is never invoked past a hard cap. Any
+    other gate failure propagates to the caller (fail-closed, never
+    silently allowed).
     """
     from agent_si.runtime import manager as _manager
 

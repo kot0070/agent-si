@@ -27,6 +27,12 @@ TEST_SETTINGS = {"testing": True, "ui_session_token": TEST_TOKEN}
 FIX = os.path.join(_WS, "tests", "fixtures", "k09b")
 
 
+def _auth():
+    """Session headers (FXR2E: the validate write route is guarded)."""
+    return {"x-actor": "k09b-tester",
+            "x-ui-session-token": TEST_TOKEN}
+
+
 def make_client():
     app = create_app(dict(TEST_SETTINGS))
     return app, TestClient(app, raise_server_exceptions=False)
@@ -72,17 +78,19 @@ def test_m_p2_74_savings_reports_stored_records():
 def test_b0b_bp05_43_validate_reports_code():
     _, client = make_client()
     good = client.post(
-        "/api/v1/kb/validate", json={"kb_dir": os.path.join(FIX, "good")})
+        "/api/v1/kb/validate", json={"kb_dir": os.path.join(FIX, "good")},
+        headers=_auth())
     assert good.status_code == 200, good.text
     assert good.json()["ok"] is True
     assert good.json()["error_code"] is None
     bad = client.post(
         "/api/v1/kb/validate",
-        json={"kb_dir": os.path.join(FIX, "no-manifest")})
+        json={"kb_dir": os.path.join(FIX, "no-manifest")},
+        headers=_auth())
     assert bad.status_code == 200, bad.text
     assert bad.json()["ok"] is False
     assert bad.json()["error_code"] == "KB_MANIFEST_MISSING"
-    empty = client.post("/api/v1/kb/validate", json={})
+    empty = client.post("/api/v1/kb/validate", json={}, headers=_auth())
     assert empty.status_code == 200, empty.text
     assert empty.json()["ok"] is False
 

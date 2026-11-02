@@ -90,10 +90,10 @@ class CatalogKbReader:
     """KbReader over the live bound catalog (the real KB, never a copy)."""
 
     def facts(self, provider: str, model: str) -> Optional[KbModelFacts]:
-        """KB facts for one exact pair, or None (NO-DATA)."""
+        """KB facts for one pair (exact, dated base, local tag), or None."""
         from agent_si.model_kb import loader as _loader
 
-        row = _loader.find_row(_kb.bound_catalog(), provider, model)
+        row = _loader.match_row(_kb.bound_catalog(), provider, model)
         if row is None:
             return None
         return row_to_facts(row)

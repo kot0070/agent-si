@@ -99,7 +99,7 @@ def picker_options(role: str, facts_list: List[KbModelFacts],
     never alphabetically.
     """
     cands = [f for f in (facts_list or [])
-             if purpose == "vision" or is_text_code_candidate(f)]
+             if is_text_code_candidate(f)]
 
     def rank(f: KbModelFacts):
         fit = f.fit_for(purpose)
@@ -145,7 +145,7 @@ def suggest_strongest(kb: KbReader, provider: str,
     measured quality, then known prices, then KB order.
     """
     cands = [f for f in kb.models(provider)
-             if purpose == "vision" or is_text_code_candidate(f)]
+             if is_text_code_candidate(f)]
     if not cands:
         return None
 

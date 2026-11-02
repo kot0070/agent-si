@@ -25,6 +25,7 @@
 - The folder picker calls a loopback endpoint guarded by the session check. The user picks, cancels, or (where no native window exists) sees no picker control at all.
 - The desktop service listens on loopback only. Remote hosts cannot reach it.
 - Local model and device steps stay on the machine. Docker and shell steps pass the same permission ladder and a loopback-host check.
+- A check command runs with the user's rights: it can read and change the user's files, so run only checks you trust.
 
 ## What leaves the machine
 
