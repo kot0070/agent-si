@@ -70,6 +70,10 @@ class _FakeWindow:
     def __init__(self, width, height):
         self.width = width
         self.height = height
+        self.loaded = []
+
+    def load_url(self, url):
+        self.loaded.append(url)
 
 
 class _FakeWebview:
@@ -90,9 +94,11 @@ class _FakeWebview:
         self.window = _FakeWindow(width, height)
         return self.window
 
-    def start(self, private_mode=False, storage_path=None):
+    def start(self, func=None, private_mode=False, storage_path=None):
         self.started = {"private_mode": private_mode,
                         "storage_path": storage_path}
+        if callable(func):
+            func()
 
 
 class _FakeServer:

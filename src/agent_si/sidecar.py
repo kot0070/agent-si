@@ -1606,14 +1606,17 @@ def main(argv: list[str] | None = None) -> int:
         reason = "server did not start"
         _log("agent-si-sidecar: " + reason)
         if window is not None and _webview is not None:
+            _failure_target = _failure_html(
+                reason, _logs_dir_for_failure(data_root),
+                lang=splash_lang)
+
+            def _show_failure() -> None:
+                try:
+                    window.load_url(_failure_target)
+                except Exception as exc:
+                    _log("agent-si-sidecar: window navigation failed (%s)" % (exc,))
             try:
-                window.load_url(_failure_html(
-                    reason, _logs_dir_for_failure(data_root),
-                    lang=splash_lang))
-            except Exception:
-                pass
-            try:
-                _webview.start(private_mode=False,
+                _webview.start(_show_failure, private_mode=False,
                                storage_path=webview_storage_dir())
             except Exception:
                 pass
@@ -1643,12 +1646,16 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if window is not None and _webview is not None:
-            try:
-                window.load_url(url)
-            except Exception as exc:
-                _log("agent-si-sidecar: window navigation failed "
-                     f"({exc})")
-            _webview.start(private_mode=False,
+            def _navigate() -> None:
+                try:
+                    window.load_url(url)
+                except Exception as exc:
+                    _log("agent-si-sidecar: window navigation failed (%s)" % (exc,))
+                    with contextlib.suppress(Exception):
+                        _open_in_browser(url)
+                    with contextlib.suppress(Exception):
+                        _note_webview_missing(url)
+            _webview.start(_navigate, private_mode=False,
                            storage_path=webview_storage_dir())
             if data_root is not None:
                 try:

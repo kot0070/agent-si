@@ -46,6 +46,10 @@ class _CopyFakeWindow:
     def __init__(self, width, height):
         self.width = width
         self.height = height
+        self.loaded = []
+
+    def load_url(self, url):
+        self.loaded.append(url)
 
 
 class _CopyFakeWebview:
@@ -59,7 +63,9 @@ class _CopyFakeWebview:
         self.window = _CopyFakeWindow(width, height)
         return self.window
 
-    def start(self, private_mode=False, storage_path=None):
+    def start(self, func=None, private_mode=False, storage_path=None):
+        if callable(func):
+            func()
         return None
 
 
