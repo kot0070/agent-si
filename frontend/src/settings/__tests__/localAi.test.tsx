@@ -5,7 +5,6 @@ import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { ApiClientProvider } from "../../app/ApiClientProvider";
 import { FakeApiClient } from "../../api/__tests__/fakeApiClient";
 import type { PartRow } from "../../api/iface";
-import { ENDPOINTS } from "../../api/endpoints";
 import { App } from "../../app/App";
 import { SettingsLayout } from "../../shell/SettingsLayout";
 import { LocalBenchTab } from "../LocalBenchTab";
@@ -190,9 +189,7 @@ describe.each([false, true])("localAi settings view (dark=%s)", (dark) => {
     expect(stored.textContent).toContain("bench-cases");
     expect(stored.textContent).toContain("local-a");
     expect(stored.textContent).toContain(EN_LOCALBENCH.modelsTitle);
-    expect(screen.getByTestId("localai-endpoint").textContent).toBe(
-      ENDPOINTS.agentsLive,
-    );
+    expect(screen.queryByTestId("localai-endpoint")).toBeNull();
     const decisions = await screen.findByTestId("localbench-decisions");
     expect(decisions.textContent).toContain("local-b");
     expect(decisions.textContent).toContain(EN_LOCALBENCH.levelDeep);
@@ -205,9 +202,7 @@ describe.each([false, true])("localAi settings view (dark=%s)", (dark) => {
     const stored = await screen.findByTestId("localai-stored");
     expect(stored.textContent).toContain(EN_LOCALBENCH.modelsEmpty);
     expect(stored.textContent).toContain(EN_LOCALBENCH.decisionEmpty);
-    expect(screen.getByTestId("localai-endpoint").textContent).toBe(
-      ENDPOINTS.agentsLive,
-    );
+    expect(screen.queryByTestId("localai-endpoint")).toBeNull();
   });
 
   it("shows stored config plus endpoint next to unchanged placement buckets", async () => {
@@ -217,9 +212,7 @@ describe.each([false, true])("localAi settings view (dark=%s)", (dark) => {
     expect(await screen.findByTestId("place-row-agent-1")).toBeTruthy();
     const stored = await screen.findByTestId("localai-stored");
     expect(stored.textContent).toContain("bench-cases");
-    expect(screen.getByTestId("localai-endpoint").textContent).toBe(
-      ENDPOINTS.agentsLive,
-    );
+    expect(screen.queryByTestId("localai-endpoint")).toBeNull();
     expect(await screen.findByTestId("localbench-decisions")).toBeTruthy();
   });
 
@@ -240,9 +233,7 @@ describe.each([false, true])("localAi settings view (dark=%s)", (dark) => {
     expect(stored.textContent).toContain(UK_LOCALBENCH.modelsTitle);
     expect(stored.textContent).toContain(UK_LOCALBENCH.decisionTitle);
     expect(stored.textContent).not.toContain(UK_LOCALBENCH.decisionEmpty);
-    expect(screen.getByTestId("localai-endpoint").textContent).toBe(
-      ENDPOINTS.agentsLive,
-    );
+    expect(screen.queryByTestId("localai-endpoint")).toBeNull();
     expect(t("settings.localAi.title")).toBe(
       (uk as unknown as { settings: { localAi: { title: string } } }).settings
         .localAi.title,

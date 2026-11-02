@@ -179,8 +179,6 @@ function LocalAiStoredPanel(): ReactElement {
           ))}
         </ul>
       )}
-      <p data-testid="localai-endpoint-label">{t("settings.localAi.title")}</p>
-      <p data-testid="localai-endpoint">{ENDPOINTS.agentsLive}</p>
       <LocalBenchDecisionList decisions={stored.decisions} />
     </div>
   );

@@ -126,7 +126,7 @@ export function RunHistory(props: RunHistoryProps): ReactElement {
         <LoadingState loadingKey="ui.loading.more" />
       ) : ledger.length === 0 && runs.length === 0 ? (
         <EmptyState
-          stateKey="projects.list.empty"
+          stateKey="projects.runs.empty"
           actionKey={null}
           onAction={null}
         />
@@ -161,8 +161,20 @@ export function RunHistory(props: RunHistoryProps): ReactElement {
                   {run.tokens === "UNKNOWN"
                     ? "not known"
                     : formatNumber(run.tokens, locale)}{" "}
-                  · Cost {run.cost === "UNKNOWN" ? "not known" : run.cost}
+                  · Cost{" "}
+                  {run.cost === "UNKNOWN"
+                    ? t("projectView.cost.notKnown")
+                    : run.cost}
                 </div>
+                {run.folder ? (
+                  <div
+                    data-testid={`devrun-folder-${run.run_id}`}
+                    className="fx-quiet fx-truncate"
+                    title={run.folder}
+                  >
+                    {run.folder}
+                  </div>
+                ) : null}
                 {run.summary === "" ? null : <div>{run.summary}</div>}
                 {run.files.length === 0 ? null : (
                   <ul>
