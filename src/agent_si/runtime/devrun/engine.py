@@ -326,6 +326,21 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
     message = str(getattr(request, "message", "") or "")
     state = stream_state if isinstance(stream_state, dict) else {}
     record = _records.new_run_record(run_id, project, task_id, folder)
+    try:
+        record["install_runs_prior"] = _records.prior_install_runs(
+            app, project)
+    except Exception:
+        record["install_runs_prior"] = []
+    prior_installs = _records.prior_snapshot(record)
+    if prior_installs:
+        # A rerun after installs: the Director and the worker briefs
+        # carry the same real install record (do not install again,
+        # verify instead). The auditor reads it through judge().
+        message = (message or "") + (
+            "\nInstalled already for this project "
+            "(do not install again, verify instead):\n%s" % (
+                "\n".join(
+                    _records.format_install_runs(prior_installs)),))
     procs: list[Any] = []
     attached: set[str] = set()
     known_parts: list[str] = []
@@ -1246,6 +1261,7 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
               call: Any, lock: Any = None, abort: Any = None) -> Any:
     """Run one part through attempts; return (verdict, next turn)."""
     from agent_si.runtime.devrun import audit as _audit
+    from agent_si.runtime.devrun import records as _records
     from agent_si.runtime.devrun import roles as _roles
 
     part_id = str(spec["part_id"])
@@ -1335,6 +1351,7 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
                 entry = {
                     "producer_ref": str(producer_ref),
                     "audit_ref": str(auditor_ref),
+                    "audit_id": "",
                     "audit_session": "",
                     "result": "FAIL",
                     "reasons": ["auditor timed out: %s" % (exc,)],
@@ -1367,6 +1384,35 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
                     "attempt": attempt,
                 })
             # FXPARALLEL END audits-lock.
+            try:
+                install_evidence = _records.combined_evidence(record)
+            except Exception:
+                install_evidence = []
+            if (entry is not None and entry.get("result") == "PASS"
+                    and spec.get("files")
+                    and files_diff == "(no changes)"
+                    and not install_evidence):
+                # Empty work passing is a release blocker: an empty diff
+                # with no real installer run behind it cannot PASS,
+                # even with green checks and a PASS verdict. Earlier
+                # attempts continue (the worker may still write files);
+                # the last attempt fails with this honest line.
+                entry["result"] = "FAIL"
+                entry["reasons"] = [
+                    "no file changes vs attempt start and "
+                    "no installer ran"]
+                if attempt >= _EXTRA_ATTEMPTS + 1:
+                    row["verdict"] = "FAIL"
+                    row["reason"] = (
+                        "no file changes vs attempt start and "
+                        "no installer ran")
+                    turn += 1
+                    yield _run_event(
+                        "delta", turn, part_id,
+                        "Part %s: FAILED (%s)" % (part_id, row["reason"]),
+                        {"run_id": run_id, "part_id": part_id})
+                    publish()
+                    return "FAIL", turn
             first_reason = ((entry or {}).get("reasons", [])
                             or ["auditor gave no reason"])[0]
             turn += 1
@@ -1793,6 +1839,14 @@ def _run_agent_command(*, record: Any, folder: str, project: str,
     if outcome == "timeout":
         return "run %s: timeout after %ss (exit unknown)\n%s" % (
             " ".join(argv), _actions.class_timeout(kind), tail)
+    if outcome == "exited" and exit_code == 0 and kind == "install":
+        # A real installer run (exit 0 only): the install record feeds
+        # the auditor and the rerun briefs, never model text. Refusals,
+        # holds and failures leave no record.
+        with contextlib.suppress(Exception):
+            from agent_si.runtime.devrun import records as _records
+
+            _records.record_install_run(record, argv, 0)
     return "run %s: exit %s\n%s" % (" ".join(argv), exit_code, tail)
 
 
@@ -1913,6 +1967,14 @@ def _run_checks(*, record: Any, spec: dict, row: dict, folder: str,
                      if outcome == "exited" else "%s\n%s" % (
                          outcome, tail),
                      "pid": pid})
+        if outcome == "exited" and exit_code == 0 and kind == "install":
+            # A real installer check run (exit 0 only): same install
+            # record as worker runs, never model text.
+            with contextlib.suppress(Exception):
+                from agent_si.runtime.devrun import records as _records
+
+                _records.record_install_run(
+                    record, list(spawn.get("argv") or command), 0)
         if outcome == "stopped":
             raise _Stopped()
         if outcome == "timeout":

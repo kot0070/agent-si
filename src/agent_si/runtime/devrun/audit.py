@@ -67,8 +67,19 @@ def auditor_messages(
     goal: str,
     files_diff: str,
     checks: list[dict[str, Any]],
+    install_runs: Any = (),
+    prior_install_runs: Any = (),
 ) -> list[dict[str, str]]:
-    """The auditor's NEW message list: goal, diff, checks with output."""
+    """The auditor's NEW message list: goal, diff, checks with output.
+
+    Installers the app ran carry their own evidence section, built
+    only from the engine's real install record, never from model
+    text: an empty diff with such a record is explained, without one
+    it stays empty work. Installs already run for the project ride a
+    second section (the rerun must verify, not reinstall).
+    """
+    from agent_si.runtime.devrun import records as _records
+
     lines = [
         "You are the auditor for one development part.",
         "Goal: %s" % (goal,),
@@ -83,6 +94,15 @@ def auditor_messages(
         lines.append("exit: %s" % (check.get("exit_code"),))
         tail = str(check.get("output_tail") or "")
         lines.append(tail if tail else "(no output)")
+    install_lines = _records.format_install_runs(install_runs)
+    if install_lines:
+        lines.append("Installers the app ran for this run:")
+        lines.extend(install_lines)
+    prior_lines = _records.format_install_runs(prior_install_runs)
+    if prior_lines:
+        lines.append("Installers already run for this project "
+                     "(do not reinstall, verify instead):")
+        lines.extend(prior_lines)
     lines.append(
         'Return ONLY JSON: {"result": "PASS"|"FAIL", '
         '"reasons": ["..."]}. Judge the real files and real outputs '
@@ -131,9 +151,13 @@ def judge(
     ride the same parameters as any role call.
     """
     from agent_si.runtime.devrun import protocol as _protocol
+    from agent_si.runtime.devrun import records as _install_records
     from agent_si.runtime.devrun import roles as _roles
 
-    messages = auditor_messages(goal, files_diff, checks)
+    evidence = _install_records.run_install_runs(record)
+    prior = _install_records.prior_snapshot(record)
+    messages = auditor_messages(goal, files_diff, checks, evidence,
+                                prior)
     # FXPARALLEL BEGIN charge-lock: auditor charges under the run lock.
     response, over, _row = _roles.invoke_owned(
         app, adapter, resolution, messages, record=record,
