@@ -837,14 +837,17 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
     if prior_installs:
         # A rerun after installs: the Director brief carries the full
         # real install record (do not install again, verify instead).
-        # The worker brief carries the same record as installer NAMES
-        # only: the "$ ... -> exit N" evidence shape would read as a
-        # runnable check to a literal follower, so it never rides the
-        # worker prompt. The auditor reads it through judge().
+        # The worker brief carries installer NAMES only ("npm", never
+        # the runnable "npm install" line and never "$ ... -> exit N"
+        # evidence): a literal follower must not read a command to run
+        # here. The auditor reads the full record through judge().
         try:
-            _names = "; ".join(
-                " ".join(str(word) for word in (row.get("argv") or []))
-                for row in prior_installs)
+            from agent_si.runtime.devrun import actions as _brief_actions
+
+            _names = "; ".join(dict.fromkeys(
+                _brief_actions._installer_name(
+                    [str(word) for word in (row.get("argv") or [])])
+                for row in prior_installs))
         except Exception:
             _names = ""
         message = (message or "") + (
