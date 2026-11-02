@@ -271,8 +271,59 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                 store = {}
                 app.state.devrun_runs = store
             store[str(project)] = record
+            _records.sync_files(record)
+            _records.persist_devrun_runs(app)
         except Exception:
             pass
+
+    def _set_task(status: str) -> None:
+        """Mirror the run state onto the task repo row (best effort).
+
+        Absent task id: no-op, never a crash, never an invented row.
+        A row naming another project is left untouched. Persisted
+        through the repo's own store file.
+        """
+        try:
+            tasks = getattr(getattr(app, "state", None),
+                            "k02r3_tasks", None)
+            if tasks is None:
+                return
+            stored = tasks.load(task_id)
+            if stored is None:
+                return
+            if str(stored.get("project_id") or "") != str(project):
+                return
+            updated = dict(stored)
+            updated["status"] = str(status)
+            try:
+                tasks.compare_and_set(
+                    task_id, stored.get("version"), updated)
+            except Exception:
+                return
+            try:
+                from agent_si.backend.read_routes import (
+                    persist_k02r3_store as _persist_tasks)
+                _persist_tasks(app)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def _finish_task() -> None:
+        """Stamp the run end and mirror the terminal task status."""
+        try:
+            _records.mark_ended(record)
+        except Exception:
+            pass
+        try:
+            _records.sync_files(record)
+            _records.persist_devrun_runs(app)
+        except Exception:
+            pass
+        if record.get("stopped"):
+            _set_task("stopped")
+        else:
+            _set_task("done" if record.get("success") else "failed")
 
     def _journal(kind: str, summary: str) -> None:
         _journal_event(project, kind, summary)
@@ -410,6 +461,7 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         return response
 
     _publish()
+    _set_task("running")
     yield _run_event("start", turn, task_id,
                      "devrun run started for %s" % (task_id,),
                      {"run_id": run_id, "project_id": project,
@@ -421,6 +473,7 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                 "run failed: project folder %r is not a directory"
                 % (folder,))
             record["success"] = False
+            _finish_task()
             yield _run_event("delta", turn, task_id, record["summary"],
                              {"run_id": run_id, "success": False})
             turn += 1
@@ -440,6 +493,7 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                 "run failed: no step limits for project %r (%s)"
                 % (project, exc))
             record["success"] = False
+            _finish_task()
             yield _run_event("done", turn, task_id, record["summary"],
                              {"run_id": run_id, "success": False})
             return
@@ -451,6 +505,7 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         except _roles.RoleUnbound as exc:
             record["summary"] = "run failed: %s" % (exc,)
             record["success"] = False
+            _finish_task()
             yield _run_event("delta", turn, task_id, record["summary"],
                              {"run_id": run_id, "success": False})
             turn += 1
@@ -464,6 +519,7 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         except _roles.RoleUnbound as exc:
             record["summary"] = "run failed: %s" % (exc,)
             record["success"] = False
+            _finish_task()
             yield _run_event("delta", turn, task_id, record["summary"],
                              {"run_id": run_id, "success": False})
             turn += 1
@@ -504,6 +560,7 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                 record["summary"] = (
                     "run failed: director plan invalid: %s" % (exc2,))
                 record["success"] = False
+                _finish_task()
                 yield _run_event("delta", turn, task_id,
                                  record["summary"],
                                  {"run_id": run_id, "success": False})
@@ -570,6 +627,7 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                 for part in record.get("parts", [])) and bool(
                     record.get("parts", []))
             record["summary"] = _records.format_summary(record)
+        _finish_task()
         _publish()
         if not record.get("stopped"):
             record["run_end"] = _run_end_tests(
@@ -591,6 +649,7 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         record["stopped"] = True
         record["success"] = False
         record["summary"] = "run stopped: user stop"
+        _finish_task()
         _publish()
         _close_live("BLOCKED")
         _journal("DEVRUN_END", record.get("summary") or "run ended")
@@ -602,6 +661,7 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
     except _BudgetOut as exc:
         record["success"] = False
         record["summary"] = "run failed: %s" % (exc,)
+        _finish_task()
         _publish()
         _close_live("BLOCKED")
         _journal("DEVRUN_END", record.get("summary") or "run ended")
@@ -615,6 +675,7 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         record["success"] = False
         record["summary"] = ("run held: install permission needed for %s"
                              % (exc.tool_id,))
+        _finish_task()
         _publish()
         if not record.get("stopped"):
             record["run_end"] = _run_end_tests(
@@ -643,6 +704,7 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         record["summary"] = (
             "%s (client disconnect: children reaped)"
             % (record.get("summary") or "run ended"))
+        _finish_task()
         _publish()
         _close_live("BLOCKED")
         raise
@@ -650,6 +712,7 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         record["success"] = False
         record["summary"] = "run failed: internal %s: %s" % (
             type(exc).__name__, exc)
+        _finish_task()
         _publish()
         _close_live("BLOCKED")
         yield _run_event("done", turn, task_id, record["summary"],
