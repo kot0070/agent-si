@@ -159,7 +159,7 @@ export function DisconnectDialog({
       style={{
         position: "fixed",
         inset: 0,
-        backgroundColor: "rgba(0, 0, 0, 0.45)",
+        backgroundColor: "#000",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",

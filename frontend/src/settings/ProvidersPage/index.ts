@@ -6,6 +6,8 @@ export type { ChatChoice } from "./ChatSelector";
 export { CONNECT_TIMEOUT_MS, ConnectDialog, saveWithTimeout } from "./ConnectDialog";
 export type { ConnectResult } from "./ConnectDialog";
 export { DisconnectDialog } from "./DisconnectDialog";
+export { listServedModels, listProviderModels, mergeModelList, modelPriceText } from "./modelsApi";
+export type { ServedModelRow, ProviderModelRow, ProviderModelsOutcome } from "./modelsApi";
 export { LeftoverFinder } from "./LeftoverFinder";
 export { ProvidersPage } from "./ProvidersPage";
 export { createMemorySecretStore, secretIdForProvider } from "./secretStore";
