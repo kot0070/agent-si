@@ -502,14 +502,16 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
             from agent_si.backend.orchestration import steplimits as _limits
             turn_cap = _limits.limits_for("task", str(project))
         except Exception as exc:
+            # Missing limits stay a terminal stream error (same contract as
+            # the manager path: "no step limits configured for project").
+            # Bookkeeping first, then let the KeyError reach the bridge,
+            # which renders the single terminal error event.
             record["summary"] = (
                 "run failed: no step limits for project %r (%s)"
                 % (project, exc))
             record["success"] = False
             _finish_task()
-            yield _run_event("done", turn, task_id, record["summary"],
-                             {"run_id": run_id, "success": False})
-            return
+            raise
         try:
             director = _roles.resolve_role(app, project, "director")
             manager = _roles.resolve_role(app, project, "manager")
