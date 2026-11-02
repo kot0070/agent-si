@@ -54,8 +54,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-GOAL_REF = "DIRECTOR/GOAL.md"
-TASK_PKG_REF = "DIRECTOR/TASK_PACKAGES/K10/TASK.md"
+GOAL_REF = "docs/GOAL.md"
+TASK_PKG_REF = "docs/TASK_PACKAGES/K10/TASK.md"
 NOTICES_DIR_REF = "docs/third_party_notices"
 REPORT_NAME = "release_report.json"
 PROVENANCE_FALLBACK = "TEST FIXTURE"
