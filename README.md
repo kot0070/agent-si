@@ -1,5 +1,7 @@
 # Agent SI
 
+![Agent SI mark](src/agent_si/assets/mark_256.png)
+
 Agent SI is a desktop app that takes one task in plain words and returns a checked result with evidence.
 You describe the goal, the app plans the work, runs the checks, and a fresh audit gives the final verdict.
 It uses connected model providers for the work and keeps every run, decision, and audit record with the project.
