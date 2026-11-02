@@ -69,6 +69,18 @@
   opacity: 0.85;
 }
 
+/* U2: placement rows wrap onto more lines instead of squeezing one line;
+   long agent names may break at word bounds but never mid-word. */
+.fxpv-place {
+  flex-wrap: wrap;
+}
+
+.fxpv-place-name,
+.fxpv-place-cell {
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
 /* FXVIEWS3 rework: one run is one stacked card, never a squeezed table
    row. The run id rides last and quiet, never first. */
 .fxpv-run {
