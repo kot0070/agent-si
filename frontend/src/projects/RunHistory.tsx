@@ -17,11 +17,7 @@ import { formatNumber, t, useLocale } from "../locale/index";
 import { EmptyState } from "../ui/EmptyState";
 import { ErrorPanel } from "../ui/ErrorPanel";
 import { LoadingState } from "../ui/LoadingState";
-import {
-  placementKey,
-  placementForRow,
-  resolveStatusHuman,
-} from "../agents/agentsApi";
+import { placementKey, resolveStatusHuman } from "../agents/agentsApi";
 import { humanRunRef, buildRunRecords, dedupeLiveRows } from "./viewsApi";
 import {
   formatRunMoment,
@@ -238,15 +234,36 @@ export function RunHistory(props: RunHistoryProps): ReactElement {
                   parts.find((candidate) => candidate.agent === row.agent);
                 const stale =
                   latestEnded && row.status === "RUNNING" && latest !== null;
+                // FXTABS U5c: the team row names the served role (or the
+                // role the agent id carries), never a bare agent id; the
+                // agent id rides the title. Repeats are folded with a count.
+                const roleMatch = /^([A-Za-z]+)-/.exec(row.agent);
+                const roleKey =
+                  row.role !== undefined
+                    ? row.role.toLowerCase()
+                    : (roleMatch?.[1]?.toLowerCase() ?? null);
+                const roleName =
+                  roleKey === "director" ||
+                  roleKey === "manager" ||
+                  roleKey === "worker" ||
+                  roleKey === "auditor" ||
+                  roleKey === "watcher"
+                    ? t(`providers.role.${roleKey}`)
+                    : null;
                 return (
                   <div
                     key={row.agent}
                     data-testid={`runhistory-part-${row.agent}`}
                     className="fxpv-row"
                   >
-                    <span title={humanRunRef(row.agent).title}>
-                      {humanRunRef(row.agent).text}
+                    <span title={roleName === null ? undefined : row.agent}>
+                      {roleName ?? row.agent}
                     </span>
+                    {row.attempts > 1 ? (
+                      <span>
+                        {t("projectView.attempts", { count: row.attempts })}
+                      </span>
+                    ) : null}
                     <span>
                       {stale
                         ? runStatusText(latest)
@@ -258,7 +275,7 @@ export function RunHistory(props: RunHistoryProps): ReactElement {
                             locale,
                           )}
                     </span>
-                    <span>{t(placementKey(placementForRow(row)))}</span>
+                    <span>{t(placementKey(row.placement))}</span>
                   </div>
                 );
               });

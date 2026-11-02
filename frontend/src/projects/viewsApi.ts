@@ -18,7 +18,7 @@ import type {
 import { placementForRow } from "../agents/agentsApi";
 import type { Placement } from "../agents/agentsApi";
 import type { SupportedLocale } from "../locale/index";
-import { formatDate } from "../locale/index";
+import { formatDate, t } from "../locale/index";
 
 export interface ShortRef {
   text: string;
@@ -314,7 +314,14 @@ export function buildTokenRows(
   telemetry: TelemetrySummary | null,
 ): TokenRow[] {
   const roles = telemetry?.roles ?? [];
-  if (roles.length > 0) {
+  // FXTABS (b): role rows count only when at least one serves a number.
+  // All-UNKNOWN roles beside a counted model aggregate used to render as
+  // "Unknown" rows plus a counted "Other calls" row; now the legacy path
+  // below gives the one honest total instead.
+  if (
+    roles.length > 0 &&
+    roles.some((row) => typeof row.tokens === "number")
+  ) {
     return roles
       .map((row) => ({
         role: row.role === "" ? undefined : row.role,
@@ -554,7 +561,32 @@ export function humanDuration(totalS: number | null): string | null {
   return restMin === 0 ? `${hours} h` : `${hours} h ${restMin} min`;
 }
 
-// Plain run status from the served success cell.
+// Plain run status from the served success cell, in the active locale
+// (FXTABS U5b: no raw English "done"/"failed" in the uk build).
 export function runStatusText(run: DevrunRun): string {
-  return run.success ? "done" : "failed";
+  return run.success
+    ? t("projectView.runs.done")
+    : t("projectView.runs.failed");
+}
+
+// FXTABS U5b: served part verdicts read as localized status words in the
+// tabs that judge rows (audits, errors). The runs-tab card keeps the raw
+// served code as provenance. Parts that never started read "not run".
+export function partVerdictText(part: {
+  verdict?: string | null;
+  attempts?: number;
+}): string {
+  const verdict = part.verdict ?? null;
+  if (verdict === "PASS") {
+    return t("projectView.runs.verdictPass");
+  }
+  if (verdict === "PENDING") {
+    return t("projectView.runs.verdictPending");
+  }
+  if (verdict !== null && verdict !== "") {
+    return verdict;
+  }
+  return (part.attempts ?? 0) > 0
+    ? t("shell.common.unknown")
+    : t("projectView.runs.notRun");
 }

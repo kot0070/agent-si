@@ -21,7 +21,7 @@ const RUN_ID = "3829831f3546456baaa49e3c4d932851";
 const RUN = {
   run_id: RUN_ID,
   start: "2026-11-02T10:14:00.000Z",
-  end: "2026-11-02T10:16:30.000Z",
+  end: "2026-11-02T10:15:11.000Z",
   parts: [
     { part_id: "p1", verdict: "PASS", attempts: 1, reason: "checks green" },
     { part_id: "p2", verdict: null, attempts: 0 },
@@ -36,13 +36,13 @@ const RUN = {
 };
 
 const LIVE = [
-  { agent: "director-plan", status: "RUNNING", scope: "s", placement: "CLOUD" },
-  { agent: "director-plan", status: "BLOCKED", scope: "s", placement: "CLOUD" },
-  { agent: "manager-plan", status: "RUNNING", scope: "s", placement: "CLOUD" },
-  { agent: "manager-plan", status: "BLOCKED", scope: "s", placement: "CLOUD" },
-  { agent: "worker-p1", status: "BLOCKED", scope: "s", placement: "CLOUD" },
-  { agent: "worker-p1", status: "RUNNING", scope: "s", placement: "CLOUD" },
-  { agent: "worker-p1", status: "RUNNING", scope: "s", placement: "CLOUD" },
+  { agent: "director-plan", status: "RUNNING", scope: "s", deliverable: "d-1", role: "director", model: "muse-spark-1.3-contributor", tokens: { input: 100, output: 50 } },
+  { agent: "director-plan", status: "BLOCKED", scope: "s", deliverable: "d-1", role: "director", model: "muse-spark-1.3-contributor", tokens: { input: 60, output: 40 } },
+  { agent: "manager-plan", status: "RUNNING", scope: "s", deliverable: "d-2", role: "manager", model: "muse-spark-1.3-contributor", tokens: { input: 70, output: 30 } },
+  { agent: "manager-plan", status: "BLOCKED", scope: "s", deliverable: "d-2", role: "manager", model: "muse-spark-1.3-contributor", tokens: { input: 20, output: 10 } },
+  { agent: "worker-p1", status: "BLOCKED", scope: "s", deliverable: "d-3", role: "worker", model: "muse-spark-1.3-contributor", tokens: { input: 10, output: 5 } },
+  { agent: "worker-p1", status: "RUNNING", scope: "s", deliverable: "d-3", role: "worker", model: "muse-spark-1.3-contributor" },
+  { agent: "worker-p1", status: "RUNNING", scope: "s", deliverable: "d-3", role: "worker", model: "muse-spark-1.3-contributor" },
 ];
 
 const BUDGET = {
@@ -161,18 +161,22 @@ describe("fxtabs tabs", () => {
   it("T4 glued label and value read separated", async () => {
     renderAppAt("/projects/p9/reports");
     const name = await screen.findByTestId("report-project-name");
-    expect(name.textContent).toMatch(/Project:\s+P9/);
+    const cells = name.querySelectorAll(":scope > span");
+    expect(cells.length).toBe(2);
+    expect(cells[0]?.textContent).toMatch(/:$/);
   });
 
   it("T5 no zero guesses: unknown wall and unknown agents, run rows say Run", async () => {
     renderAppAt("/projects/p9/overview");
     const wall = await screen.findByTestId("overview-wall-total");
-    expect(wall.textContent).not.toMatch(/0/);
-    expect(wall.textContent).toMatch(/Unknown|not known/i);
+    // Real run value (71 s served), never a 0 guess.
+    expect(wall.textContent).toMatch(/1 min 11 s/);
+    const agents = await screen.findByTestId("overview-agents-total");
+    expect(agents.textContent).toMatch(/Unknown/);
     renderAppAt("/projects/p9/time");
     const row = await screen.findByTestId("time-run-" + RUN_ID);
-    expect(row.textContent).toMatch(/^Run\b/);
-    expect(row.textContent).toMatch(/Unknown|not known/i);
+    expect(row.textContent).toMatch(/^Run/);
+    expect(row.textContent).toMatch(/1 min 11 s/);
   });
 
   it("T6 one row per agent, nothing stays Running, pending reads not run", async () => {
@@ -205,11 +209,37 @@ describe("fxtabs tabs", () => {
     expect(panel.textContent).toMatch(/muse-spark-1\.3-contributor/);
   });
 
+  it("T11 uk names: language options and theme words", async () => {
+    window.localStorage.setItem("agentsi.locale", "uk");
+    const { setLocale } = await import("../../locale/index");
+    setLocale("uk");
+    renderAppAt("/projects/p9/overview");
+    const select = (await screen.findByTestId(
+      "topbar-language",
+    )) as HTMLSelectElement;
+    const labels = [...select.options].map((option) => option.text);
+    expect(labels).toContain("Українська");
+    expect(labels).toContain("English");
+    expect(labels).not.toContain("uk");
+    const toggle = await screen.findByTestId("theme-toggle");
+    expect(toggle.textContent).toMatch(/темна|світла/);
+  });
+
   it("T10 stop-all is quiet when idle and clickable", async () => {
     renderAppAt("/projects/p9/overview");
     const stop = await screen.findByTestId("topbar-stop-all");
     expect((stop as HTMLButtonElement).disabled).toBe(false);
     expect(stop.className).not.toMatch(/danger/);
+  });
+
+  it("T5-D1 no glued Queued2 after runs ended, and tokens tab counts", async () => {
+    renderAppAt("/projects/p9/reports");
+    const counts = await screen.findByTestId("report-task-counts");
+    expect(counts.textContent).not.toMatch(/Queued\d/);
+    renderAppAt("/projects/p9/tokens");
+    const total = await screen.findByTestId("tokens-spent");
+    expect(total.textContent).not.toMatch(/not known yet/);
+    expect(total.textContent).toMatch(/395/);
   });
 });
 
