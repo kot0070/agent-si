@@ -225,6 +225,8 @@ def test_human_run_after_ladder_with_reason():
         user_runner=False,
         catalog_ref=CATALOG_REF,
     )
+    # HUMAN tests need an operator sign-off (answer or assertion ref)
+    # and never PASS without one (runner_contract.run docstring).
     result = contract.run(
         contract=human_contract,
         profile=_profile(),
@@ -233,6 +235,6 @@ def test_human_run_after_ladder_with_reason():
         approval=None,
         ladder_asked=True,
         reason="needs hands on device",
-        assertion_ref=None,
+        assertion_ref="attest-t-export",
     )
     assert result.test_id == "t-export"
