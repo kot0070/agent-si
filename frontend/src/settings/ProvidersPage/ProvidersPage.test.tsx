@@ -96,7 +96,7 @@ describe("ConnectDialog", () => {
     expect(screen.getByText("openai")).toBeTruthy();
     expect(screen.getByText("cloud")).toBeTruthy();
     expect(screen.getByText("https://api.openai.com/v1")).toBeTruthy();
-    expect(screen.getByText(/Starts with sk-/)).toBeTruthy();
+    expect(screen.getByText(/Starts with "sk-"\./)).toBeTruthy();
     expect(screen.getByLabelText("API key")).toBeTruthy();
   });
 

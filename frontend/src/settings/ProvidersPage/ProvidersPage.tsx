@@ -386,7 +386,11 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
                       >
                         Manage models
                       </button>
-                      <p data-variant="quiet">{`${state.enabledModels.length} enabled`}</p>
+                      <p data-testid={`provider-enabled-${preset.id}`} data-variant="quiet">
+                        {state.enabledModels.length === 0
+                          ? t("providers.page.noneEnabled")
+                          : `${state.enabledModels.length} enabled`}
+                      </p>
                       {lastConnectedId === preset.id ? (
                         <p role="status" data-variant="quiet">
                           {t("providers.connect.connected", { label: preset.label })}
@@ -412,20 +416,17 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
                     )}
                     </>
                   )}
-                  <p
-                    data-testid={`provider-caps-${preset.id}`}
-                    className="fx-cap-line"
-                    title={preset.caps ?? t("shell.common.unknown")}
-                  >
-                    {preset.caps ?? "—"}
-                  </p>
                   <p data-testid={`provider-keynote-${preset.id}`} className="fx-quiet-line">
                     {preset.keyHint}
                   </p>
                   <ul>
                     {(displayModels[preset.id] ?? []).map((model) => (
                       <li key={model.id} data-testid="model-row">
-                        <span>{model.label}</span>{" "}
+                        {model.label === model.id ? null : (
+                          <>
+                            <span>{model.label}</span>{" "}
+                          </>
+                        )}
                         <small data-testid={`model-id-${model.id}`} title={model.id}>
                           {model.id}
                         </small>{" "}

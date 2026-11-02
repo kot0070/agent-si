@@ -262,7 +262,7 @@ describe("FXPROV2 cards after Done", () => {
     render(<ProvidersPage project_id="local" />);
     expect(await screen.findByLabelText("Disconnect OpenAI")).toBeTruthy();
     expect(screen.getByLabelText("Manage OpenAI models")).toBeTruthy();
-    expect(screen.getByText("0 enabled")).toBeTruthy();
+    expect(screen.getByText("None enabled — open Manage models to choose.")).toBeTruthy();
     const card = screen
       .getAllByTestId("provider-card")
       .find((entry) => entry.getAttribute("data-provider-id") === "openai");

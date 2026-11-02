@@ -487,7 +487,7 @@ export function ConnectDialog({
                 checked={ticked.includes(row.id)}
                 onChange={() => toggleTicked(row.id)}
               />{" "}
-              <span>{row.label}</span>{" "}
+              <>{row.label === row.id ? null : (<span>{row.label}{" "}</span>)}</>
               <small data-testid={`connect-model-id-${row.id}`} title={row.id}>{row.id}</small>{" "}
               <span data-testid={`connect-model-price-${row.id}`} data-variant="quiet">
                 {modelPriceText(row.kb, row.price)}
