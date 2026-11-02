@@ -428,6 +428,18 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
     def _journal(kind: str, summary: str) -> None:
         _journal_event(project, kind, summary)
 
+    def _end_summary() -> str:
+        base = record.get("summary") or "run ended"
+        try:
+            extra = sorted({
+                str(path)
+                for path in (record.get("undeclared_changed", []) or [])})
+        except Exception:
+            extra = []
+        if extra:
+            base += " Also changed: %s" % (", ".join(extra),)
+        return base
+
     def _stop_seen() -> bool:
         # FXPARALLEL BEGIN stop-rule: any attached id gone from live
         # (or the cancel flag) latches the run abort for good.
@@ -856,7 +868,7 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         if not record.get("stopped"):
             record["run_end"] = _run_end_tests(
                 project_id=project, run_id=run_id, task_id=task_id)
-        _journal("DEVRUN_END", record.get("summary") or "run ended")
+        _journal("DEVRUN_END", _end_summary())
         _close_live("RETURNED")
         yield _run_event("delta", turn, task_id,
                          _ledger_total_line(record),
@@ -876,7 +888,7 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         _finish_task()
         _publish()
         _close_live("BLOCKED")
-        _journal("DEVRUN_END", record.get("summary") or "run ended")
+        _journal("DEVRUN_END", _end_summary())
         yield _run_event("delta", turn, task_id, record["summary"],
                          {"run_id": run_id})
         turn += 1
@@ -888,7 +900,7 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         _finish_task()
         _publish()
         _close_live("BLOCKED")
-        _journal("DEVRUN_END", record.get("summary") or "run ended")
+        _journal("DEVRUN_END", _end_summary())
         stop_text = "budget stop: %s" % (exc,)
         yield _run_event("delta", turn, task_id, stop_text,
                          {"run_id": run_id})
@@ -940,7 +952,7 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         _finish_task()
         _publish()
         _close_live("BLOCKED")
-        _journal("DEVRUN_END", record.get("summary") or "run ended")
+        _journal("DEVRUN_END", _end_summary())
         yield _run_event(
             "delta", turn, task_id,
             "Paused: %s. Files kept: %s." % (
@@ -962,7 +974,7 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
             record["run_end"] = _run_end_tests(
                 project_id=project, run_id=run_id, task_id=task_id)
         _close_live("BLOCKED")
-        _journal("DEVRUN_END", record.get("summary") or "run ended")
+        _journal("DEVRUN_END", _end_summary())
         status = "Needs your permission to install: %s" % (exc.command,)
         yield _run_event("delta", turn, task_id, status,
                          {"run_id": run_id})
@@ -1374,6 +1386,7 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
     for attempt in range(1, _EXTRA_ATTEMPTS + 2):
         row["attempts"] = int(attempt)
         check_stop()
+        ws_before = _audit.snapshot_workspace(folder)
         worker_adapter = _roles.build_adapter(app, _resolve_worker(
             app, project))
         producer_ref = "%s-a%d" % (producer_base, attempt)
@@ -1424,6 +1437,25 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
                 {"run_id": run_id, "part_id": part_id})
         after = _audit.snapshot_files(folder, spec["files"])
         files_diff = _audit.diff_text(before, after)
+        try:
+            ws_after = _audit.snapshot_workspace(folder)
+            undeclared_diff, undeclared_changed = \
+                _audit.diff_undeclared(
+                    ws_before, ws_after, spec.get("files") or [])
+        except Exception:
+            undeclared_diff, undeclared_changed = "", []
+        if undeclared_changed:
+            try:
+                seen = set(record.get("undeclared_changed", []) or [])
+                for path in undeclared_changed:
+                    if path not in seen:
+                        seen.add(path)
+                        record.setdefault(
+                            "undeclared_changed", []).append(path)
+            except Exception:
+                pass
+            files_diff += "\nUndeclared changes " \
+                "(not in the part's files):\n" + undeclared_diff
         entry = None
         if spec["check_commands"]:
             try:
