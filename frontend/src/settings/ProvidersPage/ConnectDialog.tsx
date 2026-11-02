@@ -16,7 +16,7 @@ import {
 import { ApiError } from "../../api/errors";
 import { t } from "../../locale/index";
 import { secretIdForProvider } from "./secretStore";
-import { listProviderModels, modelPriceText } from "./modelsApi";
+import { listProviderModels, modelPriceText, refreshProviderModels, saveEnabledModels } from "./modelsApi";
 import type { ProviderModelRow } from "./modelsApi";
 import type { SecretStorePort } from "./secretStore";
 import type { ProviderPreset, SecretRef } from "./types";
@@ -95,6 +95,10 @@ export function ConnectDialog({
   const [modelsLoading, setModelsLoading] = useState(false);
   const [ticked, setTicked] = useState<string[]>([]);
   const [modelQuery, setModelQuery] = useState("");
+  // Quiet Refresh state: a failed refresh keeps the last list plus one
+  // calm line; Done PUT state: a failed save keeps the dialog open.
+  const [refreshNote, setRefreshNote] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const keyRef = useRef<HTMLInputElement | null>(null);
   const initialTickedRef = useRef<string[] | undefined>(initialTicked);
   initialTickedRef.current = initialTicked;
@@ -141,6 +145,7 @@ export function ConnectDialog({
     setSaving(false);
     setModelQuery("");
     setModelSource(null);
+    setRefreshNote(null);
     const first = activePreset?.models[0];
     const fallbackTicked = first === undefined ? [] : [first.id];
     setTicked(initialTicked ?? fallbackTicked);
@@ -274,10 +279,61 @@ export function ConnectDialog({
   }
 
   function handleDone(): void {
-    // Ticks commit to the page (routing truth comes from a route once the
-    // backend names one; until then the page feeds Auto and role pickers).
-    onModelsDone?.(preset_id, ticked);
+    // Done PUTs the ticked ids and closes at once (the dialog always
+    // closed synchronously on Done). The server's enabled list is the
+    // routing truth: a saved list that differs is reconciled back onto
+    // the page, and a failed save re-reads the served ticks so the page
+    // never shows ticks the server refused.
+    if (preset === null) {
+      return;
+    }
+    const activePreset: ProviderPreset = preset;
+    const ids = ticked;
+    onModelsDone?.(preset_id, ids);
     closeAndClear();
+    void saveEnabledModels(activePreset.id, ids).then(
+      (saved) => {
+        if (JSON.stringify(saved) !== JSON.stringify(ids)) {
+          onModelsDone?.(preset_id, saved);
+        }
+      },
+      () => {
+        void listProviderModels(activePreset.id, activePreset.models).then(
+          (outcome) => {
+            if (outcome.servedEnabled !== null) {
+              onModelsDone?.(preset_id, outcome.servedEnabled);
+            }
+          },
+          () => undefined,
+        );
+      },
+    );
+  }
+
+  function handleRefresh(): void {
+    // Quiet Refresh: re-read the live list; any failure keeps the last
+    // list plus one calm line.
+    if (refreshing || preset === null || step !== 2) {
+      return;
+    }
+    const activePreset: ProviderPreset = preset;
+    setRefreshing(true);
+    setRefreshNote(null);
+    refreshProviderModels(activePreset.id, activePreset.models).then(
+      (outcome) => {
+        setRefreshing(false);
+        setModelRows(outcome.rows);
+        setModelSource(outcome.source);
+        const known = new Set(outcome.rows.map((row) => row.id));
+        if (outcome.servedEnabled !== null) {
+          setTicked(outcome.servedEnabled.filter((id) => known.has(id)));
+        }
+      },
+      () => {
+        setRefreshing(false);
+        setRefreshNote("Couldn't refresh the live list — keeping the last list.");
+      },
+    );
   }
 
   return (
@@ -368,6 +424,17 @@ export function ConnectDialog({
         <p role="status">Loading models...</p>
       ) : (
       <>
+      <div>
+      <button
+        type="button"
+        data-variant="quiet"
+        disabled={refreshing}
+        onClick={handleRefresh}
+      >
+        {refreshing ? "Refreshing models..." : "Refresh models"}
+      </button>
+      {refreshNote !== null ? <p data-variant="quiet">{refreshNote}</p> : null}
+      </div>
       <label>
         Filter models
         <input

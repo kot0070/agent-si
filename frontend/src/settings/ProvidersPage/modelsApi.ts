@@ -13,6 +13,12 @@
 // is adapted (bare KB ids qualify against the catalog, kb_known falls back
 // to in_base). The served `enabled` array, when present, is the routing
 // truth; otherwise only the default model starts ticked.
+//
+// Writes (FXPROVBE): Done PUTs the ticked ids to
+// PUT /api/v1/providers/{id}/models {ids}; the Refresh button POSTs
+// /api/v1/providers/{id}/models/refresh and re-reads the same shape.
+// A failed refresh keeps the last list plus a calm line (callers catch
+// and stay on the old rows).
 
 import { requestResponse } from "../../api/errors";
 
@@ -156,9 +162,22 @@ export async function listProviderModels(
   if (!isRecord(data) || !Array.isArray(data["models"])) {
     return fallback;
   }
+  return parseModelsPayload(data, catalogModels, providerId) ?? fallback;
+}
+
+// Shared shape reader for GET and POST-refresh answers: the new shape
+// verbatim, the current shape adapted, anything else null. Never throws.
+export function parseModelsPayload(
+  data: unknown,
+  catalogModels: Array<{ id: string; label: string }>,
+  providerId: string,
+): ProviderModelsOutcome | null {
+  if (!isRecord(data) || !Array.isArray(data["models"])) {
+    return null;
+  }
   const raw = data["models"] as unknown[];
   if (raw.length === 0) {
-    return fallback;
+    return null;
   }
   const catalogIds = new Set(catalogModels.map((entry) => entry.id));
   const seen = new Set<string>();
@@ -207,7 +226,7 @@ export async function listProviderModels(
     rows.push({ id, label, kb, price: price ?? null, kbKnown });
   }
   if (rows.length === 0) {
-    return fallback;
+    return null;
   }
   const enabled = Array.isArray(data["enabled"])
     ? (data["enabled"] as unknown[]).filter(
@@ -218,6 +237,48 @@ export async function listProviderModels(
     ? (data["source"] as "provider" | "catalog")
     : "provider";
   return { rows, source: declared, servedEnabled: enabled };
+}
+
+// Done PUTs the ticked ids; the route answers the stored tick list.
+// 2xx without a readable list falls back to the sent ids (the route took
+// them); anything else throws for the caller to report calmly.
+export async function saveEnabledModels(
+  providerId: string,
+  ids: string[],
+): Promise<string[]> {
+  const response = await requestResponse(
+    `/api/v1/providers/${encodeURIComponent(providerId)}/models`,
+    { method: "PUT", kind: "write", body: { ids } },
+  );
+  try {
+    const data: unknown = await response.json();
+    if (isRecord(data) && Array.isArray(data["enabled"])) {
+      return (data["enabled"] as unknown[]).filter(
+        (entry): entry is string => typeof entry === "string",
+      );
+    }
+  } catch {
+    return [...ids];
+  }
+  return [...ids];
+}
+
+// Quiet Refresh: POSTs the refresh route and re-reads the shared shape.
+// Throws a calm Error (keeping the last list) on any failure.
+export async function refreshProviderModels(
+  providerId: string,
+  catalogModels: Array<{ id: string; label: string }>,
+): Promise<ProviderModelsOutcome> {
+  const response = await requestResponse(
+    `/api/v1/providers/${encodeURIComponent(providerId)}/models/refresh`,
+    { method: "POST", kind: "write", body: {} },
+  );
+  const data: unknown = await response.json().catch(() => null);
+  const outcome = parseModelsPayload(data, catalogModels, providerId);
+  if (outcome === null) {
+    throw new Error("Couldn't refresh the live list — keeping the last list.");
+  }
+  return outcome;
 }
 
 // Merge served ids with catalog models: served order first, then catalog
