@@ -69,7 +69,7 @@ describe.each([false, true])("context card (dark=%s)", (dark) => {
     window.localStorage.clear();
   });
 
-  it("shows served remaining/total 70/85 plus the serving source", async () => {
+  it("shows served remaining/total 70/85 and no raw route text", async () => {
     const client = fixtureClient();
     render(
       <ApiClientProvider client={client}>
@@ -86,9 +86,11 @@ describe.each([false, true])("context card (dark=%s)", (dark) => {
     expect((await screen.findByTestId("context-total")).textContent).toBe(
       "85",
     );
-    expect((await screen.findByTestId("context-source")).textContent).toBe(
-      "/api/v1/budget",
-    );
+    // U3: the serving route never renders as debug text on screen.
+    expect(screen.queryByTestId("context-source")).toBeNull();
+    expect(
+      (await screen.findByTestId("context-card")).textContent,
+    ).not.toContain("/api/v1");
   });
 
   it("derives the card only from the stored budget record", async () => {
@@ -107,8 +109,6 @@ describe.each([false, true])("context card (dark=%s)", (dark) => {
     expect((await screen.findByTestId("context-total")).textContent).toBe(
       String(stored.hard_limit),
     );
-    expect((await screen.findByTestId("context-source")).textContent).toBe(
-      CONTEXT_SOURCE,
-    );
+    expect(screen.queryByTestId("context-source")).toBeNull();
   });
 });

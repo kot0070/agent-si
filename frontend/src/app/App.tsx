@@ -180,8 +180,6 @@ function LocalAiStoredPanel(): ReactElement {
           ))}
         </ul>
       )}
-      <p data-testid="localai-endpoint-label">{t("settings.localAi.title")}</p>
-      <p data-testid="localai-endpoint">{ENDPOINTS.agentsLive}</p>
       <LocalBenchDecisionList decisions={stored.decisions} />
     </div>
   );
@@ -282,6 +280,7 @@ function ChatStartBox(props: {
           {t("chat.composer.prompt")}
           <input
             data-testid="chat-prompt"
+            id="chat-prompt"
             type="text"
             placeholder={t("chat.composer.prompt")}
             aria-label={t("chat.composer.prompt")}
@@ -705,8 +704,15 @@ function AppShellInner(): ReactElement {
       {/* FXKITUI-FIRSTRUN-BEGIN */}
       <FirstRunGate />
       {/* FXKITUI-FIRSTRUN-END */}
+      {/* J11: skip link first in tab order; the composer input carries
+          the matching id on every route. */}
+      <a data-testid="skip-to-composer" href="#chat-prompt">
+        {t("shell.skipToComposer")}
+      </a>
       <TopBar projectId={projectId} />
-      <Sidebar projectId={projectId} />
+      {/* J11: the centre column sits before either rail in DOM order, so
+          keyboard tabbing reads the working area before the rails. The
+          grid areas keep the visuals unchanged. */}
       <main data-testid="app-main">
         <ClosingGuard armed={livePump} confirmKey="shell.closing.confirm">
           <Suspense
@@ -817,6 +823,7 @@ function AppShellInner(): ReactElement {
           </Suspense>
         </ClosingGuard>
       </main>
+      <Sidebar projectId={projectId} />
       <Inspector
         projectId={projectId}
         // W9: single agents-live source. The route view owns the one

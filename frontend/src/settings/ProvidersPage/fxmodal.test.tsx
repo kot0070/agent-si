@@ -3,7 +3,7 @@
  */
 // FXFIRSTRUN L1/L2/L3 + Row F08: the Connect dialog is a real centred
 // modal (backdrop, initial focus in the key field, Esc/backdrop close);
-// the "Connected {label}. Reference saved." line appears ONLY after a
+// the "Connected {label}." line appears ONLY after a
 // real route round-trip (never on an empty/unreachable store); model
 // rows name the real model id and explain the disabled checkbox.
 // Network is the only fake (global fetch); no component doubles.
@@ -145,7 +145,7 @@ describe("L2 success only after a real save", () => {
     expect(
       (within(dialog).getByText("Save") as HTMLButtonElement).disabled,
     ).toBe(true);
-    expect(screen.queryByText(/Reference saved/)).toBeNull();
+    expect(screen.queryByText("Connected Meta.")).toBeNull();
   });
 
   it("unreachable routes never show Connected: honest error, card stays put", async () => {
@@ -193,12 +193,12 @@ describe("L2 success only after a real save", () => {
     // Step 2 in the same dialog: Connected line plus the tickable list.
     // Done closes it; the card keeps the quiet Connected line.
     expect(
-      await within(dialog).findByText("Connected Meta. Reference saved."),
+      await within(dialog).findByText("Connected Meta."),
     ).toBeTruthy();
     expect(await screen.findByLabelText("Disconnect Meta")).toBeTruthy();
     fireEvent.click(within(dialog).getByText("Done"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(screen.getByText("Connected Meta. Reference saved.")).toBeTruthy();
+    expect(screen.getByText("Connected Meta.")).toBeTruthy();
   });
 });
 

@@ -116,8 +116,16 @@ describe("fxproj shared project list", () => {
   });
 
   it("projects page add shows the new row from the shared list", async () => {
+    // U13: creating a project opens it at once, so the harness needs
+    // the chat route the new behavior navigates to.
     shell(
-      [{ path: "/projects", element: <ProjectsPage /> }],
+      [
+        { path: "/projects", element: <ProjectsPage /> },
+        {
+          path: "/projects/:projectId/chat",
+          element: <span data-testid="chat-here" />,
+        },
+      ],
       "/projects",
     );
     await waitFor(() => {
@@ -130,10 +138,9 @@ describe("fxproj shared project list", () => {
       target: { value: "added" },
     });
     fireEvent.click(screen.getByTestId("project-add-submit"));
+    // U13: the new project opens at once (no stuck empty state).
     await waitFor(() => {
-      expect(
-        document.querySelector('[data-testid^="project-row-"]'),
-      ).toBeTruthy();
+      expect(screen.getByTestId("chat-here")).toBeTruthy();
     });
   });
 });

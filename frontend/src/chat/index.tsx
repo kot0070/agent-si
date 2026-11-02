@@ -2188,6 +2188,7 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
               <span className="fx-vh">{t("chat.composer.prompt")}</span>
               <textarea
                 data-testid="chat-prompt"
+                id="chat-prompt"
                 rows={1}
                 placeholder={t("chat.composer.prompt")}
                 aria-label={t("chat.composer.prompt")}

@@ -334,7 +334,9 @@ export function FirstRunFlow(props: FirstRunFlowProps): ReactElement {
                     <p>
                       {connected
                         ? t('providers.connect.connected', { label: preset.label })
-                        : t('providers.setup.hint')}
+                        : preset.kind === 'local'
+                          ? t('firstrun.provider.localNote')
+                          : t('providers.connect.getKey', { label: preset.label })}
                     </p>
                     {connected ? (
                       <button
@@ -386,6 +388,7 @@ export function FirstRunFlow(props: FirstRunFlowProps): ReactElement {
         ) : null}
         {current === 'oneClickTeam' ? (
           <>
+            <p data-testid="firstrun-team-mode-hint">{t('providers.setup.hint')}</p>
             <label>
               {t('shell.topbar.project')}
               <input

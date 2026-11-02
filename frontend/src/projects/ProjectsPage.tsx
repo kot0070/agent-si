@@ -132,17 +132,54 @@ export function ProjectsPage(): ReactElement {
   const [name, setName] = useState("");
   const [folder, setFolder] = useState("");
   const [pickOpen, setPickOpen] = useState(true);
+  // U13: block double submit while the create call is in flight; a
+  // second click with the same name made a second project.
+  const [saving, setSaving] = useState(false);
+  // U13: in-place duplicate refusal (plain line, no error panel).
+  const [duplicate, setDuplicate] = useState<string | null>(null);
+
+  function duplicateLine(): string {
+    try {
+      return t("projects.list.duplicate");
+    } catch {
+      return "A project with this name already exists.";
+    }
+  }
+
+  function isDuplicateName(candidate: string): boolean {
+    const wanted = candidate.trim().toLowerCase();
+    if (wanted.length === 0 || projects === null) {
+      return false;
+    }
+    return projects.some(
+      (row) => row.name.trim().toLowerCase() === wanted,
+    );
+  }
 
   async function submitAdd(event: FormEvent): Promise<void> {
     event.preventDefault();
+    if (saving) {
+      return;
+    }
+    // U13: refuse a duplicate name in place before any write.
+    if (isDuplicateName(name)) {
+      setDuplicate(duplicateLine());
+      return;
+    }
+    setDuplicate(null);
+    setSaving(true);
     try {
-      await client.createProject({ name, folder_ref: folder });
-      if (name.length > 0 && folder.length > 0) {
-        setName("");
-        setFolder("");
-      }
+      const created = await client.createProject({ name, folder_ref: folder });
+      setName("");
+      setFolder("");
       setOpFailure(null);
       refresh();
+      // U13: the first submit kept "No projects yet" on screen even
+      // though the project existed. Select + open the new project at
+      // once so the UI leaves the empty state immediately, even
+      // before the shared-list refetch lands.
+      current.select(created.project_id);
+      navigate?.(`/projects/${created.project_id}/chat`);
     } catch (error) {
       if (error instanceof ApiError) {
         setOpFailure({
@@ -152,6 +189,8 @@ export function ProjectsPage(): ReactElement {
       } else {
         setOpFailure({ errorKey: "errors.generic", code: "CONTEXT_MISSING" });
       }
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -245,6 +284,9 @@ export function ProjectsPage(): ReactElement {
                 value={name}
                 onChange={(event) => {
                   setName(event.target.value);
+                  // U13: typing a new name clears the in-place duplicate
+                  // refusal so a corrected name can submit at once.
+                  setDuplicate(null);
                 }}
               />
             </label>
@@ -273,7 +315,14 @@ export function ProjectsPage(): ReactElement {
                 {folderLabel("projects.folder.choose", "Choose folder")}
               </button>
             ) : null}
-            <button type="submit" data-testid="project-add-submit">
+            {duplicate !== null ? (
+              <p data-testid="project-add-duplicate">{duplicate}</p>
+            ) : null}
+            <button
+              type="submit"
+              data-testid="project-add-submit"
+              disabled={saving}
+            >
               {t("projects.list.create")}
             </button>
           </form>

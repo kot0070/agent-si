@@ -239,7 +239,7 @@ export function ProjectLimitsSection(
           </button>
         </div>
       ) : null}
-      <label htmlFor="project-limits-task">{t("tasks.list.title")}</label>
+      <label htmlFor="project-limits-task">{t("settings.project.taskStepsLabel")}</label>
       <input
         id="project-limits-task"
         data-testid="project-limits-task"
@@ -249,7 +249,7 @@ export function ProjectLimitsSection(
           setTaskText(event.target.value);
         }}
       />
-      <label htmlFor="project-limits-chat">{t("shell.sidebar.chat")}</label>
+      <label htmlFor="project-limits-chat">{t("settings.project.chatStepsLabel")}</label>
       <input
         id="project-limits-chat"
         data-testid="project-limits-chat"
@@ -259,6 +259,9 @@ export function ProjectLimitsSection(
           setChatText(event.target.value);
         }}
       />
+      <p data-testid="project-limits-steps-hint" className="fx-quiet-line">
+        {t("settings.project.stepsHint")}
+      </p>
       <button
         type="button"
         data-testid="project-limits-save"
@@ -267,7 +270,7 @@ export function ProjectLimitsSection(
           void onSave();
         }}
       >
-        {t("chat.composer.send")}
+        {t("settings.project.save")}
       </button>
       {fieldError !== null ? (
         <p data-testid="project-limits-field-error">{t(fieldError)}</p>
@@ -294,11 +297,11 @@ export function ProjectLimitsSection(
           void onSaveParallel();
         }}
       >
-        {t("chat.composer.send")}
+        {t("settings.project.save")}
       </button>
       {budgetText !== null ? (
         <div data-testid="project-limits-budget">
-          <span>{t("projects.cost.title")}</span>
+          <span>{t("projects.cost.title")}</span>{" "}
           <span>{budgetText}</span>
         </div>
       ) : null}
@@ -307,7 +310,7 @@ export function ProjectLimitsSection(
           <div key={line}>{line}</div>
         ))}
       </div>
-      <label htmlFor="project-limits-caps">{t("projects.cost.title")}</label>
+      <label htmlFor="project-limits-caps">{t("settings.project.spendCaps")}</label>
       <input
         id="project-limits-caps"
         data-testid="project-limits-caps"
@@ -325,7 +328,7 @@ export function ProjectLimitsSection(
           void onSaveCaps();
         }}
       >
-        {t("chat.composer.send")}
+        {t("settings.project.save")}
       </button>
     </section>
   );

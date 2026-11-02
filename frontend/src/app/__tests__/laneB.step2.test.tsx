@@ -36,6 +36,30 @@ const ALLOWED_TEXT = new Set<string>([
   ...Object.values(HOW_IT_WORKS_KEYS),
 ]);
 
+// Parameterized locale leaves match as full-string templates: a rendered
+// line counts as locale text when it equals a leaf with every {param}
+// filled (H2 per-provider lines). Hard-coded strings still fail — they
+// match no leaf and no template.
+const PARAM_TEMPLATES: RegExp[] = [
+  ...leafValues(en as unknown as Nested),
+  ...leafValues(uk as unknown as Nested),
+]
+  .filter((leaf) => leaf.includes('{'))
+  .map(
+    (leaf) =>
+      new RegExp(
+        `^${leaf
+          .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+          .replace(/\\\{[^}]*\\\}/g, '.+')}$`,
+      ),
+  );
+
+function isAllowedText(text: string): boolean {
+  return (
+    ALLOWED_TEXT.has(text) || PARAM_TEMPLATES.some((template) => template.test(text))
+  );
+}
+
 function visibleTexts(container: HTMLElement): string[] {
   const walker = container.ownerDocument.createTreeWalker(container, NodeFilter.SHOW_TEXT);
   const out: string[] = [];
@@ -160,7 +184,7 @@ describe('literal scan', () => {
     const stray: string[] = [];
     for (const view of views) {
       for (const text of visibleTexts(view.container)) {
-        if (!ALLOWED_TEXT.has(text)) {
+        if (!isAllowedText(text)) {
           stray.push(text);
         }
       }
