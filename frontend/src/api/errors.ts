@@ -30,6 +30,10 @@ export class ApiError extends Error {
 
 export interface ApiErrorDetails {
   toolId?: string;
+  // FXCONNECT-REFUSED: the served plain text for a refused key or an
+  // unreachable provider (the message travels in the error body next
+  // to the code; the UI names well-known failures, never raw codes).
+  message?: string;
 }
 
 const ERROR_CODES: ReadonlyArray<ApiErrorCode> = [
@@ -102,6 +106,20 @@ function missingWhenNotFound(code: string, status: number): ApiError | null {
 
 export function parseErrorBody(data: unknown, status: number): ApiError {
   const checked = ErrorBodySchema.safeParse(data);
+  // Served plain text (message next to code) rides the details so the
+  // UI can show it without ever logging or storing it.
+  let details: ApiErrorDetails | undefined;
+  try {
+    const record = (checked.success ? checked.data : data) as
+      | { message?: unknown }
+      | null;
+    if (typeof record === "object" && record !== null
+      && typeof record.message === "string" && record.message.length > 0) {
+      details = { message: record.message };
+    }
+  } catch {
+    details = undefined;
+  }
   if (checked.success) {
     const raw = (checked.data as { code?: unknown }).code;
     if (typeof raw === "string" && raw.length > 0) {
@@ -109,7 +127,9 @@ export function parseErrorBody(data: unknown, status: number): ApiError {
       if (missing !== null) {
         return missing;
       }
-      return apiErrorFromCode(raw, status);
+      const err = apiErrorFromCode(raw, status);
+      return details === undefined ? err
+        : new ApiError(err.code, err.status, details);
     }
     const detail = (checked.data as { detail?: unknown }).detail;
     if (typeof detail === "object" && detail !== null) {
@@ -119,7 +139,9 @@ export function parseErrorBody(data: unknown, status: number): ApiError {
         if (missing !== null) {
           return missing;
         }
-        return apiErrorFromCode(nested, status);
+        const err = apiErrorFromCode(nested, status);
+        return details === undefined ? err
+          : new ApiError(err.code, err.status, details);
       }
     }
   }

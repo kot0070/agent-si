@@ -444,6 +444,7 @@ def test_row_r347_local_tests_switch(client):
         "/api/v1/teststage/local-tests",
         json={"project_id": project, "enabled": False,
               "updated_at": "2026-10-30T00:00:00+00:00"},
+        headers=_auth(),
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["enabled"] is False
@@ -457,6 +458,7 @@ def test_row_r347_local_tests_switch(client):
         "/api/v1/teststage/local-tests",
         json={"project_id": project, "enabled": True,
               "updated_at": "2026-10-30T00:00:00+00:00"},
+        headers=_auth(),
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["enabled"] is True
