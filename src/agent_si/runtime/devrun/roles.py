@@ -131,16 +131,81 @@ def _pool_pick(
     return None
 
 
+def _facade_first_model(app: Any, provider: str) -> str | None:
+    """First model id the facade holds for one provider, or None.
+
+    Reads the provider facade's own connect-time model rows verbatim
+    (provider prefix stripped the way the chat bind does); never
+    invented, never a KB read. A connected provider's models are
+    enabled by connection, so the first stored row is the fallback.
+    """
+    try:
+        ctx = getattr(getattr(app, "state", None), "k04_ctx", None)
+        facade = getattr(ctx, "provider_facade", None)
+        if facade is None:
+            return None
+        providers = getattr(facade, "_providers", None)
+        if not isinstance(providers, dict):
+            return None
+        record = providers.get(provider)
+        if not isinstance(record, dict):
+            return None
+        models_map = record.get("models", {})
+        if not isinstance(models_map, dict):
+            return None
+        for value in models_map.values():
+            text = str(value or "")
+            if not text:
+                continue
+            if "/" in text:
+                head, _, tail = text.partition("/")
+                if head == provider and tail:
+                    text = tail
+            if text:
+                return text
+    except Exception:
+        return None
+    return None
+
+
 def _auto_pick(
     app: Any, factory: Any, role: str
 ) -> dict[str, Any]:
-    """One AUTO resolution; RoleUnbound names the role on no candidate."""
+    """One AUTO resolution; RoleUnbound names the role on no candidate.
+
+    A pick blocked only because no connected provider holds a KB row
+    falls back to that provider's first enabled facade model (honest
+    why, UNKNOWN price until the user runs Update); any other block
+    stays a run-failed line naming the role.
+    """
     connected = _connected_providers(app, factory)
     try:
         from agent_si.backend import routing_auto as _auto
 
         pick = _auto.pick_auto(_bound_catalog(), connected, "coding")
     except Exception as exc:
+        try:
+            from agent_si.backend import routing_auto as _blocked
+
+            no_kb_row = (isinstance(exc, _blocked.AutoBlocked)
+                         and "connected providers hold no KB rows"
+                         in str(exc))
+        except Exception:
+            no_kb_row = False
+        if no_kb_row:
+            for provider in connected or []:
+                model = _facade_first_model(app, provider)
+                if model:
+                    return {
+                        "role": role, "mode": "AUTO",
+                        "provider": str(provider),
+                        "model": str(model),
+                        "why": {
+                            "connected": list(connected or []),
+                            "task_type": "coding",
+                            "reason": "no KB row: first enabled model "
+                                      "of the connected provider"},
+                    }
         raise RoleUnbound(
             "role %r has no provider: AUTO pick failed: %s"
             % (role, exc)) from None
