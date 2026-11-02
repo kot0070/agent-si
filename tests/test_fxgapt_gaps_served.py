@@ -477,10 +477,9 @@ def _sse_texts(text):
 
 
 def test_red_laptop_chat_echoes_absolute_folder(tmp_path, monkeypatch):
-    """LAPTOP-B RED: the chat stream echoes an absolute host folder
-    path back into chat text (chat_stream.py _devrun_folder honest
-    line). Seen: 'Working folder: D:\\Test2...' / server data-dir
-    paths in chat. Expected: filenames only, never host paths.
+    """LAPTOP-B (was RED, now GREEN): the honest missing-folder line
+    names the folder, never the host absolute path
+    (chat_stream._devrun_folder via _chat_folder_label).
 
     NOTE: must run through the bound-provider orchestration path
     (_served_chat_client): with no provider bound the route takes
@@ -511,5 +510,39 @@ def test_red_laptop_chat_echoes_absolute_folder(tmp_path, monkeypatch):
                      for event in _sse_texts(resp.text))
     assert "project folder not found" in texts, (
         "the honest folder entry never fired: %r" % texts[:500])
+    assert "no-such-folder-xyz" in texts, (
+        "the folder name is shown: %r" % texts[:500])
     assert missing not in texts, (
         "chat text echoes the absolute host folder path: %r" % texts[:500])
+    assert "D:\\" not in texts and "C:\\" not in texts, (
+        "no drive prefix in chat text: %r" % texts[:500])
+
+
+def test_laptop_working_folder_shows_name_only(tmp_path):
+    """LAPTOP-B GREEN: the first stream delta names the working folder
+    by its base name, never a drive-letter host path (the engine still
+    runs against the absolute folder; scripted factory, no real run)."""
+    from tests.test_fxdevwire_served import (
+        _all_text,
+        _delta_texts,
+        _green_factory,
+        _make_project,
+        _parse_sse,
+        _post_chat,
+        _served_app,
+    )
+
+    project = "fxgapt-workname"
+    folder = tmp_path / ("ws-" + project)
+    folder.mkdir(parents=True, exist_ok=True)
+    app = _served_app(tmp_path, project, _green_factory())
+    client = TestClient(app, raise_server_exceptions=False)
+    pid = _make_project(app, client, "workname build", str(folder))
+    resp = _post_chat(client, pid, "build it", folder=str(folder))
+    assert resp.status_code == 200, resp.text
+    events = _parse_sse(resp.text)
+    deltas = _delta_texts(events)
+    assert deltas and deltas[0].startswith("Working folder: "), deltas[:2]
+    assert deltas[0] == "Working folder: %s\n" % folder.name, deltas[0]
+    assert "D:\\" not in deltas[0] and "C:\\" not in deltas[0], deltas[0]
+    assert str(folder) not in _all_text(events), deltas[0]

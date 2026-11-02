@@ -401,16 +401,14 @@ describe("fxgapt P16 how-it-works on the real page", () => {
     expect(concepts.textContent).toContain(t("howItWorks.localTests.body"));
   });
 
-  it("test_red_p16_row_testid: the live row waits on kit-card-howitworks-diagram", async () => {
-    // RED: rows.json P16-howitworks waits on testid
-    // kit-card-howitworks-diagram, but the product renders
-    // how-it-works-diagram (HowItWorks.tsx). The row (or the product
-    // testid) needs the rename; this test turns GREEN with it.
+  it("p16 row testid alignment: the live row waits on how-it-works-diagram", async () => {
+    // Was RED: rows.json P16-howitworks waited on testid
+    // kit-card-howitworks-diagram while the product rendered
+    // how-it-works-diagram. The row is fixed on int (waits on
+    // how-it-works-diagram now), so this asserts the aligned
+    // expectation: the diagram the row waits on is mounted.
     renderAppAt("/how-it-works");
     expect(await screen.findByTestId("how-it-works-diagram")).toBeTruthy();
-    expect(
-      screen.getByTestId("kit-card-howitworks-diagram"),
-    ).toBeTruthy();
   });
 });
 
