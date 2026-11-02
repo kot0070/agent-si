@@ -39,9 +39,11 @@ import {
   appendChatMessage,
   dequeueChatPrompt,
   enqueueChatPrompt,
+  getChatDraft,
   getChatState,
   patchChatMessage,
   prependChatMessages,
+  setChatDraft,
   setChatHealth,
   setChatOnline,
   setChatRunner,
@@ -1104,7 +1106,13 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
   const [boundModels, setBoundModels] = useState<unknown[] | null>(null);
   const [connected, setConnected] = useState<string[] | null>(null);
   const [directorModel, setDirectorModel] = useState<string | null>(null);
-  const [draft, setDraft] = useState(props.initialDraft ?? "");
+  const [draft, setDraft] = useState(() => props.initialDraft ?? getChatDraft(key));
+  // FXUIB-B4: every keystroke lands in the per-slice store draft, so a
+  // page change or remount revives it; a send clears it.
+  function updateDraft(next: string): void {
+    setChatDraft(key, next);
+    setDraft(next);
+  }
   const [blocking, setBlocking] = useState<BlockingError | null>(() =>
     consumeBlockingStash(key),
   );
@@ -1119,7 +1127,7 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
       blocking.task.trim() !== "" &&
       draft.trim() === ""
     ) {
-      setDraft(blocking.task);
+      updateDraft(blocking.task);
     }
   }, [blocking, draft]);
   const [toast, setToast] = useState<string | null>(null);
@@ -1369,11 +1377,11 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
     }
     if (!online) {
       enqueueChatPrompt(key, prompt);
-      setDraft("");
+      updateDraft("");
       showToast(t("chat.stream.offline"));
       return;
     }
-    setDraft("");
+    updateDraft("");
     handleSendPrompt(prompt);
   };
 
@@ -1767,7 +1775,7 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
                     decide(message.id, "accepted");
                   }}
                   onEdit={(next) => {
-                    setDraft(next);
+                    updateDraft(next);
                   }}
                   onReject={() => {
                     decide(message.id, "rejected");
@@ -1785,7 +1793,7 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
               data-testid="chat-sample-1"
               className="fx-btn-quiet"
               onClick={() => {
-                setDraft(t("chat.empty.sample1"));
+                updateDraft(t("chat.empty.sample1"));
               }}
             >
               {t("chat.empty.sample1")}
@@ -1795,7 +1803,7 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
               data-testid="chat-sample-2"
               className="fx-btn-quiet"
               onClick={() => {
-                setDraft(t("chat.empty.sample2"));
+                updateDraft(t("chat.empty.sample2"));
               }}
             >
               {t("chat.empty.sample2")}
@@ -1906,7 +1914,7 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
                 aria-label={t("chat.composer.prompt")}
                 value={draft}
                 onChange={(event) => {
-                  setDraft(event.target.value);
+                  updateDraft(event.target.value);
                 }}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey) {

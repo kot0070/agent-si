@@ -44,6 +44,32 @@ const TASK_STATUS_KEYS: Record<string, string> = {
 
 export const TASKS_CHANGED_EVENT = "tasks-changed";
 
+// FXUIB-B4: composer drafts live in sessionStorage per project (page
+// change revives them; a restart starts clean).
+function composerDraftKey(projectId: string, field: "title" | "scope"): string {
+  return `fxcomposer.${field}.${projectId}`;
+}
+
+function readComposerDraft(projectId: string, field: "title" | "scope"): string {
+  try {
+    return window.sessionStorage.getItem(composerDraftKey(projectId, field)) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function writeComposerDraft(projectId: string, field: "title" | "scope", value: string): void {
+  try {
+    if (value === "") {
+      window.sessionStorage.removeItem(composerDraftKey(projectId, field));
+    } else {
+      window.sessionStorage.setItem(composerDraftKey(projectId, field), value);
+    }
+  } catch {
+    return;
+  }
+}
+
 export function taskStatusLabel(status: string): string {
   const key = TASK_STATUS_KEYS[status];
   return key === undefined ? status : t(key);
@@ -66,8 +92,8 @@ async function loadInitialTitle(
 
 export function TaskComposer(props: TaskComposerProps): ReactElement {
   const client = useApiClient();
-  const [title, setTitle] = useState("");
-  const [scopeText, setScopeText] = useState("");
+  const [title, setTitle] = useState(() => readComposerDraft(props.projectId, "title"));
+  const [scopeText, setScopeText] = useState(() => readComposerDraft(props.projectId, "scope"));
   const [loading, setLoading] = useState(props.initialTaskId != null);
   const [posting, setPosting] = useState(false);
   const [created, setCreated] = useState<TaskRecord | null>(null);
@@ -203,6 +229,7 @@ export function TaskComposer(props: TaskComposerProps): ReactElement {
           onChange={(event) => {
             dirtyTitleRef.current = true;
             setTitle(event.target.value);
+            writeComposerDraft(props.projectId, "title", event.target.value);
             setTitleError(false);
           }}
         />
@@ -222,6 +249,7 @@ export function TaskComposer(props: TaskComposerProps): ReactElement {
           value={scopeText}
           onChange={(event) => {
             setScopeText(event.target.value);
+            writeComposerDraft(props.projectId, "scope", event.target.value);
           }}
         />
       </label>
