@@ -912,9 +912,11 @@ def _platform_guidance() -> str:
         return (" Platform: %s (Windows). Plan check commands only with"
                 " executables present on this machine: tests as"
                 " [\"python\", \"-m\", \"pytest\", ...] with a test file,"
-                " text search with findstr. POSIX shell utilities are"
-                " unavailable here. Inline code stays refused (it needs"
-                " approval first)." % (plat,))
+                " text search with findstr naming its files (for example"
+                " [\"findstr\", \"pattern\", \"dir\\file.txt\"]: never the"
+                " /S flag, backslash paths, argv word lists only). POSIX"
+                " shell utilities are unavailable here. Inline code stays"
+                " refused (it needs approval first)." % (plat,))
     return (" Platform: %s. Check commands must be argv word lists of"
             " executables present on this machine; inline code stays"
             " refused." % (plat,))
