@@ -15,18 +15,50 @@ It uses connected model providers for the work and keeps every run, decision, an
 
 ## Download and verify
 
-1. Download the portable zip and the `SHA256SUMS.txt` file published with the release.
-2. Check the hashes in PowerShell:
+Each release publishes an installer (`AgentSI-setup-0.1.0.exe`), a portable
+zip (`AgentSI-portable-0.1.0.zip`), and a `SHA256SUMS.txt` index (one
+`<sha256>  <filename>` line per file). Download the index together with
+whichever package you use, and do not run anything if a hash differs.
+
+### Installer (recommended)
+
+1. Download `AgentSI-setup-0.1.0.exe` and `SHA256SUMS.txt`.
+2. Check the hash in PowerShell:
+
+```powershell
+Get-FileHash -Algorithm SHA256 AgentSI-setup-0.1.0.exe
+```
+
+3. Compare the value with the `AgentSI-setup-0.1.0.exe` line in
+`SHA256SUMS.txt`.
+4. Double-click the installer and follow the wizard. It installs per user
+(no administrator rights needed), adds a Start-menu entry, and can add a
+desktop icon and start the app at the end. Uninstalling keeps your data
+folder unless you answer Yes to deleting it (see Remove below).
+
+The build is unsigned, so Windows SmartScreen shows "Windows protected your PC" with publisher Unknown for the installer and again on first start.
+This is expected for this release.
+Click More info, then Run anyway - only after the SHA256 value matches the published SHA256SUMS.txt.
+Do not run the app if it differs.
+
+### Portable
+
+1. Download `AgentSI-portable-0.1.0.zip` and `SHA256SUMS.txt`.
+2. Check the hash in PowerShell:
 
 ```powershell
 Get-FileHash -Algorithm SHA256 AgentSI-portable-0.1.0.zip
-Get-FileHash -Algorithm SHA256 AgentSI.exe
 ```
 
-3. Compare both values with `SHA256SUMS.txt`. Do not run the app if they differ.
-4. Unpack the zip into an empty folder and start `AgentSI.exe` by double-click.
+3. Compare the value with the `AgentSI-portable-0.1.0.zip` line in
+`SHA256SUMS.txt`. The zip also carries its own `SHA256SUMS.txt` inside,
+with the hash of every file including `app/AgentSI.exe`.
+4. If the zip was downloaded, unblock it before unzipping: right-click the zip -> Properties -> check Unblock -> OK (or PowerShell: Unblock-File -LiteralPath .\AgentSI-portable-0.1.0.zip).
+5. Unpack the zip into an empty folder and start `AgentSI.exe` by double-click.
 
-The build is unsigned, so on first start Windows SmartScreen shows "Windows protected your PC" with publisher Unknown. This is expected for this release. Click More info, then Run anyway — only after the SHA256 values above match. Do not run the app if they differ.
+The same SmartScreen warning as above appears on first start (unsigned
+build, publisher Unknown): More info, then Run anyway - only after the
+hashes match.
 
 ## First run, step by step
 
@@ -70,7 +102,7 @@ Provider keys are stored only in the Windows Credential Manager under the app na
 
 ## Remove and closing
 
-- Remove: delete the app folder. Data lives in the `data` folder next to `AgentSI.exe` by default (`%LOCALAPPDATA%\AgentSI\data` when the app folder is not writable; the `AGENT_SI_DATA_DIR` folder path overrides both). Delete that data folder too for a full removal. Provider keys live in the Windows Credential Manager under `app:<provider>` — Disconnect removes the entry.
+- Remove: delete the app folder. Data lives in the `data` folder next to `AgentSI.exe` by default (`%LOCALAPPDATA%\AgentSI\data` when the app folder is not writable; the `AGENT_SI_DATA_DIR` folder path overrides both). Delete that data folder too for a full removal. Installed: Windows Settings -> Apps -> Agent SI -> Uninstall; the uninstaller keeps your data folder unless you answer Yes to deleting it. Provider keys live in the Windows Credential Manager under `app:<provider>` — Disconnect removes the entry.
 - Closing is safe: history and records stay on disk and reappear on the next start. Closing the window ends the backend, so an active run stops with it.
 - One copy at a time: starting the app again focuses the first window instead of starting a second copy.
 
