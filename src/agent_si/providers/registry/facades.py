@@ -279,13 +279,22 @@ def default_audit_path() -> str:
 
     Unfrozen dev/test runs keep the historical CWD-anchored file. A
     frozen bundle (``sys.frozen``, e.g. PyInstaller ``AgentSI.exe``)
-    must NOT default off the CWD — the working directory of a frozen
-    app is not writable or not stable — so it anchors next to the
-    executable, falling back to the user profile when the exe
-    directory is unusable or collapses back onto the CWD.
+    anchors under the product data dir (the same portable default the
+    stores use: exe-folder data, else LocalAppData), falling back to
+    the exe folder and then the user profile when no data dir
+    resolves.
     """
     if not getattr(_sys, "frozen", False):
         return _os.path.join(_os.getcwd(), "provider_audit.jsonl")
+    try:
+        from agent_si.backend.app import get_data_dir as _data_dir
+
+        _root = _data_dir()
+    except Exception:
+        _root = None
+    if _root:
+        return _os.path.join(_os.path.abspath(str(_root)),
+                             "provider_audit.jsonl")
     exe = getattr(_sys, "executable", "") or ""
     if exe:
         # Split on both separators so a frozen Windows exe path never

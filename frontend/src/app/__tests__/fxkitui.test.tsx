@@ -166,6 +166,7 @@ describe("fxkitui fresh profile opens the guided first run", () => {
   });
 
   it("an existing profile with a project never sees the flow", async () => {
+    window.localStorage.setItem("agentsi.firstrun.done", "true");
     mockState.projects = [
       { project_id: "p-1", name: "n-1", created_at: "2026-01-01T00:00:00Z" },
     ];

@@ -68,6 +68,19 @@ _UNSTAGED_TEXT = (
 _PICK_FOLDER_UNAVAILABLE_CODE = "NATIVE_DIALOG_UNAVAILABLE"
 
 
+#: WebView2 runtime download hub, named in the missing-runtime
+#: notice so a windowed start without WebView2 tells the operator
+#: exactly where to get it.
+_WEBVIEW2_DOWNLOAD_URL = (
+    "https://developer.microsoft.com/microsoft-edge/webview2/")
+
+#: Single-instance port record under the product data dir. The first
+#: start writes ``<port>\\n<token>`` after the server is up and removes
+#: it on exit; a second start with a live port opens the same URL in
+#: the browser and ends without a second server.
+_PORT_FILE_NAME = "sidecar.port"
+
+
 def pick_free_port() -> int:
     """Return a free loopback port (bound briefly, then released)."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -141,6 +154,135 @@ def _make_config(app, port: int):
     import uvicorn
 
     return uvicorn.Config(app, host=HOST, port=port, log_config=None)
+
+
+def _open_in_browser(url: str) -> bool:
+    """Open the sidecar URL in the default browser; False on failure."""
+    try:
+        import webbrowser
+
+        webbrowser.open(str(url))
+        return True
+    except Exception:
+        return False
+
+
+def _note_webview_missing(url: str) -> bool:
+    """Tell the operator the window needs the WebView2 runtime.
+
+    Windowed native message box on Windows (plain words plus the
+    download link and the browser fallback); stderr log elsewhere or
+    when the box cannot show. Returns True when a box was shown.
+    """
+    message = (
+        "Agent SI is running but its window cannot open: "
+        "the WebView2 runtime is missing. "
+        "Install it from " + _WEBVIEW2_DOWNLOAD_URL + " "
+        "and start Agent SI again. "
+        "The app was also opened in your default browser: " + str(url)
+    )
+    shown = False
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            shown = bool(ctypes.windll.user32.MessageBoxW(
+                None, message, "Agent SI", 0x40))
+        except Exception:
+            shown = False
+    if not shown:
+        _log("agent-si-sidecar: " + message)
+    return shown
+
+
+def _sidecar_data_dir() -> str | None:
+    """Product data dir for the port record; None when unresolvable."""
+    try:
+        from agent_si.backend.app import get_data_dir
+
+        return get_data_dir()
+    except Exception:
+        return None
+
+
+def _port_file_path(root: str) -> str:
+    """Port-record path under the product data dir."""
+    return os.path.join(os.path.abspath(str(root)), _PORT_FILE_NAME)
+
+
+def _port_is_live(port: int) -> bool:
+    """True when a loopback server answers on the recorded port."""
+    try:
+        with socket.create_connection((HOST, int(port)), timeout=1):
+            pass
+        return True
+    except (OSError, ValueError, OverflowError):
+        return False
+
+
+def _read_port_file(path: str) -> tuple[int, str] | None:
+    """Parse the port record; None when absent or malformed."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            lines = handle.read().splitlines()
+    except OSError:
+        return None
+    if not lines:
+        return None
+    try:
+        port = int(lines[0].strip())
+    except ValueError:
+        return None
+    if not 1 <= port <= 65535:
+        return None
+    token = lines[1].strip() if len(lines) > 1 else ""
+    return port, token
+
+
+def _write_port_file(path: str, port: int, token: str) -> None:
+    """Record the live port plus token; failures never break start."""
+    try:
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(path, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write("%d\n%s\n" % (int(port), str(token)))
+    except OSError:
+        return
+
+
+def _clear_port_file(path: str) -> None:
+    """Remove the port record on exit; failures are silent."""
+    try:
+        os.unlink(path)
+    except OSError:
+        return
+
+
+def _reattach_running() -> bool:
+    """Open the already-running instance; True when one was live.
+
+    A second start while one server runs opens the same URL in the
+    default browser and ends at once: no second server, no second
+    window. A stale record (port dead) is cleared and start proceeds.
+    """
+    root = _sidecar_data_dir()
+    if not root:
+        return False
+    path = _port_file_path(root)
+    record = _read_port_file(path)
+    if record is None:
+        return False
+    port, token = record
+    if not _port_is_live(port):
+        _clear_port_file(path)
+        return False
+    url = f"http://{HOST}:{port}/?token={token}" if token else (
+        f"http://{HOST}:{port}/")
+    _open_in_browser(url)
+    _log(f"agent-si-sidecar: already running on {HOST}:{port}; "
+         "opened in browser, no second server started")
+    return True
 
 
 def webview_storage_dir() -> str:
@@ -384,6 +526,8 @@ def main(argv: list[str] | None = None) -> int:
     if qa_ref is not None:
         return run_qa_runner(qa_ref)
     _ = argv
+    if _reattach_running():
+        return 0
     app = build_app()
     token = getattr(app.state, "ui_session_token", "")
     port = pick_free_port()
@@ -406,6 +550,11 @@ def main(argv: list[str] | None = None) -> int:
     _log(f"agent-si-sidecar: listening on http://{HOST}:{port}/")
 
     url = f"http://{HOST}:{port}/?token={token}"
+    port_path: str | None = None
+    data_root = _sidecar_data_dir()
+    if data_root:
+        port_path = _port_file_path(data_root)
+        _write_port_file(port_path, port, str(token))
     stop = threading.Event()
 
     def request_stop(*_args: object) -> None:
@@ -425,11 +574,15 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:
         _log(
             "agent-si-sidecar: webview unavailable "
-            f"({exc}); serving until stopped"
+            f"({exc}); opened in default browser, serving until stopped"
         )
+        _open_in_browser(url)
+        _note_webview_missing(url)
         stop.wait()
     finally:
         server.should_exit = True
+        if port_path is not None:
+            _clear_port_file(port_path)
     thread.join(timeout=10)
     return 0
 

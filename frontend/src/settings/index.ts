@@ -3,7 +3,6 @@ import type { ReactElement } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { t } from '../locale/index';
 import { ApiError, requestResponse } from '../api/errors';
-import { useApiClient } from '../app/ApiClientProvider';
 import {
   readRoleProfileFromServer,
   readRoleProfilesFromServer,
@@ -402,16 +401,17 @@ export function AcceptedRiskSwitch(props: AcceptedRiskSwitchProps): ReactElement
   );
 }
 
-// FXKITUI guided-first-run start gate. A fresh profile (no connected
-// provider AND no stored project) opens /firstrun once at start; an
-// existing profile with a project never leaves chat. Completion comes from
-// the settings store above; provider and project state are always read
-// live from the server, so the decision is never localStorage-only. On the
+// FXKITUI guided-first-run start gate. A fresh profile (first-run not
+// completed) opens /firstrun by itself from the start route, even when
+// a project already exists; a completed first run or a connected
+// provider never redirects again. Provider state is always read live
+// from the server, so the decision is never localStorage-only. On the
 // Settings General page the gate renders the link to the How-it-works
 // diagram; on /firstrun it renders the always-visible skip plus the
 // How-it-works link (they live here so the flow component stays
-// untouched). Finishing the flow always creates a project, so the gate
-// naturally stays quiet afterwards. Mounted by the single FXKITUI-FIRSTRUN
+// untouched). A connected provider marks the run done (the profile is
+// no longer fresh), so the gate naturally stays quiet afterwards.
+// Mounted by the single FXKITUI-FIRSTRUN
 // block in App.tsx. Written with createElement: this module is a .ts file.
 async function readConnectedProviderIds(): Promise<string[] | null> {
   try {
@@ -443,7 +443,6 @@ async function readConnectedProviderIds(): Promise<string[] | null> {
 }
 
 export function FirstRunGate(): ReactElement | null {
-  const client = useApiClient();
   const location = useLocation();
   const navigate = useNavigate();
   const [settled, setSettled] = useState<boolean>(() => readFirstRunDone());
@@ -453,18 +452,19 @@ export function FirstRunGate(): ReactElement | null {
       return;
     }
     let alive = true;
-    void Promise.all([readConnectedProviderIds(), client.listProjects()]).then(
-      ([providers, projects]) => {
+    void readConnectedProviderIds().then(
+      (providers) => {
         if (!alive) {
           return;
         }
         setSettled(true);
-        if (
-          providers !== null &&
-          providers.length === 0 &&
-          projects.length === 0 &&
-          location.pathname === '/'
-        ) {
+        if (providers !== null && providers.length > 0) {
+          // A connected provider means the profile is no longer fresh:
+          // mark the run done and never redirect again.
+          markFirstRunDone();
+          return;
+        }
+        if (location.pathname === '/') {
           navigate('/firstrun', { replace: true });
         }
       },
@@ -479,7 +479,7 @@ export function FirstRunGate(): ReactElement | null {
     return () => {
       alive = false;
     };
-  }, [client, navigate, location.pathname]);
+  }, [navigate, location.pathname]);
   // Anchors with client-side navigation (createElement over the router
   // Link rejects test ids under .ts typing; the behavior is identical).
   function go(event: { preventDefault(): void }, to: string): void {
