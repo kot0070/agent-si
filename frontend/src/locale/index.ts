@@ -88,8 +88,15 @@ export interface LocaleProviderProps {
 
 export function LocaleProvider(props: LocaleProviderProps): ReactElement {
   const locale = props.initialLocale ?? readStoredLocale() ?? DEFAULT_LOCALE;
+  // FXUIB-B2: the stored pick drives the module locale on the first
+  // render (no TopBar needed): without this, stored uk still renders
+  // English until TopBar mounts. Render-phase sync is idempotent, so a
+  // re-render with the same pick is a no-op.
+  if (currentLocale !== locale) {
+    setLocale(locale);
+  }
   useEffect(() => {
-    persistLocale(locale);
+    setLocale(locale);
   }, [locale]);
   return createElement(LocaleContext.Provider, { value: { locale } }, props.children);
 }
