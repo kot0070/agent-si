@@ -61,6 +61,11 @@ CHAT_RATE_LIMITED = "CHAT_RATE_LIMITED"
 #: can name it, and the server logs why (run id plus forwarded count).
 NO_TERMINAL_EVENT = "NO_TERMINAL_EVENT"
 
+#: SH-05: the send target folder is missing. The honest line streams
+#: first (the bubble names the reason), then this terminal error
+#: closes the turn failed — never green, never an approval card.
+PROJECT_FOLDER_MISSING = "PROJECT_FOLDER_MISSING"
+
 
 def _log_stream_failure(run_id: str, stream_id: str,
                         err: Exception) -> None:
@@ -657,6 +662,9 @@ class ManagerSdkBridge:
         except ImportError:
             return None
         if honest is not None:
+            # SH-05: a missing folder refuses the send with the reason:
+            # the honest line streams first so the bubble names it, then
+            # a terminal error closes failed (never green, never a card).
             text = str(honest)
             if not text.endswith("\n"):
                 text = text + "\n"
@@ -665,8 +673,8 @@ class ManagerSdkBridge:
                 dev_request: ChatStreamRequest, **kwargs: Any
             ) -> Any:
                 yield {"type": "delta", "text": text}
-                yield {"type": "done", "text": text}
-
+                yield {"type": "error", "text": text,
+                       "code": PROJECT_FOLDER_MISSING}
             return _honest_entry
         if not resolved:
             return None

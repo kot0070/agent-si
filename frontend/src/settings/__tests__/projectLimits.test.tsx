@@ -168,4 +168,35 @@ describe("ProjectLimitsSection", () => {
     fireEvent.click(screen.getByTestId("project-limits-save"));
     expect(await screen.findByTestId("project-limits-error")).toBeTruthy();
   });
+
+  it("FXOPEN V6: saves read Save, every field keeps its label", async () => {
+    render(<ProjectLimitsSection projectId={PROJECT_ID} />);
+    await screen.findByTestId("project-limits-section");
+    for (const id of [
+      "project-limits-save",
+      "project-limits-parallel-save",
+      "project-limits-caps-save",
+    ]) {
+      expect(screen.getByTestId(id).textContent).toBe("Save");
+    }
+    expect(
+      screen.getAllByText(t("settings.project.parallel")).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(t("projects.cost.title")).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("FXOPEN V6: saves read Save in Ukrainian too", async () => {
+    setLocale("uk");
+    render(<ProjectLimitsSection projectId={PROJECT_ID} />);
+    await screen.findByTestId("project-limits-section");
+    for (const id of [
+      "project-limits-save",
+      "project-limits-parallel-save",
+      "project-limits-caps-save",
+    ]) {
+      expect(screen.getByTestId(id).textContent).toBe("Зберегти");
+    }
+  });
 });

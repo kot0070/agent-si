@@ -37,6 +37,9 @@ export declare function ApiClientProvider(
 export interface CurrentProject {
   projectId: string | null;
   select(projectId: string): void;
+  /** SH-04: drop the selection (archived/unknown project): the shell
+  shows no ghost id and the list becomes the landing page again. */
+  clear(): void;
 }
 
 export declare function useCurrentProject(): CurrentProject;

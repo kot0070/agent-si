@@ -155,6 +155,25 @@ def task_view(record: Any) -> dict:
     }
 
 
+def _folder_health(app: Any, project_id: str,
+                    folder_ref: Any) -> tuple[bool, str]:
+    """Working-folder health for the project read (SH-05).
+
+    Absolute refs must exist on disk; managed (non-absolute) refs
+    resolve under the data dir and self-heal on send, so they read
+    healthy here. A read never creates directories. Returns
+    (healthy, resolved path or "").
+    """
+    candidate = str(folder_ref or "").strip()
+    if os.path.isabs(candidate):
+        return os.path.isdir(candidate), candidate
+    data_dir = getattr(getattr(app, "state", None), "data_dir", None)
+    if not data_dir:
+        return True, ""
+    managed = os.path.join(str(data_dir), "workspaces", str(project_id))
+    return True, managed
+
+
 def _visible_project(projects: Any, project_id: str) -> Any | None:
     stored = projects.load(project_id)
     if stored is None or stored.get("archived"):
@@ -184,7 +203,13 @@ def register_read_routes(app: Any) -> Any:
                 status_code=404,
                 detail=f"unknown project {project_id!r}",
             )
-        return {"project": project_view(stored)}
+        view = project_view(stored)
+        folder_ok, folder_path = _folder_health(
+            app, project_id, stored.get("folder_ref"))
+        view["folder_ok"] = folder_ok
+        if folder_path:
+            view["folder_path"] = folder_path
+        return {"project": view}
 
     @app.get("/api/v1/tasks")
     def list_tasks(request: Request) -> dict:

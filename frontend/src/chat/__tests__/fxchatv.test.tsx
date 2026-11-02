@@ -655,3 +655,19 @@ describe("FXOPEN O4 photo lines: paths, plan change, one entry", () => {
     expect(resends).toHaveLength(2);
   });
 });
+
+describe("FXOPEN O6 J6: the composer grows with the draft", () => {
+  it("a long draft grows toward six rows, a short draft stays one", async () => {
+    renderChat("PV-grow");
+    const prompt = (await screen.findByTestId(
+      "chat-prompt",
+    )) as HTMLTextAreaElement;
+    expect(prompt.rows).toBe(1);
+    fireEvent.change(prompt, {
+      target: { value: "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8" },
+    });
+    expect(prompt.rows).toBe(6);
+    fireEvent.change(prompt, { target: { value: "short" } });
+    expect(prompt.rows).toBe(1);
+  });
+});

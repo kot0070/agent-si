@@ -239,7 +239,7 @@ export function TaskComposer(props: TaskComposerProps): ReactElement {
         disabled={!posting}
         onClick={handleCancel}
       >
-        {t("chat.abort.cancel")}
+        {t("tasks.creator.cancel")}
       </button>
       {created !== null ? (
         <div data-testid="composer-result" key={created.task_id}>

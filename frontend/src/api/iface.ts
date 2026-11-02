@@ -108,6 +108,11 @@ export interface ProjectRecord {
   project_id: string;
   name: string;
   created_at: string;
+  /** SH-05: working-folder health from the project read; absent when
+  the server predates the field (older rows stay unmarked). */
+  folder_ok?: boolean;
+  /** SH-05: resolved working folder when known (banner names it). */
+  folder_path?: string;
 }
 
 export interface ProjectCreate {
@@ -179,6 +184,8 @@ export type ApiErrorCode =
   | "KB_PROPOSAL_NOT_APPROVED"
   | "KEY_SAVE_TIMEOUT"
   | "CREDENTIAL_ENTRY_MISSING"
+  | "PROJECT_FOLDER_IN_USE"
+  | "PROJECT_FOLDER_MISSING"
   | "NO_PROVIDER_BOUND"
   | "APPROVAL_REQUIRED";
 

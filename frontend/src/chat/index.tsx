@@ -467,6 +467,26 @@ function disconnectClosedText(): string {
   );
 }
 
+/** FXOPEN J6: visible composer rows for a draft, about six lines max.
+Newlines always count (pasted tasks grow at once); the measured pixel
+height covers wrapped lines in a real browser. jsdom reports no
+layout, so the text count alone drives the rows there. */
+export const COMPOSER_MAX_ROWS = 6;
+
+export function composerRowsFor(
+  text: string,
+  lineHeightPx: number,
+  scrollHeightPx: number,
+): number {
+  const line = lineHeightPx > 0 ? lineHeightPx : 20;
+  const fromText = text.split("\n").length;
+  const fromMeasure = Math.ceil(Math.max(0, scrollHeightPx) / line);
+  return Math.min(
+    COMPOSER_MAX_ROWS,
+    Math.max(1, fromText, fromMeasure),
+  );
+}
+
 /** FXCHATV V1: a run-log-looking text renders as one plain verdict line
 plus a collapsed Details disclosure, never twice. Markers are the
 engine's own vocabulary (Working folder, Team, Director, Part, Check,
@@ -1342,6 +1362,31 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
   }, [blocking, draft]);
   const [toast, setToast] = useState<string | null>(null);
   const [flooded, setFlooded] = useState(false);
+  // FXOPEN J6: the composer grows with the draft, about six lines.
+  // The ref read stays inside the change handler and this effect, so
+  // the rows follow restored drafts too (never a stuck one-liner).
+  const promptRef = useRef<HTMLTextAreaElement | null>(null);
+  function growComposer(): void {
+    const area = promptRef.current;
+    if (area === null) {
+      return;
+    }
+    let line = 20;
+    try {
+      const parsed = parseFloat(
+        window.getComputedStyle(area).lineHeight,
+      );
+      if (Number.isFinite(parsed) && parsed > 0) {
+        line = parsed;
+      }
+    } catch {
+      line = 20;
+    }
+    area.rows = composerRowsFor(draft, line, area.scrollHeight);
+  }
+  useEffect(() => {
+    growComposer();
+  });
   const offlineRef = useRef(!readOnline());
   const oneShotSentRef = useRef(false);
   const [pendingAsk, setPendingAsk] = useState<InstallPermissionAsk | null>(
@@ -2210,12 +2255,14 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
               <span className="fx-vh">{t("chat.composer.prompt")}</span>
               <textarea
                 data-testid="chat-prompt"
+                ref={promptRef}
                 rows={1}
                 placeholder={t("chat.composer.prompt")}
                 aria-label={t("chat.composer.prompt")}
                 value={draft}
                 onChange={(event) => {
                   setDraft(event.target.value);
+                  growComposer();
                 }}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey) {

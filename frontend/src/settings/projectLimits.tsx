@@ -251,7 +251,7 @@ export function ProjectLimitsSection(
           void onSave();
         }}
       >
-        {t("chat.composer.send")}
+        {t("settings.project.save")}
       </button>
       <label htmlFor="project-limits-parallel">
         {t("settings.project.parallel")}
@@ -275,7 +275,7 @@ export function ProjectLimitsSection(
           void onSaveParallel();
         }}
       >
-        {t("chat.composer.send")}
+        {t("settings.project.save")}
       </button>
       {budgetText !== null ? (
         <div data-testid="project-limits-budget">
@@ -306,7 +306,7 @@ export function ProjectLimitsSection(
           void onSaveCaps();
         }}
       >
-        {t("chat.composer.send")}
+        {t("settings.project.save")}
       </button>
     </section>
   );
