@@ -68,6 +68,24 @@ _UNSTAGED_TEXT = (
 _PICK_FOLDER_UNAVAILABLE_CODE = "NATIVE_DIALOG_UNAVAILABLE"
 
 
+#: Default native window size (F3): pywebview opens 800x600 without
+#: an explicit size, which hides nav behind the condensed bar.
+_WINDOW_DEFAULT_WIDTH = 1280
+_WINDOW_DEFAULT_HEIGHT = 800
+
+#: Minimum native window size: never restored smaller than this
+#: (floor applied before the work-area cap, so the cap always wins
+#: on tiny screens and the window never exceeds the screen).
+_WINDOW_MIN_WIDTH = 1024
+_WINDOW_MIN_HEIGHT = 700
+
+#: Window-size record under the product data dir. The DATA DIR is
+#: used on purpose and never localStorage: the UI origin port
+#: changes on every launch, so a per-origin store would lose the
+#: size. JSON body ``{"width": int, "height": int}``.
+_WINDOW_SIZE_FILE_NAME = "sidecar.window.json"
+
+
 #: WebView2 runtime download hub, named in the missing-runtime
 #: notice so a windowed start without WebView2 tells the operator
 #: exactly where to get it.
@@ -257,6 +275,123 @@ def _clear_port_file(path: str) -> None:
         os.unlink(path)
     except OSError:
         return
+
+
+def _window_size_file_path(root: str) -> str:
+    """Size-record path under the product data dir."""
+    return os.path.join(os.path.abspath(str(root)), _WINDOW_SIZE_FILE_NAME)
+
+
+def _screen_work_area() -> tuple[int, int] | None:
+    """Return the usable screen work area (width, height).
+
+    Windows reads SPI_GETWORKAREA (the screen minus the taskbar);
+    elsewhere there is no portable stdlib probe, so None is
+    returned and the caller keeps the uncapped size. Tests fake
+    this hook with small/normal screens.
+    """
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            rect = (ctypes.c_long * 4)()
+            SPI_GETWORKAREA = 0x0030
+            ok = ctypes.windll.user32.SystemParametersInfoW(
+                SPI_GETWORKAREA, 0, rect, 0)
+            if ok:
+                width = int(rect[2]) - int(rect[0])
+                height = int(rect[3]) - int(rect[1])
+                if width > 0 and height > 0:
+                    return width, height
+        except Exception:
+            return None
+        return None
+    return None
+
+
+def _read_window_size(path: str) -> tuple[int, int] | None:
+    """Parse the saved size record; None when absent or malformed."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            import json
+
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    try:
+        if isinstance(data, dict):
+            width = int(data.get("width"))
+            height = int(data.get("height"))
+        elif isinstance(data, (list, tuple)) and len(data) == 2:
+            width, height = int(data[0]), int(data[1])
+        else:
+            return None
+    except (TypeError, ValueError):
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    return width, height
+
+
+def _write_window_size(path: str, width: int, height: int) -> None:
+    """Persist the close size in the DATA DIR; failures never break exit."""
+    try:
+        import json
+
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(path, "w", encoding="utf-8", newline="\n") as handle:
+            json.dump({"width": int(width), "height": int(height)}, handle)
+    except (OSError, ValueError):
+        return
+
+
+def _cap_window_size(
+    width: int, height: int, work: tuple[int, int] | None,
+) -> tuple[int, int]:
+    """Floor to the minimum, then cap to the work area (cap wins)."""
+    try:
+        w, h = int(width), int(height)
+    except (TypeError, ValueError):
+        w, h = _WINDOW_DEFAULT_WIDTH, _WINDOW_DEFAULT_HEIGHT
+    if w <= 0 or h <= 0:
+        w, h = _WINDOW_DEFAULT_WIDTH, _WINDOW_DEFAULT_HEIGHT
+    w = max(w, _WINDOW_MIN_WIDTH)
+    h = max(h, _WINDOW_MIN_HEIGHT)
+    if work is not None:
+        try:
+            ww, hh = int(work[0]), int(work[1])
+        except (TypeError, ValueError, IndexError):
+            return w, h
+        if ww > 0:
+            w = min(w, ww)
+        if hh > 0:
+            h = min(h, hh)
+    return w, h
+
+
+def resolve_window_size(data_root: str | None = None) -> tuple[int, int]:
+    """Return the window size: saved record else the 1280x800 default.
+
+    The saved record (DATA DIR JSON) is restored when present and
+    valid; the result is floored to the 1024x700 minimum and capped
+    to the screen work area. A bad record or an unknown screen
+    falls back to the default (still floored, cap skipped).
+    """
+    width, height = _WINDOW_DEFAULT_WIDTH, _WINDOW_DEFAULT_HEIGHT
+    if data_root is not None:
+        try:
+            saved = _read_window_size(_window_size_file_path(data_root))
+        except Exception:
+            saved = None
+        if saved is not None:
+            width, height = saved
+    try:
+        work = _screen_work_area()
+    except Exception:
+        work = None
+    return _cap_window_size(width, height, work)
 
 
 def _reattach_running() -> bool:
@@ -568,9 +703,20 @@ def main(argv: list[str] | None = None) -> int:
     try:
         import webview
 
-        window = webview.create_window("Agent SI", url)
+        width, height = resolve_window_size(data_root)
+        window = webview.create_window(
+            "Agent SI", url, width=width, height=height)
         _ = window
         webview.start(private_mode=False, storage_path=webview_storage_dir())
+        if data_root is not None:
+            try:
+                end_w = int(getattr(window, "width", width))
+                end_h = int(getattr(window, "height", height))
+            except (TypeError, ValueError):
+                end_w, end_h = width, height
+            if end_w > 0 and end_h > 0:
+                _write_window_size(
+                    _window_size_file_path(data_root), end_w, end_h)
     except Exception as exc:
         _log(
             "agent-si-sidecar: webview unavailable "
