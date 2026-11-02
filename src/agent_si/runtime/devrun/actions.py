@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -198,12 +199,22 @@ def write_file(
 
 
 #: Installer programs: forced to the install class, never smuggled.
+#: npx rides here verb-gated like the rest: `npx install` asks while
+#: `npx tsc` (no install verb) keeps its normal class.
 _INSTALL_PROGRAMS = frozenset({
-    "pip", "pip3", "npm", "yarn", "pnpm", "poetry", "uv", "pipx",
+    "pip", "pip3", "npm", "npx", "yarn", "pnpm", "poetry", "uv", "pipx",
     "cargo", "go", "dotnet", "nuget", "winget", "choco", "apt",
     "apt-get", "brew",
 })
 _INSTALL_VERBS = frozenset({"install", "add", "require"})
+
+#: Python launchers whose `-m <module>` form runs the module as the
+#: effective tool (workspace `.venv` pythons resolve here by basename,
+#: so they stay project tools unless the module installs).
+_PYTHON_LAUNCHERS = frozenset({"python", "python3", "py"})
+
+#: Managers whose `run` verb executes project scripts.
+_SCRIPT_MANAGERS = frozenset({"npm", "yarn", "pnpm", "bun"})
 
 #: Shell carriers and destructive / network / kill programs: denied.
 _SHELL_PROGRAMS = frozenset({
@@ -233,6 +244,73 @@ _LINT_WORDS = frozenset({"ruff", "flake8", "mypy", "pylint", "eslint"})
 _TEST_WORDS = frozenset({"pytest", "unittest"})
 
 
+#: Installer invocations inside a package.json script body: any of
+#: these turns the manager's run of that script into the install class.
+_INSTALL_SCRIPT_TOKENS = re.compile(
+    r"(?<![\w-])(npm\s+(i|install|ci|add)|pip\s+install|"
+    r"uv\s+pip\s+(install|sync)|npx\b|yarn\s+add|pnpm\s+add|"
+    r"bun\s+add|poetry\s+add|pipx\s+install|conda\s+install|"
+    r"winget\s+install|choco\s+install|apt(-get)?\s+install)"
+    r"(?![\w-])",
+    re.IGNORECASE)
+
+
+def _run_script_name(head: str, words: list[str]) -> str:
+    """Project script name for a manager run verb, or empty.
+
+    npm runs scripts via run/run-script plus the test/start shorthands;
+    yarn/pnpm/bun run a bare script name (their run verb included).
+    Anything else (flags, install verbs, unknown shapes) is empty.
+    """
+    if not words:
+        return ""
+    first = str(words[0])
+    if first in ("run", "run-script"):
+        return str(words[1]) if len(words) > 1 else ""
+    if head == "npm" and first in ("test", "start"):
+        return first
+    if head in ("yarn", "pnpm", "bun"):
+        if first.startswith("-") or first.lower() in _INSTALL_VERBS:
+            return ""
+        return first
+    return ""
+
+
+def _script_runs_install(folder: str, argv: list[str]) -> bool:
+    """True when a manager run executes a script that installs.
+
+    Reads only folder/package.json (never executed): the named script
+    body is scanned for installer invocations. A missing/unreadable
+    package.json, a missing name, or a clean script reads False — the
+    manager itself then fails honestly when nothing is there to run, so
+    no install can slip through. Never raises.
+    """
+    try:
+        words = [str(word) for word in list(argv)]
+        if not words:
+            return False
+        head = _bare_head(words[0])
+        if head not in _SCRIPT_MANAGERS:
+            return False
+        name = _run_script_name(head, words[1:])
+        if not name:
+            return False
+        path = os.path.join(str(folder), "package.json")
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+        if not isinstance(data, dict):
+            return False
+        scripts = data.get("scripts")
+        if not isinstance(scripts, dict):
+            return False
+        body = scripts.get(name)
+        if not isinstance(body, str):
+            return False
+        return bool(_INSTALL_SCRIPT_TOKENS.search(body))
+    except Exception:
+        return False
+
+
 def _bare_head(word: str) -> str:
     """Tool identity: basename without drive, dirs or exe suffix."""
     head = word.replace("\\", "/").rsplit("/", 1)[-1].lower()
@@ -243,10 +321,27 @@ def _bare_head(word: str) -> str:
 
 
 def classify_argv(argv: list[str]) -> str:
-    """Map one argv to its DETAILS A class (install/inline included)."""
+    """Map one argv to its DETAILS A class (install/inline included).
+
+    The effective tool head decides: a Python launcher's ``-m <mod>``
+    form runs the module (``python -m pip install`` is an install while
+    a workspace ``.venv`` python running pytest stays a project tool),
+    and a bare installer head with an install verb is an install.
+    Project scripts executed through a manager's run verb are NOT
+    decided here (no filesystem): spawn_checked upgrades them through
+    _script_runs_install when the script text invokes an installer.
+    """
     words = [str(word) for word in argv[1:]]
     head = _bare_head(argv[0]) if argv else ""
-    if head in _INSTALL_PROGRAMS and any(
+    effective = head
+    if head in _PYTHON_LAUNCHERS and "-m" in words:
+        try:
+            module = str(words[words.index("-m") + 1])
+        except (ValueError, IndexError):
+            module = ""
+        if module:
+            effective = module.strip().lower().rsplit("/", 1)[-1]
+    if effective in _INSTALL_PROGRAMS and any(
             word.lower() in _INSTALL_VERBS for word in words):
         return "install"
     if head in ("python", "python3") and "-c" in words:
@@ -473,6 +568,13 @@ def spawn_checked(
     if denied:
         raise PermissionError("refused: %s" % (denied,))
     kind = classify_argv(words)
+    if kind != "install" and _script_runs_install(str(folder), words):
+        # An install reached indirectly: the manager runs a project
+        # script whose body invokes an installer. Same install class,
+        # same permission ask; a workspace program (a .venv python, a
+        # node_modules/.bin binary) classifies by its own head above
+        # and never lands here.
+        kind = "install"
     if kind == "install":
         from agent_si.toolguard import permissions as _ask_permissions
 
