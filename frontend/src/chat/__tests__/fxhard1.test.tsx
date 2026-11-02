@@ -251,11 +251,11 @@ describe("second send while a stream runs", () => {
 });
 
 describe("failed and stopped turns", () => {
-  it("stores a failed turn and restores the error card on reopen", async () => {
+  it("stores a failed turn and restores the error line on reopen", async () => {
     streamReplies.push(() => errorStream("BUDGET_CAPPED"));
     renderChat();
     promptAndSend("do it");
-    expect(await screen.findByTestId("kit-error-panel")).toBeTruthy();
+    expect(await screen.findByTestId("chat-error-line")).toBeTruthy();
     await waitFor(() => {
       expect(
         historyPosts.filter(
@@ -271,7 +271,7 @@ describe("failed and stopped turns", () => {
     expect((failed?.body as { error_code?: unknown }).error_code).toBe(
       "BUDGET_CAPPED",
     );
-    // Reopen from the stored failed turn: the card returns, Ready.
+    // Reopen from the stored failed turn: the line returns, Ready.
     historyTurns = [
       turn("t-f", "do it", "half", "failed", {
         error_code: "BUDGET_CAPPED",
@@ -280,10 +280,10 @@ describe("failed and stopped turns", () => {
     cleanup();
     resetChatStore();
     renderChat();
-    expect(await screen.findByTestId("kit-error-panel")).toBeTruthy();
-    expect(
-      await screen.findByTestId("chat-health-degraded"),
-    ).toBeTruthy();
+    const line = await screen.findByTestId("chat-error-line");
+    expect(line.textContent).toContain("do it");
+    expect(line.textContent).not.toContain("BUDGET_CAPPED");
+    expect(screen.queryByTestId("kit-error-panel")).toBeNull();
     expect(screen.queryByTestId("chat-spinner")).toBeNull();
     expect(
       (await screen.findByTestId("chat-statusline")).textContent,
@@ -440,7 +440,7 @@ describe("empty-answer stream", () => {
     );
     renderChat();
     promptAndSend("answer me");
-    expect(await screen.findByTestId("kit-error-panel")).toBeTruthy();
+    expect(await screen.findByTestId("chat-error-line")).toBeTruthy();
     await waitFor(() => {
       expect(
         historyPosts.filter(

@@ -33,7 +33,6 @@ import {
 } from "../api/errors";
 import { DEFAULT_LOCALE, t } from "../locale/index";
 import enTable from "../locale/en.json";
-import { ErrorPanel } from "../ui/ErrorPanel";
 import { ApprovalCard } from "./ApprovalCard";
 import { HierarchyRows } from "./HierarchyRows";
 import {
@@ -86,6 +85,8 @@ export interface ChatAreaProps {
 interface BlockingError {
   errorKey: string;
   code: string;
+  /** Failed task text for the one-line error ("which step"), if known. */
+  task?: string;
 }
 
 // FXCHATHIST Part 2: the store slice is session-scoped. The store itself
@@ -156,6 +157,14 @@ const pumps = new Map<string, ChatPump>();
 // is frozen, so the per-message mark lives here, keyed by the unique
 // store message id.
 const proposalMessages = new Set<string>();
+
+// Engine turns (done event with executed:true, or a served turn with
+// the executed mark) render a verdict line plus the disclosed steps,
+// never the approval card. The map carries the terminal state per
+// message id; history never marks a proposal. The store shape is
+// frozen, so the per-message mark lives here, keyed by the unique
+// store message id.
+const engineTurnStatus = new Map<string, "ok" | "failed" | "stopped">();
 
 // Stopped-turn assistants show one plain stopped line instead of the card.
 const stoppedAssistants = new Set<string>();
@@ -352,6 +361,8 @@ const ChatHistoryTurnSchema = z.object({
   status: z.string().optional().default("ok"),
   run_id: z.string().optional().default(""),
   error_code: z.string().optional().default(""),
+  executed: z.boolean().optional().default(false),
+  run_end_reason: z.string().optional().default(""),
 });
 
 const ChatHistoryResponseSchema = z.object({
@@ -386,11 +397,135 @@ function interruptedText(stored: string): string {
   return stored !== "" ? `${stored}\n${note}` : note;
 }
 
+/** Named disconnect line: the run stopped when the window closed. */
+function disconnectClosedText(): string {
+  return pt(
+    "chat.stream.disconnectClosed",
+    "The run stopped when the window closed. Files so far are kept. Send the task again.",
+  );
+}
+
+/** FXR3B: engine-turn verdict from the lines plus the terminal state.
+
+No new server events: the text carries the part rows ("Part p1:
+PASS"), "[files: ...]" markers and run lines; the done event (or the
+served executed flag) says it is an engine turn, the terminal state
+says Done vs Failed. Every original line is kept verbatim for the
+steps disclosure below the verdict.
+*/
+export interface EngineSummary {
+  done: boolean;
+  parts: number;
+  passed: number;
+  files: string[];
+  lines: string[];
+}
+
+export function summarizeEngineTurn(
+  text: string,
+  status: "ok" | "failed" | "stopped",
+): EngineSummary {
+  const lines = text.split("\n");
+  const verdicts = new Map<string, boolean>();
+  const files: string[] = [];
+  for (const line of lines) {
+    const part = /^Part\s+([^:]+):\s*(PASS|FAIL)\b/i.exec(line);
+    if (part !== null && part[1] !== undefined && part[2] !== undefined) {
+      verdicts.set(part[1].trim(), part[2].toUpperCase() === "PASS");
+    }
+    for (const filesMatch of line.matchAll(
+      /\[files:\s*([^\]]+)\]/gi,
+    )) {
+      const listed = filesMatch[1];
+      if (listed === undefined) {
+        continue;
+      }
+      for (const name of listed.split(",")) {
+        const file = name.trim();
+        if (file !== "" && !files.includes(file)) {
+          files.push(file);
+        }
+      }
+    }
+  }
+  const parts = verdicts.size;
+  let passed = 0;
+  for (const ok of verdicts.values()) {
+    if (ok) {
+      passed += 1;
+    }
+  }
+  const failed =
+    status !== "ok" ||
+    (parts > 0 ? passed < parts : /run fail/i.test(text));
+  return {
+    done: !failed,
+    parts,
+    passed,
+    files,
+    lines,
+  };
+}
+
+/** One plain verdict line for a finished engine turn. */
+export function engineVerdictLine(summary: EngineSummary): string {
+  const head = summary.done ? "Done" : "Failed";
+  const parts =
+    summary.parts === 1
+      ? "1 part"
+      : `${summary.parts} parts`;
+  const passed =
+    summary.passed === 1 ? "1 passed" : `${summary.passed} passed`;
+  const files =
+    summary.files.length > 0
+      ? `files: ${summary.files.join(", ")}`
+      : "files: none listed";
+  const next = summary.done
+    ? ""
+    : " Next: fix the failing part, then send the task again.";
+  return `${head} — ${parts}, ${passed}, ${files}.${next}`;
+}
+
+/** FXR3B: finished engine turn — verdict line first, steps disclosed. */
+export function EngineTurnView(props: {
+  text: string;
+  status: "ok" | "failed" | "stopped";
+}): ReactElement {
+  const summary = summarizeEngineTurn(props.text, props.status);
+  const [open, setOpen] = useState(!summary.done);
+  return (
+    <>
+      <p data-testid="run-verdict" style={{ whiteSpace: "pre-wrap" }}>
+        {engineVerdictLine(summary)}
+      </p>
+      <button
+        type="button"
+        data-testid="run-steps-toggle"
+        className="fx-btn-quiet"
+        aria-expanded={open}
+        onClick={() => {
+          setOpen(!open);
+        }}
+      >
+        {pt("chat.run.steps", "Run steps")}
+      </button>
+      <div data-testid="run-steps" hidden={!open}>
+        {summary.lines.map((line, index) => (
+          <p key={`${index}`} style={{ whiteSpace: "pre-wrap" }}>
+            {line}
+          </p>
+        ))}
+      </div>
+    </>
+  );
+}
+
 // Merge one served page into the slice, oldest first. Merge key is the
 // server turn id only: identical user texts ("hello" twice) never drop
 // nor duplicate. A running turn whose stream is gone renders as
-// interrupted with its stored text plus a resend; failed and stopped
-// turns restore the error card.
+// interrupted with its stored text plus a resend — or the named
+// disconnect line when the server record says the window closed;
+// failed and stopped turns restore the error card.
 function buildHistoryBatch(
   key: string,
   page: ChatHistoryPage,
@@ -420,10 +555,15 @@ function buildHistoryBatch(
         at,
         final: true,
       });
+      const closedByWindow =
+        typeof turn.run_end_reason === "string" &&
+        turn.run_end_reason.includes("client disconnect");
       batch.push({
         id: assistantId,
         role: "assistant",
-        text: interruptedText(turn.assistant_text),
+        text: closedByWindow
+          ? `${turn.assistant_text !== "" ? `${turn.assistant_text}\n` : ""}${disconnectClosedText()}`
+          : interruptedText(turn.assistant_text),
         at,
         final: true,
         resendPrompt: turn.user_text,
@@ -445,6 +585,18 @@ function buildHistoryBatch(
         at,
         final: true,
       });
+      if (turn.executed === true) {
+        // Served engine mark: the verdict view renders from the lines,
+        // never the approval card. Status rides along for Done/Failed.
+        engineTurnStatus.set(
+          assistantId,
+          turn.status === "stopped"
+            ? "stopped"
+            : turn.status === "failed"
+              ? "failed"
+              : "ok",
+        );
+      }
       if (turn.status === "stopped") {
         // Stopped turns show one plain stopped line instead of a card.
         // History never marks a proposal: default is no card.
@@ -456,6 +608,7 @@ function buildHistoryBatch(
       emitBlocking(key, {
         errorKey: apiErrorLocaleKey(turn.error_code || "UNKNOWN"),
         code: turn.error_code !== "" ? turn.error_code : "UNKNOWN",
+        task: turn.user_text,
       });
     }
   }
@@ -571,7 +724,12 @@ async function recordTurnBestEffort(
   projectId: string,
   userText: string,
   assistantText: string,
-  extra?: { status?: string; run_id?: string; error_code?: string },
+  extra?: {
+    status?: string;
+    run_id?: string;
+    error_code?: string;
+    executed?: boolean;
+  },
 ): Promise<void> {
   try {
     await requestResponse(CHAT_HISTORY_ROUTE, {
@@ -584,6 +742,7 @@ async function recordTurnBestEffort(
         status: extra?.status ?? "ok",
         run_id: extra?.run_id ?? "",
         error_code: extra?.error_code ?? "",
+        executed: extra?.executed ?? false,
       },
     });
   } catch {
@@ -592,6 +751,30 @@ async function recordTurnBestEffort(
 }
 
 let streamSeq = 0;
+
+/** FXR3B J5: one human error line — what failed, which step, next
+action. The code never reaches the screen. The task rides on the
+blocking error when the failing turn is known (history reload), else
+the last sent prompt of this slice. */
+/** FXR3B J5: one human error line — what failed, which step, next
+action. The code never reaches the screen (it rides only the tooltip
+for diagnostics). The no-model case names the exact next step. */
+function chatErrorText(
+  blocking: BlockingError,
+  prompt: string | null,
+): string {
+  if (
+    blocking.code === "NO_PROVIDER_BOUND" ||
+    blocking.errorKey === "firstrun.steps.connectProvider"
+  ) {
+    return t("chat.error.noProvider");
+  }
+  const raw = blocking.task ?? prompt ?? "";
+  const step =
+    raw.trim() !== "" ? ` — task "${raw.trim().slice(0, 140)}"` : "";
+  const what = t(blocking.errorKey);
+  return `${what}${step}. ${pt("chat.error.retryHint", "Retry sends it again.")}`;
+}
 
 function nextStreamId(): string {
   streamSeq += 1;
@@ -700,6 +883,7 @@ function handleRunError(
   const current = getChatState(key).messages.find(
     (message) => message.id === assistantId,
   );
+  const failedCode = runErrorCode(error);
   if (record !== undefined) {
     // Failed runs are stored too (holds are not terminal: Allow replays
     // the same run id, so the held running turn upserts into one turn).
@@ -707,8 +891,14 @@ function handleRunError(
     void recordTurnBestEffort(record.projectId, record.prompt, partial, {
       status: "failed",
       run_id: record.runId,
-      error_code: runErrorCode(error),
+      error_code: failedCode,
     });
+    if (failedCode === "NO_PROVIDER_BOUND") {
+      // No model bound: the draft text stays so the user can connect a
+      // provider and send the same task again. The restore itself runs
+      // in the component (see the blocking effect below): this module
+      // function never touches component state.
+    }
   }
   if (current !== undefined && current.text === "") {
     // Failed before any token: prune the empty placeholder (render
@@ -722,9 +912,14 @@ function handleRunError(
     emitBlocking(key, {
       errorKey: apiErrorLocaleKey(error.code),
       code: error.code,
+      ...(record === undefined ? {} : { task: record.prompt }),
     });
   } else {
-    emitBlocking(key, { errorKey: "errors.generic", code: "UNKNOWN" });
+    emitBlocking(key, {
+      errorKey: "errors.generic",
+      code: "UNKNOWN",
+      ...(record === undefined ? {} : { task: record.prompt }),
+    });
   }
 }
 
@@ -827,15 +1022,20 @@ function startChatRun(
         getChatState(key).messages.find(
           (message) => message.id === assistantId,
         )?.text ?? "";
+      const ranEngine = executed === true;
       if (aborted) {
         // Stop closes the run as stopped: stored, never Working. No
         // card mark: a stopped turn is never a waiting proposal.
         patchChatMessage(key, assistantId, { final: false });
         stoppedAssistants.add(assistantId);
+        if (ranEngine) {
+          engineTurnStatus.set(assistantId, "stopped");
+        }
         void recordTurnBestEffort(projectId, text, answer, {
           status: "stopped",
           run_id: runId,
           error_code: "STOPPED",
+          executed: ranEngine,
         });
       } else if (answer === "") {
         // Dropped stream (no terminal text): a clear failed line.
@@ -845,23 +1045,28 @@ function startChatRun(
           status: "failed",
           run_id: runId,
           error_code: "EMPTY_RESPONSE",
+          executed: ranEngine,
         });
         emitBlocking(key, {
           errorKey: apiErrorLocaleKey("UNKNOWN"),
           code: "UNKNOWN",
+          task: text,
         });
       } else {
         setChatHealth(key, "ok");
         patchChatMessage(key, assistantId, { final: true });
         // The stream's own clean terminal event marks the waiting
         // proposal — the ONLY card path. Engine turns (executed) never
-        // mark, so they never show a card, live or reloaded.
-        if (executed !== true) {
+        // mark: they render the verdict view instead, live or reloaded.
+        if (ranEngine) {
+          engineTurnStatus.set(assistantId, "ok");
+        } else {
           proposalMessages.add(assistantId);
         }
         void recordTurnBestEffort(projectId, text, answer, {
           status: "ok",
           run_id: runId,
+          executed: ranEngine,
         });
       }
       if (!mountedSlices.has(key)) {
@@ -903,6 +1108,20 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
   const [blocking, setBlocking] = useState<BlockingError | null>(() =>
     consumeBlockingStash(key),
   );
+  // No model bound: the draft text stays so the user can connect a
+  // provider and send the same task again. Never clobbers text the
+  // user typed after the send.
+  useEffect(() => {
+    if (
+      blocking !== null &&
+      blocking.code === "NO_PROVIDER_BOUND" &&
+      blocking.task !== undefined &&
+      blocking.task.trim() !== "" &&
+      draft.trim() === ""
+    ) {
+      setDraft(blocking.task);
+    }
+  }, [blocking, draft]);
   const [toast, setToast] = useState<string | null>(null);
   const [flooded, setFlooded] = useState(false);
   const offlineRef = useRef(!readOnline());
@@ -1479,7 +1698,15 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
                   : "fx-msg fx-msg-assistant"
               }
             >
-              <p style={{ whiteSpace: "pre-wrap" }}>{message.text}</p>
+              {message.role === "assistant" &&
+              engineTurnStatus.has(message.id) ? (
+                <EngineTurnView
+                  text={message.text}
+                  status={engineTurnStatus.get(message.id) ?? "ok"}
+                />
+              ) : (
+                <p style={{ whiteSpace: "pre-wrap" }}>{message.text}</p>
+              )}
               {message.role === "assistant" &&
               message.final &&
               message.text !== "" ? (
@@ -1550,6 +1777,31 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
             </div>
           ))}
         </div>
+        {messages.length === 0 ? (
+          <div data-testid="chat-empty-state">
+            <p>{t("chat.empty.line")}</p>
+            <button
+              type="button"
+              data-testid="chat-sample-1"
+              className="fx-btn-quiet"
+              onClick={() => {
+                setDraft(t("chat.empty.sample1"));
+              }}
+            >
+              {t("chat.empty.sample1")}
+            </button>
+            <button
+              type="button"
+              data-testid="chat-sample-2"
+              className="fx-btn-quiet"
+              onClick={() => {
+                setDraft(t("chat.empty.sample2"));
+              }}
+            >
+              {t("chat.empty.sample2")}
+            </button>
+          </div>
+        ) : null}
         {visibleTags.length > 0 ? (
           <div data-testid="chat-channel-meta">
             <span
@@ -1634,10 +1886,9 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
             inside, the send as an icon button inside right; a small status
             line under it (model | route | working state). */}
         <div data-testid="chat-composer" className="fx-composer">
-          {draft !== "" ? (
-            <span data-testid="chat-draft-chip" className="fx-quiet">{t("chat.composer.draft")}</span>
-          ) : null}
-          {boundModels !== null && boundModels.length === 0 ? (
+          {boundModels !== null &&
+          boundModels.length === 0 &&
+          blocking?.code !== "NO_PROVIDER_BOUND" ? (
             <div className="fx-composer-hint">
               <p data-testid="chat-no-model-hint" className="fx-quiet">{t("chat.composer.noModel")}</p>
               <a data-testid="chat-no-model-connect" href="/settings/models" className="fx-btn-quiet">
@@ -1648,9 +1899,9 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
           <div className="fx-composer-box">
             <label className="fx-composer-field">
               <span className="fx-vh">{t("chat.composer.prompt")}</span>
-              <input
+              <textarea
                 data-testid="chat-prompt"
-                type="text"
+                rows={1}
                 placeholder={t("chat.composer.prompt")}
                 aria-label={t("chat.composer.prompt")}
                 value={draft}
@@ -1658,7 +1909,8 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
                   setDraft(event.target.value);
                 }}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter") {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
                     handleSend();
                   }
                 }}
@@ -1677,7 +1929,11 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
               <span className="fx-vh">{t("chat.composer.send")}</span>
             </button>
           </div>
-          <p data-testid="chat-statusline" className="fx-statusline">            {/* FXDESIGN6: one span per value; the "|" dividers are CSS
+          <p
+            data-testid="chat-statusline"
+            className="fx-statusline"
+            title={`${directorModel ?? t("chat.hierarchy.auto")} · ${statusRoute()}`}
+          >            {/* FXDESIGN6: one span per value; the "|" dividers are CSS
                 (no separator text nodes, so the locale-only contract
                 sees exactly the three locale values). */}
             <span>{directorModel ?? t("chat.hierarchy.auto")}</span>
@@ -1722,7 +1978,30 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
               {t("chat.stream.offline")}
             </span>
           )}
-          {health === "degraded" ? (
+          {blocking !== null ? (
+            <div
+              data-testid="chat-error-line"
+              role="alert"
+              className="fx-quiet"
+              title={blocking.code}
+            >
+              <p>
+                {chatErrorText(
+                  blocking,
+                  lastSentBySlice.get(key) ?? null,
+                )}
+              </p>
+              <button
+                type="button"
+                data-testid="kit-error-retry"
+                className="fx-btn-quiet"
+                onClick={handleRetry}
+              >
+                {t("chat.error.retry")}
+              </button>
+            </div>
+          ) : null}
+          {blocking === null && health === "degraded" ? (
             <span data-testid="chat-health-degraded" role="status" className="fx-quiet">
               {t("errors.generic")}
             </span>
@@ -1745,13 +2024,6 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
               {t("ui.error.retry")}
             </button>
           </div>
-        ) : null}
-        {blocking !== null ? (
-          <ErrorPanel
-            errorKey={blocking.errorKey}
-            code={blocking.code}
-            onRetry={handleRetry}
-          />
         ) : null}
         {toast !== null ? (
           <div data-testid="chat-toast" role="status">

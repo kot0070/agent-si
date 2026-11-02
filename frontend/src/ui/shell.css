@@ -704,20 +704,27 @@ div[data-testid="approval-card"] {
   min-width: 0;
 }
 
-.fx-composer-field input {
+.fx-composer-field textarea {
   width: 100%;
   border: none;
   background: none;
   padding: 6px 0;
+  resize: none;
+  field-sizing: content;
+  max-height: calc(6 * 1.5em);
+  overflow-y: auto;
+  font: inherit;
+  color: inherit;
 }
 
-.fx-composer-field input:focus-visible {
+.fx-composer-field textarea:focus,
+.fx-composer-field textarea:focus-visible {
   outline: none;
 }
 
 .fx-composer-box:focus-within {
-  outline: 2px solid var(--fx-focus-ring);
-  outline-offset: 2px;
+  outline: 1px solid var(--fx-input-border);
+  outline-offset: 1px;
 }
 
 button.fx-send-btn {

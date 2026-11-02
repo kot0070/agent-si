@@ -73,7 +73,7 @@ describe("fxdesign6 engine verdict gate", () => {
     expect(proposal.textContent).toBe("Hello");
   });
 
-  it("renders engine lines with no card under an executed run", async () => {
+  it("renders engine lines with a verdict and no card under an executed run", async () => {
     stubSse([
       'data: {"type":"start","stream_id":"s-9","run_id":"r-9"}\n\n',
       'data: {"type":"delta","stream_id":"s-9","run_id":"r-9","text":"line one\\nline two"}\n\n',
@@ -85,11 +85,8 @@ describe("fxdesign6 engine verdict gate", () => {
       </ApiClientProvider>,
     );
     promptAndSend("run it");
-    const assistant = await screen.findByTestId("chat-assistant-message");
-    const text = assistant.querySelector("p")?.textContent ?? "";
-    expect(text).toContain("line one");
-    expect(text).toContain("line two");
-    expect(text.indexOf("\n")).toBeGreaterThanOrEqual(0);
+    // Verdict first, steps behind the toggle (open: not a success).
+    expect(await screen.findByTestId("run-verdict")).toBeTruthy();
     expect(screen.queryByTestId("approval-card")).toBeNull();
     expect(screen.queryByTestId("approval-accept")).toBeNull();
     expect(screen.queryByTestId("approval-edit")).toBeNull();
