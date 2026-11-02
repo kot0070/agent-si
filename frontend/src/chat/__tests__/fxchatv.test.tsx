@@ -549,3 +549,109 @@ describe("LAPTOP_B photo lines", () => {
     expect(steps).toContain("Working folder:");
   });
 });
+
+describe("FXOPEN O4 photo lines: paths, plan change, one entry", () => {
+  const PHOTO_PATH_LOG = [
+    "Working folder: D:\\Test2\\app\\data\\workspaces\\abc123",
+    "Team: director, manager, worker, auditor on meta/x (Auto)",
+    "Director: plan of 1 parts",
+    "Part p1: Create file hello.txt with the text hello [files: hello.txt]",
+    "Check p1 $ C:\\Windows\\system32\\findstr.EXE hello hello.txt -> exit 0",
+    "Run dir: C:\\Users\\kot00\\work",
+    "run success: all 1 parts PASS",
+  ].join("\n");
+
+  function historyOk(id: string, text: string): unknown {
+    return {
+      project_id: "PV-open",
+      user_text: "create hello",
+      assistant_text: text,
+      time: "2026-01-01T00:00:00Z",
+      id,
+      status: "ok",
+      run_id: `run-${id}`,
+      error_code: "",
+      executed: true,
+      run_end_reason: "",
+    };
+  }
+
+  it("chat shows file names, never host absolute paths or the user name", async () => {
+    historyTurns = [historyOk("t-paths", PHOTO_PATH_LOG)];
+    renderChat("PV-open");
+    await screen.findByTestId("run-verdict");
+    const steps = screen.getByTestId("run-steps").textContent ?? "";
+    expect(steps).not.toMatch(/[A-Za-z]:[\\/]/);
+    expect(steps).not.toContain("kot00");
+    expect(steps).not.toContain("Test2");
+    expect(steps).toContain("findstr");
+    expect(steps).toContain("hello.txt");
+    expect(steps).toContain("Working folder:");
+  });
+
+  it("a second plan announcement renders one plain Plan changed line", async () => {
+    historyTurns = [
+      historyOk(
+        "t-plan",
+        [
+          "Director: plan of 2 parts",
+          "Part p1: first [files: a.txt]",
+          "Director: plan of 3 parts",
+          "Part p1: Install pytest dependency [files: b.txt]",
+          "run success: all 1 parts PASS",
+        ].join("\n"),
+      ),
+    ];
+    renderChat("PV-open");
+    const changed = await screen.findByTestId("plan-changed");
+    expect(changed.textContent).toContain("Plan changed:");
+    expect(changed.textContent).toContain("was 2 parts");
+    expect(changed.textContent).toContain("now 3 parts");
+  });
+
+  it("a single plan announcement renders no Plan changed line", async () => {
+    historyTurns = [historyOk("t-one", PHOTO_PATH_LOG)];
+    renderChat("PV-open");
+    await screen.findByTestId("run-verdict");
+    expect(screen.queryByTestId("plan-changed")).toBeNull();
+  });
+
+  function historyRunning(
+    id: string,
+    userText: string,
+    time: string,
+  ): unknown {
+    return {
+      project_id: "PV-open",
+      user_text: userText,
+      assistant_text: "half done",
+      time,
+      id,
+      status: "running",
+      run_id: `run-${id}`,
+      error_code: "",
+      executed: false,
+      run_end_reason: "",
+    };
+  }
+
+  it("one entry per interrupted task after restart", async () => {
+    historyTurns = [
+      historyRunning("t-1011", "count words", "2026-01-01T10:11:00Z"),
+      historyRunning("t-1014", "count words", "2026-01-01T10:14:00Z"),
+    ];
+    renderChat("PV-open");
+    await screen.findByTestId("chat-resend");
+    expect(screen.getAllByTestId("chat-resend")).toHaveLength(1);
+  });
+
+  it("different interrupted tasks keep their own entries", async () => {
+    historyTurns = [
+      historyRunning("t-a", "count words", "2026-01-01T10:11:00Z"),
+      historyRunning("t-b", "weigh stones", "2026-01-01T10:14:00Z"),
+    ];
+    renderChat("PV-open");
+    const resends = await screen.findAllByTestId("chat-resend");
+    expect(resends).toHaveLength(2);
+  });
+});

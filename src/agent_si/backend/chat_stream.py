@@ -29,6 +29,7 @@ from __future__ import annotations
 import importlib
 import json
 import os
+import re
 import uuid
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
@@ -790,6 +791,17 @@ class ManagerSdkBridge:
         message = str(getattr(request, "message", "") or "")
         texts: list[str] = []
         closed = False
+        # FXOPEN O4: chat-facing run text carries file names plus
+        # project-relative paths only, never host absolute paths.
+        display_folder = ""
+        try:
+            folder = str(getattr(request, "folder", "") or "")
+            if app is not None and project:
+                resolved, honest = self._devrun_folder(app, project, folder)
+                if honest is None and resolved:
+                    display_folder = resolved
+        except Exception:
+            display_folder = ""
 
         def _close(kind: str, error_code: str = "") -> None:
             """Store the terminal turn + mirror tasks once (idempotent)."""
@@ -842,6 +854,10 @@ class ManagerSdkBridge:
                     stream_id, run_id, event)
                 if payload.get("type") == "start":
                     continue
+                if display_folder and isinstance(
+                        payload.get("text"), str):
+                    payload["text"] = _chat_display_text(
+                        payload["text"], display_folder)
                 if (kb_note and payload.get("type") == "delta"
                         and isinstance(payload.get("text"), str)
                         and not state.get("kb_cited")):
@@ -1113,6 +1129,57 @@ class ManagerSdkBridge:
             app, project, message, str(captured.get("text", "")), "ok",
             run_id=run_id)
         _mirror_run_tasks(app, project, task, message, "done")
+
+
+#: One absolute Windows path token (drive letter, either slash).
+_DRIVE_PATH_RE = re.compile(r"[A-Za-z]:(?:[\\/])[^\s\"']*")
+
+
+def _replace_ci(text: str, old: str, new: str) -> str:
+    """Case-insensitive literal replace (Windows paths vary in case)."""
+    if not old:
+        return text
+    return re.sub(re.escape(old), lambda _match: new, text,
+                  flags=re.IGNORECASE)
+
+
+def _chat_display_text(text: str, folder: str) -> str:
+    """Render run text for chat without host absolute paths.
+
+    Paths under the working folder become project-relative (the folder
+    itself becomes its base name); any other absolute Windows path
+    token shows its file name only. User names in ``C:\\Users\\<name>``
+    segments never reach the screen. Plain words, never a refusal.
+    """
+    if not isinstance(text, str) or not text:
+        return text
+    out = text
+    if folder:
+        norm = os.path.normpath(folder)
+        base = os.path.basename(norm) or norm
+        prefixes = [norm + os.sep]
+        for variant in (norm.replace("\\", "/"), norm.replace("/", "\\")):
+            for sep in ("\\", "/"):
+                candidate = variant + sep
+                if candidate not in prefixes:
+                    prefixes.append(candidate)
+        for prefix in sorted(prefixes, key=len, reverse=True):
+            out = _replace_ci(out, prefix, "")
+        # A lone folder mention (not followed by more path) becomes
+        # its base name; longer sibling paths keep their own shape for
+        # the drive-token rule below.
+        for lone in dict.fromkeys(
+                (norm, norm.replace("\\", "/"), norm.replace("/", "\\"))):
+            out = re.sub(
+                re.escape(lone) + r"(?![\\/])", lambda _m: base, out,
+                flags=re.IGNORECASE)
+
+    def _basename(match: "re.Match[str]") -> str:
+        token = match.group(0)
+        name = token.replace("/", "\\").rsplit("\\", 1)[-1]
+        return name or token
+
+    return _DRIVE_PATH_RE.sub(_basename, out)
 
 
 def _manager_event_payload(
