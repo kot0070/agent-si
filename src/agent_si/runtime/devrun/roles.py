@@ -32,6 +32,67 @@ class ModelTimeout(RuntimeError):
     code: str = "DEVRUN_MODEL_TIMEOUT"
 
 
+class ContextOverflow(RuntimeError):
+    """A model call died for input size (HTTP 400/413 + a length marker).
+
+    The worker loop shrinks its history and retries once; a second hit
+    ends the attempt with the plain line. Director and auditor call
+    sites show the same plain line, never an internal dump.
+    """
+
+    code: str = "DEVRUN_CONTEXT_OVERFLOW"
+
+
+#: Plain line for every context-overflow end (worker attempt, director,
+#: auditor): the user gets this sentence, never "internal".
+CONTEXT_PLAIN = ("The task outgrew the model's context. "
+                 "Try smaller parts or a model with a larger window.")
+
+#: Provider length-error markers (matched on the lowered error text).
+_CONTEXT_MARKERS = (
+    "context_length",
+    "maximum context",
+    "too many tokens",
+    "prompt is too long",
+    "input is too long",
+    "request too large",
+)
+
+#: Bare 400/413 in the error text (the last resort when the provider
+#: error carries no status attribute).
+_CONTEXT_STATUS = re.compile(r"\b(400|413)\b")
+
+
+def _is_context_overflow(exc: BaseException) -> bool:
+    """True for provider length errors: status 400/413 + a length marker.
+
+    Timeouts, stops and marker-free errors are never an overflow.
+    """
+    if isinstance(exc, (ModelStopped, ModelTimeout)):
+        return False
+    try:
+        text = str(exc or "").lower()
+    except Exception:
+        return False
+    if not text:
+        return False
+    if not any(marker in text for marker in _CONTEXT_MARKERS):
+        return False
+    try:
+        status = getattr(exc, "status", None)
+        if status is None:
+            status = getattr(exc, "status_code", None)
+        if status is None:
+            status = getattr(exc, "code", None)
+        if status is not None and int(status) in (400, 413):
+            return True
+    except (TypeError, ValueError):
+        pass
+    except Exception:
+        pass
+    return _CONTEXT_STATUS.search(text) is not None
+
+
 class ModelStopped(RuntimeError):
     """A model call was stopped while waiting; the run unwinds."""
 
@@ -872,6 +933,19 @@ def invoke_owned(
         except (ModelStopped, ModelTimeout):
             raise
         except Exception as exc:
+            if _is_context_overflow(exc):
+                raise ContextOverflow(
+                    str(exc) or "model context overflow") from exc
+            try:
+                from agent_si.providers.adapters.base import (
+                    ProviderTimeoutError as _ProviderTimeout)
+            except Exception:
+                _ProviderTimeout = None
+            if _ProviderTimeout is not None and isinstance(
+                    exc, _ProviderTimeout):
+                raise ModelTimeout(
+                    "model call timed out (provider timeout): %s"
+                    % (exc,)) from exc
             if not _is_outage_error(exc):
                 raise
             failures.append(exc)
