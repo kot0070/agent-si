@@ -380,8 +380,9 @@ def set_role(ctx: RoutingCtx, query, body) -> Tuple[int, Dict]:
     if mode == "PINNED" and (not provider or not model):
         return 400, {"error": "PINNED needs provider and model"}
     if mode in ("pool",) and not body.get("pool"):
-        # pool mode without members: profile stored, binding required later
-        pass
+        # pool mode without members: plain refusal, nothing stored
+        # (an empty pool would only BLOCK later at resolve).
+        return 400, {"error": "pool needs at least one member"}
     profile = T.RoleModelProfile(
         role=role, project_id=project_id, mode=mode,
         provider=provider if mode == "PINNED" else None,

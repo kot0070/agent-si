@@ -179,6 +179,54 @@ def diff_undeclared(before: dict[str, str | None],
     return text, changed
 
 
+#: Auditor post-image bounds: 8 KB per declared file, 32 KB total.
+_POST_IMAGE_PER_FILE = 8192
+_POST_IMAGE_TOTAL = 32768
+
+
+def post_image_lines(part_files: Any) -> list[str]:
+    """Render declared post-images for the auditor: 8 KB per file.
+
+    Whole-file contents after this attempt, so a break in an unchanged
+    file (no diff) or beyond a cut diff is still visible. At most
+    32 KB ride along; files past the budget are named as omitted, and
+    every cut or omission is marked in plain words. Never raises.
+    """
+    try:
+        names = sorted(part_files or {})
+    except Exception:
+        return []
+    if not names:
+        return []
+    lines = ["Files (post-image after this attempt, declared files):"]
+    total = 0
+    for path in names:
+        try:
+            text = (part_files or {}).get(path)
+        except Exception:
+            text = None
+        if text is None:
+            lines.append("--- %s: (missing or unreadable)" % (path,))
+            continue
+        try:
+            body = str(text)
+        except Exception:
+            lines.append("--- %s: (missing or unreadable)" % (path,))
+            continue
+        if len(body) > _POST_IMAGE_PER_FILE:
+            cut = len(body) - _POST_IMAGE_PER_FILE
+            body = ("%s\n[... file cut: %d more chars not shown ...]"
+                    % (body[:_POST_IMAGE_PER_FILE], cut))
+        if total + len(body) > _POST_IMAGE_TOTAL:
+            lines.append("--- %s: (omitted: 32 KB post-image budget spent)"
+                         % (path,))
+            continue
+        total += len(body)
+        lines.append("--- %s:" % (path,))
+        lines.append(body)
+    return lines
+
+
 def auditor_messages(
     goal: str,
     files_diff: str,
@@ -186,6 +234,7 @@ def auditor_messages(
     install_runs: Any = (),
     prior_install_runs: Any = (),
     part_diff: str = "",
+    part_files: Any = None,
 ) -> list[dict[str, str]]:
     """The auditor's NEW message list: goal, diff, checks with output.
 
@@ -194,6 +243,8 @@ def auditor_messages(
     text: an empty diff with such a record is explained, without one
     it stays empty work. Installs already run for the project ride a
     second section (the rerun must verify, not reinstall).
+    Declared post-images ride their own section (8 KB per file,
+    32 KB total) so unchanged-file breaks stay visible.
     """
     from agent_si.runtime.devrun import records as _records
 
@@ -204,8 +255,12 @@ def auditor_messages(
         files_diff,
         "Files (whole part changes since part start):",
         part_diff if part_diff else "(no changes)",
-        "Checks (command, exit code, real output tail):",
     ]
+    try:
+        lines.extend(post_image_lines(part_files))
+    except Exception:
+        pass
+    lines.append("Checks (command, exit code, real output tail):")
     if not checks:
         lines.append("(no check commands)")
     for check in checks:
@@ -261,6 +316,7 @@ def judge(
     checks: list[dict[str, Any]],
     artifact_refs: list[str],
     part_diff: str = "",
+    part_files: Any = None,
     lock: Any = None,
     timeout_s: Any = None,
     stop_seen: Any = None,
@@ -279,7 +335,8 @@ def judge(
     evidence = _install_records.run_install_runs(record)
     prior = _install_records.prior_snapshot(record)
     messages = auditor_messages(goal, files_diff, checks, evidence,
-                                prior, part_diff=part_diff)
+                                prior, part_diff=part_diff,
+                                part_files=part_files)
     # FXPARALLEL BEGIN charge-lock: auditor charges under the run lock.
     response, over, _row = _roles.invoke_owned(
         app, adapter, resolution, messages, record=record,

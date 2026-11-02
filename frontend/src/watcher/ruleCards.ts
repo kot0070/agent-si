@@ -39,11 +39,15 @@ export const RULE_CARDS: readonly RuleCardSpec[] = [
 ];
 
 /** Read one rule card's model choice (local default, never a request). */
-export function cardModel(cardId: string): WatcherModel {
-  return loadCardModel(cardId);
+export function cardModel(cardId: string, projectId?: string | null): WatcherModel {
+  return loadCardModel(cardId, projectId);
 }
 
 /** Record one rule card's model choice locally (no network calls). */
-export function setCardModel(cardId: string, model: WatcherModel): void {
-  saveCardModel(cardId, model);
+export function setCardModel(
+  cardId: string,
+  model: WatcherModel,
+  projectId?: string | null,
+): void {
+  saveCardModel(cardId, model, projectId);
 }
