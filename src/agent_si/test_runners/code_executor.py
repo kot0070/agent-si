@@ -636,6 +636,7 @@ def execute_catalog_test(
     assertion_ref: Optional[str] = None,
     runner_id: str = "",
     timeout_s: float = EXECUTOR_DEFAULT_TIMEOUT_S,
+    record_cost: bool = True,
 ) -> Dict[str, Any]:
     """Execute one catalog test for real; per-kind honest outcome dict.
 
@@ -644,6 +645,10 @@ def execute_catalog_test(
     that passed; unavailable tools, gateways or answers yield BLOCKED
     plus a reason. A CODE test without an explicit argv runs the
     command the resolver derives from the project folder.
+    ``record_cost`` covers the AI-kind gateway call: explicit runs
+    bill it like any product call, while the automatic run-end hook
+    passes False so harness self-tests never bill the user project
+    (one turn keeps one charge and one usage row).
     """
     outcome_kind = kind if kind in ("CODE", "AI", "HUMAN") else "CODE"
     started = time.monotonic()
@@ -750,8 +755,9 @@ def execute_catalog_test(
                 "duration_s": time.monotonic() - started,
             }
         text = _gateway_reply_text(response)
-        _record_gateway_cost(project_id, "local-tests",
-                             "test-%s" % test_id, resolved, response)
+        if record_cost:
+            _record_gateway_cost(project_id, "local-tests",
+                                 "test-%s" % test_id, resolved, response)
         status = "PASS" if text.strip() else "FAIL"
         reason = None if status == "PASS" else (
             "the gateway returned no judgement text")
