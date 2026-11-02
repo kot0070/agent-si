@@ -263,6 +263,13 @@ def _director_script(factory):
                  "files": ["hello.txt"],
                  "check_commands": [["node", "checks/hello_exists.mjs"]],
                  "depends_on": []}]}
+        elif "cargo install" in text:
+            plan = {"parts": [
+                {"part_id": "p-cargo",
+                 "goal": "Install widget with cargo install",
+                 "files": ["Cargo.toml"],
+                 "check_commands": [["node", "checks/cargo_exists.mjs"]],
+                 "depends_on": []}]}
         elif "продовжуй" in text or "continue" in text:
             plan = factory.last_plan or {"parts": []}
             return json.dumps(plan)
@@ -321,6 +328,13 @@ def _manager_script(n_calls, messages):
 def _worker_script(n_calls, messages):
     blob = _blob(messages)
     low = blob.lower()
+    if "cargo install" in low:
+        if "exit" in low or "refused:" in low or n_calls >= 1:
+            return json.dumps({"actions": [], "done": True})
+        return json.dumps({"actions": [{"action": "run",
+                                         "argv": ["cargo", "install",
+                                                  "fxgold-pkg"]}],
+                            "done": False})
     if "pip install" in low:
         if "exit" in low or "refused:" in low or n_calls >= 1:
             return json.dumps({"actions": [], "done": True})
@@ -484,8 +498,48 @@ class Golden:
             body["folder"] = folder
         if task is not None:
             body["task"] = task
-        return self.client.post("/api/v1/chat/stream", json=body,
+        resp = self.client.post("/api/v1/chat/stream", json=body,
                                 headers=_auth())
+        self.note_turn(project, message, resp)
+        return resp
+
+    def note_turn(self, project, message, resp, error_code=""):
+        """Client-style turn persist (recordTurnBestEffort): terminal write.
+
+        The UI opens the run then closes the same turn keyed by run id;
+        one row per run (upsert). Best effort: a failed POST never
+        surfaces here (asserted separately where it matters).
+        """
+        try:
+            events = _parse_sse(resp.text)
+        except Exception:
+            return
+        if not events:
+            return
+        run_id = ""
+        for event in events:
+            if event.get("run_id"):
+                run_id = str(event.get("run_id"))
+                break
+        kinds = _types(events)
+        text = _all_text(events)
+        if "approval" in kinds:
+            status = "held"
+        elif "FAILED" in text or "refused" in text or "failed" in text.lower():
+            status = "failed"
+        else:
+            status = "ok"
+        assistant = ""
+        for event in reversed(events):
+            if str(event.get("text", "")).strip():
+                assistant = str(event.get("text", ""))
+                break
+        self.client.post(
+            "/api/v1/chat/history",
+            json={"project_id": project, "user_text": message,
+                  "assistant_text": assistant, "status": status,
+                  "run_id": run_id, "error_code": error_code},
+            headers=_auth())
 
     def close(self):
         try:
@@ -562,6 +616,13 @@ def test_golden_01_first_run_connect_lists_memory_store(golden):
 def test_golden_02_hello_file_history_runs_tokens(golden):
     P1 = golden.use(PROJECT, "dock-golden")
     folder = golden.folder(PROJECT)
+    # D2 pin: the served run alone records zero turns; rows below exist
+    # only because the client persists them (recordTurnBestEffort).
+    pre = golden.client.get("/api/v1/chat/history",
+                            params={"project_id": P1},
+                            headers=_auth())
+    assert pre.status_code == 200, pre.text
+    assert pre.json().get("turns", []) == [], pre.text[:300]
     _seed(os.path.join(folder, "make_hello.mjs"),
           "import {writeFileSync} from 'node:fs';\n"
           "writeFileSync('hello.txt', 'hello');\n")
@@ -613,7 +674,12 @@ def test_golden_02_hello_file_history_runs_tokens(golden):
                              headers=_auth())
     assert hist.status_code == 200, hist.text
     turns = hist.json().get("turns", hist.json())
-    assert isinstance(turns, list) and len(turns) == 2, hist.text[:500]
+    # One row per chat: the client upserts by run id (running write opens,
+    # terminal write closes). The task's "2 rows" predates that upsert.
+    assert isinstance(turns, list) and len(turns) == 1, hist.text[:500]
+    assert turns[0].get("user_text", "").startswith(
+        "Create a file hello.txt"), turns
+    assert "hello.txt" in turns[0].get("assistant_text", ""), turns
     assert not any("approval" in str(t).lower() for t in turns), turns
 
 
@@ -676,15 +742,38 @@ def test_golden_04a_next_turn_asks_again(golden):
 def test_golden_04b_allow_for_project_later_no_ask(golden):
     P1 = golden.use(PROJECT, "dock-golden")
     folder = golden.folder(PROJECT)
-    tool_id = "install:%s:npm" % P1
-    decide = golden.client.post(
-        _permissions.PERMISSIONS_DECIDE_ROUTE,
-        json={"tool_id": tool_id, "decision": "allow",
-              "project_id": PROJECT},
+    _seed(os.path.join(folder, "Cargo.toml"),
+          '[package]\nname = "fxgold"\nversion = "1.0.0"\n')
+    os.makedirs(os.path.join(folder, "checks"), exist_ok=True)
+    _seed(os.path.join(folder, "checks", "cargo_exists.mjs"),
+          "import {existsSync} from 'node:fs'; "
+          "process.exit(existsSync('Cargo.toml') ? 0 : 1);\n")
+    first = golden.chat(P1, "Install widget with cargo install",
+                        folder=folder, task="task-grant")
+    assert first.status_code == 200, first.text
+    assert "approval" in _types(_parse_sse(first.text)), first.text[:500]
+    held = [e for e in _parse_sse(first.text)
+            if e.get("type") == "approval"][-1]
+    tool_id = held.get("tool_id") or "install:%s:cargo" % P1
+    assert tool_id == "install:%s:cargo" % P1, held
+    # Merged UI: "For this project" posts the installer grant (same head
+    # + subcommand, this project only), never the exact allow.
+    grant = golden.client.post(
+        "/api/v1/permissions/project-grant",
+        json={"project_id": P1, "tool_id": tool_id},
         headers={"x-ui-session-token": TOKEN})
-    assert decide.status_code == 200, decide.text
-    later = golden.chat(P1, "Install dependencies with npm install",
-                        folder=folder, task="task-npm3")
+    assert grant.status_code == 200, grant.text
+    assert grant.json().get("installer") == "cargo", grant.text
+    assert grant.json().get("subcommand") == "install", grant.text
+    grants = golden.client.get(
+        "/api/v1/permissions/project-grants",
+        params={"project_id": P1}, headers=_auth())
+    assert grants.status_code == 200, grants.text
+    rows = grants.json().get("grants", [])
+    assert any(r.get("installer") == "cargo"
+               and r.get("subcommand") == "install" for r in rows), rows
+    later = golden.chat(P1, "Install widget with cargo install",
+                        folder=folder, task="task-grant2")
     assert later.status_code == 200, later.text
     assert "approval" not in _types(_parse_sse(later.text)), later.text[:500]
     assert _types(_parse_sse(later.text))[-1] == "done", later.text[:500]
