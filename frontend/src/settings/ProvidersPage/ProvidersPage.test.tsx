@@ -57,6 +57,36 @@ function refFor(secretId: string, providerId: string): SecretRef {
   };
 }
 
+// Network-boundary stub for the connect route round trip: the dialog
+// shows "Connected" only after a real save, so tests that expect the
+// success line serve the key-save 201 plus the connect 200 here.
+function stubConnectRoutes(): void {
+  vi.stubGlobal(
+    "fetch",
+    async (input: unknown) => {
+      const url = String(input);
+      const body = (data: unknown, status = 200): Response =>
+        new Response(JSON.stringify(data), {
+          status,
+          headers: { "content-type": "application/json" },
+        });
+      if (url === "/api/v1/providers") {
+        return body({ providers: [] });
+      }
+      if (url === "/api/v1/providers/keys") {
+        return body(
+          { key_ref: { secret_id: "openai", provider_id: "openai" } },
+          201,
+        );
+      }
+      if (url === "/api/v1/providers/connect") {
+        return body({ provider: { provider_id: "openai" } });
+      }
+      return body({});
+    },
+  );
+}
+
 describe("ConnectDialog", () => {
   it("key-only connect fills id, type and base URL from the preset", () => {
     const store = createMemorySecretStore("sess");
@@ -72,6 +102,7 @@ describe("ConnectDialog", () => {
 
   it("bounded save shows a visible timeout result", async () => {
     // FAKE-OF: ./secretStore (never-resolving save to exercise the bounded timeout)
+    stubConnectRoutes();
     const hanging: SecretStorePort = {
       list: async () => [],
       save: () => new Promise<void>(() => {}),
@@ -95,6 +126,7 @@ describe("ConnectDialog", () => {
   });
 
   it("successful save shows a visible result and reports the reference", async () => {
+    stubConnectRoutes();
     const store = createMemorySecretStore("sess");
     const onConnected = vi.fn();
     render(
@@ -108,6 +140,7 @@ describe("ConnectDialog", () => {
   });
 
   it("passes the frozen preset_id value to the callback on match", async () => {
+    stubConnectRoutes();
     const store = createMemorySecretStore("sess");
     const onConnected = vi.fn();
     render(
@@ -301,6 +334,7 @@ describe("ProvidersPage", () => {
   });
 
   it("connect enables per-model toggles and Disconnect cleans up", async () => {
+    stubConnectRoutes();
     const store = createMemorySecretStore("sess");
     render(<ProvidersPage project_id="local" />);
     fireEvent.click(screen.getByLabelText("Connect OpenAI"));
