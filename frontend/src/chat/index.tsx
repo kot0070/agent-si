@@ -39,6 +39,8 @@ import type { InstallPermissionAsk } from "./permissions";
 export interface ChatAreaProps {
   projectId: string;
   initialDraft?: string;
+  initialSend?: string;
+  onSendConsumed?: () => void;
 }
 
 interface ChatMessage {
@@ -132,6 +134,7 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
   );
   const sendTimesRef = useRef<number[]>([]);
   const offlineRef = useRef(!readOnline());
+  const oneShotSentRef = useRef(false);
   const runnerRef = useRef<ChatRunner | null>(null);
   const [pendingAsk, setPendingAsk] = useState<InstallPermissionAsk | null>(
     null,
@@ -306,6 +309,24 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
       },
     );
   };
+
+  // First-message one-shot: the start box created the project plus
+  // task already, so the kept message sends once through the existing
+  // sendPrompt on mount, guarded against double effects, then the
+  // parent clears it. initialDraft keeps filling without sending.
+  useEffect(() => {
+    if (
+      props.initialSend !== undefined &&
+      props.initialSend !== "" &&
+      !oneShotSentRef.current
+    ) {
+      oneShotSentRef.current = true;
+      sendPrompt(props.initialSend);
+      props.onSendConsumed?.();
+    }
+    // One-shot only: the sent guard covers double effects.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (online && !streaming && queue.length > 0) {
