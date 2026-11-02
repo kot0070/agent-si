@@ -267,6 +267,38 @@ def _here_root() -> str:
     return os.path.dirname(os.path.dirname(here))
 
 
+#: Mark-of-the-Web stream stripped from the frozen bundle's own
+#: files (a zip downloaded from the internet marks every file, and
+#: .NET then refuses the marked DLLs, so pythonnet + WebView2 fail).
+_ZONE_IDENTIFIER_STREAM = ":Zone.Identifier"
+
+
+def _unblock_zone_identifiers(root: str | None = None) -> int:
+    """Strip Mark-of-the-Web streams under the frozen exe folder.
+
+    Frozen exe only with an implicit root (the exe's own folder):
+    walk the folder and remove the Zone.Identifier stream from
+    every file, ignoring errors, touching nothing else. An explicit
+    root (probes) is processed as given. Returns the removed count.
+    """
+    if root is None:
+        if not getattr(sys, "frozen", False):
+            return 0
+        try:
+            root = os.path.dirname(os.path.abspath(sys.executable))
+        except Exception:
+            return 0
+    removed = 0
+    for dirpath, _dirnames, filenames in os.walk(str(root)):
+        for name in filenames:
+            stream = os.path.join(dirpath, name) + _ZONE_IDENTIFIER_STREAM
+            try:
+                os.remove(stream)
+            except OSError:
+                continue
+            removed += 1
+    return removed
+
 def _resolve_web_dir() -> str:
     """Return the web-tree dir (frozen bundle else source dist)."""
     meipass = getattr(sys, "_MEIPASS", None)
@@ -1666,6 +1698,10 @@ def main(argv: list[str] | None = None) -> int:
     # starts behind it. No window (headless) keeps the old path:
     # serve, then open the browser. background_color matches the splash
     # so no white flash paints before it.
+    # A zip downloaded from the internet marks every file and .NET
+    # refuses marked DLLs: strip the mark from the bundle's own files
+    # before webview (pythonnet) loads. Frozen exe only, errors ignored.
+    _unblock_zone_identifiers()
     window_error: Exception | None = None
     try:
         import webview as _webview
