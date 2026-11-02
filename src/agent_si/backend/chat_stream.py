@@ -232,10 +232,9 @@ def _record_server_turn(app: Any, project: str, user_text: str,
                         run_id: str = "", error_code: str = "") -> None:
     """Store one server-side chat turn; never raises, never breaks flow.
 
-    The stream start stores the user message (no run id: every stream
-    opens its own row); the terminal write carries the run id. Client
-    writes keep their own run ids, so their running/terminal pair
-    still upserts to one row.
+    The stream start stores the user message with the run id; the
+    terminal write carries the same run id, so the pair upserts to one
+    row. Client writes with the same run id upsert the same row.
     """
     try:
         if app is None:
@@ -805,7 +804,8 @@ class ManagerSdkBridge:
             _mirror_run_tasks(app, project, task, message, task_status)
 
         yield sse_bytes(self._start_event(stream_id, run_id, request))
-        _record_server_turn(app, project, message, "", "running")
+        _record_server_turn(app, project, message, "", "running",
+                            run_id=run_id)
         _mirror_run_tasks(app, project, task, message, "running")
         if state["cancelled"]:
             yield sse_bytes({"type": "cancelled", "stream_id": stream_id})
@@ -922,7 +922,8 @@ class ManagerSdkBridge:
         task = str(getattr(request, "task", "") or "")
         message = str(getattr(request, "message", "") or "")
         yield sse_bytes(self._start_event(stream_id, run_id, request))
-        _record_server_turn(app, project, message, "", "running")
+        _record_server_turn(app, project, message, "", "running",
+                            run_id=run_id)
         _mirror_run_tasks(app, project, task, message, "running")
         if state["cancelled"] or provider is None:
             if not state["cancelled"]:
