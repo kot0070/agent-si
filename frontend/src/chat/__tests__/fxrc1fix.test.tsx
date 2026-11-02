@@ -16,6 +16,45 @@ import {
   setLocale,
 } from "../../locale/index";
 import { ChatArea } from "../index";
+// @ts-ignore: node types unavailable offline
+import { readFileSync } from "node:fs";
+// @ts-ignore: node types unavailable offline
+import { fileURLToPath } from "node:url";
+
+// S2 stylesheet source: jsdom never applies shell.css, so the meaning
+// (composer in flow, messages own the scroll) is read from the file text.
+function readShellCss(): string {
+  try {
+    return readFileSync(
+      fileURLToPath(new URL("../../ui/shell.css", import.meta.url)),
+      "utf8",
+    );
+  } catch {
+    // Transformed import.meta.url is not file: here; tests run from frontend/.
+    // @ts-ignore: node types unavailable offline
+    return readFileSync("src/ui/shell.css", "utf8");
+  }
+}
+const shellCss = readShellCss();
+
+/** All stylesheet bodies for a selector (incl. prefixed child rules). */
+function ruleBodies(css: string, selector: string): string[] {
+  const bodies: string[] = [];
+  let from = 0;
+  for (;;) {
+    const at = css.indexOf(selector, from);
+    if (at === -1) {
+      return bodies;
+    }
+    const open = css.indexOf("{", at);
+    const close = open === -1 ? -1 : css.indexOf("}", open);
+    if (open === -1 || close === -1) {
+      return bodies;
+    }
+    bodies.push(css.slice(open + 1, close));
+    from = close + 1;
+  }
+}
 
 beforeEach(() => {
   resetLocaleForTests();
@@ -60,7 +99,7 @@ describe("fxrc1fix P1 assistant text keeps line breaks", () => {
 });
 
 describe("fxrc1fix P3 messages scroll inside the card", () => {
-  it("keeps the composer below the scrolling message list", async () => {
+  it("keeps the composer in flow under the scrolling message list, never over it", async () => {
     const client = new FakeApiClient({ chatDeltas: ["x"] });
     render(
       <ApiClientProvider client={client}>
@@ -70,13 +109,35 @@ describe("fxrc1fix P3 messages scroll inside the card", () => {
     const layout = await screen.findByTestId("chat-layout");
     const messages = screen.getByTestId("chat-messages");
     const composer = screen.getByTestId("chat-composer");
-    expect(layout.style.maxHeight).not.toBe("");
-    expect(composer.style.position).toBe("static");
+    // Composer follows the messages in DOM order (in flow, under them).
     expect(
       (messages.compareDocumentPosition(composer) &
         Node.DOCUMENT_POSITION_FOLLOWING) !==
         0,
     ).toBe(true);
+    // No inline overlay override on the composer.
+    expect(composer.style.position).not.toMatch(/sticky|fixed|absolute/);
+    // Stylesheet meaning: no chat-composer rule parks it sticky/fixed/absolute.
+    const composerBodies = ruleBodies(
+      shellCss,
+      'div[data-testid="chat-composer"]',
+    );
+    expect(composerBodies.length).toBeGreaterThan(0);
+    for (const body of composerBodies) {
+      expect(body).not.toMatch(/position\s*:\s*(sticky|fixed|absolute)/);
+    }
+    // Stylesheet meaning: the messages area owns the scroll; the layout
+    // constrains the height so the composer stays below, never over text.
+    const messageBodies = ruleBodies(
+      shellCss,
+      'div[data-testid="chat-messages"]',
+    );
+    expect(
+      messageBodies.some((body) =>
+        /overflow-y\s*:\s*(auto|scroll)/.test(body),
+      ),
+    ).toBe(true);
+    expect(layout.style.maxHeight).not.toBe("");
   });
 
   it("auto-scrolls to newest unless the user scrolled up", async () => {

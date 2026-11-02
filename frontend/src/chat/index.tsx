@@ -674,7 +674,9 @@ ${note}`,
             </button>
           </div>
         ) : null}
-        <div data-testid="chat-composer" style={{ position: "static" }}>
+        {/* FXDESIGN5 S2: no inline position override; shell.css docks the
+            composer sticky at the bottom of the centre column. */}
+        <div data-testid="chat-composer">
           {draft !== "" ? (
             <span data-testid="chat-draft-chip">{t("chat.composer.draft")}</span>
           ) : null}
