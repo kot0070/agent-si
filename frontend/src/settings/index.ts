@@ -513,9 +513,23 @@ export function FirstRunGate(): ReactElement | null {
     navigate(to);
   }
   if (location.pathname === '/settings' && settled) {
+    // U9: settings hub links reach the info pages; the old hub link
+    // wore the wrong label (a run title pointing at how-it-works).
     return createElement(
-      'p',
-      { 'data-testid': 'settings-how-it-works-wrap' },
+      'nav',
+      { 'data-testid': 'settings-hub-links' },
+      createElement(
+        'a',
+        {
+          'data-testid': 'settings-about',
+          href: '/about',
+          onClick: (event: { preventDefault(): void }) => {
+            go(event, '/about');
+          },
+        },
+        t('settings.hub.about'),
+      ),
+      ' ',
       createElement(
         'a',
         {
@@ -525,7 +539,7 @@ export function FirstRunGate(): ReactElement | null {
             go(event, '/how-it-works');
           },
         },
-        t('howItWorks.runs.title'),
+        t('settings.hub.howItWorks'),
       ),
     );
   }
