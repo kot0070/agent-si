@@ -856,14 +856,17 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
     if prior_installs:
         # A rerun after installs: the Director brief carries the full
         # real install record (do not install again, verify instead).
-        # The worker brief carries the same record as installer NAMES
-        # only: the "$ ... -> exit N" evidence shape would read as a
-        # runnable check to a literal follower, so it never rides the
-        # worker prompt. The auditor reads it through judge().
+        # The worker brief carries installer NAMES only ("npm", never
+        # the runnable "npm install" line and never "$ ... -> exit N"
+        # evidence): a literal follower must not read a command to run
+        # here. The auditor reads the full record through judge().
         try:
-            _names = "; ".join(
-                " ".join(str(word) for word in (row.get("argv") or []))
-                for row in prior_installs)
+            from agent_si.runtime.devrun import actions as _brief_actions
+
+            _names = "; ".join(dict.fromkeys(
+                _brief_actions._installer_name(
+                    [str(word) for word in (row.get("argv") or [])])
+                for row in prior_installs))
         except Exception:
             _names = ""
         message = (message or "") + (
@@ -1370,14 +1373,22 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
             worker = _roles.resolve_role(app, project, "worker")
             auditor = _roles.resolve_role(app, project, "auditor")
         except _roles.RoleUnbound as exc:
-            record["summary"] = "run failed: %s" % (exc,)
+            # FXCLASS CA-1/CA-3/CA-4: a new project with no provider ends
+            # with one plain line, same words on chat + Tasks, no role word.
+            # The verbatim role detail stays in the journal, never on screen.
+            _journal("DEVRUN_NOPROVIDER", "role unbound: %s" % (exc,))
+            record["summary"] = "Connect a provider first"
             record["success"] = False
             _finish_task()
             yield _run_event("delta", turn, task_id, record["summary"],
-                             {"run_id": run_id, "success": False})
+                             {"run_id": run_id, "success": False,
+                              "code": "NO_PROVIDER_BOUND",
+                              "connectHref": "/providers"})
             turn += 1
             yield _run_event("done", turn, task_id, record["summary"],
-                             {"run_id": run_id, "success": False})
+                             {"run_id": run_id, "success": False,
+                              "code": "NO_PROVIDER_BOUND",
+                              "connectHref": "/providers"})
             return
         # FXPARALLEL BEGIN adapters: one auditor adapter per part is
         # built inside the part thread (A4); only plan-phase adapters
@@ -1387,14 +1398,20 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
             manager_adapter = _roles.build_adapter(app, manager)
         except _roles.RoleUnbound as exc:
         # FXPARALLEL END adapters.
-            record["summary"] = "run failed: %s" % (exc,)
+            # FXCLASS CA-1/CA-3/CA-4: same plain line as the resolve path.
+            _journal("DEVRUN_NOPROVIDER", "adapter unbound: %s" % (exc,))
+            record["summary"] = "Connect a provider first"
             record["success"] = False
             _finish_task()
             yield _run_event("delta", turn, task_id, record["summary"],
-                             {"run_id": run_id, "success": False})
+                             {"run_id": run_id, "success": False,
+                              "code": "NO_PROVIDER_BOUND",
+                              "connectHref": "/providers"})
             turn += 1
             yield _run_event("done", turn, task_id, record["summary"],
-                             {"run_id": run_id, "success": False})
+                             {"run_id": run_id, "success": False,
+                              "code": "NO_PROVIDER_BOUND",
+                              "connectHref": "/providers"})
             return
         for line in _team_lines([
                 ("director", director), ("manager", manager),
@@ -1865,7 +1882,12 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
             record["run_end"] = _run_end_tests(
                 project_id=project, run_id=run_id, task_id=task_id)
         _journal("DEVRUN_END", _end_summary())
-        _close_live("RETURNED")
+        _journal("DEVRUN_END", record.get("summary") or "run ended")
+        # FXCLASS CB-6: one shared status map. A run with a FAIL part is
+        # failed on every surface: the live row closes BLOCKED (never
+        # RETURNED beside a FAIL verdict), the served run row carries
+        # success=False, and the chat verdict reads Failed.
+        _close_live("RETURNED" if record.get("success") else "BLOCKED")
         yield _run_event("delta", turn, task_id,
                          _ledger_total_line(record),
                          {"run_id": run_id})
@@ -3731,14 +3753,23 @@ def _spawn_held(*, project: Any, run_id: str, folder: str,
     from agent_si.runtime.devrun import actions as _spawn_actions
 
     try:
+        # grant_run_id rides only when set: the 6-positional spawn
+        # shape (and its test doubles) keeps working unchanged.
         if lock is not None:
             with lock:
+                if grant_run_id:
+                    return _spawn_actions.spawn_checked(
+                        project, run_id, folder, list(argv), log_path,
+                        log_rel, grant_run_id=grant_run_id)
                 return _spawn_actions.spawn_checked(
                     project, run_id, folder, list(argv), log_path,
-                    log_rel, grant_run_id=grant_run_id)
+                    log_rel)
+        if grant_run_id:
+            return _spawn_actions.spawn_checked(
+                project, run_id, folder, list(argv), log_path, log_rel,
+                grant_run_id=grant_run_id)
         return _spawn_actions.spawn_checked(
-            project, run_id, folder, list(argv), log_path, log_rel,
-            grant_run_id=grant_run_id)
+            project, run_id, folder, list(argv), log_path, log_rel)
     except _spawn_actions.InstallAskNeeded as exc:
         raise _InstallHeld(exc.tool_id, " ".join(
             str(word) for word in (argv or []))) from None

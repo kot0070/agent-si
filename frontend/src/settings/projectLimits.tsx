@@ -46,6 +46,7 @@ export function ProjectLimitsSection(
   const [teamSaving, setTeamSaving] = useState(false);
   const [capsSaving, setCapsSaving] = useState(false);
   const [errorKey, setErrorKey] = useState<string | null>(null);
+  const [fieldError, setFieldError] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
 
   function parseCapsText(raw: string): Record<string, string> | null {
@@ -133,12 +134,21 @@ export function ProjectLimitsSection(
   }, [props.projectId, nonce]);
 
   async function onSave(): Promise<void> {
-    const task = Number(taskText);
-    const chat = Number(chatText);
-    if (!Number.isInteger(task) || !Number.isInteger(chat)) {
-      setErrorKey("errors.generic");
+    // FXCLASS CA-6: a blank limit input shows a field message, sends
+    // nothing, and never falls back to a generic error.
+    const taskRaw = taskText.trim();
+    const chatRaw = chatText.trim();
+    if (taskRaw === "" || chatRaw === "") {
+      setFieldError("settings.project.limitsBlank");
       return;
     }
+    const task = Number(taskRaw);
+    const chat = Number(chatRaw);
+    if (!Number.isInteger(task) || !Number.isInteger(chat) || task < 1 || chat < 1) {
+      setFieldError("settings.project.limitsBlank");
+      return;
+    }
+    setFieldError(null);
     setSaving(true);
     try {
       const saved = await saveStepLimits(props.projectId, task, chat);
@@ -180,15 +190,21 @@ export function ProjectLimitsSection(
   }
 
   async function onSaveParallel(): Promise<void> {
-    const parallel = Number(parallelText);
+    const raw = parallelText.trim();
+    if (raw === "") {
+      setFieldError("settings.project.limitsBlank");
+      return;
+    }
+    const parallel = Number(raw);
     if (
       !Number.isInteger(parallel) ||
       parallel < 1 ||
       parallel > 4
     ) {
-      setErrorKey("errors.generic");
+      setFieldError("settings.project.limitsBlank");
       return;
     }
+    setFieldError(null);
     setParallelSaving(true);
     try {
       const saved = await saveParallelParts(props.projectId, parallel);
@@ -287,6 +303,9 @@ export function ProjectLimitsSection(
       >
         {t("chat.composer.send")}
       </button>
+      {fieldError !== null ? (
+        <p data-testid="project-limits-field-error">{t(fieldError)}</p>
+      ) : null}
       <label htmlFor="project-limits-parallel">
         {t("settings.project.parallel")}
       </label>

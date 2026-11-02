@@ -7,6 +7,8 @@
 
 import { useSyncExternalStore } from "react";
 import type { ApiClient, PartRow } from "../api/iface";
+import { ApiError } from "../api/errors";
+import { backoffForFailures, isHiddenTick, onVisible } from "../api/polling";
 
 export const LIVE_IDLE_MS = 3000;
 export const LIVE_ACTIVE_MS = 1000;
@@ -14,6 +16,7 @@ export const LIVE_ACTIVE_MS = 1000;
 export interface LiveSnapshot {
   rows: PartRow[] | null;
   failed: boolean;
+  code: string | null;
 }
 
 interface LiveSubscriber {
@@ -27,12 +30,14 @@ interface ClientEntry {
   inflight: boolean;
   stopExternal: (() => void) | null;
   external: boolean;
+  failures: number;
+  stopVisible: (() => void) | null;
 }
 
 const entries = new WeakMap<ApiClient, ClientEntry>();
 
 function emptySnapshot(): LiveSnapshot {
-  return { rows: null, failed: false };
+  return { rows: null, failed: false, code: null };
 }
 
 function sameRows(a: PartRow[] | null, b: PartRow[] | null): boolean {
@@ -49,6 +54,8 @@ function entryFor(client: ApiClient): ClientEntry {
       inflight: false,
       stopExternal: null,
       external: false,
+      failures: 0,
+      stopVisible: null,
     };
     entries.set(client, entry);
   }
@@ -77,11 +84,7 @@ async function tick(entry: ClientEntry, client: ApiClient): Promise<void> {
   }
   // Paused while the window is hidden: retry on the idle cadence.
   try {
-    if (
-      typeof document !== "undefined" &&
-      typeof document.hidden === "boolean" &&
-      document.hidden
-    ) {
+    if (isHiddenTick()) {
       schedule(entry, client, LIVE_IDLE_MS);
       return;
     }
@@ -94,18 +97,25 @@ async function tick(entry: ClientEntry, client: ApiClient): Promise<void> {
   entry.inflight = true;
   try {
     const next = await client.listAgentsLive();
+    entry.failures = 0;
     if (!sameRows(entry.snapshot.rows, next)) {
-      entry.snapshot = { rows: next, failed: false };
+      entry.snapshot = { rows: next, failed: false, code: null };
       emit(entry);
     } else if (entry.snapshot.failed) {
-      entry.snapshot = { rows: entry.snapshot.rows, failed: false };
+      entry.snapshot = { rows: entry.snapshot.rows, failed: false, code: null };
       emit(entry);
     }
-  } catch {
+  } catch (err: unknown) {
+    entry.failures += 1;
+    // FXCLASS CD-5: keep the served ApiError code, never a generic discard.
+    const code = err instanceof ApiError ? err.code : "CONTEXT_WRONG_CONTRACT_VERSION";
     const failed = entry.snapshot.failed;
     const rows = entry.snapshot.rows ?? [];
     if (!sameRows(entry.snapshot.rows, rows) || !failed) {
-      entry.snapshot = { rows, failed: true };
+      entry.snapshot = { rows, failed: true, code };
+      emit(entry);
+    } else if (entry.snapshot.code !== code) {
+      entry.snapshot = { rows: entry.snapshot.rows, failed: true, code };
       emit(entry);
     }
   } finally {
@@ -115,7 +125,8 @@ async function tick(entry: ClientEntry, client: ApiClient): Promise<void> {
     // Held contract: one load at mount, then a steady 3 s interval. The
     // rows never wait for a tick: first paint shows LoadingState, then the
     // first answer replaces it, then every generation refreshes in place.
-    schedule(entry, client, LIVE_IDLE_MS);
+    // FXCLASS P5: failures back off 3-6-12-30 s, reset on success.
+    schedule(entry, client, backoffForFailures(entry.failures));
   }
 }
 
@@ -126,7 +137,7 @@ function start(entry: ClientEntry, client: ApiClient): void {
     try {
       entry.stopExternal = source.subscribe((next) => {
         if (!sameRows(entry.snapshot.rows, next)) {
-          entry.snapshot = { rows: [...next], failed: false };
+          entry.snapshot = { rows: [...next], failed: false, code: null };
           emit(entry);
         }
       }) ?? null;
@@ -136,6 +147,14 @@ function start(entry: ClientEntry, client: ApiClient): void {
   }
   // The initial load runs for every client; the interval only for clients
   // without their own subscription feed.
+  // FXCLASS P5: one fresh read when the tab becomes visible again.
+  if (entry.stopVisible === null) {
+    entry.stopVisible = onVisible(() => {
+      if (entry.listeners.size > 0) {
+        void tick(entry, client);
+      }
+    });
+  }
   void tick(entry, client);
   if (!entry.external && entry.timer === null) {
     schedule(entry, client, LIVE_IDLE_MS);
