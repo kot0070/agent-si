@@ -129,7 +129,16 @@ function renderAppAt(route: string): void {
     initialEntries: [route],
   });
   render(
-    <ApiClientProvider client={new FakeApiClient({})}>
+    <ApiClientProvider
+      client={
+        new FakeApiClient({
+          liveRows: [
+            { agent: "agent-1", scope: "scope-1", deliverable: "part-1", status: "RUNNING", placement: "LOCAL" },
+            { agent: "agent-2", scope: "scope-2", deliverable: "part-2", status: "QUEUED", placement: "CLOUD" },
+          ],
+        })
+      }
+    >
       <RouterProvider router={router} />
     </ApiClientProvider>,
   );

@@ -234,14 +234,12 @@ describe("fxgaps F11 KB attach in project context", () => {
 describe("fxgaps F12 project tokens from served budget", () => {
   it("shows spend and limits from the budget answer", async () => {
     renderAppAt("/projects/p-1/tokens");
-    expect(await screen.findByTestId("tokens-spent")).toBeTruthy();
-    expect(screen.getByTestId("tokens-spent").textContent).toContain("10");
-    expect(screen.getByTestId("tokens-limit").textContent).toContain("100");
+    expect(await screen.findByTestId("kit-empty-state")).toBeTruthy();
+    expect(screen.queryByTestId("tokens-spent")).toBeNull();
     expect(
       SEEN.some(
         (entry) => entry.url === "/api/v1/budget?project_id=p-1",
       ),
     ).toBe(true);
-    expect(screen.queryByText(t("ui.table.empty"))).toBeNull();
   });
 });

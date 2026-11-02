@@ -52,6 +52,7 @@ beforeEach(() => {
   setLocale("en");
   window.localStorage.clear();
   window.sessionStorage.clear();
+  window.localStorage.setItem("agentsi.firstrun.done", "true");
   vi.stubGlobal(
     "fetch",
     async (input: unknown, init?: { method?: string; body?: unknown }) => {

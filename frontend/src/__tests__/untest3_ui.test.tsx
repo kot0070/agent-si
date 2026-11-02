@@ -61,10 +61,11 @@ afterEach(() => {
 describe("untest3 ui rows over the real App route with fetch-boundary fake", () => {
   it("R-372 About route shows name plus licence line plus third-party MIT text", async () => {
     renderAppAt("/about");
-    expect(await screen.findByText(AGENT_SI_NAME)).toBeTruthy();
+    expect((await screen.findAllByText(AGENT_SI_NAME)).length).toBeGreaterThanOrEqual(1);
     expect(await screen.findByText(LICENCE_LINE)).toBeTruthy();
-    const about = await screen.findByText(AGENT_SI_NAME);
-    const section = about.closest("section");
+    const names = await screen.findAllByText(AGENT_SI_NAME);
+    const about = names.map((node) => node.closest("section")).find((section) => section !== null) ?? names[names.length - 1]?.closest("section");
+    const section = about;
     expect(section).toBeTruthy();
     expect(section?.textContent).toContain(en.about.licence.line);
     expect(section?.textContent).toContain("MIT License");

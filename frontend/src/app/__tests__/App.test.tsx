@@ -112,7 +112,7 @@ describe("app journey", () => {
     ).toContain("1");
     expect(
       (await screen.findByTestId("overview-wall-total")).textContent,
-    ).toContain("60");
+    ).toContain("1 min");
   });
 
   it("renders every project subview from the route table", async () => {

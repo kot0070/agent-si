@@ -273,9 +273,12 @@ describe("k07f1b session token behaviour", () => {
       }
       return projectsListBody();
     });
+    const router = createMemoryRouter([{ path: "*", element: <TopBar projectId="p-1" /> }], {
+      initialEntries: ["/"],
+    });
     render(
       <ApiClientProvider client={new HttpApiClient()}>
-        <TopBar projectId="p-1" />
+        <RouterProvider router={router} />
       </ApiClientProvider>,
     );
     fireEvent.click(await screen.findByTestId("topbar-stop-all"));

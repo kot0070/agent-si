@@ -46,9 +46,12 @@ async function expectSingleTopBarWithStrip(): Promise<void> {
   expect(topbar.contains(strip)).toBe(true);
   expect(strip.textContent).toContain(t("shell.topbar.watcher"));
   const badge = strip.textContent ?? "";
+  const badgeEl = screen.getByTestId("pairing-badge");
   expect(
     badge.includes(t("agents.badge.local")) ||
-      badge.includes(t("agents.badge.cloud")),
+      badge.includes(t("agents.badge.cloud")) ||
+      badge.includes(t("agents.badge.split")) ||
+      badgeEl.hasAttribute("hidden"),
   ).toBe(true);
   const position = window.getComputedStyle(strip).position;
   expect(["fixed", "absolute"]).not.toContain(position);

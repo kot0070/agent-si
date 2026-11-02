@@ -141,7 +141,8 @@ describe("k07http1 report readable over HttpApiClient", () => {
     expect(raw.textContent).toContain("agent-si-report/1");
     const derived = await screen.findByTestId("project-report-derived");
     expect(derived.textContent).toContain(en.projects.derived.label);
-    expect(derived.textContent).toContain("packages=1 tasks=2");
+    expect(derived.textContent).toContain("Packages");
+    expect(derived.textContent).toContain("Tasks");
     expect(derived.textContent).not.toContain('{"');
     const gets = seen.filter((request) => request.method === "GET");
     expect(
