@@ -64,6 +64,40 @@ _INSTALLER_COMMANDS = frozenset(
     }
 )
 
+#: Manager verbs that run a project script (a runnable check, never
+#: the install class): npm needs run/run-script or the test/start
+#: shorthands; yarn/pnpm/bun run a bare script name (run included).
+_SCRIPT_RUN_MANAGERS = frozenset({"npm", "yarn", "pnpm", "bun"})
+
+#: Manager verbs that install no matter what follows; anything else
+#: after a manager head is a project script run. Fail closed: unknown
+#: shapes stay in the installer block.
+_MANAGER_INSTALL_VERBS = frozenset({
+    "install", "i", "ci", "add", "remove", "uninstall", "rm", "un",
+    "update", "upgrade", "up", "link", "publish", "login", "logout",
+    "init", "create", "dlx", "exec", "fetch",
+})
+
+
+def _is_script_run(name: str, words: list[str]) -> bool:
+    """True when argv runs a project script through a manager."""
+    if name not in _SCRIPT_RUN_MANAGERS or len(words) < 2:
+        return False
+    rest = [str(word) for word in words[1:]]
+    if not rest:
+        return False
+    first = rest[0]
+    if name == "npm":
+        if first in ("test", "start"):
+            return True
+        return (first in ("run", "run-script") and len(rest) > 1
+                and not rest[1].startswith("-"))
+    if first == "run":
+        return len(rest) > 1 and not rest[1].startswith("-")
+    return (not first.startswith("-")
+            and first.lower() not in _MANAGER_INSTALL_VERBS)
+
+
 _FETCH_COMMANDS = frozenset(
     {
         "fetch",
@@ -448,7 +482,20 @@ def evaluate(
                     action_class,
                     tool,
                 )
-    if name in _INSTALLER_COMMANDS:
+    if _is_script_run(name, words):
+        # A project script run is a runnable check, never the install
+        # class: it falls through to the normal permission path. The
+        # installer block below still owns every install verb, and the
+        # dispatch seam still upgrades scripts whose bodies install.
+        for item in words:
+            if _has_cmd_fragment(item):
+                return _deny(
+                    "refused: cmd metacharacters in script-run argv "
+                    "element: %r" % (item,),
+                    action_class,
+                    words[0],
+                )
+    elif name in _INSTALLER_COMMANDS:
         for item in words:
             if _has_cmd_fragment(item):
                 return _deny(
