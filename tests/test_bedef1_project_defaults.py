@@ -163,7 +163,12 @@ def test_e_step_limits_restored_after_restart(tmp_path):
     assert _steplimits.limits_for("chat", pid) == 15
 
 
-def test_f_stream_without_limits_ends_with_single_error_event(tmp_path):
+def test_f_stream_without_limits_self_heals_then_fails_on_roles(tmp_path):
+    # Folder-bound chats run the dev engine, which self-heals wiped step
+    # limits to the project defaults and then fails honestly on the next
+    # real problem (no provider bound for the director role): start plus
+    # a terminal done naming it. The no-limits single-error contract
+    # itself still holds on the manager path (livewire L0B-13).
     _steplimits._reset_state()
     app = create_app(_settings(tmp_path))
     app.state.chat_provider_adapter = _mock_adapter()
@@ -186,11 +191,7 @@ def test_f_stream_without_limits_ends_with_single_error_event(tmp_path):
     events = _parse_sse(resp.text)
     assert events, "expected SSE events, got none"
     assert events[0].get("type") == "start"
-    errors = [e for e in events if e.get("type") == "error"]
-    assert len(errors) == 1
-    err = errors[0]
-    assert err.get("stream_id")
-    assert err.get("code")
-    assert "no step limits configured for project" in err.get("message", "")
-    assert pid in err.get("message", "")
-    assert events[-1].get("type") == "error"
+    assert _steplimits.limits_for("task", pid) == 40
+    assert _steplimits.limits_for("chat", pid) == 15
+    assert events[-1].get("type") == "done"
+    assert "has no provider" in str(events[-1].get("text", ""))
