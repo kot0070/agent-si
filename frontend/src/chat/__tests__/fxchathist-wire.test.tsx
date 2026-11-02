@@ -242,9 +242,11 @@ describe("H2 history loads from the served route on project open", () => {
       </ApiClientProvider>,
     );
     expect(await screen.findByText("older question")).toBeTruthy();
-    // The served answer renders in the message plus its verdict card.
+    // History never marks a proposal: the served answer renders once,
+    // with no verdict card.
     const answers = await screen.findAllByText("older answer");
-    expect(answers).toHaveLength(2);
+    expect(answers).toHaveLength(1);
+    expect(screen.queryByTestId("approval-card")).toBeNull();
   });
 
   it("restores history for a fresh session (restart persistence)", async () => {
@@ -266,7 +268,8 @@ describe("H2 history loads from the served route on project open", () => {
     );
     expect(await screen.findByText("older question")).toBeTruthy();
     const answers = await screen.findAllByText("older answer");
-    expect(answers).toHaveLength(2);
+    expect(answers).toHaveLength(1);
+    expect(screen.queryByTestId("approval-card")).toBeNull();
   });
 });
 

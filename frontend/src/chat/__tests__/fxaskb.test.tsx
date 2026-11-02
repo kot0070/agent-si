@@ -175,7 +175,9 @@ describe("fxaskb devrun-hold dialog", () => {
     promptAndSend("please install the helper");
     const dialog = await screen.findByTestId("permission-dialog");
     expect(dialog).toBeTruthy();
-    expect(screen.getByTestId("permission-tool").textContent).toBe(TOOL);
+    expect(screen.getByTestId("permission-tool").textContent).toBe(
+      "fxaskbcmd",
+    );
     fireEvent.click(screen.getByTestId("permission-allow"));
     await waitFor(() => {
       expect(decidePosts.length).toBe(1);
@@ -198,7 +200,7 @@ describe("fxaskb devrun-hold dialog", () => {
     expect(checkPosts.length).toBe(0);
   });
 
-  it("Deny posts deny with the token and resends without asking", async () => {
+  it("Deny posts deny with the token and closes without resending", async () => {
     stubHoldBoundary("run refused, continuing");
     renderChat();
     promptAndSend("please install the helper");
@@ -213,12 +215,16 @@ describe("fxaskb devrun-hold dialog", () => {
       decision: "deny",
       project_id: PROJECT_ID,
     });
-    await waitFor(() => {
-      expect(streams).toBe(2);
-    });
+    // The denied part closes with a plain FAILED line: the held message
+    // keeps only the receipt, the run does not loop, no resend.
     await waitFor(() => {
       expect(screen.queryByTestId("permission-dialog")).toBeNull();
     });
+    expect(
+      await screen.findByText("Install permission denied for fxaskbcmd"),
+    ).toBeTruthy();
+    expect(screen.queryByTestId("approval-card")).toBeNull();
+    expect(streams).toBe(1);
     expect(checkPosts.length).toBe(0);
   });
 });
