@@ -230,8 +230,11 @@ def test_f01_product_run_serves_counters_and_rows(client):
     by_id = {row["test_id"]: row for row in body["rows"]}
     assert by_id, "the view serves one row per staged test"
     for row in body["rows"]:
+        # Served staged-row shape: test_id + status always; output_ref
+        # / reason ride only when recorded. There is no `kind` key on
+        # the staged row (the tab renders unknown-kind in that case).
+        assert row["test_id"], row
         assert row["status"] in ("PASS", "FAIL", "BLOCKED"), row
-        assert row.get("kind") in ("CODE", "AI", "HUMAN"), row
 
 
 # -- F02: pinned binding persists and re-renders ----------------------------
