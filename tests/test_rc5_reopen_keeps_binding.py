@@ -102,7 +102,7 @@ def _providers(client):
     return {r["provider_id"]: r for r in resp.json()["providers"]}
 
 
-def _send(client):
+def _create_project(client):
     project = client.post(
         "/api/v1/projects",
         json={"name": "rc5-reopen", "folder_ref": "dock-rc5"},
@@ -115,10 +115,14 @@ def _send(client):
     else:
         pid = ""
     assert pid, body
+    return pid
+
+
+def _send_to(client, project_id):
     from agent_si.backend.orchestration import steplimits as _limits
 
     outcome = _limits.apply_steplimit_config_change({
-        "project_id": pid,
+        "project_id": project_id,
         "authority": "rc5-reopen-test",
         "reason": "configure test project limits for reopen chat",
         "task_max_steps": 10,
@@ -127,7 +131,7 @@ def _send(client):
     assert outcome.applied, outcome.reason
     resp = client.post(
         "/api/v1/chat/stream",
-        json={"project": pid, "message": "hi again"},
+        json={"project": project_id, "message": "hi again"},
         headers=HEADERS)
     assert resp.status_code == 200, resp.text
     return resp.text
@@ -154,15 +158,19 @@ def test_reopen_keeps_connected_key_and_binding(tmp_path, monkeypatch):
     try:
         key_ref = _connect(client)
         assert _providers(client)["openai"]["evidenced"] is True
-        first = _send(client)
+        project_id = _create_project(client)
+        first = _send_to(client, project_id)
         assert "NO_PROVIDER_BOUND" not in first, first
         assert '"type": "done"' in first or '"done"' in first, first
         for _round in range(2):
+            # Reopen: rebuild the app on the SAME appdata dir and talk
+            # to the EXISTING project (the persisted folder guard
+            # PROJECT_FOLDER_IN_USE correctly refuses a re-create).
             client2, _app2 = _make_client(store_dir)
             rows = _providers(client2)
             assert "openai" in rows, rows
             assert rows["openai"]["evidenced"] is True, rows
-            again = _send(client2)
+            again = _send_to(client2, project_id)
             assert "NO_PROVIDER_BOUND" not in again, again
             assert '"type": "done"' in again or '"done"' in again, again
         import glob as _glob
