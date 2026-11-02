@@ -473,14 +473,25 @@ def _sse_texts(text):
     return events
 
 
-def test_red_laptop_chat_echoes_absolute_folder(client, tmp_path):
+def test_red_laptop_chat_echoes_absolute_folder(tmp_path, monkeypatch):
     """LAPTOP-B RED: the chat stream echoes an absolute host folder
     path back into chat text (chat_stream.py _devrun_folder honest
     line). Seen: 'Working folder: D:\\Test2...' / server data-dir
-    paths in chat. Expected: filenames only, never host paths."""
+    paths in chat. Expected: filenames only, never host paths.
+
+    NOTE: must run through the bound-provider orchestration path
+    (_served_chat_client): with no provider bound the route takes
+    no_provider_run (NO_PROVIDER_BOUND only, devrun entry never
+    evaluated) and the probe would pass vacuously."""
     from agent_si.backend.orchestration import steplimits as _limits
 
+    client, _app = _served_chat_client(tmp_path, monkeypatch)
     project_id = "fxgapt-laptop-path"
+    created = client.post("/api/v1/projects", json={
+        "name": "laptop-path", "folder_ref": "dock-fxgapt-path",
+    }, headers=_auth())
+    assert created.status_code == 200, created.text
+    project_id = created.json()["project"]["project_id"]
     outcome = _limits.apply_steplimit_config_change({
         "project_id": project_id,
         "authority": "fxgapt", "reason": "path leak probe",
@@ -496,5 +507,7 @@ def test_red_laptop_chat_echoes_absolute_folder(client, tmp_path):
     texts = " ".join(str(event.get("text", "")) + " " +
                      str(event.get("detail", ""))
                      for event in _sse_texts(resp.text))
+    assert "project folder not found" in texts, (
+        "the honest folder entry never fired: %r" % texts[:500])
     assert missing not in texts, (
         "chat text echoes the absolute host folder path: %r" % texts[:500])
