@@ -317,6 +317,27 @@ K06REST_RAW = "sk-K06RESTTESTONLY12345678"
 K06REST_RAW_TWO = "AKIAK06RESTTESTONLY1234"
 
 
+@pytest.fixture
+def _k06rest_budget_gate():
+    """FXLOC C5 neighbour fixture: fail-closed gate needs a real gate.
+
+    Real BudgetGate, generous limits, the stream project configured,
+    restored after (same pattern as test_fxctx_chat_context). Without
+    it the served mock stream ends budget_stop (BUDGET_GATE_MISSING)
+    instead of done.
+    """
+    from agent_si.budget.gate import BudgetGate
+    from agent_si.runtime import manager as _mgr
+
+    prev = _mgr._BUDGET_GATE
+    gate = BudgetGate()
+    gate.configure_project(
+        "proj-k06rest-365", "USD", "1000000.00", "900000.00", "1000000.00")
+    _mgr.set_budget_gate(gate)
+    yield
+    _mgr.set_budget_gate(prev)
+
+
 def _k06rest_settings():
     return {"testing": True, "ui_session_token": K06REST_TOKEN}
 
@@ -614,7 +635,7 @@ def test_k06rest_r365_stream_guards_and_dispatch_refused() -> None:
 
 
 def test_k06rest_r365_mock_stream_carries_refs_never_values(
-        monkeypatch, tmp_path) -> None:
+        _k06rest_budget_gate, monkeypatch, tmp_path) -> None:
     """R-365 via POST /api/v1/chat/stream: refs in, never values out."""
     from agent_si.backend.orchestration import steplimits as k06rest_limits
     from agent_si.providers.adapters.base import (
