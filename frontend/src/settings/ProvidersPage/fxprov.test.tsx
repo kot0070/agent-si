@@ -301,7 +301,7 @@ describe("FXPROV P3 merged model list", () => {
 });
 
 describe("FXPROV P4 modal shape", () => {
-  it("quiet X/Cancel, one primary Save, one quiet id line, narrow opaque overlay", () => {
+  it("quiet X/Cancel, one primary Save, one quiet id line, narrow translucent overlay", () => {
     stubServed(emptyRoutes());
     render(<ProvidersPage project_id="local" />);
     fireEvent.click(screen.getByLabelText("Connect OpenAI"));
@@ -309,7 +309,7 @@ describe("FXPROV P4 modal shape", () => {
     expect(dialog.getAttribute("aria-modal")).toBe("true");
     const backdrop = screen.getByTestId("connect-backdrop");
     expect(backdrop.contains(dialog)).toBe(true);
-    expect(getComputedStyle(backdrop).backgroundColor).toBe("rgb(0, 0, 0)");
+    expect(getComputedStyle(backdrop).backgroundColor).toBe("rgba(0, 0, 0, 0.5)");
     const dialogBox = dialog as HTMLElement;
     expect(dialogBox.style.maxWidth).toBe("480px");
     expect(Number.parseInt(dialogBox.style.maxWidth, 10)).toBeLessThanOrEqual(560);

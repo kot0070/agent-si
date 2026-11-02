@@ -394,6 +394,7 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
                       ) : null}
                     </>
                   ) : (
+                    <>
                     <button
                       type="button"
                       aria-label={t("providers.page.connectCta", { label: preset.label })}
@@ -401,6 +402,15 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
                     >
                       {t("providers.page.connectLabel")}
                     </button>
+                    {preset.kind === "local" ? null : (
+                      <p
+                        data-testid={`provider-getkey-${preset.id}`}
+                        className="fx-quiet-line"
+                      >
+                        {t("providers.connect.getKey", { label: preset.label })}
+                      </p>
+                    )}
+                    </>
                   )}
                   <p
                     data-testid={`provider-caps-${preset.id}`}
@@ -416,7 +426,7 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
                     {(displayModels[preset.id] ?? []).map((model) => (
                       <li key={model.id} data-testid="model-row">
                         <span>{model.label}</span>{" "}
-                        <small data-testid={`model-id-${model.id}`}>
+                        <small data-testid={`model-id-${model.id}`} title={model.id}>
                           {model.id}
                         </small>{" "}
                         <span data-testid={`model-price-${model.id}`}>
