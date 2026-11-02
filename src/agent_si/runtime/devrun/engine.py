@@ -2376,13 +2376,14 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
         except Exception:
             last_fail = ""
         ws_before = _audit.snapshot_workspace(folder)
-        worker_adapter = _roles.build_adapter(app, _resolve_worker(
-            app, project))
+        worker_spec = _resolve_worker(app, project)
+        worker_adapter = _roles.build_adapter(app, worker_spec)
         producer_ref = "%s-a%d" % (producer_base, attempt)
         turn += 1
         outcome = _agent_loop(
             record=record, app=app, spec=spec, row=row,
-            adapter=worker_adapter, folder=folder, project=project,
+            adapter=worker_adapter, worker_spec=worker_spec,
+            folder=folder, project=project,
             run_id=run_id, part_id=part_id, attempt=attempt,
             turn=turn, turn_cap=turn_cap, state=state, procs=procs,
             failing=failing, reasons=reasons, message=message,
@@ -2976,7 +2977,8 @@ def _looks_like_build_task(message: Any) -> bool:
 
 
 def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
-                adapter: Any, folder: str, project: str, run_id: str,
+                adapter: Any, worker_spec: dict, folder: str,
+                project: str, run_id: str,
                 part_id: str, attempt: int, turn: int, turn_cap: int,
                 state: Any, procs: list, failing: list, reasons: list,
                 message: str, publish: Any, check_stop: Any, live: Any,
@@ -2997,7 +2999,6 @@ def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
     from agent_si.runtime.devrun import protocol as _protocol
     from agent_si.runtime.devrun import roles as _call_roles
 
-    worker_spec = _resolve_worker(app, project)
     try:
         cap_chars = _history_cap_chars(
             worker_spec.get("provider"), worker_spec.get("model"))
