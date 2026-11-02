@@ -5,6 +5,7 @@ import { RULE_CARDS, RULE_CARD_MODELS } from "./ruleCards";
 import {
   WATCHER_SETTINGS_KEY,
   cardModelKey,
+  watcherSettingsKey,
 } from "./watcherSettings";
 import { WatcherTab } from "./WatcherTab";
 
@@ -120,9 +121,11 @@ describe("WatcherTab (fetch-level fake only)", () => {
     fireEvent.click(fallback);
 
     const stored = JSON.parse(
-      localStorage.getItem(WATCHER_SETTINGS_KEY) ?? "{}",
+      localStorage.getItem(watcherSettingsKey("proj-w")) ?? "{}",
     );
     expect(stored).toEqual({ model: "API", cloudFallback: true });
+    // FXHIGH-6: no leak into the old project-less key.
+    expect(localStorage.getItem(WATCHER_SETTINGS_KEY)).toBeNull();
 
     cleanup();
     render(<WatcherTab projectId="proj-w" />);
@@ -183,12 +186,78 @@ describe("WatcherTab (fetch-level fake only)", () => {
     ) as HTMLSelectElement;
     fireEvent.change(select, { target: { value: "OFF" } });
     expect(select.value).toBe("OFF");
-    expect(localStorage.getItem(cardModelKey("card-guard"))).toBe("OFF");
+    expect(localStorage.getItem(cardModelKey("card-guard", "proj-w"))).toBe(
+      "OFF",
+    );
     for (const url of seen) {
       expect(url.startsWith("/api/v1/watcher/")).toBe(true);
     }
     expect(
       seen.every((url) => url.includes("/api/v1/watcher/status") || url.includes("/api/v1/watcher/journal")),
     ).toBe(true);
+  });
+
+  it("keeps separate settings values per project", async () => {
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", fakeFetchByRoute(STATUS_BODY, JOURNAL_BODY, seen));
+    render(<WatcherTab projectId="proj-a" />);
+    expect(await screen.findByTestId("watcher-tab")).toBeTruthy();
+
+    fireEvent.change(screen.getByTestId("watcher-model"), {
+      target: { value: "API" },
+    });
+    fireEvent.click(screen.getByTestId("watcher-cloud-fallback"));
+    expect(JSON.parse(
+      localStorage.getItem(watcherSettingsKey("proj-a")) ?? "{}",
+    )).toEqual({ model: "API", cloudFallback: true });
+
+    cleanup();
+    render(<WatcherTab projectId="proj-b" />);
+    expect(await screen.findByTestId("watcher-tab")).toBeTruthy();
+    // Project B inherits nothing from A: local default, fallback OFF.
+    expect(
+      (screen.getByTestId("watcher-model") as HTMLSelectElement).value,
+    ).toBe("local");
+    expect(
+      (screen.getByTestId("watcher-cloud-fallback") as HTMLInputElement)
+        .checked,
+    ).toBe(false);
+    fireEvent.change(screen.getByTestId("watcher-model"), {
+      target: { value: "OFF" },
+    });
+    expect(JSON.parse(
+      localStorage.getItem(watcherSettingsKey("proj-b")) ?? "{}",
+    )).toEqual({ model: "OFF", cloudFallback: false });
+
+    cleanup();
+    render(<WatcherTab projectId="proj-a" />);
+    expect(await screen.findByTestId("watcher-tab")).toBeTruthy();
+    expect(
+      (screen.getByTestId("watcher-model") as HTMLSelectElement).value,
+    ).toBe("API");
+    expect(
+      (screen.getByTestId("watcher-cloud-fallback") as HTMLInputElement)
+        .checked,
+    ).toBe(true);
+  });
+
+  it("reads the old project-less key once as a fallback", async () => {
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", fakeFetchByRoute(STATUS_BODY, JOURNAL_BODY, seen));
+    localStorage.setItem(
+      WATCHER_SETTINGS_KEY,
+      JSON.stringify({ model: "API", cloudFallback: true }),
+    );
+    render(<WatcherTab projectId="proj-legacy" />);
+    expect(await screen.findByTestId("watcher-tab")).toBeTruthy();
+    expect(
+      (screen.getByTestId("watcher-model") as HTMLSelectElement).value,
+    ).toBe("API");
+    expect(
+      (screen.getByTestId("watcher-cloud-fallback") as HTMLInputElement)
+        .checked,
+    ).toBe(true);
+    // Fallback is read-only: nothing migrates until the user saves.
+    expect(localStorage.getItem(watcherSettingsKey("proj-legacy"))).toBeNull();
   });
 });
