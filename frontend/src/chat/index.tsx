@@ -15,7 +15,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { useApiClient } from "../app/ApiClientProvider";
-import { ApiError, apiErrorLocaleKey } from "../api/errors";
+import { ApiError, apiErrorLocaleKey, requestResponse } from "../api/errors";
 import { DEFAULT_LOCALE, formatDate, t } from "../locale/index";
 import enTable from "../locale/en.json";
 import { ErrorPanel } from "../ui/ErrorPanel";
@@ -101,6 +101,18 @@ function readChannelLocale(): string {
 
 /** Bound chat models for the pre-send hint (GET only, never a token). */
 const CHAT_MODELS_ROUTE = "/api/v1/chat/models";
+
+/** FXASKB B2: the devrun-hold decision ledger (A2 route, token-guarded). */
+const PERMISSIONS_DECIDE_ROUTE = "/api/v1/permissions/decide";
+
+/** FXASKB B3: one journal row per recorded chat answer (token-guarded). */
+const CHAT_DECISION_ROUTE = "/api/v1/chat/decision";
+
+function isInstallHoldTool(toolName: string): boolean {
+  // A B1 hold id names the held command (install:<project>:<argv0>); the
+  // legacy guard-tool asks keep the asked-once check path.
+  return toolName.startsWith("install:");
+}
 
 async function readBoundModels(projectId: string): Promise<unknown[] | null> {
   try {
@@ -270,6 +282,18 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
             ),
           );
           const toolName = (error as ApiError).toolId as string;
+          if (isInstallHoldTool(toolName)) {
+            // FXASKB B1 hold: the dialog shows regardless of the
+            // asked-once flag; Allow/Deny records the decision and the
+            // same prompt resends, so the run continues stored and
+            // never asks again. The tool is the command's own id.
+            if (pendingAskRef.current?.toolName === toolName) {
+              return;
+            }
+            pendingAskRef.current = { toolName, messageId: assistantId };
+            setPendingAsk({ toolName, messageId: assistantId });
+            return;
+          }
           if (pendingAskRef.current?.toolName === toolName) {
             return;
           }
@@ -404,6 +428,58 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
     }
     pendingAskRef.current = null;
     setPendingAsk(null);
+    if (isInstallHoldTool(ask.toolName)) {
+      // FXASKB B2: record the decision with the session token, then
+      // resend the same prompt automatically; the stored answer lets
+      // the run continue without asking again.
+      const decision = allow ? "allow" : "deny";
+      void requestResponse(PERMISSIONS_DECIDE_ROUTE, {
+        method: "POST",
+        kind: "write",
+        body: {
+          tool_id: ask.toolName,
+          decision,
+          project_id: props.projectId,
+        },
+      }).then(
+        () => {
+          const note = allow
+            ? pt(
+                "chat.permission.allowed",
+                "Install permission granted for '{tool}'.",
+                { tool: ask.toolName },
+              )
+            : pt(
+                "chat.permission.denied",
+                "Install permission denied for '{tool}'.",
+                { tool: ask.toolName },
+              );
+          setMessages((prev) =>
+            prev.map((message) =>
+              message.id === ask.messageId
+                ? {
+                    ...message,
+                    text:
+                      message.text === ""
+                        ? note
+                        : `${message.text}
+${note}`,
+                    decided: allow ? "accepted" : "rejected",
+                  }
+                : message,
+            ),
+          );
+          const prompt = lastSentRef.current;
+          if (prompt !== null && !streamingRef.current) {
+            sendPrompt(prompt);
+          }
+        },
+        () => {
+          setBlocking({ errorKey: "errors.generic", code: "UNKNOWN" });
+        },
+      );
+      return;
+    }
     void askPermission(ask.toolName).then(
       () => {
         const note = allow
@@ -440,10 +516,27 @@ ${note}`,
   };
 
   const decide = (id: string, decided: "accepted" | "rejected"): void => {
+    const proposal =
+      messages.find((message) => message.id === id)?.text ?? "";
     setMessages((prev) =>
       prev.map((message) =>
         message.id === id ? { ...message, decided } : message,
       ),
+    );
+    // FXASKB B3: Accept and Reject each post one journal row through
+    // the token-guarded route; a failed post never blocks the local
+    // decision.
+    void requestResponse(CHAT_DECISION_ROUTE, {
+      method: "POST",
+      kind: "write",
+      body: {
+        project_id: props.projectId,
+        decision: decided,
+        proposal: proposal.slice(0, 500),
+      },
+    }).then(
+      () => undefined,
+      () => undefined,
     );
   };
 
