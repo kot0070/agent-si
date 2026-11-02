@@ -62,6 +62,21 @@ export async function saveKey(
   return null;
 }
 
+// POST the typed key to the check-only route; never stores.
+// 200 means the provider accepted the key with the same preflight the
+// save uses (auth/network/other mapped by status). Any failure raises
+// ApiError with the served code + plain message, same as saveKey.
+export async function checkKey(
+  presetId: string,
+  keyValue: string,
+): Promise<void> {
+  await requestResponse("/api/v1/providers/keys/check", {
+    method: "POST",
+    kind: "write",
+    body: { preset_id: presetId, key_value: keyValue },
+  });
+}
+
 // POST one connect request for a cloud preset, exactly as the connect
 // handler reads it: preset id, model, and the id-only key ref.
 export async function connectCloud(body: ConnectRequestBody): Promise<void> {

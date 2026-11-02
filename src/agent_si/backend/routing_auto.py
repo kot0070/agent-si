@@ -178,7 +178,9 @@ def pick_auto(catalog: dict, connected: list,
         model = cand.get("model_id")
         if not provider or not model:
             continue
-        if _loader.find_row(catalog, provider, model) is None:
+        if _loader.row_proves_non_text(cand.get("row") or {}):
+            continue
+        if _loader.match_row(catalog, provider, model) is None:
             continue
         profile = _roles.make_default_manager_profile(provider, model)
         _, bound = _roles.resolve_manager(profile)

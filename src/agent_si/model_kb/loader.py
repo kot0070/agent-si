@@ -32,9 +32,37 @@ def find_row(catalog, provider_id, model_id):
     return None
 
 
+#: One trailing -YYYYMMDD date stamp (same exact rule the provider
+#: model lists use for dated snapshots; stripped once, never fuzzy).
+_MATCH_DATED_SUFFIX = re.compile(r"-\d{8}$")
+
+
+def match_row(catalog, provider_id, model_id):
+    """One capability-match fn: exact, dated base, local tag.
+
+    Exact (provider_id, model_id) first; then the same id without one
+    trailing -YYYYMMDD date stamp (``claude-haiku-4-5-20251001``); then
+    without one local ``:tag`` (``qwen3:8b``). Never fuzzy: only these
+    two mechanical strips, in this order. Returns the row dict or None.
+    Every reader uses this; find_row stays exact-only.
+    """
+    row = find_row(catalog, provider_id, model_id)
+    if row is not None:
+        return row
+    text = str(model_id or "")
+    base = text
+    if _MATCH_DATED_SUFFIX.search(base):
+        base = base[:-9]
+    if ":" in base:
+        base = base.split(":")[0]
+    if base and base != text:
+        return find_row(catalog, provider_id, base)
+    return None
+
+
 def lookup(catalog, provider_id, model_id):
     """Single PINNED-style read with the base-membership mark."""
-    row = find_row(catalog, provider_id, model_id)
+    row = match_row(catalog, provider_id, model_id)
     return {"provider_id": provider_id,
             "model_id": model_id,
             "found": row is not None,
@@ -70,7 +98,7 @@ def _tag_index(local_tags):
 
 def bridge(catalog, provider_id, model_id, snapshots=None, local_tags=None):
     """Bridge exact ids to the KB row plus dated snapshot plus tags."""
-    row = find_row(catalog, provider_id, model_id)
+    row = match_row(catalog, provider_id, model_id)
     snap = _snapshot_index(snapshots).get((provider_id, model_id))
     tags = _tag_index(local_tags).get((provider_id, model_id), [])
     return {"provider_id": provider_id,
@@ -91,9 +119,14 @@ def candidates_for_auto(catalog, connected_provider_ids,
         if provider not in catalog_providers:
             catalog_providers.append(provider)
     candidates = []
+    skipped_non_text = []
     for provider_id in connected:
         for row in catalog.get("models", []):
             if row.get("provider_id") != provider_id:
+                continue
+            if row_proves_non_text(row):
+                skipped_non_text.append(
+                    "%s/%s" % (provider_id, row.get("model_id")))
                 continue
             candidates.append(
                 bridge(catalog, provider_id, row.get("model_id"),
@@ -105,6 +138,11 @@ def candidates_for_auto(catalog, connected_provider_ids,
         reason = "connected providers hold no KB rows"
     else:
         reason = "no provider connected; AUTO is blocked with this reason"
+    if excluded:
+        reason += "; excluded unconnected: %s" % ", ".join(excluded)
+    if skipped_non_text:
+        reason += ("; skipped non-text models (image/audio/embedding "
+                   "are never offered): %s" % ", ".join(skipped_non_text))
     return {"candidates": candidates,
             "excluded_unconnected": sorted(excluded),
             "reason": reason}
@@ -212,6 +250,36 @@ def _modalities_eligible(row):
     return not any(mark in text for mark in _NON_TEXT_MODALITIES)
 
 
+def row_proves_non_text(row):
+    """True when KB modalities prove a pure non-text model.
+
+    UNKNOWN, empty, absent or otherwise unproven modalities return
+    False, so unproven rows keep their legacy path. Multimodal chat
+    rows (text plus image/audio, e.g. the staged text-in/image-in
+    catalog rows) stay eligible: only rows proving image, audio or
+    embedding WITHOUT any text token are never offered or chosen; a
+    pinned one gets a plain refusal.
+    """
+    try:
+        value = row.get("fields", {}).get("modalities", {}).get(
+            "value", None)
+    except AttributeError:
+        return False
+    if value is None:
+        return False
+    if isinstance(value, (list, tuple)):
+        text = " ".join(str(item) for item in value)
+    else:
+        text = str(value)
+    text = text.strip().lower()
+    if not text or text == "unknown":
+        return False
+    tokens = {tok for tok in _TOKEN_SPLIT.split(text) if tok}
+    if not (tokens & set(_NON_TEXT_MODALITIES)):
+        return False
+    return "text" not in tokens
+
+
 def _affirmative(text):
     """True when KB text affirms a capability; negatives/UNKNOWN False."""
     tokens = _split_words(text)
@@ -309,12 +377,14 @@ __all__ = [
     "find_row",
     "import_staged_sections",
     "lookup",
+    "match_row",
     "offer_one_click",
     "propose_update",
     "read_back",
     "read_kb",
     "resolve_exact_id",
     "resolve_pool",
+    "row_proves_non_text",
     "staged_section_rows",
 ]
 

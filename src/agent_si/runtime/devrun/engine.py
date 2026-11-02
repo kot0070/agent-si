@@ -2007,6 +2007,12 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         record["success"] = False
         record["summary"] = "run failed: internal %s: %s" % (
             type(exc).__name__, exc)
+        try:
+            from agent_si import file_log as _file_log
+
+            _file_log.log_exception("devrun-engine", run_id, exc)
+        except Exception:
+            pass
         _finish_task()
         _publish()
         _close_live("BLOCKED")

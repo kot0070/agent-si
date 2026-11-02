@@ -163,6 +163,10 @@ def test_http400_health_error_keeps_status(tmp_path, monkeypatch):
     captured = []
 
     def _fake(request, timeout=None):
+        url = (request.full_url
+               if hasattr(request, "full_url") else "")
+        if url.rstrip("/").endswith("/models"):
+            return _FakeModelsResp()
         try:
             raw = request.data
             body = json.loads(raw.decode("utf-8")) if raw else {}
@@ -173,6 +177,16 @@ def test_http400_health_error_keeps_status(tmp_path, monkeypatch):
             request.full_url if hasattr(request, "full_url") else str(
                 getattr(request, "selector", "")),
             400, "Bad Request", {}, io.BytesIO(b"{}"))
+
+    class _FakeModelsResp:
+        def read(self):
+            return b'{"data": [{"id": "gpt-4o-mini-400"}]}'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
 
     monkeypatch.setattr(_urlreq, "urlopen", _fake)
     client, app = _make_client(tmp_path)
@@ -187,15 +201,14 @@ def test_http400_health_error_keeps_status(tmp_path, monkeypatch):
                        json={"preset_id": "openai", "model": model,
                              "key_ref": key_ref},
                        headers=HEADERS)
-    assert conn.status_code == 200, conn.text
+    assert conn.status_code == 400, conn.text
+    assert conn.json() == {"code": "PROVIDER_CHECK_FAILED",
+                           "message": "provider answered HTTP 400"}, conn.text
     assert BAIT2 not in conn.text
     listed = client.get("/api/v1/providers", headers=HEADERS)
     assert listed.status_code == 200, listed.text
     rows = {r["provider_id"]: r for r in listed.json()["providers"]}
-    assert "openai" in rows, rows
-    assert rows["openai"]["evidenced"] is False, rows
-    assert rows["openai"]["health"] == "ERROR", rows
-    assert "400" in str(rows["openai"].get("error", "")), rows
+    assert rows == {}, rows
     assert BAIT2 not in listed.text
     assert captured, "no provider request was made"
     probe_hits = [b for b in captured
