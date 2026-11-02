@@ -9,7 +9,7 @@ import {
   CONTRIBUTOR_WARNING_UK,
   defaultContributorWarnings,
 } from "./ChatModelSelector";
-import type { ProviderState } from "./types";
+import type { ProviderState, ProviderPreset } from "./types";
 import { resetLocaleForTests, setLocale } from "../../locale/index";
 
 beforeEach(() => {
@@ -22,6 +22,21 @@ afterEach(() => {
   resetLocaleForTests();
 });
 
+function metaCatalog(): ProviderPreset[] {
+  return [
+    {
+      id: "meta",
+      label: "Meta",
+      kind: "cloud",
+      group: "Cloud",
+      baseUrl: "https://api.meta.ai/v1",
+      keyHint: "Key from your Meta dashboard.",
+      keyStartsWith: "",
+      models: [{ id: "meta/model-1", label: "Model 1" }],
+    },
+  ];
+}
+
 function metaConnected(): Record<string, ProviderState> {
   return {
     meta: { presetId: "meta", connected: true, enabledModels: ["meta/model-1"] },
@@ -33,6 +48,7 @@ describe("ChatModelSelector contributor warning", () => {
     render(
       <ChatModelSelector
         project_id="warn-1"
+        catalog={metaCatalog()}
         states={metaConnected()}
         warnings={{ "meta/model-1": CONTRIBUTOR_WARNING_EN }}
       />,
@@ -52,6 +68,7 @@ describe("ChatModelSelector contributor warning", () => {
     render(
       <ChatModelSelector
         project_id="warn-2"
+        catalog={metaCatalog()}
         states={metaConnected()}
         warnings={{ "meta/model-1": CONTRIBUTOR_WARNING_EN }}
       />,
@@ -71,6 +88,7 @@ describe("ChatModelSelector contributor warning", () => {
     render(
       <ChatModelSelector
         project_id="warn-3"
+        catalog={metaCatalog()}
         states={metaConnected()}
         warnings={{ "meta/model-1": CONTRIBUTOR_WARNING_UK }}
         lang="uk"
@@ -97,6 +115,7 @@ describe("ChatModelSelector contributor warning", () => {
     render(
       <ChatModelSelector
         project_id="warn-4"
+        catalog={metaCatalog()}
         states={metaConnected()}
         warnings={{
           "meta/model-1":
