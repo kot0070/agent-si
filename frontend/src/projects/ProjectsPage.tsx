@@ -269,7 +269,7 @@ export function ProjectsPage(): ReactElement {
               </button>
             ) : null}
             <button type="submit" data-testid="project-add-submit">
-              {t("tasks.creator.create")}
+              {t("projects.list.create")}
             </button>
           </form>
           {projects.length === 0 ? (

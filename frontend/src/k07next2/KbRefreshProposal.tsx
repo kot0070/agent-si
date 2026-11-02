@@ -14,13 +14,16 @@ const KB_STATUS_ROUTE = "/api/v1/kb/status";
 const KB_UPDATE_ROUTE = "/api/v1/kb/update";
 const KB_APPLY_ROUTE = "/api/v1/kb/proposals/apply";
 
-async function readKbStatusText(): Promise<string> {
+async function readKbStatusDoc(): Promise<unknown> {
   const response = await fetch(KB_STATUS_ROUTE);
   if (!response.ok) {
     throw new Error(`kb status request failed: ${response.status}`);
   }
-  const body: unknown = await response.json();
-  return JSON.stringify(body);
+  try {
+    return (await response.json()) as unknown;
+  } catch {
+    return null;
+  }
 }
 
 async function postKbJson(route: string, body: unknown): Promise<unknown> {
@@ -47,10 +50,70 @@ function proposalIdOf(value: unknown): string | null {
   return null;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// FXDESIGN2: served KB facts render as readable table rows, never raw
+// JSON. Nested records flatten to "name: value" pairs joined with "; ",
+// so no braces or quotes from JSON.stringify ever reach the card.
+function renderFactValue(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return t("shell.common.unknown");
+    }
+    return value.map((entry) => renderFactValue(entry)).join("; ");
+  }
+  if (isRecord(value)) {
+    const parts = Object.entries(value).map(
+      ([name, entry]) => `${name}: ${renderFactValue(entry)}`,
+    );
+    return parts.length === 0 ? t("shell.common.unknown") : parts.join("; ");
+  }
+  return t("shell.common.unknown");
+}
+
+function FactRows(props: { data: unknown }): ReactElement {
+  if (isRecord(props.data)) {
+    return (
+      <>
+        {Object.entries(props.data).map(([name, entry]) => (
+          <tr key={name}>
+            <th scope="row">{name}</th>
+            <td>{renderFactValue(entry)}</td>
+          </tr>
+        ))}
+      </>
+    );
+  }
+  if (Array.isArray(props.data)) {
+    return (
+      <>
+        {props.data.map((entry, index) => (
+          <tr key={index}>
+            <td>{renderFactValue(entry)}</td>
+          </tr>
+        ))}
+      </>
+    );
+  }
+  return (
+    <tr>
+      <td>{renderFactValue(props.data)}</td>
+    </tr>
+  );
+}
+
 export function KbRefreshProposal(): ReactElement {
   const [doc, setDoc] = useState<KbProposalDoc | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
-  const [result, setResult] = useState<string | null>(null);
+  const [status, setStatus] = useState<unknown>(null);
+  const [result, setResult] = useState<unknown>(null);
   const [updating, setUpdating] = useState(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
 
@@ -70,10 +133,10 @@ export function KbRefreshProposal(): ReactElement {
 
   useEffect(() => {
     let alive = true;
-    void readKbStatusText()
-      .then((text) => {
+    void readKbStatusDoc()
+      .then((doc) => {
         if (alive) {
-          setStatus(text);
+          setStatus(doc);
         }
       })
       .catch(() => undefined);
@@ -94,14 +157,14 @@ export function KbRefreshProposal(): ReactElement {
       });
       const proposalId = proposalIdOf(refreshed);
       if (proposalId === null) {
-        setResult(JSON.stringify(refreshed));
+        setResult(refreshed);
         return;
       }
       const applied = await postKbJson(KB_APPLY_ROUTE, {
         proposal_id: proposalId,
         approved_by_user: true,
       });
-      setResult(JSON.stringify({ refresh: refreshed, apply: applied }));
+      setResult({ refresh: refreshed, apply: applied });
     } catch (error) {
       setUpdateError(error instanceof Error ? error.message : "request failed");
     } finally {
@@ -112,7 +175,15 @@ export function KbRefreshProposal(): ReactElement {
   return (
     <section data-testid="k07next2-kb-proposal">
       <h2>{t("firstrun.optional.kbs")}</h2>
-      {status === null ? null : <p data-testid="kb-status">{status}</p>}
+      {status === null ? null : (
+        <div data-testid="kb-status">
+          <table>
+            <tbody>
+              <FactRows data={status} />
+            </tbody>
+          </table>
+        </div>
+      )}
       <button
         type="button"
         data-testid="kb-update"
@@ -125,7 +196,13 @@ export function KbRefreshProposal(): ReactElement {
       </button>
       {updating ? <p>{t("chat.stream.spinner")}</p> : null}
       {result === null ? null : (
-        <p data-testid="kb-update-result">{result}</p>
+        <div data-testid="kb-update-result">
+          <table>
+            <tbody>
+              <FactRows data={result} />
+            </tbody>
+          </table>
+        </div>
       )}
       {updateError === null ? null : (
         <p data-testid="kb-update-error">{updateError}</p>
@@ -135,7 +212,13 @@ export function KbRefreshProposal(): ReactElement {
       ) : (
         <ol>
           {doc.proposals.map((proposal, index) => (
-            <li key={index}>{JSON.stringify(proposal)}</li>
+            <li key={index}>
+              <table>
+                <tbody>
+                  <FactRows data={proposal} />
+                </tbody>
+              </table>
+            </li>
           ))}
         </ol>
       )}
