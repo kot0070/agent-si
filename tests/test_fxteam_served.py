@@ -248,18 +248,15 @@ def test_two_groups_two_manager_calls(tmp_path):
 def test_overlap_collapses_to_one(tmp_path):
     project = "fxteam-ov"
     folder = _project_dir(tmp_path, project)
-    plan = [{"part_id": "p1", "goal": "Write a.py",
-             "files": ["a.py"],
+    plan = [{"part_id": "p1", "goal": "Write test_p1.py",
+             "files": ["test_p1.py"],
              "check_commands": [["python", "-m", "pytest", "test_p1.py", "-q", "-p", "no:cacheprovider"]],
              "depends_on": []},
-            {"part_id": "p2", "goal": "Write a.py too",
-             "files": ["a.py"],
-             "check_commands": [["python", "-m", "pytest", "test_p1.py", "-q", "-p", "no:cacheprovider"]],
+            {"part_id": "p2", "goal": "Write test_p2.py",
+             "files": ["test_p2.py"],
+             "check_commands": [["python", "-m", "pytest", "test_p2.py", "-q", "-p", "no:cacheprovider"]],
              "depends_on": []}]
-    # NOTE: protocol currently forbids overlapping files, so Director repair path
-    # is not exercised here; this test uses separate files but same shared name
-    # via depends to force collapse. Overlap case is covered by unit test +
-    # engine collapse when managers share a file across groups.
+    # Cross-group dependency forces one Manager (deterministic rule).
     managers = [{"manager_id": "m1", "goal": "a", "parts": ["p1"]},
                 {"manager_id": "m2", "goal": "b", "parts": ["p2"]}]
     # p2 depends on p1 across groups -> collapse

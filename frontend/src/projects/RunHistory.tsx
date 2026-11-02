@@ -163,6 +163,21 @@ export function RunHistory(props: RunHistoryProps): ReactElement {
                     : formatNumber(run.tokens, locale)}{" "}
                   · Cost {run.cost === "UNKNOWN" ? "not known" : run.cost}
                 </div>
+                {run.manager_why == null || run.manager_why === "" ? null : (
+                  <div>
+                    {run.manager_count != null && run.manager_count > 1
+                      ? `Managers: ${run.manager_count} (${run.manager_why})`
+                      : `Manager: ${run.manager_why}`}
+                    {run.managers != null && run.managers.length > 1
+                      ? ` · ${run.managers
+                          .map(
+                            (group) =>
+                              `${group.manager_id}: ${group.parts.join(", ")}`,
+                          )
+                          .join(" · ")}`
+                      : null}
+                  </div>
+                )}
                 {run.summary === "" ? null : <div>{run.summary}</div>}
                 {run.files.length === 0 ? null : (
                   <ul>

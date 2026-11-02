@@ -440,6 +440,17 @@ const DevrunRunSchema = z.object({
   files: z.array(z.string()),
   success: z.boolean(),
   summary: z.string(),
+  manager_why: z.string().optional(),
+  manager_count: z.number().int().optional(),
+  managers: z
+    .array(
+      z.object({
+        manager_id: z.string(),
+        goal: z.string().optional(),
+        parts: z.array(z.string()),
+      }),
+    )
+    .optional(),
 });
 
 export type DevrunRun = z.infer<typeof DevrunRunSchema>;

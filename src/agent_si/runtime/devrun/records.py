@@ -436,6 +436,9 @@ def to_runs_row(record: dict[str, Any]) -> dict[str, Any]:
         "tokens": tokens,
         "cost": cost,
         "files": files,
+        "manager_why": str(record.get("manager_why") or ""),
+        "managers": list(record.get("managers") or []),
+        "manager_count": int(record.get("manager_count") or 1),
     }
 
 
