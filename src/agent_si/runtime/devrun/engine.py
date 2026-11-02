@@ -2899,6 +2899,32 @@ def _install_denied(project: Any, folder: Any, argv: Any) -> str:
         return ""
 
 
+def _spawn_held(*, project: Any, run_id: str, folder: str,
+                argv: list, log_path: str, log_rel: str,
+                lock: Any = None, grant_run_id: str = "") -> Any:
+    """One spawn_checked that never leaks the install ask as a refusal.
+
+    InstallAskNeeded always becomes _InstallHeld (the run holds with a
+    terminal approval event). Every spawn site goes through here, so no
+    present or future path can swallow the ask in a broad
+    PermissionError net (InstallAskNeeded subclasses PermissionError).
+    """
+    from agent_si.runtime.devrun import actions as _spawn_actions
+
+    try:
+        if lock is not None:
+            with lock:
+                return _spawn_actions.spawn_checked(
+                    project, run_id, folder, list(argv), log_path,
+                    log_rel, grant_run_id=grant_run_id)
+        return _spawn_actions.spawn_checked(
+            project, run_id, folder, list(argv), log_path, log_rel,
+            grant_run_id=grant_run_id)
+    except _spawn_actions.InstallAskNeeded as exc:
+        raise _InstallHeld(exc.tool_id, " ".join(
+            str(word) for word in (argv or []))) from None
+
+
 def _run_agent_command(*, record: Any, folder: str, project: str,
                        run_id: str, argv: list, state: Any,
                        procs: list, attached: Any = None,
@@ -2923,19 +2949,16 @@ def _run_agent_command(*, record: Any, folder: str, project: str,
                            "%s.log" % (stamp,)).replace("\\", "/")
     log_path = os.path.join(str(folder), ".devrun", "agent",
                             "%s.log" % (stamp,))
-    # FXPARALLEL BEGIN spawn-lock: the run lock covers spawn_checked
+    # FXPARALLEL BEGIN spawn-lock: the run lock covers the spawn
     # only (dispatcher keeps lock-guarded shared tables at
     # worker_tools/dispatcher.py:111-114), never the wait below.
+    # _spawn_held converts the ask to _InstallHeld; the InstallAskNeeded
+    # except below stays as a backstop for direct spawn_checked calls.
     try:
-        if lock is not None:
-            with lock:
-                spawn = _actions.spawn_checked(
-                    project, run_id, folder, argv, log_path, log_rel,
-                    grant_run_id=grant_run_id)
-        else:
-            spawn = _actions.spawn_checked(
-                project, run_id, folder, argv, log_path, log_rel,
-                grant_run_id=grant_run_id)
+        spawn = _spawn_held(
+            project=project, run_id=run_id, folder=folder, argv=argv,
+            log_path=log_path, log_rel=log_rel, lock=lock,
+            grant_run_id=grant_run_id)
     except _actions.InstallAskNeeded as exc:
         raise _InstallHeld(exc.tool_id, " ".join(argv)) from None
     except (PermissionError, ValueError) as exc:
@@ -3033,20 +3056,17 @@ def _run_checks(*, record: Any, spec: dict, row: dict, folder: str,
                                         "word list",
                          "pid": 0})
             continue
-        # FXPARALLEL BEGIN spawn-lock: lock around spawn_checked
+        # FXPARALLEL BEGIN spawn-lock: lock around the spawn
         # only (never around the wait below); id lands after attach.
+        # _spawn_held converts an ungranted install to _InstallHeld,
+        # which propagates to the run-level hold (approval event) —
+        # never a refused row. _InstallHeld is not a PermissionError,
+        # so the broad net below cannot eat it.
         try:
-            if lock is not None:
-                with lock:
-                    spawn = _actions.spawn_checked(
-                        project, check_id, folder,
-                        [str(word) for word in command],
-                        log_path, log_rel)
-            else:
-                spawn = _actions.spawn_checked(
-                    project, check_id, folder,
-                    [str(word) for word in command],
-                    log_path, log_rel)
+            spawn = _spawn_held(
+                project=project, run_id=check_id, folder=folder,
+                argv=[str(word) for word in command],
+                log_path=log_path, log_rel=log_rel, lock=lock)
         except _actions.SpawnNotInstalled as exc:
             rows.append({"argv": [str(word) for word in command],
                          "exit_code": None, "output_file": log_rel,
