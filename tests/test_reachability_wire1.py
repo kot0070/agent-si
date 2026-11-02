@@ -163,22 +163,39 @@ def _k04_payload(method, template, write_headers):
         return {}, write_headers, 404
     if key == ("get", "/api/v1/providers/{id}/models"):
         return None, None, 404
+    if key == ("post", "/api/v1/providers/{id}/models/refresh"):
+        # FXPROVBE: refresh one provider's live list; unknown id 404s
+        # inside the entry (same wiring as provider_models above).
+        return {}, write_headers, 404
+    if key == ("put", "/api/v1/providers/{id}/models"):
+        # FXPROVBE: persist the enabled subset; unknown id 404s before
+        # any body validation (same wiring as disconnect above).
+        return {}, write_headers, 404
     if key == ("get", "/api/v1/chat/models"):
         return None, None, 200
     if key == ("get", "/api/v1/roles/pools"):
-        return None, None, 200
+        # FXFAKEID2: the fake "p1" default is gone; with no query the
+        # entry answers 400 (project_id required) instead of 200.
+        return None, None, 400
     if key == ("put", "/api/v1/roles/pools"):
         return {}, write_headers, 400
     if key == ("get", "/api/v1/routing/decision/{id}/why"):
         return None, None, 404
     if key == ("get", "/api/v1/budget"):
-        return None, None, 404
+        # FXFAKEID2: the fake "p1" default is gone; with no query the
+        # entry answers 400 (project_id required) instead of 404.
+        return None, None, 400
     if key == ("get", "/api/v1/kb/status"):
         return None, None, 200
     if key == ("post", "/api/v1/kb/proposals/apply"):
         return {}, write_headers, 400
     if key == ("put", "/api/v1/roles/chat-model"):
         return {}, write_headers, 400
+    if key == ("get", "/api/v1/roles/chat-model"):
+        # FXSAVED item 1: read one project's saved chat model; the
+        # wire1 drive sends no query, so the entry answers 400
+        # (project_id required) without reaching the registry.
+        return None, None, 400
     raise AssertionError("no safe payload for %s %s" % (method, template))
 
 

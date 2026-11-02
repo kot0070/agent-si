@@ -96,7 +96,17 @@ def seam_client(monkeypatch):
         auto_iface, "guard_check_escape", lambda project_id, path: True)
     monkeypatch.setattr(
         auto_iface, "stop_all_request_stop", _reach_stop)
-    return TestClient(create_app(_seam_settings()))
+    # FXHIGH-2: resume is fail-closed without a budget hook; reachability
+    # proves the seam (not the guard), so bind the allow hook explicitly
+    # (same pattern as test_k08open1_timers_templates setup_function).
+    # create_app installs real_budget_check, so the hook is bound after
+    # it and restored to the fail-closed default after the test.
+    _app = create_app(_seam_settings())
+    _auto_runner.set_budget_hook(lambda project_id: True)
+    try:
+        yield TestClient(_app)
+    finally:
+        _auto_runner.set_budget_hook(None)
 
 
 #: Sample {id} path fill per frozen entry name (test data, not routes).
