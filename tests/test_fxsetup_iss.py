@@ -220,9 +220,11 @@ def test_iss_uninstall_leaves_data_unless_user_opts_in():
 # --- item 1: clean-stage scan on fixtures ------------------------------------
 
 def _stage_fixture(base, dirty=False):
+    # FXDIR: mirrors the real one-folder stage layout (AgentSI.exe at
+    # the stage root, support files beside it).
     stage = base / "stage"
-    (stage / "sidecar").mkdir(parents=True)
-    (stage / "sidecar" / "AgentSI.exe").write_bytes(b"exe")
+    stage.mkdir(parents=True)
+    (stage / "AgentSI.exe").write_bytes(b"exe")
     (stage / "LICENSE").write_text("MIT\nCopyright (c) 2026 Ivan Soprun\n")
     notices = stage / "docs" / "third_party_notices"
     notices.mkdir(parents=True)
@@ -254,6 +256,68 @@ def test_stage_scan_dirty_fixtures_fail(tmp_path):
         stage = _stage_fixture(tmp_path / dirty, dirty=dirty)
         violations = build.scan_stage_clean(stage)
         assert violations, f"dirty stage ({dirty}) passed the scan"
+
+
+# --- item 2 (FXDIR): one-folder shortcuts ------------------------------------
+# Owner 16:50: Start-menu entry + desktop shortcut, BOTH checked by
+# default in the wizard, both named 'Agent SI' with the SI icon,
+# opening AgentSI.exe in its folder with the working directory set
+# to it; uninstall removes both.
+
+
+def _icons_entries(text):
+    section = re.search(r"\[Icons\](.*?)(?:^\[|\Z)", text,
+                        re.IGNORECASE | re.MULTILINE | re.DOTALL)
+    assert section is not None, "[Icons] section missing"
+    entries = []
+    for line in section.group(1).splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith(";"):
+            continue
+        entries.append(stripped)
+    return entries
+
+
+def _tasks_lines(text):
+    section = re.search(r"\[Tasks\](.*?)(?:^\[|\Z)", text,
+                        re.IGNORECASE | re.MULTILINE | re.DOTALL)
+    assert section is not None, "[Tasks] section missing"
+    lines = []
+    for line in section.group(1).splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith(";"):
+            continue
+        lines.append(stripped)
+    return lines
+
+
+def test_iss_shortcuts_open_exe_at_folder_root():
+    entries = _icons_entries(_read_iss())
+    targets = [e for e in entries if "AgentSI.exe" in e]
+    assert len(targets) >= 2, \
+        f"need Start-menu + desktop AgentSI.exe icons, found: {entries}"
+    for entry in targets:
+        assert re.search(r'Filename\s*:\s*"\{app\}\\AgentSI\.exe"', entry), \
+            f"shortcut not at the folder root: {entry!r}"
+        assert re.search(r'WorkingDir\s*:\s*"\{app\}"', entry,
+                         re.IGNORECASE), \
+            f"shortcut misses WorkingDir {{app}}: {entry!r}"
+
+
+def test_iss_desktop_shortcut_checked_by_default():
+    lines = _tasks_lines(_read_iss())
+    desktop = [ln for ln in lines if "desktopicon" in ln.lower()]
+    assert desktop, "no desktopicon task in [Tasks]"
+    for line in desktop:
+        assert "unchecked" not in line.lower(), \
+            f"desktop shortcut not checked by default: {line!r}"
+
+
+def test_iss_uninstall_display_icon_at_folder_root():
+    setup = _setup_directives(_read_iss())
+    icon = setup.get("UninstallDisplayIcon", "")
+    assert icon == "{app}\\AgentSI.exe", \
+        f"UninstallDisplayIcon not at the folder root: {icon!r}"
 
 
 # --- item 2: ISCC step -------------------------------------------------------
