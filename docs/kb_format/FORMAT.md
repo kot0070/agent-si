@@ -1,4 +1,4 @@
-# KB directory format (K09-B)
+# KB directory format
 
 A knowledge base (KB) is a directory with three parts: a manifest, a purpose
 declaration, and section files. `tools/kb_validator/iface.py`
