@@ -181,7 +181,9 @@ def test_shell_real_look(served_base, edge, theme, width, height):
         page.reload(wait_until="networkidle")
 
         assert page.evaluate("document.documentElement.dataset.theme") == theme
-        for testid in ("topbar", "sidebar", "app-main", "menu-chat"):
+        # R06: FXLAYOUT renamed the chat entry to menu-new-task (exactly
+        # four rail entries); the shell regions below are unchanged.
+        for testid in ("topbar", "sidebar", "app-main", "menu-new-task"):
             page.wait_for_selector('[data-testid="%s"]' % testid)
 
         nav = _box(page, '[data-testid="sidebar"]')
