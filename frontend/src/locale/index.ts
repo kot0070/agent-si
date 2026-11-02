@@ -1,4 +1,4 @@
-import { createContext, createElement, useContext, useEffect } from 'react';
+import { createContext, createElement, useContext, useEffect, useRef } from 'react';
 import type { ReactElement, ReactNode } from 'react';
 import en from './en.json';
 import uk from './uk.json';
@@ -88,6 +88,14 @@ export interface LocaleProviderProps {
 
 export function LocaleProvider(props: LocaleProviderProps): ReactElement {
   const locale = props.initialLocale ?? readStoredLocale() ?? DEFAULT_LOCALE;
+  // FXSAVED item 4: apply the stored locale during the first render,
+  // before children render (not in an effect), so t() already reads it
+  // on first paint even when no TopBar is mounted yet.
+  const appliedRef = useRef<SupportedLocale | null>(null);
+  if (appliedRef.current !== locale) {
+    appliedRef.current = locale;
+    setLocale(locale);
+  }
   useEffect(() => {
     persistLocale(locale);
   }, [locale]);
