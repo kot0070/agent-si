@@ -8,7 +8,7 @@ It uses connected model providers for the work and keeps every run, decision, an
 
 - Windows 10 or 11, 64-bit.
 - WebView2 runtime. If it is missing, the app shows a message with the download link and also opens the app in the default browser.
-- No Python install needed to run the app. Code tests on Python projects need a real Python: install Python (so `python` runs) or set `AGENT_SI_PYTHON` to a python executable. On Windows, if `python` only opens the Microsoft Store, that alias is not enough. No administrator rights needed. The portable build runs from its own folder.
+- No Python install needed to run the app. Code tests on Python projects need a real Python: install Python (so `python` runs) or set `AGENT_SI_PYTHON` to a python executable. On Windows, a `python` that only opens the Microsoft Store never counts: the app skips that stub and tries the `py` launcher instead. No administrator rights needed. The portable build runs from its own folder.
 - The bundle carries the licence text and the third-party notices; both are also shown on the About screen.
 
 ## Download and verify
@@ -49,7 +49,7 @@ Go to Settings -> Models, or use the Setup wizard on the first-run screen.
 
 Search filters the list by provider or model name. Model checkboxes are enabled only when the provider is connected. An optional setup wizard, role pools, and a chat-model picker are on the same page.
 
-The connect dialog shows its key check before you save. It shows the expected key format, and a key that does not fit shows "This key does not match the expected format." before you press Save (a warning only — Save still works). Save sends the key to the server and runs a connect probe; only when the server answers does the dialog report "Connected {label}. Reference saved.", and only then is the local reference copy written.
+The connect dialog shows the expected key format, and a key that does not fit shows "This key does not match the expected format." before you save (a warning only). Connecting itself is two steps: paste the key, press Check, then Save. Check tries the key against the live provider without storing anything: a good key answers "Key checked. Save to connect." and enables Save (local providers check at once, with no network). A wrong key answers "The provider refused this key. Paste the full key again." and nothing is stored — a failed replace keeps the old working key; an unreachable provider answers "Could not reach the provider.". Save stores the checked key (the server checks once more first) and only then reports "Connected {label}. Reference saved."; the local reference copy is written only after the server answers.
 
 Model checkboxes switch models on and off for the team: only ticked models reach Auto, the role pools, and the chat picker. A fresh connect ticks only the default model. On the project Models route a team quick-fix card can apply the routing's suggested binding (Accept) or drop it (Dismiss).
 
