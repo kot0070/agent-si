@@ -22,6 +22,7 @@ import type {
   TaskRecord,
 } from "../api/iface";
 import { ApiError, apiErrorLocaleKey } from "../api/errors";
+import { backoffForFailures, isHiddenTick, onVisible } from "../api/polling";
 import { useApiClient } from "../app/ApiClientProvider";
 import { formatDate, formatNumber, t, useLocale } from "../locale/index";
 import type { SupportedLocale } from "../locale/index";
@@ -727,11 +728,49 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
     if (props.view !== "tasks" || !tasksUnfinished) {
       return;
     }
-    const timer = setInterval(() => {
-      setNonce((value) => value + 1);
-    }, 5000);
+    // FXCLASS P5: skip the tick when hidden, one fresh read on
+    // visibilitychange. The nonce read resets naturally on success; a
+    // failed read backs off via the same 3-6-12-30 s ladder.
+    let alive = true;
+    let failures = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    function chain(): void {
+      if (timer !== null) {
+        clearTimeout(timer);
+      }
+      timer = setTimeout(
+        () => {
+          timer = null;
+          if (!alive) {
+            return;
+          }
+          if (isHiddenTick()) {
+            chain();
+            return;
+          }
+          try {
+            setNonce((value) => value + 1);
+          } catch {
+            failures += 1;
+          }
+          failures = 0;
+          chain();
+        },
+        failures === 0 ? 5000 : backoffForFailures(failures),
+      );
+    }
+    chain();
+    const stopVisible = onVisible(() => {
+      if (alive) {
+        setNonce((value) => value + 1);
+      }
+    });
     return () => {
-      clearInterval(timer);
+      alive = false;
+      if (timer !== null) {
+        clearTimeout(timer);
+      }
+      stopVisible();
     };
   }, [props.view, tasksUnfinished]);
 

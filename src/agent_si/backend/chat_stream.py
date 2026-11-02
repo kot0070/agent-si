@@ -232,10 +232,9 @@ def _record_server_turn(app: Any, project: str, user_text: str,
                         run_id: str = "", error_code: str = "") -> None:
     """Store one server-side chat turn; never raises, never breaks flow.
 
-    The stream start stores the user message (no run id: every stream
-    opens its own row); the terminal write carries the run id. Client
-    writes keep their own run ids, so their running/terminal pair
-    still upserts to one row.
+    The stream start stores the user message with the run id; the
+    terminal write carries the same run id, so the pair upserts to one
+    row. Client writes with the same run id upsert the same row.
     """
     try:
         if app is None:
@@ -560,18 +559,17 @@ class ManagerSdkBridge:
                 {"type": "cancelled", "stream_id": stream_id})
             return
         self._finish(stream_id)
-        # K04BIND1: append the verbatim last failure reason (never secret).
-        base = ("no provider is connected; "
-                "connect a provider to enable chat")
-        reason = state.get("no_provider_reason")
-        if isinstance(reason, str) and reason.strip():
-            base = base + " (last error: " + reason.strip() + ")"
+        # FXCLASS CA-1/CA-3/CA-4: one plain line, same words on chat +
+        # Tasks, no role word. The verbatim last failure stays server-side
+        # only when explicitly passed; the wire message stays plain.
+        base = "Connect a provider first"
         yield sse_bytes({
             "type": "error",
             "stream_id": stream_id,
             "run_id": run_id,
             "code": NO_PROVIDER_BOUND,
             "message": base,
+            "connectHref": "/providers",
         })
 
     def _devrun_folder(
@@ -821,7 +819,8 @@ class ManagerSdkBridge:
             _mirror_run_tasks(app, project, task, message, task_status)
 
         yield sse_bytes(self._start_event(stream_id, run_id, request))
-        _record_server_turn(app, project, message, "", "running")
+        _record_server_turn(app, project, message, "", "running",
+                            run_id=run_id)
         _mirror_run_tasks(app, project, task, message, "running")
         if state["cancelled"]:
             yield sse_bytes({"type": "cancelled", "stream_id": stream_id})
@@ -938,7 +937,8 @@ class ManagerSdkBridge:
         task = str(getattr(request, "task", "") or "")
         message = str(getattr(request, "message", "") or "")
         yield sse_bytes(self._start_event(stream_id, run_id, request))
-        _record_server_turn(app, project, message, "", "running")
+        _record_server_turn(app, project, message, "", "running",
+                            run_id=run_id)
         _mirror_run_tasks(app, project, task, message, "running")
         if state["cancelled"] or provider is None:
             if not state["cancelled"]:
