@@ -9,6 +9,7 @@ AI-generated. Product code uses only parts.py + ledger.py.
 
 from __future__ import annotations
 
+import logging
 import os
 import secrets
 import shutil
@@ -481,6 +482,24 @@ def create_app(settings: Any = None,
                 status_code=400,
                 detail=_k02r4_chat.http_error_detail(
                     _k02r4_chat.CHAT_BAD_REQUEST, str(err))) from None
+        # FXCHATTASK (R04 + R-nodata-fallback): the first accepted chat
+        # message for a project with no task yet stores one task row
+        # through the shared console write path; later messages add
+        # none, and a write failure only logs (the stream never breaks).
+        try:
+            from agent_si.backend import (
+                console_projects_write as _fxchattask_write,
+            )
+
+            _fxchattask_write.ensure_first_chat_task(
+                app,
+                project_id=chat_request.project,
+                message=chat_request.message,
+                chat_task=chat_request.task,
+            )
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "fxchattask: first-chat task hook failed; stream continues")
         # M-WIRE L0B-12: resolve the routed provider adapter at open
         # (start bind, then the per-project chat record) so the bridge
         # sees a connected provider with no test help.
