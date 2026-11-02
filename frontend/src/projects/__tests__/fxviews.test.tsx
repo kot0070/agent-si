@@ -60,17 +60,18 @@ describe("FXVIEWS viewsApi pure helpers", () => {
     expect(formatServedDate("t-9", "en")).toBe("t-9");
   });
 
-  it("dedupes live attempts into one row per agent+role+model+status with a count", () => {
+  it("dedupes live attempts into one row per agent with a count", () => {
     const rows = dedupeLiveRows([
       liveRow({ agent: "a-1", status: "RUNNING" }),
       liveRow({ agent: "a-1", status: "RUNNING" }),
       liveRow({ agent: "a-1", status: "BLOCKED" }),
     ]);
-    expect(rows).toHaveLength(2);
-    const running = rows.find((row) => row.status === "RUNNING");
-    expect(running?.attempts).toBe(2);
-    const blocked = rows.find((row) => row.status === "BLOCKED");
-    expect(blocked?.attempts).toBe(1);
+    // FXTABS T6: one row per agent; the terminal end wins over stale
+    // RUNNING attempts, so nothing stays Running at run end.
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.agent).toBe("a-1");
+    expect(rows[0]?.status).toBe("BLOCKED");
+    expect(rows[0]?.attempts).toBe(3);
   });
 
   it("sums served token cells per role+model and drops rows with no cells", () => {
