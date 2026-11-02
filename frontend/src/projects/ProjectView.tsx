@@ -1688,6 +1688,7 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
           type="button"
           data-testid="project-chat-tab"
           className="fxpv-tab"
+          aria-selected="false"
           onClick={() => {
             props.onSelect?.("chat" as ProjectViewName);
           }}
@@ -1706,6 +1707,7 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
             type="button"
             data-testid={projectMenuTestId(name)}
             aria-current={props.view === name ? "true" : undefined}
+            aria-selected={props.view === name ? "true" : "false"}
             className={
               props.view === name ? "fxpv-tab fxpv-tab-selected" : "fxpv-tab"
             }
