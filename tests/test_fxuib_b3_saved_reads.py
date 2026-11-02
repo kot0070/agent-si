@@ -68,3 +68,17 @@ def test_b3_new_reads_are_served(tmp_path):
     ctx = make_ctx(tmp_path)
     assert ("get", "/api/v1/roles/chat-model") in PR._DISPATCH
     assert ("get", "/api/v1/roles/pools/profile") in PR._DISPATCH
+
+
+def test_b6_empty_pool_put_refused_as_json(tmp_path):
+    # FXUIB-B6 backend leg: PUT mode=pool pool=[] is refused 400 with a
+    # JSON error body (never plain text, never a stored binding).
+    ctx = make_ctx(tmp_path)
+    status, payload = PR.put_role_pools(ctx, {}, {
+        "project_id": "p1", "role": "worker", "mode": "pool",
+        "pool": [], "strategy": "AUTO"})
+    assert status == 400, payload
+    assert "at least one pool member" in payload["error"]
+    status, payload = PR.get_role_pool_profile(
+        ctx, {"project_id": "p1", "role": "worker"}, None)
+    assert status == 404, payload
