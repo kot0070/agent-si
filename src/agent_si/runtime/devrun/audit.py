@@ -119,6 +119,7 @@ def judge(
     files_diff: str,
     checks: list[dict[str, Any]],
     artifact_refs: list[str],
+    lock: Any = None,
     timeout_s: Any = None,
     stop_seen: Any = None,
     on_waiting: Any = None,
@@ -133,11 +134,13 @@ def judge(
     from agent_si.runtime.devrun import roles as _roles
 
     messages = auditor_messages(goal, files_diff, checks)
-    response, over = _roles.invoke(
+    # FXPARALLEL BEGIN charge-lock: auditor charges under the run lock.
+    response, over, _row = _roles.invoke_owned(
         app, adapter, resolution, messages, record=record,
         project_id=project_id, run_id=run_id, part=part_id,
-        attempt=attempt, timeout_s=timeout_s, stop_seen=stop_seen,
-        on_waiting=on_waiting)
+        attempt=attempt, lock=lock, timeout_s=timeout_s,
+        stop_seen=stop_seen, on_waiting=on_waiting)
+    # FXPARALLEL END charge-lock.
     entry: dict[str, Any] = {
         "part_id": str(part_id), "attempt": int(attempt),
         "producer_ref": str(producer_ref),

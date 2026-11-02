@@ -204,6 +204,10 @@ def write_file(
     parent = os.path.dirname(target)
     if parent:
         os.makedirs(parent, exist_ok=True)
+    # FXPARALLEL+int atomic-write: temp file plus replace in the same
+    # folder, so a peer part never reads a half-written file. The
+    # temp name is dot-prefixed plus .tmp (never a project file,
+    # never inside the part's allowed list) and is removed on failure.
     fd, tmp_path = tempfile.mkstemp(
         dir=parent or ".", prefix=".write-", suffix=".tmp")
     try:

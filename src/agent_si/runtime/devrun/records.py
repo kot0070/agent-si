@@ -13,8 +13,15 @@ import contextlib
 import json
 import os
 import tempfile
+import threading
 from datetime import UTC, datetime
 from typing import Any
+
+# FXPARALLEL BEGIN run-lock: seq stays unique under part threads.
+#: Guards the short len-then-append writes only; never held across a
+#: model call, a child process or a file snapshot.
+_RECORD_LOCK = threading.Lock()
+# FXPARALLEL END run-lock.
 
 #: Snapshot file name for devrun run records under the data dir
 #: (file name only; the dir itself comes from app.state.data_dir).
@@ -74,17 +81,20 @@ def ledger_add(
             value = usage.get(key)
             if isinstance(value, int) and not isinstance(value, bool):
                 tokens[name] = value
-    row = {
-        "seq": len(record.get("ledger", [])) + 1,
-        "role": str(role),
-        "provider": str(provider),
-        "model": str(model),
-        "part": None if part is None else str(part),
-        "attempt": int(attempt),
-        "tokens": tokens,
-        "cost": "UNKNOWN" if cost is None else str(cost),
-    }
-    record.setdefault("ledger", []).append(row)
+    # FXPARALLEL BEGIN run-lock: seq taken and appended as one unit.
+    with _RECORD_LOCK:
+        row = {
+            "seq": len(record.get("ledger", [])) + 1,
+            "role": str(role),
+            "provider": str(provider),
+            "model": str(model),
+            "part": None if part is None else str(part),
+            "attempt": int(attempt),
+            "tokens": tokens,
+            "cost": "UNKNOWN" if cost is None else str(cost),
+        }
+        record.setdefault("ledger", []).append(row)
+    # FXPARALLEL END run-lock.
     return row
 
 
@@ -92,16 +102,21 @@ def part_add(
     record: dict[str, Any], *, part_id: str, goal: str
 ) -> dict[str, Any]:
     """Append one part row; return the row for in-place updates."""
-    row: dict[str, Any] = {
-        "part_id": str(part_id),
-        "goal": str(goal),
-        "verdict": "PENDING",
-        "attempts": 0,
-        "auto_why": {},
-        "checks": [],
-        "reason": "",
-    }
-    record.setdefault("parts", []).append(row)
+    # FXPARALLEL BEGIN run-lock: timed part rows for overlap proof.
+    with _RECORD_LOCK:
+        row: dict[str, Any] = {
+            "part_id": str(part_id),
+            "goal": str(goal),
+            "verdict": "PENDING",
+            "attempts": 0,
+            "auto_why": {},
+            "checks": [],
+            "reason": "",
+            "started_at": None,
+            "finished_at": None,
+        }
+        record.setdefault("parts", []).append(row)
+    # FXPARALLEL END run-lock.
     return row
 
 

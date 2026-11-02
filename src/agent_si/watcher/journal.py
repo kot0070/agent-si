@@ -11,9 +11,15 @@ the error-code table are defined once here and reused by sibling import.
 from __future__ import annotations
 
 import hashlib
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Dict, List, Tuple
+
+# FXPARALLEL BEGIN run-lock: entry ids stay unique under part threads.
+#: Guards the entry-id sequence plus the row append only.
+_JOURNAL_LOCK = threading.Lock()
+# FXPARALLEL END run-lock.
 
 __all__ = (
     "WatcherError",
@@ -110,33 +116,37 @@ def append_event(project_id: str, source: str, kind: str,
         raise WatcherError(
             "JOURNAL_KIND_UNKNOWN", "unknown journal kind %r" % (kind,)
         )
+    # FXPARALLEL BEGIN run-lock: sequence plus append as one unit.
     global _SEQ, _NONCE
-    _SEQ += 1
-    _NONCE += 1
-    stamped = _utcnow()
-    entry_id = "evt-%04d" % _SEQ
-    digest = hashlib.sha256(
-        "|".join((
-            str(project_id),
-            str(source),
-            str(kind),
-            str(summary),
-            ",".join(str(ref) for ref in refs),
-            entry_id,
-            stamped,
-            str(_NONCE),
-        )).encode("utf-8")
-    ).hexdigest()
-    entry = JournalEntry(entry_id=entry_id, timestamp=stamped, hash=digest)
-    _ROWS.setdefault(str(project_id), []).append(
-        {
-            "kind": kind,
-            "entry": entry,
-            "source": source,
-            "summary": summary,
-            "refs": tuple(refs),
-        }
-    )
+    with _JOURNAL_LOCK:
+        _SEQ += 1
+        _NONCE += 1
+        stamped = _utcnow()
+        entry_id = "evt-%04d" % _SEQ
+        digest = hashlib.sha256(
+            "|".join((
+                str(project_id),
+                str(source),
+                str(kind),
+                str(summary),
+                ",".join(str(ref) for ref in refs),
+                entry_id,
+                stamped,
+                str(_NONCE),
+            )).encode("utf-8")
+        ).hexdigest()
+        entry = JournalEntry(entry_id=entry_id, timestamp=stamped,
+                             hash=digest)
+        _ROWS.setdefault(str(project_id), []).append(
+            {
+                "kind": kind,
+                "entry": entry,
+                "source": source,
+                "summary": summary,
+                "refs": tuple(refs),
+            }
+        )
+    # FXPARALLEL END run-lock.
     return entry
 
 

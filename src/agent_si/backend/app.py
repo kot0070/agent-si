@@ -1036,6 +1036,14 @@ def create_app(settings: Any = None,
 
     _r349_steplimits.register_steplimit_routes(app)
 
+    # FXPARALLEL user switch (additions-only): per-project
+    # "parts running at the same time" 1..4, default 1, GET+PUT surface
+    # plus devrun_parallel.json persistence owned by
+    # parallelparts_routes; the R349A surface above is unchanged.
+    from agent_si.backend import parallelparts_routes as _fxpar_parallel
+
+    _fxpar_parallel.register_parallelparts_routes(app)
+
     # OC-K02 R-302/R-333 (additions-only): hierarchy run + control-plane
     # map and the routine-offload switch surface; no existing line above
     # or the K04 block below changes.

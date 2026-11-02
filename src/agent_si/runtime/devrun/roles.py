@@ -587,6 +587,7 @@ def invoke(
     run_id: str,
     part: Any = None,
     attempt: int = 0,
+    lock: Any = None,
     timeout_s: Any = None,
     first_notice_s: Any = None,
     notice_every_s: Any = None,
@@ -598,13 +599,60 @@ def invoke(
 
     The charge id is the run id plus "-c" plus the ledger sequence
     number, so every call settles its own reservation; repeating the
+    same call id is refused by the gate like any duplicate (int B4,
+    per-call billing). The plain manager path is unchanged. Returns
+    (response, over_cap): over_cap is True only when the call's own
+    cost exceeds the remaining budget. A reached provider cap or hard
+    limit raises _BudgetOut before call. The model call always runs
+    outside any lock; the whole post-call block (charge, ledger,
+    telemetry, over-cap) runs as one unit under the given lock, so
+    two parts never interleave a charge (A1). The call itself runs
+    off the stream thread with a bounded timeout (default 300 s): a
+    stop raises ModelStopped at once, an expired bound raises
+    ModelTimeout and the attempt continues. Callers that need the
+    row they wrote (never the ledger tail) use invoke_owned.
+    """
+    response, over, _row = invoke_owned(
+        app, adapter, resolution, messages, record=record,
+        project_id=project_id, run_id=run_id, part=part,
+        attempt=attempt, lock=lock, timeout_s=timeout_s,
+        first_notice_s=first_notice_s, notice_every_s=notice_every_s,
+        tick_s=tick_s, stop_seen=stop_seen, on_waiting=on_waiting)
+    return response, over
+
+
+def invoke_owned(
+    app: Any,
+    adapter: Any,
+    resolution: dict[str, Any],
+    messages: list,
+    *,
+    record: Any,
+    project_id: str,
+    run_id: str,
+    part: Any = None,
+    attempt: int = 0,
+    lock: Any = None,
+    timeout_s: Any = None,
+    first_notice_s: Any = None,
+    notice_every_s: Any = None,
+    tick_s: float = 0.2,
+    stop_seen: Any = None,
+    on_waiting: Any = None,
+) -> Any:
+    """Same as invoke, plus the ledger row this call wrote.
+
+    Returns (response, over_cap, ledger_row) for the A2 own-row rule.
+    The charge id is the run id plus "-c" plus the ledger sequence
+    number, so every call settles its own reservation; repeating the
     same call id is refused by the gate like any duplicate. The plain
-    manager path is unchanged. Returns (response, over_cap): over_cap
-    is True only when the call's own cost exceeds the remaining budget.
-    A reached provider cap or hard limit raises _BudgetOut before call.
-    The call itself runs off the stream thread with a bounded timeout
-    (default 300 s): a stop raises ModelStopped at once, an expired
-    bound raises ModelTimeout and the attempt continues.
+    manager path is unchanged. Returns (response, over_cap,
+    ledger_row): over_cap is True only when the call's own cost
+    exceeds the remaining budget. A reached provider cap or hard
+    limit raises _BudgetOut before call. The call itself runs off the
+    stream thread with a bounded timeout (default 300 s): a stop
+    raises ModelStopped at once, an expired bound raises ModelTimeout
+    and the attempt continues.
     """
     provider = str(resolution["provider"])
     model = str(resolution["model"])
@@ -633,31 +681,42 @@ def invoke(
         first_notice_s=first_notice_s, notice_every_s=notice_every_s,
         tick_s=tick_s, stop_seen=stop_seen, on_waiting=on_waiting)
     usage = getattr(response, "usage", {}) or {}
-    cost: Any = None
-    try:
-        from agent_si.runtime import manager as _manager
+
+    # FXPARALLEL BEGIN charge-lock: post-call block as one unit.
+    def _charge_locked() -> Any:
         try:
-            seq = len(record.get("ledger", []) or []) if isinstance(
-                record, dict) else 0
+            from agent_si.runtime import manager as _manager
+            try:
+                seq = len(record.get("ledger", []) or []) if isinstance(
+                    record, dict) else 0
+            except Exception:
+                seq = 0
+            call_id = "%s-c%d" % (run_id, int(seq) + 1)
+            cost = _manager._charge_budget_gate(
+                str(project_id), provider, model, usage, str(call_id))
         except Exception:
-            seq = 0
-        call_id = "%s-c%d" % (run_id, int(seq) + 1)
-        cost = _manager._charge_budget_gate(
-            str(project_id), provider, model, usage, str(call_id))
-    except Exception:
-        cost = None
-    try:
-        from agent_si.runtime.devrun import records as _records
-        _records.ledger_add(
-            record, role=resolution["role"],
-            provider=provider, model=model,
-            part=part, attempt=attempt, usage=usage, cost=cost)
-    except Exception:
-        pass
-    _record_usage(app, record, project_id, run_id,
-                  provider, model, usage)
-    over = _over_cap(app, project_id, provider, model, usage)
-    return response, over
+            cost = None
+        row: Any = {}
+        try:
+            from agent_si.runtime.devrun import records as _records
+            row = _records.ledger_add(
+                record, role=resolution["role"],
+                provider=provider, model=model,
+                part=part, attempt=attempt, usage=usage, cost=cost)
+        except Exception:
+            pass
+        _record_usage(app, record, project_id, run_id,
+                      provider, model, usage)
+        over = _over_cap(app, project_id, provider, model, usage)
+        return row, over
+
+    if lock is not None:
+        with lock:
+            row, over = _charge_locked()
+    else:
+        row, over = _charge_locked()
+    # FXPARALLEL END charge-lock.
+    return response, over, row
 
 
 def new_identity(prefix: str) -> str:
