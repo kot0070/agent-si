@@ -41,39 +41,9 @@ def setup_function(_func):
     _engine.reset_state()
     _status.reset_state()
     _stats.reset_state()
-    try:
-        from agent_si.runtime import manager as _manager_home
-
-        from types import SimpleNamespace as _NS
-
-        class _AllowGate:
-            def get_state(self, pid):
-                return _NS(hard_limit="1000", spent="0", reserved="0",
-                           currency="USD", provider_spend_caps={})
-
-            def compare_and_reserve(self, *args, **kwargs):
-                return None
-
-            def release(self, *args, **kwargs):
-                return None
-
-        global _SAVED_BUDGET_GATE
-        _SAVED_BUDGET_GATE = _manager_home._BUDGET_GATE
-        _manager_home._BUDGET_GATE = _AllowGate()
-    except Exception:
-        pass
-
-
-_SAVED_BUDGET_GATE = None
 
 
 def teardown_function(_func):
-    try:
-        from agent_si.runtime import manager as _manager_home
-
-        _manager_home._BUDGET_GATE = _SAVED_BUDGET_GATE
-    except Exception:
-        pass
     _journal.reset_state()
     _rules.reset_state()
     _engine.reset_state()
