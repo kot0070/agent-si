@@ -211,6 +211,7 @@ def record_provider_usage(
     model: str,
     usage: Any,
     store_dir: str | None = None,
+    role: str | None = None,
 ) -> dict[str, Any]:
     """Record one successful provider call: cloud_calls + usage + event.
 
@@ -220,6 +221,8 @@ def record_provider_usage(
     a pricing snapshot, never invented) and one TelemetryEvent
     PROVIDER_USAGE_REPORTED referencing those metric ids. No secret material
     is stored: only provider/model names and numeric counts travel.
+    role names the calling role when the caller serves one (dev-run role
+    path); role-less calls keep role None and aggregate under "".
     """
     pid = str(project_id or "run")
     now = _utc_now()
@@ -360,6 +363,7 @@ def record_provider_usage(
         run_id=run_id,
         provider=str(provider or ""),
         model=str(model or ""),
+        role=str(role) if isinstance(role, str) and role else None,
         event_type="PROVIDER_USAGE_REPORTED",
         metric_refs=(
             cloud.metric_id, tokens.metric_id, _cost_id),
@@ -464,9 +468,20 @@ def _linked_value(
 
 def _accumulate_usage(
     store_dir: str | None = None,
+    project_id: str | None = None,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
-    """Per-model and per-provider call/token/cost evidence from the store."""
+    """Per-model and per-provider call/token/cost evidence from the store.
+
+    With project_id set, only that project's PROVIDER_USAGE_REPORTED events
+    count, so a project rail never shows another project's totals.
+    """
     usage, by_id = _usage_events(store_dir=store_dir)
+    if project_id is not None:
+        wanted = str(project_id)
+        usage = [
+            event for event in usage
+            if str(event.get("project_id")) == wanted
+        ]
     models: dict[str, dict[str, Any]] = {}
     providers: dict[str, dict[str, Any]] = {}
     for event in usage:
@@ -538,14 +553,17 @@ def get_project_aggregates(
 
 def get_model_aggregates(
     store_dir: str | None = None,
+    project_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Per-model calls/tokens/cost from store usage events, sorted by model.
 
     calls counts PROVIDER_USAGE_REPORTED events; tokens sums the linked
     MEASURED tokens_total rows; cost sums the linked MEASURED/CALCULATED
     cost rows. Unevidenced tokens/cost read "UNAVAILABLE", never 0.
+    With project_id set, only that project's events count.
     """
-    models, _providers = _accumulate_usage(store_dir=store_dir)
+    models, _providers = _accumulate_usage(
+        store_dir=store_dir, project_id=project_id)
     return [
         _finish_usage_row(model, "model", models[model])
         for model in sorted(models)
@@ -554,13 +572,73 @@ def get_model_aggregates(
 
 def get_provider_aggregates(
     store_dir: str | None = None,
+    project_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Per-provider calls/tokens/cost from store usage events, sorted."""
-    _models, providers = _accumulate_usage(store_dir=store_dir)
+    """Per-provider calls/tokens/cost from store usage events, sorted.
+
+    With project_id set, only that project's events count."""
+    _models, providers = _accumulate_usage(
+        store_dir=store_dir, project_id=project_id)
     return [
         _finish_usage_row(provider, "provider", providers[provider])
         for provider in sorted(providers)
     ]
+
+
+def _accumulate_roles(
+    store_dir: str | None = None,
+    project_id: str | None = None,
+) -> dict[tuple[str, str], dict[str, Any]]:
+    """Per (role, model) call/token/cost evidence from the store.
+
+    Role-less events bucket under role "": the Tokens tab renders that
+    bucket as Other calls, and only those calls ever land there.
+    With project_id set, only that project's events count.
+    """
+    usage, by_id = _usage_events(store_dir=store_dir)
+    if project_id is not None:
+        wanted = str(project_id)
+        usage = [
+            event for event in usage
+            if str(event.get("project_id")) == wanted
+        ]
+    roles: dict[tuple[str, str], dict[str, Any]] = {}
+    for event in usage:
+        model = event.get("model")
+        if not (isinstance(model, str) and model):
+            continue
+        raw_role = event.get("role")
+        role = str(raw_role) if isinstance(raw_role, str) and raw_role else ""
+        tokens, tokens_ok = _linked_value(
+            by_id, event, TOKENS_TOTAL_NAME, (MetricState.MEASURED.value,))
+        cost, cost_ok = _linked_value(
+            by_id, event, COST_NAME, _EVIDENCED_COST_STATES)
+        row = roles.setdefault(
+            (role, model), {"calls": 0, "token_values": [], "cost_values": []})
+        row["calls"] += 1
+        if tokens_ok:
+            row["token_values"].append(tokens)
+        if cost_ok:
+            row["cost_values"].append(cost)
+    return roles
+
+
+def get_role_aggregates(
+    store_dir: str | None = None,
+    project_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Per-role-per-model calls/tokens/cost, sorted by role then model.
+
+    Unevidenced tokens/cost read "UNAVAILABLE", never 0. Role-less events
+    aggregate under role "" (the tab's Other calls row). With project_id
+    set, only that project's events count.
+    """
+    roles = _accumulate_roles(store_dir=store_dir, project_id=project_id)
+    rows = []
+    for role, model in sorted(roles):
+        finished = _finish_usage_row(model, "model", roles[(role, model)])
+        rows.append({"role": role, **finished})
+    return rows
 
 
 def aggregates(store_dir: str | None = None) -> dict[str, Any]:
@@ -612,6 +690,7 @@ __all__ = [
     "get_model_aggregates",
     "get_project_aggregates",
     "get_provider_aggregates",
+    "get_role_aggregates",
     "load_store",
     "record_provider_usage",
     "record_run_terminated",

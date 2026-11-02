@@ -258,6 +258,12 @@ PERMISSIONS_DECIDE_ROUTE = "/api/v1/permissions/decide"
 #: Frozen FXASKA route listing recorded install decisions.
 PERMISSIONS_DECISIONS_ROUTE = "/api/v1/permissions/decisions"
 
+#: FXR1B routes: per-project installer grants plus the pending ask argv
+#: the permission dialog displays instead of the raw tool id.
+PERMISSIONS_PROJECT_GRANT_ROUTE = "/api/v1/permissions/project-grant"
+PERMISSIONS_PROJECT_GRANTS_ROUTE = "/api/v1/permissions/project-grants"
+PERMISSIONS_INSTALL_REQUEST_ROUTE = "/api/v1/permissions/install-request"
+
 #: File in the app store dir holding the persisted decision ledger.
 DECISIONS_FILENAME = "demof13w_decisions.json"
 
@@ -362,6 +368,10 @@ _BOUND_STORE_DIR: str | None = None
 #: spawn path; the file stays the durable record.
 _BOUND_DECISIONS: dict[str, dict[str, Any]] = {}
 
+#: In-process project-grant memory shared by the grant routes and the
+#: spawn path; the file stays the durable record.
+_BOUND_GRANTS: dict[str, dict[str, Any]] = {}
+
 
 def bind_decision_store(store_dir: Any) -> dict[str, dict[str, Any]]:
     """Bind the ledger store dir; reseed shared memory from the file."""
@@ -369,6 +379,8 @@ def bind_decision_store(store_dir: Any) -> dict[str, dict[str, Any]]:
     _BOUND_STORE_DIR = str(store_dir) if store_dir else None
     _BOUND_DECISIONS.clear()
     _BOUND_DECISIONS.update(load_decisions(store_dir))
+    _BOUND_GRANTS.clear()
+    _BOUND_GRANTS.update(load_project_grants(store_dir))
     return _BOUND_DECISIONS
 
 
@@ -595,3 +607,230 @@ def list_decisions(store_dir: Any = None, memory: Any = None,
             "time": str(entry.get("time", "")),
         })
     return rows
+
+
+#: File in the app store dir holding the per-project installer grants.
+PROJECT_GRANTS_FILENAME = "demof13w_project_grants.json"
+
+#: Flags that widen an install beyond installer+subcommand: a project
+#: grant never covers them (the spawn path asks again).
+WIDENING_FLAGS = frozenset(
+    {"--force", "-g", "--global", "--unsafe-perm", "--registry"})
+
+#: Longest accepted installer/subcommand word; longer values are refused.
+_GRANT_WORD_MAX_LEN = 128
+
+
+def _grant_key(project_id: str, installer: str, subcommand: str) -> str:
+    """Ledger key for one project grant (NUL-joined, never ambiguous)."""
+    return "\x00".join([project_id, installer, subcommand])
+
+
+def _valid_grant_word(value: Any, field: str) -> str:
+    """Coerced grant word, or a loud 400 for a bad one."""
+    if not isinstance(value, str) or not value.strip():
+        raise PermissionCheckError(
+            400, "DEMOF13W_GRANT_WORD_INVALID",
+            "permissions grant needs a non-empty %s string" % (field,))
+    word = value.strip()
+    if len(word) > _GRANT_WORD_MAX_LEN or "\x00" in word:
+        raise PermissionCheckError(
+            400, "DEMOF13W_GRANT_WORD_INVALID",
+            "permissions grant needs a short %s string" % (field,))
+    return word
+
+
+def require_grant_word(value: Any, field: str) -> str:
+    """Return the required grant word, else a loud 400."""
+    return _valid_grant_word(value, field)
+
+
+def _install_subcommand(words: list[str]) -> str:
+    """Subcommand word of one install argv, or empty when flag-led."""
+    if len(words) < 2:
+        return ""
+    second = str(words[1])
+    if not second or second.startswith("-"):
+        return ""
+    return second
+
+
+def _resolve_grants(store_dir: Any,
+                    memory: Any) -> tuple[Any, dict]:
+    """Fill unset grant call sites from the bound store and memory."""
+    if store_dir is None:
+        store_dir = _BOUND_STORE_DIR
+    if memory is None:
+        memory = _BOUND_GRANTS
+    return store_dir, memory
+
+
+def _grants_path(store_dir: str) -> str:
+    """Path of the persisted project-grant ledger inside the store dir."""
+    return os.path.join(store_dir, PROJECT_GRANTS_FILENAME)
+
+
+def load_project_grants(store_dir: Any) -> dict[str, dict[str, Any]]:
+    """Read the persisted project grants; unknown state reads empty."""
+    if not store_dir:
+        return {}
+    try:
+        with open(_grants_path(store_dir), encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    grants: dict[str, dict[str, Any]] = {}
+    for key, value in data.items():
+        if isinstance(key, str) and isinstance(value, dict):
+            grants[key] = {
+                "project": str(value.get("project", "")),
+                "installer": str(value.get("installer", "")),
+                "subcommand": str(value.get("subcommand", "")),
+                "time": str(value.get("time", "")),
+            }
+    return grants
+
+
+def save_project_grants(
+        store_dir: Any,
+        grants: dict[str, dict[str, Any]]) -> None:
+    """Persist the project grants with a temp file plus os.replace."""
+    if not store_dir:
+        return
+    os.makedirs(store_dir, exist_ok=True)
+    path = _grants_path(store_dir)
+    fd, tmp = tempfile.mkstemp(
+        dir=store_dir, prefix="projgrants_", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(
+                {key: grants[key] for key in sorted(grants)},
+                handle)
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
+def record_project_grant(store_dir: Any = None, memory: Any = None,
+                          project_id: str = "", installer: str = "",
+                          subcommand: str = "") -> dict[str, str]:
+    """Record one per-project installer grant; the file is durable.
+
+    Later installs by the same installer head and subcommand in this
+    project do not ask; anything else (flags, registries, heads,
+    projects) still asks through the normal path.
+    """
+    project = _valid_grant_word(project_id, "project_id")
+    head = _valid_grant_word(installer, "installer")
+    sub = _valid_grant_word(subcommand, "subcommand")
+    store_dir, memory = _resolve_grants(store_dir, memory)
+    key = _grant_key(project, head, sub)
+    merged = load_project_grants(store_dir)
+    if isinstance(memory, dict):
+        for known_key, known in memory.items():
+            if isinstance(known, dict):
+                merged[known_key] = known
+    record = {
+        "project": project,
+        "installer": head,
+        "subcommand": sub,
+        "time": _decision_now(),
+    }
+    if isinstance(memory, dict):
+        memory[key] = dict(record)
+    merged[key] = dict(record)
+    save_project_grants(store_dir, merged)
+    return dict(record)
+
+
+def remove_project_grant(store_dir: Any = None, memory: Any = None,
+                          project_id: str = "", installer: str = "",
+                          subcommand: str = "") -> bool:
+    """Remove one project grant; True when a row was present."""
+    store_dir, memory = _resolve_grants(store_dir, memory)
+    key = _grant_key(str(project_id), str(installer), str(subcommand))
+    merged = load_project_grants(store_dir)
+    if isinstance(memory, dict):
+        for known_key, known in memory.items():
+            if isinstance(known, dict) and known_key not in merged:
+                merged[known_key] = known
+    if key not in merged:
+        return False
+    del merged[key]
+    if isinstance(memory, dict):
+        memory.pop(key, None)
+    save_project_grants(store_dir, merged)
+    return True
+
+
+def get_project_grant(store_dir: Any = None, memory: Any = None,
+                       project_id: str = "", installer: str = "",
+                       subcommand: str = "") -> dict[str, str] | None:
+    """Read one project grant row; unknown grants read as none."""
+    store_dir, memory = _resolve_grants(store_dir, memory)
+    key = _grant_key(str(project_id), str(installer), str(subcommand))
+    entry = None
+    if isinstance(memory, dict):
+        entry = memory.get(key)
+    if entry is None and store_dir:
+        entry = load_project_grants(store_dir).get(key)
+    if isinstance(entry, dict):
+        return {
+            "project": str(entry.get("project", "")),
+            "installer": str(entry.get("installer", "")),
+            "subcommand": str(entry.get("subcommand", "")),
+            "time": str(entry.get("time", "")),
+        }
+    return None
+
+
+def list_project_grants(store_dir: Any = None, memory: Any = None,
+                         project_id: str = "") -> list[dict[str, str]]:
+    """List grant rows for one project, ordered by installer."""
+    store_dir, memory = _resolve_grants(store_dir, memory)
+    merged = load_project_grants(store_dir)
+    if isinstance(memory, dict):
+        for key, value in memory.items():
+            if isinstance(value, dict):
+                merged[key] = value
+    rows: list[dict[str, str]] = []
+    for key in sorted(merged):
+        entry = merged[key]
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("project", "")) != str(project_id):
+            continue
+        rows.append({
+            "project_id": str(entry.get("project", "")),
+            "installer": str(entry.get("installer", "")),
+            "subcommand": str(entry.get("subcommand", "")),
+            "time": str(entry.get("time", "")),
+        })
+    rows.sort(key=lambda row: (row["installer"], row["subcommand"]))
+    return rows
+
+
+def install_grant_allows(project_id: Any, words: Any) -> bool:
+    """True when a project grant covers these exact install words.
+
+    Cover means the same installer head and subcommand in the same
+    project with no widening flag (--force, -g, --global,
+    --unsafe-perm, --registry) anywhere in the words.
+    """
+    if not isinstance(words, (list, tuple)) or len(words) < 2:
+        return False
+    argv = [str(word) for word in words]
+    if any(not word for word in argv):
+        return False
+    subcommand = _install_subcommand(argv)
+    if not argv[0] or not subcommand:
+        return False
+    for word in argv[1:]:
+        if word in WIDENING_FLAGS or word.startswith("--registry="):
+            return False
+    return get_project_grant(
+        None, None, str(project_id), argv[0], subcommand) is not None

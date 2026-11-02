@@ -389,10 +389,19 @@ def register_read_routes(app: Any) -> Any:
             return base
         project = _telemetry_run_store.get_project_aggregates(
             str(project_id), store_dir=directory)
+        # FXTELEM: per-model/per-provider aggregates scope to the requested
+        # project, so the rail's per-model rows add up to this project's
+        # total instead of a global sum across projects. The legacy totals
+        # above stay global (other lanes pin their exact shape).
         models = _telemetry_run_store.get_model_aggregates(
-            store_dir=directory)
+            store_dir=directory, project_id=str(project_id))
         providers = _telemetry_run_store.get_provider_aggregates(
-            store_dir=directory)
+            store_dir=directory, project_id=str(project_id))
+        # FXTELEM roles: per-role-per-model aggregates for the Tokens tab,
+        # so role rows carry the served per-call numbers (same events as
+        # the models rows, grouped by the role recorded at record time).
+        roles = _telemetry_run_store.get_role_aggregates(
+            store_dir=directory, project_id=str(project_id))
         unavailable: list = []
         if project.get("tasks") is None:
             unavailable.append("project.tasks")
@@ -413,6 +422,7 @@ def register_read_routes(app: Any) -> Any:
             "project": project,
             "models": models,
             "providers": providers,
+            "roles": roles,
             "source": "telemetry_store",
             "unavailable": sorted(unavailable),
         })

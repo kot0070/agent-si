@@ -651,11 +651,10 @@ def _cap_block(app: Any, project_id: str, provider: str) -> str | None:
 
 
 def _record_usage(app: Any, record: Any, project_id: str, run_id: str,
-                  provider: str, model: str, usage: Any) -> None:
-    """One telemetry row per call; never raises into the run."""
+                  provider: str, model: str, usage: Any,
+                  role: Any = None, cost: Any = None) -> None:
+    """One telemetry row per call (with role), plus metered-call log; never raises."""
     try:
-        from agent_si.telemetry import run_store as _store
-
         task_id = ""
         try:
             if isinstance(record, dict):
@@ -664,12 +663,96 @@ def _record_usage(app: Any, record: Any, project_id: str, run_id: str,
                 task_id = str(getattr(record, "task", "") or "")
         except Exception:
             task_id = ""
-        _store.record_provider_usage(
-            project_id=str(project_id), task_id=task_id,
-            run_id=str(run_id), provider=str(provider),
-            model=str(model), usage=usage)
+        try:
+            from agent_si.telemetry import run_store as _store
+
+            _store.record_provider_usage(
+                project_id=str(project_id), task_id=task_id,
+                run_id=str(run_id), provider=str(provider),
+                model=str(model), usage=usage,
+                role=str(role) if isinstance(role, str) and role else None)
+        except Exception:
+            pass
+        try:
+            _METERED_CALLS.append({
+                "project_id": str(project_id), "task_id": task_id,
+                "run_id": str(run_id), "role": str(role or "devrun"),
+                "provider": str(provider), "model": str(model),
+                "cost": cost,
+            })
+        except Exception:
+            pass
     except Exception:
         pass
+
+
+#: Every metered model call this process settled (role confirmation
+#: surface for the chat and AI-test entries, which carry no devrun
+#: ledger row). Appended only; never raises; probe isolation reads a
+#: snapshot via metered_calls.
+_METERED_CALLS: list = []
+
+
+def metered_calls() -> tuple:
+    """Snapshot of every metered call settled so far (oldest first)."""
+    return tuple(_METERED_CALLS)
+
+
+def admit_role_call(gate: Any, *, project_id: str, task_id: str,
+                    run_id: str, role: str, provider_id: str) -> None:
+    """Admit one named-role model call before it runs (HE19-1 shared).
+
+    The same admission every metered entry shares: a zero-amount
+    reserve under ``admit-<run>-<role>`` that raises the gate's own
+    BudgetBlockedError when the provider cap or hard limit is already
+    reached, so the provider is never invoked past a hard cap. A
+    missing gate allows the call (the post-call charge still reports
+    UNAVAILABLE); any other gate failure also allows it.
+    """
+    from agent_si.runtime import manager as _manager
+
+    _manager.admit_budget_call(
+        gate, str(project_id), str(provider_id), str(task_id),
+        str(run_id), "admit-%s-%s" % (str(run_id), str(role)))
+
+
+def settle_role_call(*, project_id: str, task_id: str, run_id: str,
+                     role: str, provider_id: str, model: str,
+                     usage: Any) -> Any:
+    """Telemetry plus charge for one named-role model call (HE19-1 shared).
+
+    Records the provider usage row, settles the spend through the
+    budget gate, and logs the call (with its role) on metered_calls.
+    Never raises; returns the charged cost (None when unknown).
+    """
+    provider = str(provider_id)
+    name = str(model)
+    try:
+        from agent_si.telemetry import run_store as _store
+
+        _store.record_provider_usage(
+            project_id=str(project_id), task_id=str(task_id),
+            run_id=str(run_id), provider=provider,
+            model=name, usage=usage)
+    except Exception:
+        pass
+    cost: Any = None
+    try:
+        from agent_si.runtime import manager as _manager
+
+        cost = _manager._charge_budget_gate(
+            str(project_id), provider, name, usage, str(run_id))
+    except Exception:
+        cost = None
+    try:
+        _METERED_CALLS.append({
+            "project_id": str(project_id), "task_id": str(task_id),
+            "run_id": str(run_id), "role": str(role),
+            "provider": provider, "model": name, "cost": cost,
+        })
+    except Exception:
+        pass
+    return cost
 
 
 def invoke(
@@ -757,15 +840,17 @@ def invoke_owned(
         raise _BudgetOut(blocked)
     try:
         from agent_si.budget.gate import BudgetBlockedError as _AdmitBlocked
-        from agent_si.runtime import manager as _manager
 
         ctx = getattr(getattr(app, "state", None), "k04_ctx", None)
-        _manager.admit_budget_call(
-            getattr(ctx, "budget_state", None), str(project_id),
-            provider, str(record.get("task") if isinstance(
-                record, dict) else ""),
-            str(run_id),
-            "admit-%s-%s-a%d" % (run_id, str(part), int(attempt)))
+        try:
+            task_name = str(record.get("task") if isinstance(
+                record, dict) else "")
+        except Exception:
+            task_name = ""
+        admit_role_call(
+            getattr(ctx, "budget_state", None), project_id=str(project_id),
+            task_id=task_name, run_id=str(run_id),
+            role=str(resolution.get("role", "devrun")), provider_id=provider)
     except _BudgetOut:
         raise
     except _AdmitBlocked as _admit_exc:
@@ -802,6 +887,7 @@ def invoke_owned(
     def _charge_locked() -> Any:
         try:
             from agent_si.runtime import manager as _manager
+
             try:
                 seq = len(record.get("ledger", []) or []) if isinstance(
                     record, dict) else 0
@@ -822,7 +908,10 @@ def invoke_owned(
         except Exception:
             pass
         _record_usage(app, record, project_id, run_id,
-                      provider, model, usage)
+                      provider, model, usage,
+                      role=resolution.get("role")
+                      if isinstance(resolution, dict) else None,
+                      cost=cost)
         over = _over_cap(app, project_id, provider, model, usage)
         return row, over
 

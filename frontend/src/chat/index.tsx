@@ -68,8 +68,11 @@ import { readRoleProfiles } from "../settings/index";
 import { Icon } from "../ui/icons";
 import {
   askPermission,
+  installDisplayCommand,
   isInstallPermissionAsk,
   pt,
+  readInstallArgv,
+  recordProjectGrant,
 } from "./permissions";
 import type { InstallPermissionAsk } from "./permissions";
 
@@ -146,10 +149,16 @@ interface ChatPump {
 
 const pumps = new Map<string, ChatPump>();
 
-// Executed engine turns (done event with executed:true) hide the verdict
-// card (D6(b), FXDESIGN6). The store shape is frozen, so the per-message
-// engine flag lives here, keyed by the unique store message id.
-const engineRunMessages = new Set<string>();
+// A card shows ONLY for a live waiting proposal: the stream's own
+// clean terminal event marks the message id here. Default is no card —
+// history, failed, stopped, engine and interrupted turns never mark,
+// so a restart or a remount can never resurrect one. The store shape
+// is frozen, so the per-message mark lives here, keyed by the unique
+// store message id.
+const proposalMessages = new Set<string>();
+
+// Stopped-turn assistants show one plain stopped line instead of the card.
+const stoppedAssistants = new Set<string>();
 
 // Assistant placeholders pruned after a failed stream (the store is
 // append/patch only). Render filters these ids out.
@@ -436,6 +445,11 @@ function buildHistoryBatch(
         at,
         final: true,
       });
+      if (turn.status === "stopped") {
+        // Stopped turns show one plain stopped line instead of a card.
+        // History never marks a proposal: default is no card.
+        stoppedAssistants.add(assistantId);
+      }
     }
     if (turn.status === "failed" || turn.status === "stopped") {
       sawTerminal = true;
@@ -814,8 +828,10 @@ function startChatRun(
           (message) => message.id === assistantId,
         )?.text ?? "";
       if (aborted) {
-        // Stop closes the run as stopped: stored, never Working.
+        // Stop closes the run as stopped: stored, never Working. No
+        // card mark: a stopped turn is never a waiting proposal.
         patchChatMessage(key, assistantId, { final: false });
+        stoppedAssistants.add(assistantId);
         void recordTurnBestEffort(projectId, text, answer, {
           status: "stopped",
           run_id: runId,
@@ -837,8 +853,11 @@ function startChatRun(
       } else {
         setChatHealth(key, "ok");
         patchChatMessage(key, assistantId, { final: true });
-        if (executed === true) {
-          engineRunMessages.add(assistantId);
+        // The stream's own clean terminal event marks the waiting
+        // proposal — the ONLY card path. Engine turns (executed) never
+        // mark, so they never show a card, live or reloaded.
+        if (executed !== true) {
+          proposalMessages.add(assistantId);
         }
         void recordTurnBestEffort(projectId, text, answer, {
           status: "ok",
@@ -891,6 +910,25 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
   const [pendingAsk, setPendingAsk] = useState<InstallPermissionAsk | null>(
     null,
   );
+  // FXR1B: pinned argv behind the pending install ask, for the real
+  // command display (never the raw tool key). Null until loaded or when
+  // the ask carries no pinned words.
+  const [askArgv, setAskArgv] = useState<readonly string[] | null>(null);
+  useEffect(() => {
+    if (pendingAsk === null) {
+      setAskArgv(null);
+      return;
+    }
+    let alive = true;
+    void readInstallArgv(pendingAsk.toolName).then((argv) => {
+      if (alive) {
+        setAskArgv(argv);
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, [pendingAsk]);
   // FXHARD1: earlier-page cursor from the served history page (null at
   // the oldest turn) plus the load-earlier busy flag.
   const [cursor, setCursor] = useState<string | null>(null);
@@ -1182,7 +1220,13 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
     startChatRun(client, props.projectId, compacted);
   };
 
-  const answerAsk = (allow: boolean): void => {
+  // FXR1B: three answers for an install hold — "once" replays the
+  // parked run and asks again next time, "project" records a
+  // server-side installer grant (same head + subcommand, no widening
+  // flags, this project only) and replays, "deny" closes the part with
+  // a plain FAILED line and never resends. The card and the chat lines
+  // name the real command, never the raw tool key.
+  const answerAsk = (mode: "once" | "project" | "deny"): void => {
     const ask = pendingAskRef.current;
     if (ask === null) {
       return;
@@ -1190,54 +1234,76 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
     pendingAskRef.current = null;
     setPendingAsk(null);
     clearAskStash(key);
+    const command = installDisplayCommand(
+      ask.toolName,
+      props.projectId,
+      askArgv,
+    );
     if (isInstallHoldTool(ask.toolName)) {
+      if (mode === "project") {
+        void recordProjectGrant(props.projectId, ask.toolName).then(
+          () => {
+            noteInstallAnswer(ask, command, true);
+            replayParkedRun();
+          },
+          () => {
+            emitBlocking(key, {
+              errorKey: "errors.generic",
+              code: "UNKNOWN",
+            });
+          },
+        );
+        return;
+      }
+      if (mode === "deny") {
+        // FXASKB B2: record the decision with the session token. Deny
+        // closes the part with a plain FAILED line; the run does not
+        // loop, so nothing resends.
+        void requestResponse(PERMISSIONS_DECIDE_ROUTE, {
+          method: "POST",
+          kind: "write",
+          body: {
+            tool_id: ask.toolName,
+            decision: "deny",
+            project_id: props.projectId,
+          },
+        }).then(
+          () => {
+            const current = noteInstallAnswer(ask, command, false);
+            const prompt = lastSentBySlice.get(key) ?? null;
+            if (prompt !== null) {
+              const runId = runIdBySlice.get(key) ?? "";
+              void recordTurnBestEffort(props.projectId, prompt, current, {
+                status: "failed",
+                run_id: runId,
+                error_code: "DENIED",
+              });
+            }
+          },
+          () => {
+            emitBlocking(key, {
+              errorKey: "errors.generic",
+              code: "UNKNOWN",
+            });
+          },
+        );
+        return;
+      }
       // FXASKB B2: record the decision with the session token, then
       // resend the same prompt automatically; the stored answer lets
       // the run continue without asking again.
-      const decision = allow ? "allow" : "deny";
       void requestResponse(PERMISSIONS_DECIDE_ROUTE, {
         method: "POST",
         kind: "write",
         body: {
           tool_id: ask.toolName,
-          decision,
+          decision: "allow",
           project_id: props.projectId,
         },
       }).then(
         () => {
-          const note = allow
-            ? pt(
-                "chat.permission.allowed",
-                "Install permission granted for '{tool}'.",
-                { tool: ask.toolName },
-              )
-            : pt(
-                "chat.permission.denied",
-                "Install permission denied for '{tool}'.",
-                { tool: ask.toolName },
-              );
-          const current = getChatState(key).messages.find(
-            (message) => message.id === ask.messageId,
-          );
-          if (current !== undefined) {
-            patchChatMessage(key, ask.messageId, {
-              text:
-                current.text === "" ? note : `${current.text}\n${note}`,
-              decided: allow ? "accepted" : "rejected",
-            });
-          }
-          const prompt = lastSentBySlice.get(key) ?? null;
-          // Replay once, one visible user turn: the decision is recorded,
-          // then the same prompt resends without the user copy (the held
-          // message keeps only the receipt; the terminal write upserts
-          // the opening run id into one stored turn).
-          if (prompt !== null) {
-            const replayRunId = runIdBySlice.get(key);
-            startChatRun(client, props.projectId, prompt, {
-              skipUserAppend: true,
-              ...(replayRunId === undefined ? {} : { runId: replayRunId }),
-            });
-          }
+          noteInstallAnswer(ask, command, true);
+          replayParkedRun();
         },
         () => {
           emitBlocking(key, { errorKey: "errors.generic", code: "UNKNOWN" });
@@ -1247,24 +1313,25 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
     }
     void askPermission(ask.toolName).then(
       () => {
-        const note = allow
-          ? pt(
-              "chat.permission.allowed",
-              "Install permission granted for '{tool}'.",
-              { tool: ask.toolName },
-            )
-          : pt(
-              "chat.permission.denied",
-              "Install permission denied for '{tool}'.",
-              { tool: ask.toolName },
-            );
+        const note =
+          mode === "deny"
+            ? pt(
+                "chat.permission.denied",
+                "Install permission denied for {command}",
+                { command },
+              )
+            : pt(
+                "chat.permission.allowed",
+                "Install permission granted for {command}",
+                { command },
+              );
         const current = getChatState(key).messages.find(
           (message) => message.id === ask.messageId,
         );
         if (current !== undefined) {
           patchChatMessage(key, ask.messageId, {
             text: current.text === "" ? note : `${current.text}\n${note}`,
-            decided: allow ? "accepted" : "rejected",
+            decided: mode === "deny" ? "rejected" : "accepted",
           });
         }
       },
@@ -1273,6 +1340,50 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
       },
     );
   };
+
+  function noteInstallAnswer(
+    ask: InstallPermissionAsk,
+    command: string,
+    granted: boolean,
+  ): string {
+    const note = granted
+      ? pt(
+          "chat.permission.allowed",
+          "Install permission granted for {command}",
+          { command },
+        )
+      : pt(
+          "chat.permission.denied",
+          "Install permission denied for {command}",
+          { command },
+        );
+    const current = getChatState(key).messages.find(
+      (message) => message.id === ask.messageId,
+    );
+    if (current !== undefined) {
+      patchChatMessage(key, ask.messageId, {
+        text: current.text === "" ? note : `${current.text}\n${note}`,
+        decided: granted ? "accepted" : "rejected",
+      });
+      return current.text === "" ? note : `${current.text}\n${note}`;
+    }
+    return note;
+  }
+
+  function replayParkedRun(): void {
+    const prompt = lastSentBySlice.get(key) ?? null;
+    // Replay once, one visible user turn: the same prompt resends
+    // without the user copy (the held message keeps only the receipt;
+    // the terminal write upserts the opening run id into one stored
+    // turn).
+    if (prompt !== null) {
+      const replayRunId = runIdBySlice.get(key);
+      startChatRun(client, props.projectId, prompt, {
+        skipUserAppend: true,
+        ...(replayRunId === undefined ? {} : { runId: replayRunId }),
+      });
+    }
+  }
 
   const decide = (id: string, decided: "accepted" | "rejected"): void => {
     const proposal =
@@ -1408,10 +1519,20 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
                 </button>
               ) : null}
               {message.role === "assistant" &&
+              stoppedAssistants.has(message.id) ? (
+                <span
+                  data-testid="chat-stopped-line"
+                  role="status"
+                  className="fx-quiet"
+                >
+                  {pt("chat.stream.stopped", "Stopped")}
+                </span>
+              ) : null}
+              {message.role === "assistant" &&
+              proposalMessages.has(message.id) &&
               message.final &&
               message.text !== "" &&
               message.decided === undefined &&
-              !engineRunMessages.has(message.id) &&
               !streaming ? (
                 <ApprovalCard
                   proposal={message.text}
@@ -1455,25 +1576,54 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
             <p>
               {pt(
                 "chat.permission.body",
-                "The run needs install permission for '{tool}'.",
-                { tool: pendingAsk.toolName },
+                "The run wants to execute “{command}”.",
+                {
+                  command: installDisplayCommand(
+                    pendingAsk.toolName,
+                    props.projectId,
+                    askArgv,
+                  ),
+                },
               )}
             </p>
-            <p data-testid="permission-tool">{pendingAsk.toolName}</p>
+            <p data-testid="permission-why" className="fx-quiet">
+              {pt(
+                "chat.permission.why",
+                "It installs packages the task needs to continue.",
+              )}
+            </p>
+            <p data-testid="permission-tool">
+              {installDisplayCommand(
+                pendingAsk.toolName,
+                props.projectId,
+                askArgv,
+              )}
+            </p>
             <button
               type="button"
               data-testid="permission-allow"
               onClick={() => {
-                answerAsk(true);
+                answerAsk("once");
               }}
             >
-              {pt("chat.permission.allow", "Allow")}
+              {pt("chat.permission.allowOnce", "Allow once")}
             </button>
+            {isInstallHoldTool(pendingAsk.toolName) ? (
+              <button
+                type="button"
+                data-testid="permission-allow-project"
+                onClick={() => {
+                  answerAsk("project");
+                }}
+              >
+                {pt("chat.permission.allowProject", "For this project")}
+              </button>
+            ) : null}
             <button
               type="button"
               data-testid="permission-deny"
               onClick={() => {
-                answerAsk(false);
+                answerAsk("deny");
               }}
             >
               {pt("chat.permission.deny", "Deny")}
@@ -1533,9 +1683,19 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
             <span>{directorModel ?? t("chat.hierarchy.auto")}</span>
             <span>{statusRoute()}</span>
             <span>
-              {streaming
-                ? t("chat.composer.statusWorking")
-                : t("chat.composer.statusReady")}
+              {streaming ? (
+                <>
+                  <span
+                    data-testid="chat-spinner"
+                    role="status"
+                    aria-label={t("chat.stream.spinner")}
+                    className="fx-spin"
+                  />
+                  <span>{t("chat.composer.statusWorking")}</span>
+                </>
+              ) : (
+                t("chat.composer.statusReady")
+              )}
             </span>
           </p>
           {streaming && draft.trim() !== "" ? (
@@ -1547,17 +1707,13 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
             </span>
           ) : null}
           {streaming ? (
-            <span data-testid="chat-spinner" role="status" className="fx-quiet">
-              {t("chat.stream.spinner")}
-            </span>
-          ) : null}
-          {streaming ? (
             <button
               type="button"
               data-testid="chat-abort"
               className="fx-btn-quiet"
               onClick={handleAbort}
             >
+              <span className="fx-spin" aria-hidden="true" />
               {t("chat.abort.cancel")}
             </button>
           ) : null}
