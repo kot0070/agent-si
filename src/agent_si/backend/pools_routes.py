@@ -380,8 +380,9 @@ def set_role(ctx: RoutingCtx, query, body) -> Tuple[int, Dict]:
     if mode == "PINNED" and (not provider or not model):
         return 400, {"error": "PINNED needs provider and model"}
     if mode in ("pool",) and not body.get("pool"):
-        # pool mode without members: profile stored, binding required later
-        pass
+        # pool mode without members: plain refusal, nothing stored
+        # (an empty pool would only BLOCK later at resolve).
+        return 400, {"error": "pool needs at least one member"}
     profile = T.RoleModelProfile(
         role=role, project_id=project_id, mode=mode,
         provider=provider if mode == "PINNED" else None,
@@ -718,6 +719,21 @@ def _chat_project_known(ctx: RoutingCtx, project_id: str) -> bool:
         if get_chat_record(ctx, project_id) is not None:
             return True
     return False
+
+
+def get_chat_model(ctx: RoutingCtx, query, body) -> Tuple[int, Dict]:
+    """Read one project's saved chat model (GET /api/v1/roles/chat-model).
+
+    Same project key as the PUT; answers 200 with the saved model_id or
+    null when the registry holds no chat record. A read needs no token.
+    """
+    _ = body
+    project_id = _q(query or {}, "project_id", None)
+    if not (isinstance(project_id, str) and project_id.strip()):
+        return 400, {"error": "project_id required"}
+    record = get_chat_record(ctx, project_id)
+    model_id = record["model_id"] if record is not None else None
+    return 200, {"project_id": project_id, "model_id": model_id}
 
 
 def put_chat_model(ctx: RoutingCtx, query, body) -> Tuple[int, Dict]:
@@ -1604,6 +1620,8 @@ def _d9_merge():
          _guarded_write("kb_proposal_apply", _modelkb.kb_proposal_apply)),
         ("put", "/api/v1/roles/chat-model", "put_chat_model",
          _guarded_write("put_chat_model", put_chat_model)),
+        ("get", "/api/v1/roles/chat-model", "get_chat_model",
+         get_chat_model),
     )
     frozen_keys = {(method.lower(), path) for method, path, _n, _f in frozen}
     legacy = []

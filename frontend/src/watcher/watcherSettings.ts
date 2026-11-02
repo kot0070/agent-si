@@ -21,8 +21,13 @@ export interface WatcherSettings {
 /** localStorage namespace for every watcher setting key. */
 export const WATCHER_SETTINGS_NAMESPACE = "agent_si.watcher.";
 
-/** Storage key for the tab-level watcher settings record. */
+/** Storage key for the tab-level watcher settings record (legacy, project-less). */
 export const WATCHER_SETTINGS_KEY = `${WATCHER_SETTINGS_NAMESPACE}settings`;
+
+/** Storage key for one project's tab-level watcher settings record. */
+export function watcherSettingsKey(projectId: string): string {
+  return `${WATCHER_SETTINGS_NAMESPACE}${projectId}.settings`;
+}
 
 /** Storage key prefix for one rule card's model choice. */
 export const WATCHER_CARD_MODEL_PREFIX = `${WATCHER_SETTINGS_NAMESPACE}card.`;
@@ -65,9 +70,20 @@ function writeStored(key: string, value: string): void {
   }
 }
 
+/** One stored key read: the project key, else one read of the old key. */
+function readProjectOrLegacy(projectKey: string, legacyKey: string): string | null {
+  const raw = readStored(projectKey);
+  if (raw !== null) {
+    return raw;
+  }
+  return readStored(legacyKey);
+}
+
 /** Load the tab settings; unknown or missing fields fall back to defaults. */
-export function loadWatcherSettings(): WatcherSettings {
-  const raw = readStored(WATCHER_SETTINGS_KEY);
+export function loadWatcherSettings(projectId?: string | null): WatcherSettings {
+  const raw = projectId
+    ? readProjectOrLegacy(watcherSettingsKey(projectId), WATCHER_SETTINGS_KEY)
+    : readStored(WATCHER_SETTINGS_KEY);
   if (raw === null) {
     return { ...DEFAULT_WATCHER_SETTINGS };
   }
@@ -92,49 +108,78 @@ export function loadWatcherSettings(): WatcherSettings {
   };
 }
 
-/** Persist the tab settings locally. */
-export function saveWatcherSettings(settings: WatcherSettings): void {
+/** Persist the tab settings locally (per project when given). */
+export function saveWatcherSettings(
+  settings: WatcherSettings,
+  projectId?: string | null,
+): void {
   const record: WatcherSettings = {
     model: isWatcherModel(settings.model)
       ? settings.model
       : DEFAULT_WATCHER_SETTINGS.model,
     cloudFallback: settings.cloudFallback === true,
   };
-  writeStored(WATCHER_SETTINGS_KEY, JSON.stringify(record));
+  writeStored(
+    projectId ? watcherSettingsKey(projectId) : WATCHER_SETTINGS_KEY,
+    JSON.stringify(record),
+  );
 }
 
 /** Record the tab-level model choice locally; returns the stored settings. */
-export function setWatcherModel(model: WatcherModel): WatcherSettings {
-  const next: WatcherSettings = { ...loadWatcherSettings(), model };
-  saveWatcherSettings(next);
+export function setWatcherModel(
+  model: WatcherModel,
+  projectId?: string | null,
+): WatcherSettings {
+  const next: WatcherSettings = { ...loadWatcherSettings(projectId), model };
+  saveWatcherSettings(next, projectId);
   return next;
 }
 
 /** Record the cloud-fallback switch locally; returns the stored settings. */
-export function setCloudFallback(enabled: boolean): WatcherSettings {
+export function setCloudFallback(
+  enabled: boolean,
+  projectId?: string | null,
+): WatcherSettings {
   const next: WatcherSettings = {
-    ...loadWatcherSettings(),
+    ...loadWatcherSettings(projectId),
     cloudFallback: enabled === true,
   };
-  saveWatcherSettings(next);
+  saveWatcherSettings(next, projectId);
   return next;
 }
 
-/** Storage key for one rule card's model choice. */
-export function cardModelKey(cardId: string): string {
+/** Storage key for one rule card's model choice (per project when given). */
+export function cardModelKey(cardId: string, projectId?: string | null): string {
+  if (projectId) {
+    return `${WATCHER_SETTINGS_NAMESPACE}${projectId}.card.${cardId}.model`;
+  }
   return `${WATCHER_CARD_MODEL_PREFIX}${cardId}${WATCHER_CARD_MODEL_SUFFIX}`;
 }
 
 /** Load one rule card's model choice; defaults to the local model. */
-export function loadCardModel(cardId: string): WatcherModel {
-  const raw = readStored(cardModelKey(cardId));
+export function loadCardModel(
+  cardId: string,
+  projectId?: string | null,
+): WatcherModel {
+  const key = projectId ? cardModelKey(cardId, projectId) : cardModelKey(cardId);
+  let raw = readStored(key);
+  if (raw === null && projectId) {
+    raw = readStored(cardModelKey(cardId));
+  }
   return isWatcherModel(raw) ? raw : "local";
 }
 
 /** Persist one rule card's model choice locally (no network calls). */
-export function saveCardModel(cardId: string, model: WatcherModel): void {
+export function saveCardModel(
+  cardId: string,
+  model: WatcherModel,
+  projectId?: string | null,
+): void {
   if (!isWatcherModel(model)) {
     return;
   }
-  writeStored(cardModelKey(cardId), model);
+  writeStored(
+    projectId ? cardModelKey(cardId, projectId) : cardModelKey(cardId),
+    model,
+  );
 }

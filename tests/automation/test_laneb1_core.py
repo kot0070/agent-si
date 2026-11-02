@@ -355,6 +355,9 @@ def test_p7_resume_time_guard_refuses():
         "proj-a", "tpl-nightly", now=2000.0, resume_window_s=10.0
     )
     runner.cancel_run("proj-a", started.run_id, reason="restart")
+    # FXHIGH-2: resume is fail-closed on budget; bind an allow hook so
+    # this test proves the time guard (not the budget guard) refuses.
+    runner.set_budget_hook(lambda project_id: True)
     with pytest.raises(AutomationError) as excinfo:
         runner.resume("proj-a", started.run_id, now=2000.0 + 3600.0)
     assert _code(excinfo) == "AUTOMATION_PAUSED"

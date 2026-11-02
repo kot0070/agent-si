@@ -54,6 +54,7 @@ import { ThemeToggle } from "../shell/ThemeToggle";
 import { ContractDefaultsBar } from "../settings/ContractDefaultsBar";
 import { Inspector } from "../shell/Inspector";
 import { ClosingGuard } from "../shell/ClosingGuard";
+import { useLivePumpActive } from "../chat/index";
 import type { ProjectViewName } from "../projects/ProjectView";
 import { LocaleCoverage } from "../k07next/LocaleCoverage";
 import { TelemetryThemes } from "../k07next/TelemetryThemes";
@@ -691,6 +692,8 @@ function FirstRunRoute(props: {
 function AppShellInner(): ReactElement {
   const current = useCurrentProject();
   const projectId = current.projectId;
+  // FXSAVED item 5: arm the close warning while any chat pump streams.
+  const livePump = useLivePumpActive();
   const [chatPrefill, setChatPrefill] = useState<string | null>(null);
   const [chatOneShot, setChatOneShot] = useState<{
     projectId: string;
@@ -711,7 +714,7 @@ function AppShellInner(): ReactElement {
           keyboard tabbing reads the working area before the rails. The
           grid areas keep the visuals unchanged. */}
       <main data-testid="app-main">
-        <ClosingGuard armed={false} confirmKey="shell.closing.confirm">
+        <ClosingGuard armed={livePump} confirmKey="shell.closing.confirm">
           <Suspense
             fallback={<LoadingState loadingKey="ui.loading.more" />}
           >
@@ -838,15 +841,25 @@ function AppShell(): ReactElement {
   // FXPROJ J1: first selection rides the shared list load in the same
   // tick (no extra fetch, no extra render hop). Later loads never
   // reselect: the ref guards the null case at call time.
+  // FXSAVED item 3: a stored pick restores as-is (ApiClientProvider
+  // inits from the same localStorage); a stored id of a deleted
+  // project is a ghost: fall back to rows[0] and rewrite the store
+  // through select. No second clear here: FXOPEN owns
+  // CurrentProject.clear() (SH-04) and reuses this same key.
   const selectionRef = useRef(current.projectId);
   selectionRef.current = current.projectId;
   const selectFirst = useCallback(
     (rows: ProjectRecord[]) => {
-      if (selectionRef.current !== null) {
+      const first = rows[0];
+      if (first === undefined) {
         return;
       }
-      const first = rows[0];
-      if (first !== undefined) {
+      const stored = selectionRef.current;
+      if (stored === null) {
+        current.select(first.project_id);
+        return;
+      }
+      if (!rows.some((row) => row.project_id === stored)) {
         current.select(first.project_id);
       }
     },

@@ -150,6 +150,40 @@ interface ChatPump {
 
 const pumps = new Map<string, ChatPump>();
 
+// FXSAVED item 5: live-pump signal for the close warning. True while any
+// chat pump drives a stream; the shell ClosingGuard arms on it through
+// useSyncExternalStore, so closing the window mid-run warns while an
+// idle app closes quietly.
+const pumpListeners = new Set<() => void>();
+let pumpVersion = 0;
+
+function emitPumpsChanged(): void {
+  pumpVersion += 1;
+  for (const notify of [...pumpListeners]) {
+    notify();
+  }
+}
+
+export function subscribeLivePumps(listener: () => void): () => void {
+  pumpListeners.add(listener);
+  return () => {
+    pumpListeners.delete(listener);
+  };
+}
+
+/** True while any chat pump drives a stream (test and guard probe). */
+export function hasLivePump(): boolean {
+  return pumps.size > 0;
+}
+
+export function useLivePumpActive(): boolean {
+  return useSyncExternalStore(
+    subscribeLivePumps,
+    () => pumps.size > 0,
+    () => pumps.size > 0,
+  );
+}
+
 // A card shows ONLY for a live waiting proposal: the stream's own
 // clean terminal event marks the message id here. Default is no card —
 // history, failed, stopped, engine and interrupted turns never mark,
@@ -1162,9 +1196,11 @@ function startChatRun(
     prompt: text,
     assistantId,
   });
+  emitPumpsChanged();
   runner.done.then(
     ({ aborted, executed }) => {
       pumps.delete(key);
+      emitPumpsChanged();
       setChatRunner(key, { streamId: null, streaming: false });
       const answer =
         getChatState(key).messages.find(
@@ -1228,6 +1264,7 @@ function startChatRun(
     },
     (error: unknown) => {
       pumps.delete(key);
+      emitPumpsChanged();
       setChatRunner(key, { streamId: null, streaming: false });
       handleRunError(key, assistantId, error, {
         projectId,
