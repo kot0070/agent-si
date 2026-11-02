@@ -1,9 +1,9 @@
 # Scene plan — ONE 3-minute 14-function cut (matches demo-script.md)
 
 Scope (production note, not visitor text): owned file `SUBMISSION/K12/scene-plan.md`.
+Status: claim evidence is tracked in `SUBMISSION/ANSWERS_DRAFT.md`.
 Same ONE script as `demo-script.md`: same 14 scenes, same seconds, same play order.
-Total 174s (<=180s). Every scene evidence is `PENDING-DRIVE` (all F01-F14 NOT
-STARTED per `DIRECTOR/FUNCTIONS_CHECKLIST.md` lines 6-19 at write time).
+Total 174s (<=180s). Every scene evidence is `PENDING-DRIVE`.
 
 ## Play order (seconds match demo-script.md exactly)
 
