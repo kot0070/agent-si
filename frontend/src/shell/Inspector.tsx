@@ -19,6 +19,7 @@ import { useApiClient } from "../app/ApiClientProvider";
 import { useLiveRows } from "../agents/liveStore";
 import { readLedgerWithRuns } from "../api/projectsApi";
 import type { RunLedgerRow } from "../api/projectsApi";
+import { dedupeLiveRows, readLiveExtras } from "../projects/viewsApi";
 import { readProjectTelemetry } from "../k07next2/k07next2Api";
 import type { ProjectTelemetry } from "../k07next2/k07next2Api";
 import { ApiError, requestResponse } from "../api/errors";
@@ -33,6 +34,7 @@ import {
 import { Icon } from "../ui/icons";
 import { remainingBudget } from "../projects/projectsApi";
 import { MetricCard } from "../ui/MetricCard";
+import { useKitExpanded } from "../ui/Card";
 import { fetchAppsCard } from "../watcher/AppsCard";
 import type { AppsCardData } from "../watcher/AppsCard";
 import {
@@ -185,6 +187,9 @@ export function Inspector(props: InspectorProps): ReactElement {
   const [budget, setBudget] = useState<BudgetState | null>(null);
   const [watcherStatus, setWatcherStatus] =
     useState<WatcherStatusData | null>(null);
+  const [providers, setProviders] = useState<string[] | null>(null);
+  const [testRuns, setTestRuns] = useState<string | null>(null);
+  const [localModels, setLocalModels] = useState<string[] | null>(null);
   const [watchDecided, setWatchDecided] = useState<boolean | null>(null);
   const [journal, setJournal] = useState<WatcherJournalEntry[] | null>(null);
   const [watcherFailed, setWatcherFailed] = useState(false);
@@ -342,6 +347,96 @@ export function Inspector(props: InspectorProps): ReactElement {
           setAppsFailed(true);
         }
       }
+      // FXTELEM: providers name connected ids from GET /api/v1/providers
+      // (never an invented Unknown); tests read the latest staged run when
+      // the teststage lane serves one; local AI reads the local models
+      // route. Every miss reads a quiet honest line, never Unknown.
+      try {
+        const response = await fetch("/api/v1/providers");
+        if (!response.ok) {
+          throw new Error(`providers request failed: ${response.status}`);
+        }
+        const body = (await response.json()) as unknown;
+        const rows =
+          typeof body === "object" && body !== null
+            ? ((body as Record<string, unknown>)["providers"] as unknown)
+            : null;
+        const names = Array.isArray(rows)
+          ? rows
+              .map((row) =>
+                typeof row === "object" && row !== null
+                  ? String(
+                      (row as Record<string, unknown>)["provider_id"] ?? "",
+                    )
+                  : "",
+              )
+              .filter((name) => name !== "")
+          : [];
+        if (alive) {
+          setProviders(names);
+        }
+      } catch {
+        if (alive) {
+          setProviders(null);
+        }
+      }
+      try {
+        const planResponse = await fetch(
+          `/api/v1/teststage/plans/latest?project_id=${encodeURIComponent(target)}`,
+        );
+        if (!planResponse.ok) {
+          throw new Error(`no test plan: ${planResponse.status}`);
+        }
+        const planBody = (await planResponse.json()) as Record<string, unknown>;
+        const planId = planBody["plan_id"];
+        const runResponse = await fetch(
+          `/api/v1/teststage/runs/latest?project_id=${encodeURIComponent(target)}`,
+        );
+        if (!runResponse.ok) {
+          throw new Error(`no test run: ${runResponse.status}`);
+        }
+        const runBody = (await runResponse.json()) as Record<string, unknown>;
+        const runId = runBody["run_id"];
+        if (alive) {
+          setTestRuns(
+            typeof planId === "string" &&
+              planId !== "" &&
+              typeof runId === "string" &&
+              runId !== ""
+              ? `${planId} / ${runId}`
+              : typeof runId === "string" && runId !== ""
+                ? runId
+                : null,
+          );
+        }
+      } catch {
+        if (alive) {
+          setTestRuns(null);
+        }
+      }
+      try {
+        const response = await fetch("/api/v1/local/models");
+        if (!response.ok) {
+          throw new Error(`local models request failed: ${response.status}`);
+        }
+        const body = (await response.json()) as unknown;
+        const names = Array.isArray(body)
+          ? body
+              .map((row) =>
+                typeof row === "object" && row !== null
+                  ? String((row as Record<string, unknown>)["model"] ?? "")
+                  : "",
+              )
+              .filter((name) => name !== "")
+          : [];
+        if (alive) {
+          setLocalModels(names);
+        }
+      } catch {
+        if (alive) {
+          setLocalModels(null);
+        }
+      }
     }
     if (projectId === null) {
       setLedger(null);
@@ -355,6 +450,9 @@ export function Inspector(props: InspectorProps): ReactElement {
       setWatcherFailed(false);
       setApps(null);
       setAppsFailed(false);
+      setProviders(null);
+      setTestRuns(null);
+      setLocalModels(null);
       return () => {
         alive = false;
       };
@@ -370,6 +468,129 @@ export function Inspector(props: InspectorProps): ReactElement {
   }, [client, projectId]);
 
   const rows = (liveRows ?? []).filter(isLiveRowActive);
+
+  // FXTELEM: Team now lists one row per agent+role+model+placement+status
+  // with an attempt count (the shared snapshot is the current run while
+  // live, else the last run's team). "Now" means now: the dev-run engine
+  // serves the run id inside each row's deliverable
+  // ("artifact://run/<run_id>/<label>", engine.py), so rows from older
+  // runs sort behind a Show more. RUNNING rows come first, then queued,
+  // then ended rows newest-run-first. Details come from the first
+  // matching live row; rows never invent, they only fold and sort.
+  const foldedTeam = useMemo(() => dedupeLiveRows(rows), [rows]);
+  const foldedTeamIds = useMemo(() => {
+    const counts = new Map<string, number>();
+    return foldedTeam.map((entry) => {
+      const seen = counts.get(entry.agent) ?? 0;
+      counts.set(entry.agent, seen + 1);
+      const total = foldedTeam.filter(
+        (other) => other.agent === entry.agent,
+      ).length;
+      return total <= 1
+        ? `team-row-${entry.agent}`
+        : `team-row-${entry.agent}-${seen}`;
+    });
+  }, [foldedTeam]);
+  function teamRepresentative(entry: {
+    agent: string;
+    status: PartRow["status"];
+    role?: string;
+    model?: string;
+  }): PartRow | null {
+    for (const candidate of rows) {
+      if (
+        candidate.agent !== entry.agent ||
+        candidate.status !== entry.status
+      ) {
+        continue;
+      }
+      const extras = readLiveExtras(candidate);
+      if ((extras.role ?? undefined) !== entry.role) {
+        continue;
+      }
+      if ((extras.model ?? undefined) !== entry.model) {
+        continue;
+      }
+      return candidate;
+    }
+    return (
+      rows.find(
+        (candidate) =>
+          candidate.agent === entry.agent &&
+          candidate.status === entry.status,
+      ) ?? null
+    );
+  }
+  function teamRunIdOf(row: PartRow): string | null {
+    const match = /^artifact:\/\/run\/([^/]+)\//.exec(row.deliverable);
+    return match ? (match[1] ?? null) : null;
+  }
+  function teamStatusRank(status: PartRow["status"]): number {
+    const key = String(status).toUpperCase();
+    if (key === "RUNNING") {
+      return 0;
+    }
+    if (key === "QUEUED" || key === "CREATED") {
+      return 1;
+    }
+    return 2;
+  }
+  const latestTeamRunId =
+    (runs ?? []).length === 0
+      ? null
+      : (runs?.[(runs?.length ?? 0) - 1]?.run_id ?? null);
+  function teamRunRank(runId: string | null): number {
+    // Latest run and unattributed rows stay visible; older listed runs
+    // sort behind Show more, newest run first (higher runs index first).
+    if (runId === null || runId === latestTeamRunId) {
+      return Number.MAX_SAFE_INTEGER;
+    }
+    const at = (runs ?? []).findIndex((run) => run.run_id === runId);
+    return at < 0 ? -1 : at;
+  }
+  interface TeamItem {
+    entry: (typeof foldedTeam)[number];
+    testId: string;
+    row: PartRow;
+    running: boolean;
+    primary: boolean;
+    statusRank: number;
+    runRank: number;
+  }
+  const teamItems = useMemo(() => {
+    const items: TeamItem[] = [];
+    foldedTeam.forEach((entry, index) => {
+      const row = teamRepresentative(entry);
+      if (row === null) {
+        return;
+      }
+      const running =
+        String(entry.status).toUpperCase() === "RUNNING";
+      const runRank = teamRunRank(teamRunIdOf(row));
+      items.push({
+        entry,
+        testId: foldedTeamIds[index] ?? `team-row-${entry.agent}`,
+        row,
+        running,
+        primary:
+          running || runRank === Number.MAX_SAFE_INTEGER,
+        statusRank: teamStatusRank(entry.status),
+        runRank,
+      });
+    });
+    const primary = items
+      .filter((item) => item.primary)
+      .sort((left, right) => left.statusRank - right.statusRank);
+    const secondary = items
+      .filter((item) => !item.primary)
+      .sort(
+        (left, right) =>
+          right.runRank - left.runRank ||
+          left.statusRank - right.statusRank,
+      );
+    return { primary, secondary };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [foldedTeam, foldedTeamIds, rows, runs]);
 
   const [resultsOpen, setResultsOpen] = useState(false);
   const [backgroundOpen, setBackgroundOpen] = useState(false);
@@ -396,6 +617,11 @@ export function Inspector(props: InspectorProps): ReactElement {
       );
     }
   }
+
+  const [teamMoreOpen, setTeamMoreOpen] = useState(false);
+  const teamMoreLabel = teamMoreOpen
+    ? t("shell.cards.showLess")
+    : t("shell.cards.showMore");
 
   // FXDESIGN6: the ref legend splits the bar by role. Grouped from the live
   // rows' own extras (role + tokens); with no live token data the legend
@@ -497,38 +723,38 @@ export function Inspector(props: InspectorProps): ReactElement {
     lastRun.tokens >= 0
       ? lastRun.tokens
       : null;
+  // FXTELEM: this project's tokens are the sum of the runs key's served
+  // per-run tokens (the same numbers the chat Total lines print), never a
+  // global sum across projects.
+  const projectRunsTotal = (runs ?? []).reduce<number | null>(
+    (acc, run) => {
+      const value = (run as { tokens?: unknown }).tokens;
+      if (
+        typeof value === "number" &&
+        Number.isFinite(value) &&
+        value >= 0
+      ) {
+        return (acc ?? 0) + value;
+      }
+      return acc;
+    },
+    null,
+  );
 
   const tokenIn = readTokenSum(rows, "input");
   const tokenOut = readTokenSum(rows, "output");
   const liveTokenTotal = tokenIn + tokenOut;
   const unknown = t("shell.common.unknown");
 
-  // FXDESIGN8 exact cause: readTokenSum/tokensOfRow read only live extras,
-  // which end with the run. Tokens + Context legend read live rows while a
-  // run is live, otherwise the project's served totals: the last run's
-  // tokens from the runs key first (the chat Total line shows the same
-  // number), then telemetry tokens_total. No invented zero, no chip.
+  // Token totals read live rows while a run is live, otherwise the
+  // project's served totals. No invented zero, no chip.
   const runLive = useMemo(
     () => rows.some((row) => String(row.status).toUpperCase() === "RUNNING"),
     [rows],
   );
-  const telemetryTotals = telemetry?.totals ?? null;
-  const telemetryTokensTotal =
-    telemetryTotals !== null &&
-    typeof telemetryTotals["tokens_total"] === "number" &&
-    Number.isFinite(telemetryTotals["tokens_total"])
-      ? (telemetryTotals["tokens_total"] as number)
-      : null;
-  const idleTokenTotal = lastRunTokens ?? telemetryTokensTotal;
-  const tokenTotal = runLive
-    ? liveTokenTotal
-    : (idleTokenTotal ?? liveTokenTotal);
-  const tokensKnown =
-    liveRows === null
-      ? false
-      : runLive
-        ? rows.some((row) => tokensOfRow(row) > 0)
-        : idleTokenTotal !== null;
+  // FXTELEM round 2: the legacy global totals never render as a project
+  // number; the project-scoped telemetry models (read_routes passes
+  // ?project_id=) carry the project truth, with the runs key as fallback.
   // Served per-model tokens for the idle legend (raw model names, never a
   // locale lookup; UNAVAILABLE rows carry no number and stay out).
   const modelSlices = useMemo(() => {
@@ -543,6 +769,24 @@ export function Inspector(props: InspectorProps): ReactElement {
     return slices;
   }, [telemetry]);
   const modelTotal = modelSlices.reduce((sum, slice) => sum + slice.tokens, 0);
+  // FXTELEM round 2: "This project" is the project-scoped telemetry
+  // total (the same doc the project Tokens tab reads, so the numbers are
+  // one). Fallback to the runs-key sum only when telemetry has no row.
+  // The runs-key (chat answers) sum renders as its own quiet line only
+  // when it differs from the telemetry total.
+  const projectTotal =
+    modelTotal > 0 ? modelTotal : (projectRunsTotal ?? null);
+  const chatDiffers =
+    projectRunsTotal !== null &&
+    projectTotal !== null &&
+    projectRunsTotal !== projectTotal;
+  const tokenTotal = runLive ? liveTokenTotal : (projectTotal ?? liveTokenTotal);
+  const tokensKnown =
+    liveRows === null
+      ? false
+      : runLive
+        ? rows.some((row) => tokensOfRow(row) > 0)
+        : projectTotal !== null;
 
   const usedCount =
     newest === null ? null : readCount(readExtra(newest, "context"));
@@ -596,11 +840,37 @@ export function Inspector(props: InspectorProps): ReactElement {
   const hard = budget?.hard_limit ?? 0;
   const remaining = budget === null ? 0 : Math.max(0, remainingBudget(budget));
   const currency = budget?.currency ?? "";
+  // FXTELEM round 4: the budget state rows hold real numbers (spent sums
+  // the settled reservations), so spent/reserved/remaining render them;
+  // "not known" never hides a served number.
+  const spentText = `${formatNumber(spent)}${currency === "" ? "" : ` ${currency}`}`;
+  const remainingText = `${formatNumber(remaining)}${currency === "" ? "" : ` ${currency}`}`;
   const budgetTotal =
     budget === null
       ? unknown
       : `${formatNumber(spent)} / ${formatNumber(hard)}${currency === "" ? "" : ` ${currency}`}`;
 
+  const [budgetExpanded, onBudgetToggleInner] = useKitExpanded(
+    budgetCollapsed,
+    onBudgetToggle,
+  );
+  // FXTELEM: providers name the connected ids from GET /api/v1/providers;
+  // with none served the card reads one quiet line, never Unknown.
+  const providersTotal =
+    providers === null
+      ? unknown
+      : providers.length === 0
+        ? t("shell.cards.providers.emptyLine")
+        : providers.join(", ");
+  const testsTotal = testRuns ?? t("shell.cards.tests.emptyLine");
+  const localAiTotal =
+    localModels === null
+      ? unknown
+      : localModels.length === 0
+        ? t("shell.cards.localai.emptyLine")
+        : localModels.join(", ");
+  const limitText = `${formatNumber(hard)}${currency === "" ? "" : ` ${currency}`}`;
+  const reservedText = `${formatNumber(reserved)}${currency === "" ? "" : ` ${currency}`}`;
   const appsCount = apps?.service_ids.length ?? 0;
   const appsTotal =
     apps === null
@@ -638,8 +908,13 @@ export function Inspector(props: InspectorProps): ReactElement {
           {liveRows === null || rows.length === 0 ? (
             <p data-testid="team-empty">{t("agents.live.empty")}</p>
           ) : (
+            <>
             <ul data-testid="team-rows">
-              {rows.map((row) => {
+              {(teamMoreOpen
+                ? [...teamItems.primary, ...teamItems.secondary]
+                : teamItems.primary
+              ).map((item) => {
+                const { entry, row, testId: rowTestId } = item;
                 const fileRef = readRef(readExtra(row, "file"));
                 const lastActionRef = readRef(readExtra(row, "last_action"));
                 const scopeRef = shortenLiveRef(row.scope);
@@ -663,8 +938,8 @@ export function Inspector(props: InspectorProps): ReactElement {
                   stepRaw > 0;
                 return (
                   <li
-                    key={row.agent}
-                    data-testid={`team-row-${row.agent}`}
+                    key={rowTestId}
+                    data-testid={rowTestId}
                     className="fx-team-row"
                   >
                     <details data-testid={`team-detail-${row.agent}`}>
@@ -700,6 +975,16 @@ export function Inspector(props: InspectorProps): ReactElement {
                           <span className="fx-team-field">
                             {t("shell.cards.team.step")}{": "}
                             {String(stepRaw)}
+                          </span>
+                        ) : null}
+                        {entry.attempts > 1 ? (
+                          <span
+                            data-testid={`team-attempts-${row.agent}`}
+                            className="fx-team-field"
+                          >
+                            {t("projectView.attempts", {
+                              count: entry.attempts,
+                            })}
                           </span>
                         ) : null}
                         {place === "UNKNOWN" ? null : (
@@ -779,6 +1064,21 @@ export function Inspector(props: InspectorProps): ReactElement {
                 );
               })}
             </ul>
+            {teamItems.secondary.length > 0 && (
+              <button
+                type="button"
+                data-testid="team-show-more"
+                className="fx-btn-quiet fx-show-more"
+                aria-expanded={teamMoreOpen}
+                onClick={() => {
+                  setTeamMoreOpen(!teamMoreOpen);
+                }}
+              >
+                <Icon name="expand" />
+                <span>{teamMoreLabel}</span>
+              </button>
+            )}
+            </>
           )}
           <Link data-testid="team-open-agents" to="/agents/live">
             {t("shell.cards.team.openAgents")}
@@ -795,40 +1095,27 @@ export function Inspector(props: InspectorProps): ReactElement {
           </h2>
           {liveRows === null ? (
             <p data-testid="context-empty">{t("empty.generic")}</p>
-          ) : newest === null ? (
-            <p
-              data-testid="context-empty"
-              className="fx-quiet-line"
-              title={t("shell.common.unknown")}
-            >
-              {t("shell.cards.context.noUsage")}
-            </p>
           ) : runLive ? (
-            <>
-              {usedCount !== null && windowCount !== null ? (
-                <>
-                  <div data-testid="ctx-top" className="fx-ctx-top">
-                    <p data-testid="ctx-percent">
-                      {t("shell.cards.context.percentValue", { value: percentText })}
-                    </p>
-                    <p data-testid="ctx-window">
-                      {usedText} / {windowText}
-                    </p>
-                  </div>
-                  <p data-testid="ctx-source" className="fx-quiet">
-                    {t("shell.cards.context.source")} last call
+            // FXTELEM: during a run the meter reads the live token rows:
+            // percent plus window (Unknown when unserved), the live source,
+            // the input/output bar and one legend with the input/output
+            // rows plus the per-role slices. With no live tokens yet there
+            // is one quiet line and no empty bar.
+            liveTokenTotal > 0 ? (
+              <>
+                <div data-testid="ctx-top" className="fx-ctx-top">
+                  <p data-testid="ctx-percent">
+                    {t("shell.cards.context.percentValue", { value: percentText })}
                   </p>
-                </>
-              ) : (
-                <p
-                  data-testid="ctx-unknown"
-                  className="fx-quiet-line"
-                  title={unknown}
-                >
-                  &mdash;
+                  <p data-testid="ctx-window">
+                    {usedText} / {windowText}
+                  </p>
+                </div>
+                <p data-testid="ctx-source" className="fx-quiet">
+                  {t("shell.cards.context.source")}{" "}
+                  {t("shell.cards.context.sourceLive")}
                 </p>
-              )}
-              <div data-testid="ctx-bar" className="fx-ctx-bar">
+                <div data-testid="ctx-bar" className="fx-ctx-bar">
                 <div
                   data-testid="ctx-bar-input"
                   className="fx-ctx-seg"
@@ -844,8 +1131,29 @@ export function Inspector(props: InspectorProps): ReactElement {
                   }}
                 />
               </div>
-              {roleTotal > 0 ? (
                 <ul data-testid="ctx-legend" className="fx-legend">
+                  <li
+                    data-testid="ctx-legend-input"
+                    className="fx-legend-row"
+                  >
+                    <span className="fx-legend-name">
+                      {t("shell.cards.context.input")}
+                    </span>{" "}
+                    <span className="fx-legend-tokens">
+                      {formatNumber(tokenIn)}
+                    </span>
+                  </li>
+                  <li
+                    data-testid="ctx-legend-output"
+                    className="fx-legend-row"
+                  >
+                    <span className="fx-legend-name">
+                      {t("shell.cards.context.output")}
+                    </span>{" "}
+                    <span className="fx-legend-tokens">
+                      {formatNumber(tokenOut)}
+                    </span>
+                  </li>
                 {roleSlices.map((slice, index) => (
                   <li
                     key={slice.key}
@@ -870,29 +1178,49 @@ export function Inspector(props: InspectorProps): ReactElement {
                   </li>
                 ))}
               </ul>
-              ) : null}
-            </>
+              </>
+            ) : (
+              <p
+                data-testid="ctx-unknown"
+                className="fx-quiet-line"
+                title={unknown}
+              >
+                &mdash;
+              </p>
+            )
+          ) : projectTotal === null ? (
+            // Idle with no served totals anywhere: one quiet line, never
+            // an invented zero or an empty bar.
+            <p
+              data-testid="context-empty"
+              className="fx-quiet-line"
+              title={t("shell.common.unknown")}
+            >
+              {t("shell.cards.context.noUsage")}
+            </p>
           ) : (
-            // Idle: no run live, so the meter reads the project's served
-            // totals (last run first, then telemetry) with a per-model
-            // legend from the telemetry doc. No window is served idle, so
-            // no percent is rendered; unevidenced reads one quiet line.
+            // Idle: every number is named. "This project" is the runs key
+            // sum (the chat Total lines add up to the same number), "Last
+            // run" the last run's tokens; the per-model legend breaks down
+            // the project-scoped telemetry total. No window is served idle,
+            // so no percent is rendered.
             <>
-              {idleTokenTotal === null ? (
-                <p
-                  data-testid="ctx-unknown"
-                  className="fx-quiet-line"
-                  title={unknown}
-                >
-                  &mdash;
+              <p data-testid="ctx-used" className="fx-quiet">
+                {t("shell.cards.context.projectTotal")}:{" "}
+                {formatNumber(projectTotal)}
+              </p>
+              {lastRunTokens !== null && lastRunTokens !== projectTotal ? (
+                <p data-testid="ctx-last-run" className="fx-quiet">
+                  {t("shell.cards.context.lastRun")}:{" "}
+                  {formatNumber(lastRunTokens)}
                 </p>
-              ) : (
-                <p data-testid="ctx-used" className="fx-quiet">
-                  {t("shell.cards.context.percentValue", {
-                    value: formatNumber(idleTokenTotal),
-                  })}
+              ) : null}
+              {chatDiffers ? (
+                <p data-testid="ctx-chat" className="fx-quiet">
+                  {t("shell.cards.context.chatAnswers")}:{" "}
+                  {formatNumber(projectRunsTotal ?? 0)}
                 </p>
-              )}
+              ) : null}
               {modelTotal > 0 ? (
                 <ul data-testid="ctx-legend" className="fx-legend">
                   {modelSlices.map((slice, index) => (
@@ -934,9 +1262,12 @@ export function Inspector(props: InspectorProps): ReactElement {
             <Icon name="file" />
             <span>{t("shell.cards.results.title")}</span>
           </h2>
-          {projectId === null ||
-          ledger === null ||
-          lastPackages.length === 0 ? (
+          {/* FXTELEM: the last run's verdict plus files read the runs key,
+              so a real run shows even when no package rows were recorded.
+              Only with neither a run nor packages is the tab honestly empty. */}
+          {projectId === null || ledger === null || runs === null ? (
+            <p data-testid="results-empty">{t("empty.generic")}</p>
+          ) : lastRun === null && lastPackages.length === 0 ? (
             <p data-testid="results-empty">{t("empty.generic")}</p>
           ) : (
             <>
@@ -1209,6 +1540,31 @@ export function Inspector(props: InspectorProps): ReactElement {
                 ))}
               </ul>
             )}
+            {/* FXTELEM: idle totals are named: the last run's tokens and
+                this project's runs-key sum. The per-model rows above add up
+                to the project-scoped telemetry total. */}
+            {runLive ? null : (
+              <>
+                {lastRunTokens !== null ? (
+                  <p data-testid="tokens-last-run" className="fx-quiet">
+                    {t("shell.cards.context.lastRun")}:{" "}
+                    {formatNumber(lastRunTokens)}
+                  </p>
+                ) : null}
+                {projectTotal !== null && projectTotal !== lastRunTokens ? (
+                  <p data-testid="tokens-project" className="fx-quiet">
+                    {t("shell.cards.context.projectTotal")}:{" "}
+                    {formatNumber(projectTotal)}
+                  </p>
+                ) : null}
+                {chatDiffers ? (
+                  <p data-testid="tokens-chat" className="fx-quiet">
+                    {t("shell.cards.context.chatAnswers")}:{" "}
+                    {formatNumber(projectRunsTotal ?? 0)}
+                  </p>
+                ) : null}
+              </>
+            )}
           </>
         ) : (
           <>
@@ -1232,45 +1588,80 @@ export function Inspector(props: InspectorProps): ReactElement {
           titleKey="shell.cards.tests.title"
           subtitleKey="shell.cards.tests.subtitle"
           totalKey="shell.cards.tests.total"
-          totalText={unknown}
+          totalText={testsTotal}
           segments={[]}
           collapsed={testsCollapsed}
           onToggle={onTestsToggle}
         />
-        <MetricCard
-          cardId="fx-budget"
-          titleKey="shell.cards.budget.title"
-          subtitleKey="shell.cards.budget.subtitle"
-          totalKey="shell.cards.budget.total"
-          totalText={budgetTotal}
-          segments={[
-            {
-              segmentKey: "shell.cards.budget.spent",
-              fraction: fractionOf(spent, hard),
-            },
-            {
-              segmentKey: "shell.cards.budget.reserved",
-              fraction: fractionOf(reserved, hard),
-            },
-            {
-              segmentKey: "shell.cards.budget.remaining",
-              fraction: fractionOf(remaining, hard),
-            },
-          ]}
-          segmentTexts={{
-            "shell.cards.budget.spent": formatNumber(spent),
-            "shell.cards.budget.reserved": formatNumber(reserved),
-            "shell.cards.budget.remaining": formatNumber(remaining),
+        {/* FXTELEM: one budget block only: limit, spent, reserved and
+            remaining as a single spaced list, never legend plus a repeated
+            list, never glued. Spent reads the unknown-price line when no
+            served cost number exists. */}
+        <section
+          data-testid="kit-metric-fx-budget"
+          aria-label={t("shell.cards.budget.title")}
+          style={{
+            backgroundColor: "var(--agent-si-surface)",
+            color: "var(--agent-si-ink)",
+            borderColor: "var(--agent-si-card-border)",
           }}
-          collapsed={budgetCollapsed}
-          onToggle={onBudgetToggle}
-        />
+        >
+          <h2>{t("shell.cards.budget.title")}</h2>
+          <button
+            type="button"
+            data-testid="kit-toggle-fx-budget"
+            aria-label={t("ui.card.toggle")}
+            aria-expanded={budgetExpanded}
+            className="fx-kit-toggle"
+            onClick={onBudgetToggleInner}
+          />
+          <p data-testid="kit-sub-fx-budget">
+            {t("shell.cards.budget.subtitle")}
+          </p>
+          {budgetExpanded ? (
+            budget === null ? (
+              <p data-testid="budget-unknown" className="fx-quiet-line">
+                {unknown}
+              </p>
+            ) : (
+              <ul
+                data-testid="budget-facts"
+                className="fx-budget-facts"
+                style={{
+                  display: "flex",
+                  gap: "1rem",
+                  flexWrap: "wrap",
+                  listStyle: "none",
+                  padding: 0,
+                }}
+              >
+                <li data-testid="budget-row-limit">
+                  {t("projectView.cost.limit")}: {limitText}
+                </li>
+                <li data-testid="budget-row-spent">
+                  {t("shell.cards.budget.spent")}: {spentText}
+                </li>
+                <li data-testid="budget-row-reserved">
+                  {t("shell.cards.budget.reserved")}: {reservedText}
+                </li>
+                <li data-testid="budget-row-remaining">
+                  {t("shell.cards.budget.remaining")}: {remainingText}
+                </li>
+              </ul>
+            )
+          ) : (
+            <span data-testid="kit-collapsed-line">
+              <span>{t("shell.cards.budget.title")}</span>
+              <span>{budgetTotal}</span>
+            </span>
+          )}
+        </section>
         <MetricCard
           cardId="fx-providers"
           titleKey="shell.cards.providers.title"
           subtitleKey="shell.cards.providers.subtitle"
           totalKey="shell.cards.providers.total"
-          totalText={unknown}
+          totalText={providersTotal}
           segments={[]}
           collapsed={providersCollapsed}
           onToggle={onProvidersToggle}
@@ -1280,7 +1671,7 @@ export function Inspector(props: InspectorProps): ReactElement {
           titleKey="shell.cards.localai.title"
           subtitleKey="shell.cards.localai.subtitle"
           totalKey="shell.cards.localai.total"
-          totalText={unknown}
+          totalText={localAiTotal}
           segments={[]}
           collapsed={localAiCollapsed}
           onToggle={onLocalAiToggle}

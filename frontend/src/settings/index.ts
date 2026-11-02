@@ -9,6 +9,11 @@ import {
   writeRoleProfileToServer,
 } from './roleProfilesApi';
 import { askPermission, installPermissionToolId } from '../chat/permissions';
+import type { ProjectGrant } from '../chat/permissions';
+import {
+  listProjectGrants,
+  removeProjectGrant,
+} from '../chat/permissions';
 
 export type RoleMode = 'PINNED' | 'pool' | 'AUTO';
 
@@ -17,6 +22,74 @@ export interface SettingsRoute {
   titleKey: string;
   purposeKey: string;
   needItNowKey: string;
+}
+
+// FXR1B: per-project installer grants live next to the accepted-risk
+// latch (Settings > Project). Rows come from the served ledger; Remove
+// deletes server-side and refetches, so the list never shows a removed
+// grant.
+export interface InstallGrantsListProps {
+  projectId: string;
+}
+
+export function InstallGrantsList(props: InstallGrantsListProps): ReactElement {
+  const [grants, setGrants] = useState<ProjectGrant[] | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    void listProjectGrants(props.projectId).then((rows) => {
+      if (alive) {
+        setGrants(rows);
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, [props.projectId]);
+
+  async function handleRemove(
+    installer: string,
+    subcommand: string,
+  ): Promise<void> {
+    await removeProjectGrant(props.projectId, installer, subcommand);
+    const rows = await listProjectGrants(props.projectId);
+    setGrants(rows);
+  }
+
+  const rows = grants ?? [];
+  return createElement(
+    'section',
+    { 'data-testid': 'install-grants' },
+    createElement('h2', null, t('settings.grants.title')),
+    rows.length === 0
+      ? createElement('p', null, t('settings.grants.empty'))
+      : createElement(
+          'ul',
+          null,
+          rows.map((grant) =>
+            createElement(
+              'li',
+              {
+                key: `${grant.installer} ${grant.subcommand}`,
+                'data-testid': 'install-grant',
+              },
+              `${grant.installer} ${grant.subcommand} `,
+              createElement(
+                'button',
+                {
+                  type: 'button',
+                  'data-testid': 'install-grant-remove',
+                  'aria-label': t('settings.grants.remove'),
+                  onClick: () => {
+                    void handleRemove(grant.installer, grant.subcommand);
+                  },
+                },
+                t('settings.grants.remove'),
+              ),
+            ),
+          ),
+        ),
+  );
 }
 
 // FXKITUI guided first run: completion record in the settings store. The

@@ -203,6 +203,7 @@ export function DisconnectDialog({
         </button>
         <button
           type="button"
+          data-testid="disconnect-confirm"
           data-variant="primary"
           style={{ fontWeight: 700 }}
           disabled={busy}

@@ -34,7 +34,7 @@ import {
   t,
 } from "../locale/index";
 import type { SupportedLocale } from "../locale/index";
-import { SETTINGS_ROUTES, AcceptedRiskSwitch, FirstRunGate, RoleProfileEditor, markFirstRunDone } from "../settings/index";
+import { SETTINGS_ROUTES, AcceptedRiskSwitch, FirstRunGate, InstallGrantsList, RoleProfileEditor, markFirstRunDone } from "../settings/index";
 import { OptimizationPolicySection } from "../settings/optimizationPolicy";
 import { ProvidersPage } from "../settings/ProvidersPage";
 import {
@@ -615,6 +615,7 @@ function SettingsSectionRoute(): ReactElement {
             <>
               <ContractDefaultsBar projectId={projectId} role="manager" />
               <AcceptedRiskSwitch projectId={projectId} />
+              <InstallGrantsList projectId={projectId} />
             </>
           ) : null}
         </>

@@ -543,7 +543,9 @@ class _ExecTool:
                 flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
             try:
                 with open(log_path, "ab") as handle:
-                    proc = subprocess.Popen(
+                    from agent_si.backend import proc_tree as _proc_tree
+
+                    proc = _proc_tree.spawn(
                         resolved,
                         cwd=folder,
                         stdin=subprocess.DEVNULL,
@@ -622,7 +624,14 @@ def spawn_checked(
             str(project_id), words[0])
         _ask_decision = _ask_permissions.get_decision(
             tool_id=_ask_tool_id)
-        if _ask_decision is None:
+        # FXR1B project grant: the same installer head and subcommand
+        # in this project do not ask again; flags and registries still
+        # ask (see install_grant_allows). Read-only here by design.
+        _ask_project_grant = (
+            _ask_decision is None
+            and _ask_permissions.install_grant_allows(
+                str(project_id), words))
+        if _ask_decision is None and not _ask_project_grant:
             with contextlib.suppress(Exception):
                 _ask_permissions.record_install_request(
                     tool_id=_ask_tool_id,
@@ -633,13 +642,16 @@ def spawn_checked(
                 f"refused: install-class command {words[0]!r} needs "
                 "install permission (ungranted runs continue without "
                 "the install)")
-        if _ask_decision != "allow":
+        if not _ask_project_grant and _ask_decision != "allow":
             raise PermissionError(
                 f"refused: install-class command {words[0]!r} needs "
                 "install permission (ungranted runs continue without "
                 "the install)")
-        _ask_approved = _ask_permissions.get_install_argv(
-            tool_id=_ask_tool_id)
+        _ask_approved = (
+            [str(word) for word in words]
+            if _ask_project_grant
+            else _ask_permissions.get_install_argv(
+                tool_id=_ask_tool_id))
         if _ask_approved is None:
             with contextlib.suppress(Exception):
                 _ask_approved = _ask_permissions.pin_install_argv(
@@ -742,16 +754,11 @@ def wait_proc(
 
 
 def _kill(proc: Any) -> None:
-    """Terminate then kill one child; never raises."""
+    """Terminate then tree-kill one child; never raises."""
+    from agent_si.backend import proc_tree as _proc_tree
+
     with contextlib.suppress(Exception):
-        proc.terminate()
-    with contextlib.suppress(Exception):
-        proc.wait(timeout=5)
-        return
-    with contextlib.suppress(Exception):
-        proc.kill()
-    with contextlib.suppress(Exception):
-        proc.wait(timeout=5)
+        _proc_tree.terminate_tree(proc)
 
 
 def ensure_dead(proc: Any, rounds: int = 3) -> None:
@@ -767,11 +774,15 @@ def ensure_dead(proc: Any, rounds: int = 3) -> None:
             return
         if not alive:
             with contextlib.suppress(Exception):
-                proc.wait(timeout=5)
+                from agent_si.backend import proc_tree as _proc_tree
+
+                proc.wait(timeout=_proc_tree.STOP_TIMEOUT_S)
             return
         _kill(proc)
     with contextlib.suppress(Exception):
-        proc.wait(timeout=5)
+        from agent_si.backend import proc_tree as _proc_tree
+
+        proc.wait(timeout=_proc_tree.STOP_TIMEOUT_S)
 
 
 def finalize_log(log_path: str, cap: int = 256 * 1024) -> str:

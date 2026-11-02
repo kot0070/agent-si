@@ -1003,9 +1003,9 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
         }
         const rows = buildTokenRows(live, telemetry);
         const total = sumTokenRows(rows);
-        // Any unknown cell poisons the total: a sum over partial cells
-        // would read as measured. "Other calls" names the role-less row.
-        const hasUnknown = rows.some((row) => row.tokens === null);
+        // Total is the sum of known rows; a row without a number keeps
+        // its own Unknown instead of poisoning the total. "Other calls"
+        // names the role-less row only.
         const unknown = t("shell.common.unknown");
         if (rows.length === 0) {
           return (
@@ -1024,7 +1024,7 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
               testId="tokens-spent"
               labelKey="projectView.tokens.used"
               value={
-                total === null || hasUnknown
+                total === null
                   ? "not known yet"
                   : formatNumber(total, locale)
               }

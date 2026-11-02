@@ -1355,3 +1355,31 @@ details[data-testid^="team-detail-"] > summary::-webkit-details-marker {
   border-radius: 999px;
   font-size: 12px;
 }
+
+/* B7 animated working circle: beside "Working" in the status line and
+   on Stop while a run streams. CSS only; still when the OS asks for
+   reduced motion. */
+.fx-spin {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  vertical-align: -2px;
+  animation: fx-spin 0.9s linear infinite;
+}
+
+@keyframes fx-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fx-spin {
+    animation: none;
+    border-top-color: currentColor;
+  }
+}

@@ -25,12 +25,18 @@ __all__ = (
 
 @dataclass(frozen=True)
 class WatcherStatus:
-    """Status payload: project, stored integrity, stored journal head."""
+    """Status payload: project, stored integrity, stored journal head.
+
+    Plus the watcher model truth: the exact model name that answered
+    the latest abnormal WATCH_DECISION row (a stored fact), or
+    "Rules only" when no model answered yet.
+    """
 
     project_id: str
     integrity_ok: bool = False
     journal_head: str = ""
     generated_at: str = ""
+    watcher_model: str = "Rules only"
 
 
 def _utcnow() -> str:
@@ -43,9 +49,31 @@ def _utcnow() -> str:
     )
 
 
-def reset_state() -> None:
-    """Status keeps no per-run state; present for probe isolation."""
-    return None
+def _watcher_model(project_id: str) -> str:
+    """Exact model that answered the latest abnormal decision, else Rules.
+
+    Reads stored WATCH_DECISION rows only: the newest row carrying both
+    a ``model=`` and an ``action=`` marker names the model that
+    answered; default-action and OFF-marker rows name no model.
+    """
+    try:
+        rows = journal_store.stored_rows(str(project_id), "WATCH_DECISION")
+    except Exception:
+        return "Rules only"
+    for row in reversed(list(rows)):
+        try:
+            summary = str(row.summary)
+        except Exception:
+            continue
+        if "model=" not in summary or "action=" not in summary:
+            continue
+        try:
+            name = summary.split("model=", 1)[1].split()[0].strip()
+        except (IndexError, AttributeError):
+            continue
+        if name:
+            return name
+    return "Rules only"
 
 
 def get(project_id: str) -> WatcherStatus:
@@ -71,4 +99,10 @@ def get(project_id: str) -> WatcherStatus:
         integrity_ok=ok,
         journal_head=head,
         generated_at=generated_at,
+        watcher_model=_watcher_model(key),
     )
+
+
+def reset_state() -> None:
+    """Status keeps no per-run state; present for probe isolation."""
+    return None
