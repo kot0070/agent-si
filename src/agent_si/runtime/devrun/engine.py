@@ -2214,6 +2214,23 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
                 "delta", turn, part_id,
                 "Part %s: %s" % (part_id, stop_note),
                 {"run_id": run_id, "part_id": part_id})
+        if row.get("install_denied"):
+            # FXR4A D6 grant-path terminal: a denied installer closes
+            # the part FAILED with the plain line (no retry, no
+            # checks-green swallow). Check/audit verdict gates below
+            # stay untouched.
+            row["verdict"] = "FAIL"
+            row["reason"] = str(row["install_denied"])
+            turn += 1
+            yield _run_event(
+                "delta", turn, part_id,
+                "Part %s: FAILED (%s)" % (part_id, row["reason"]),
+                {"run_id": run_id, "part_id": part_id})
+            _journal_event(
+                project, "DEVRUN_PART",
+                "part %s: FAIL (%s)" % (part_id, row["reason"]))
+            publish()
+            return "FAIL", turn
         if not attempt_ok:
             failing.append("agent loop failed")
         checks = _run_checks(
@@ -2737,6 +2754,8 @@ def _apply_actions(*, record: Any, row: Any, folder: str, project: str,
                     record=record, folder=folder, project=project,
                     run_id="%s-%s-a%d-agent" % (
                         run_id, part_id, attempt),
+                    grant_run_id=str(run_id),
+                    raise_denied=True,
                     argv=[str(word) for word in argv], state=state,
                     procs=procs, attached=attached,
                     stop_seen=stop_seen, lock=lock)
@@ -2759,6 +2778,19 @@ def _apply_actions(*, record: Any, row: Any, folder: str, project: str,
                                 str(word) for word in argv),))
             else:
                 notes.append("%s: refused: unknown action" % (name,))
+        except _actions.InstallDenied as exc:
+            # FXR4A D6: the denied installer reaches the worker reply
+            # (notes) and the verdict gate (row flag + journal); the
+            # attempt ends here with the plain line (no retry, no
+            # checks-green swallow).
+            _denied_note = "run %s: %s" % (
+                " ".join(str(word) for word in (action.get("argv")
+                                                or [])), exc)
+            notes.append(_denied_note)
+            refusals.append(_denied_note)
+            row["install_denied"] = str(exc)
+            if stop_note is None:
+                stop_note = "refused: %s" % (exc,)
         except _actions.ActionRefused as exc:
             notes.append("%s: %s" % (name, exc))
             refusals.append("%s: %s" % (name, exc))
@@ -2774,14 +2806,63 @@ def _apply_actions(*, record: Any, row: Any, folder: str, project: str,
     return text, stop_note
 
 
+def _deny_tool_id(project: Any, argv: Any) -> str:
+    """Tool id for deny-terminal bookkeeping; never raises."""
+    try:
+        from agent_si.toolguard import permissions as _deny_perm
+
+        words = [str(word) for word in list(argv or [])]
+        if not words:
+            return ""
+        return _deny_perm.install_tool_id(str(project), words[0])
+    except Exception:
+        return ""
+
+
+def _install_denied(project: Any, folder: Any, argv: Any) -> str:
+    """Plain deny line for denied install words, else empty (FXR4A D6).
+
+    Mirrors the spawn ladder: direct install class plus scripts whose
+    body invokes an installer, minus project grants, with a recorded
+    deny. Never raises; unreadable state reads as not-denied.
+    """
+    try:
+        from agent_si.runtime.devrun import actions as _deny_actions
+        from agent_si.toolguard import permissions as _deny_perm
+
+        words = [str(word) for word in list(argv or [])]
+        if not words:
+            return ""
+        kind = _deny_actions.classify_argv(words)
+        if kind != "install" and _deny_actions._script_runs_install(
+                str(folder), words):
+            kind = "install"
+        if kind != "install":
+            return ""
+        if _deny_perm.install_grant_allows(str(project), words):
+            return ""
+        if _deny_perm.get_decision(
+                tool_id=_deny_perm.install_tool_id(
+                    str(project), words[0])) != "deny":
+            return ""
+        return "install permission denied for %s" % (" ".join(words),)
+    except Exception:
+        return ""
+
+
 def _run_agent_command(*, record: Any, folder: str, project: str,
                        run_id: str, argv: list, state: Any,
                        procs: list, attached: Any = None,
-                       stop_seen: Any = None, lock: Any = None) -> str:
+                       stop_seen: Any = None, lock: Any = None,
+                       grant_run_id: str = "",
+                       raise_denied: bool = False) -> str:
     """Run one worker command; refusals and failures return as text.
 
     An install-class command with no recorded decision raises
-    _InstallHeld (the run ends as held, never as run text).
+    _InstallHeld (the run ends as held, never as run text). A denied
+    install returns the refusal as text unless raise_denied (the
+    _apply_actions worker path, FXR4A D6) asks for the InstallDenied
+    raise that closes the part FAILED.
     """
     from agent_si.runtime.devrun import actions as _actions
 
@@ -2800,13 +2881,22 @@ def _run_agent_command(*, record: Any, folder: str, project: str,
         if lock is not None:
             with lock:
                 spawn = _actions.spawn_checked(
-                    project, run_id, folder, argv, log_path, log_rel)
+                    project, run_id, folder, argv, log_path, log_rel,
+                    grant_run_id=grant_run_id)
         else:
             spawn = _actions.spawn_checked(
-                project, run_id, folder, argv, log_path, log_rel)
+                project, run_id, folder, argv, log_path, log_rel,
+                grant_run_id=grant_run_id)
     except _actions.InstallAskNeeded as exc:
         raise _InstallHeld(exc.tool_id, " ".join(argv)) from None
     except (PermissionError, ValueError) as exc:
+        _denied_line = _install_denied(project, folder, argv)
+        if _denied_line and raise_denied:
+            # FXR4A D6: the refusal is raised (never a swallowed note)
+            # so the part closes FAILED with the plain line; the note
+            # below still reaches the worker's reply first.
+            raise _actions.InstallDenied(
+                _deny_tool_id(project, argv), _denied_line) from None
         return "run %s: %s" % (" ".join(argv), exc)
     proc = spawn.get("proc")
     if lock is not None:

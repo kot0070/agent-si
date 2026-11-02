@@ -27,7 +27,7 @@ A React shell inside a desktop window talks over loopback HTTP and events to a l
 
 - Director: plans the task, splits it into parts, checks the split, and integrates the results.
 - Managers: each owns a part of the plan and drives its workers to completion.
-- Workers: small task agents that write files and run the assigned steps. Work runs in sequence unless a step explicitly allows parallel parts. <<PARALLEL>>
+- Workers: small task agents that write files and run the assigned steps. Work runs in sequence unless a step explicitly allows parallel parts.
 - Auditor: a fresh instance per audit. It reads the run, checks the files and records, and returns a verdict. Audit records are stored with the run and shown in the project view.
 
 ## Routing and Auto

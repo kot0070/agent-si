@@ -49,7 +49,7 @@ _HISTORY_FILE = "chat_history.jsonl"
 
 #: Only these fields ever persist; anything else in the body is dropped.
 _TURN_FIELDS = ("project_id", "user_text", "assistant_text", "time",
-                "id", "status", "run_id", "error_code")
+                "id", "status", "run_id", "error_code", "executed")
 
 #: Stored turn states: a run starts as running, ends ok / failed /
 #: stopped. Every terminal write lands, so restarts can show the last
@@ -228,6 +228,8 @@ def _memory(app: Any) -> dict:
                 for key in ("run_id", "error_code"):
                     if not isinstance(turn.get(key), str):
                         turn[key] = ""
+                if turn.get("executed") is not True:
+                    turn["executed"] = False
                 turns.setdefault(turn["project_id"], []).append(turn)
     return turns
 
@@ -257,7 +259,7 @@ def _new_turn_id() -> str:
 def record_turn(app: Any, project_id: str, user_text: str,
                 assistant_text: str, *, status: str = "ok",
                 run_id: str = "", error_code: str = "",
-                turn_id: str = "") -> dict:
+                turn_id: str = "", executed: bool = False) -> dict:
     """Store one scrubbed turn for a project; returns the stored turn.
 
     Atomic under the project's lock: the append plus its snapshot
@@ -272,6 +274,7 @@ def record_turn(app: Any, project_id: str, user_text: str,
         raise ValueError("chat history needs a known status")
     code = error_code if isinstance(error_code, str) else ""
     rid = run_id.strip() if isinstance(run_id, str) else ""
+    ran = executed is True
     lock = _lock_for(project)
     with lock:
         project_turns = _memory(app).setdefault(project, [])
@@ -285,6 +288,7 @@ def record_turn(app: Any, project_id: str, user_text: str,
                     turn["time"] = _utcnow()
                     turn["status"] = status
                     turn["error_code"] = code
+                    turn["executed"] = ran
                     stored = dict(turn)
                     break
         if stored is None:
@@ -298,11 +302,53 @@ def record_turn(app: Any, project_id: str, user_text: str,
                 "status": status,
                 "run_id": rid,
                 "error_code": code,
+                "executed": ran,
             }
             project_turns.append(dict(turn))
             stored = dict(turn)
         _persist(app)
         return stored
+
+
+def _disconnect_reason(app: Any, project: str, turn_time: Any) -> str:
+    """Server-side run-end reason for a client disconnect, else "".
+
+    A page reload or window close ends the run on the server
+    ("(client disconnect: children reaped)" in the run summary); the
+    chat's running turn never gets its terminal write, so the history
+    read passes the reason through on the row instead. Best effort:
+    never raises, never invents a reason. Only a disconnect recorded
+    at or after the turn started counts, so an old disconnect never
+    mislabels a newer running turn.
+    """
+    try:
+        from agent_si.runtime.devrun import records as _records
+    except Exception:
+        return ""
+    try:
+        rows = _records.runs_for_project(app, project)
+    except Exception:
+        return ""
+    try:
+        started = str(turn_time or "")
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            summary = row.get("summary")
+            if not (isinstance(summary, str)
+                    and "client disconnect" in summary):
+                continue
+            # Served rows name the stamp "end" ("UNKNOWN" when unset);
+            # raw records name it "ended_at".
+            ended = row.get("ended_at", row.get("end"))
+            if (isinstance(ended, str) and ended
+                    and ended != "UNKNOWN" and started
+                    and ended >= started):
+                return summary
+            return ""
+    except Exception:
+        return ""
+    return ""
 
 
 def _copy_turns(app: Any, project: str) -> list:
@@ -350,6 +396,15 @@ def history_page(app: Any, project_id: str, *, limit: int = _DEFAULT_LIMIT,
     total = len(turns)
     window = turns[-count:] if total > count else list(turns)
     older = total - len(window)
+    for turn in window:
+        # A running turn whose stream is gone ended on the server when
+        # the window closed: pass the recorded reason through the row
+        # (never persisted, recomputed on every read).
+        if turn.get("status") == "running":
+            turn["run_end_reason"] = _disconnect_reason(
+                app, project, turn.get("time"))
+        else:
+            turn["run_end_reason"] = ""
     return {
         "turns": window,
         "next_before": window[0]["id"] if older > 0 else None,
@@ -419,6 +474,7 @@ def register_chat_history_routes(app: Any) -> Any:
                 error_code=(body.get("error_code", "")
                             if isinstance(body.get("error_code"), str)
                             else ""),
+                executed=body.get("executed", False) is True,
             )
         except ValueError as err:
             raise HTTPException(status_code=400, detail=str(err)) from None
