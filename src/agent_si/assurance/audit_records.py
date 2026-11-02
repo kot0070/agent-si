@@ -1,4 +1,4 @@
-"""K03 assurance lane STEP1 shapes: audit records, verdicts, failure classes.
+"""Audit records, verdicts, failure classes.
 
 Frozen sources: RECORDS/day0/K13_MANIFEST.md §17B (AuditResult and
 AuditHandlingDisposition, immutable result, handling separate),
@@ -10,7 +10,7 @@ AUDIT_REWORK / VERIFICATION_REWORK correction runs), §16
 (ReworkCounterRecord, AUDIT_REWORK counter kind); SPEC 18
 (AUDIT_INDEPENDENCE: execution record carries the auditor's actual runtime
 binding); SPEC 20B (contributor sets derived from work records);
-DIRECTOR/TASK_PACKAGES/K03/TASK.md SPEC 0A (requirement verdicts
+the requirement-verdict spec (requirement verdicts
 PRESERVED / CHANGED / MISSING / CONTRADICTED; non-PRESERVED blocks PASS).
 """
 

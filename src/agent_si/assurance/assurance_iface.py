@@ -1,8 +1,8 @@
-"""K03 assurance lane STEP1 shapes: the narrow cross-package interface.
+"""Cross-package assurance interface: the narrow shared shapes.
 
-Frozen sources: RECORDS/day0/K13_MANIFEST.md §17B (canonical AuditResult
-and separate handling disposition), §0A-adjacent SPEC 0A in
-DIRECTOR/TASK_PACKAGES/K03/TASK.md (requirement verdicts PRESERVED /
+Frozen sources: the frozen manifest §17B (canonical AuditResult
+and separate handling disposition), the §0A-adjacent requirement-verdict
+spec (requirement verdicts PRESERVED /
 CHANGED / MISSING / CONTRADICTED), §1 authority order USER > DIRECTOR >
 MANAGER > AGENTS; RECORDS/day1/K04_INTERFACE.md sec 2 (exact model id);
 other packages code against this module only and never import lane

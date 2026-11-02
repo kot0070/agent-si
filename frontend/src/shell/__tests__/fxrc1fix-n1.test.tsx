@@ -1,7 +1,8 @@
 /** @vitest-environment jsdom */
-// FXRC1FIX N1: Inspector Team-now shows only live rows. Ended rows from
-// older runs (RETURNED/ACCEPTED/REJECTED/BLOCKED) drop out;
-// QUEUED/RUNNING/HANDOFF stay visible with their state.
+// FXDESIGN8 (L-151 C1 conflict): Inspector Team-now lists every served row,
+// including finished runs: after a run the rail still shows the last run's
+// team with its real state (real state or none, never an Unknown chip).
+// The old N1 drop-ended-rows pin is superseded; see TEST_CHANGES.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
@@ -58,8 +59,8 @@ function renderInspector(client: FakeApiClient): void {
   render(node);
 }
 
-describe("fxrc1fix N1 inspector team-now ended rows", () => {
-  it("drops ended rows and keeps live ones", async () => {
+describe("fxdesign8 team-now finished rows", () => {
+  it("keeps ended rows with their real state", async () => {
     renderInspector(
       new FakeApiClient({ liveRows: MIXED_ROWS.map((row) => ({ ...row })) }),
     );
@@ -72,19 +73,13 @@ describe("fxrc1fix N1 inspector team-now ended rows", () => {
       "gone-rejected",
       "gone-blocked",
     ]) {
-      expect(screen.queryByTestId(`team-row-${agent}`)).toBeNull();
+      expect(await screen.findByTestId(`team-row-${agent}`)).toBeTruthy();
     }
     expect(screen.queryByTestId("team-empty")).toBeNull();
   });
 
-  it("shows the team empty line when every row ended", async () => {
-    renderInspector(
-      new FakeApiClient({
-        liveRows: MIXED_ROWS.filter((row) =>
-          ["RETURNED", "ACCEPTED", "REJECTED", "BLOCKED"].includes(row.status),
-        ).map((row) => ({ ...row })),
-      }),
-    );
+  it("shows the team empty line only when no rows are served", async () => {
+    renderInspector(new FakeApiClient({ liveRows: [] }));
     expect(await screen.findByTestId("team-empty")).toBeTruthy();
     expect(screen.queryByTestId("team-rows")).toBeNull();
   });

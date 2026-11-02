@@ -16,6 +16,8 @@ export interface ChatStoredMessage {
   at: number;
   final: boolean;
   decided?: "accepted" | "rejected";
+  /** FXHARD1: prompt to resend (restart-interrupted turn replay). */
+  resendPrompt?: string;
 }
 
 export type ChatHealth = "ok" | "degraded" | "reconnecting";
@@ -42,7 +44,7 @@ export type NewChatMessage = Omit<ChatStoredMessage, "id" | "at"> & {
 };
 
 export type ChatMessagePatch = Partial<
-  Pick<ChatStoredMessage, "text" | "final" | "decided">
+  Pick<ChatStoredMessage, "text" | "final" | "decided" | "resendPrompt">
 >;
 
 let messageSeq = 0;
@@ -130,10 +132,34 @@ export function appendChatMessage(
     at: message.at ?? Date.now(),
     final: message.final,
     ...(message.decided === undefined ? {} : { decided: message.decided }),
+    ...(message.resendPrompt === undefined
+      ? {}
+      : { resendPrompt: message.resendPrompt }),
   };
   stateFor(projectId).messages.push(stored);
   emit(projectId);
   return { ...stored };
+}
+
+/** FXHARD1: prepend earlier-page messages (load-earlier cursor). */
+export function prependChatMessages(
+  projectId: string,
+  messages: NewChatMessage[],
+): void {
+  const state = stateFor(projectId);
+  const stored = messages.map((message) => ({
+    id: message.id ?? nextMessageId(),
+    role: message.role,
+    text: message.text,
+    at: message.at ?? Date.now(),
+    final: message.final,
+    ...(message.decided === undefined ? {} : { decided: message.decided }),
+    ...(message.resendPrompt === undefined
+      ? {}
+      : { resendPrompt: message.resendPrompt }),
+  }));
+  state.messages = [...stored, ...state.messages];
+  emit(projectId);
 }
 
 export function patchChatMessage(

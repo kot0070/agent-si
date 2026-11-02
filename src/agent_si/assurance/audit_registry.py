@@ -1,4 +1,4 @@
-"""K03 assurance lane STEP1 shapes: fail-closed auditor sourcing.
+"""Fail-closed auditor sourcing.
 
 Frozen sources: RECORDS/day0/K13_MANIFEST.md §26A (AuditRequirement,
 minimum_independence_level, L4 manual rules), §28 (RoutingDecision
@@ -7,7 +7,7 @@ PROXY/MEASURED evidence, never assumed), §44 (AuditorRegistry owns lookup
 only, never execution); RECORDS/day1/K04_INTERFACE.md sec 2 (exact model
 id, never reworded) and sec 6 (NO_ELIGIBLE_CANDIDATE vocabulary);
 RECORDS/day1/K02_V2_CHANGES.md C16 (select_audit_model, AuditModelChoice);
-DIRECTOR/TASK_PACKAGES/K03/TASK.md ROWS B0B-BP07-14/17/18/20 (fail-closed
+the frozen fail-closed sourcing rows (fail-closed
 sourcing, NO_ELIGIBLE_AUDITOR, BLOCKED, PASS prohibited until sourcing
 completes), B0B-BP07-53/54 (sourcing stays fail-closed BLOCKED until the
 USER resolves provider options), B0B-UNCOVERED_ARCH-652/746 (missing

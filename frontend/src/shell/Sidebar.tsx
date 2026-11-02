@@ -5,16 +5,17 @@
 // (never anchors, so the four-entry anchor rule holds); the selected row
 // carries the soft fill and opens the project overview on click.
 
-import { useEffect, useState } from "react";
-import type { ReactElement } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
-import type { ProjectRecord } from "../api/iface";
+import type { ReactElement } from "react";
 import type { SidebarProps } from "../app/iface";
 import { useApiClient, useCurrentProject } from "../app/ApiClientProvider";
+import { useProjectList } from "../projects/projectList";
 import { hasChatUnseen, useUnseenVersion } from "../chat/index";
 import { t } from "../locale/index";
 import { Icon } from "../ui/icons";
 import type { IconName } from "../ui/icons";
+import { ErrorPanel } from "../ui/ErrorPanel";
+import { LoadingState } from "../ui/LoadingState";
 
 // FXDESIGN3 S5: the rail exposes the active entry through NavLink's
 // aria-current="page" plus the fx-nav-active soft-fill token in shell.css.
@@ -38,26 +39,10 @@ export function Sidebar(props: SidebarProps): ReactElement {
   const location = useLocation();
   const current = useCurrentProject();
   const active = props.projectId ?? current.projectId;
-  const [projects, setProjects] = useState<ProjectRecord[] | null>(null);
-
-  useEffect(() => {
-    let alive = true;
-    client.listProjects().then(
-      (rows) => {
-        if (alive) {
-          setProjects(rows);
-        }
-      },
-      () => {
-        if (alive) {
-          setProjects([]);
-        }
-      },
-    );
-    return () => {
-      alive = false;
-    };
-  }, [client]);
+  // FXPROJ J1: the one shared project list (refetch on create, delete
+  // and route change). Null is loading, never an empty list; a failed
+  // load keeps the last good rows and reports failure with a retry.
+  const { projects, failure, refresh } = useProjectList();
 
   const resultsTo =
     active === null ? "/projects" : `/projects/${active}/reports`;
@@ -152,37 +137,49 @@ export function Sidebar(props: SidebarProps): ReactElement {
         </span>
       ) : null}
       <div data-testid="sidebar-projects" className="fx-project-list">
-        {(projects ?? []).map((project) => (
-          <button
-            key={project.project_id}
-            type="button"
-            data-testid={`sidebar-project-${project.project_id}`}
-            className={
-              project.project_id === active
-                ? "fx-project-row fx-nav-active"
-                : "fx-project-row"
-            }
-            aria-current={project.project_id === active ? true : undefined}
-            title={project.name}
-            onClick={() => {
-              openProject(project.project_id);
-            }}
-          >
-            <Icon name="folder" />
-            <span className="fx-truncate">{project.name}</span>
-            {/* FXCHATHIST Part 2 (H4): quiet dot while this project's
-                chat holds unseen activity; opening the chat clears it. */}
-            {hasChatUnseen(client, project.project_id) ? (
-              <span
-                data-testid={`project-chat-dot-${project.project_id}`}
-                className="fx-quiet"
-                aria-hidden="true"
-              >
-                {"\u2022"}
-              </span>
-            ) : null}
-          </button>
-        ))}
+        {projects === null ? (
+          failure !== null ? (
+            <ErrorPanel
+              errorKey={failure.errorKey}
+              code={failure.code}
+              onRetry={refresh}
+            />
+          ) : (
+            <LoadingState loadingKey="ui.loading.more" />
+          )
+        ) : (
+          projects.map((project) => (
+            <button
+              key={project.project_id}
+              type="button"
+              data-testid={`sidebar-project-${project.project_id}`}
+              className={
+                project.project_id === active
+                  ? "fx-project-row fx-nav-active"
+                  : "fx-project-row"
+              }
+              aria-current={project.project_id === active ? true : undefined}
+              title={project.name}
+              onClick={() => {
+                openProject(project.project_id);
+              }}
+            >
+              <Icon name="folder" />
+              <span className="fx-truncate">{project.name}</span>
+              {/* FXCHATHIST Part 2 (H4): quiet dot while this project's
+                  chat holds unseen activity; opening the chat clears it. */}
+              {hasChatUnseen(client, project.project_id) ? (
+                <span
+                  data-testid={`project-chat-dot-${project.project_id}`}
+                  className="fx-quiet"
+                  aria-hidden="true"
+                >
+                  {"\u2022"}
+                </span>
+              ) : null}
+            </button>
+          ))
+        )}
       </div>
     </nav>
   );

@@ -16,6 +16,8 @@ import {
 import { ApiError } from "../../api/errors";
 import { t } from "../../locale/index";
 import { secretIdForProvider } from "./secretStore";
+import { listProviderModels, modelPriceText, refreshProviderModels, saveEnabledModels } from "./modelsApi";
+import type { ProviderModelRow } from "./modelsApi";
 import type { SecretStorePort } from "./secretStore";
 import type { ProviderPreset, SecretRef } from "./types";
 
@@ -32,6 +34,12 @@ type ConnectDialogProps = {
   timeoutMs?: number;
   onClose: () => void;
   onConnected: (presetId: string, ref: SecretRef) => void;
+  // Step-2 additions (all optional; omitting them keeps the old key-only
+  // contract): Manage models opens at step 2 with the current ticks, Done
+  // reports the ticked ids through onModelsDone before closing.
+  initialStep?: 1 | 2;
+  initialTicked?: string[];
+  onModelsDone?: (presetId: string, modelIds: string[]) => void;
 };
 
 export const CONNECT_TIMEOUT_MS = 8000;
@@ -72,40 +80,107 @@ export function ConnectDialog({
   timeoutMs = CONNECT_TIMEOUT_MS,
   onClose,
   onConnected,
+  initialStep,
+  initialTicked,
+  onModelsDone,
 }: ConnectDialogProps) {
   const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<ConnectResult | null>(null);
+  // Step 2: the model list inside the same dialog (Connected line, loading
+  // state, tickable rows, Done closes). The key is already cleared.
+  const [step, setStep] = useState<1 | 2>(1);
+  const [modelRows, setModelRows] = useState<ProviderModelRow[]>([]);
+  const [modelSource, setModelSource] = useState<"provider" | "catalog" | null>(null);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [ticked, setTicked] = useState<string[]>([]);
+  const [modelQuery, setModelQuery] = useState("");
+  // Quiet Refresh state: a failed refresh keeps the last list plus one
+  // calm line; Done PUT state: a failed save keeps the dialog open.
+  const [refreshNote, setRefreshNote] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const keyRef = useRef<HTMLInputElement | null>(null);
+  const initialTickedRef = useRef<string[] | undefined>(initialTicked);
+  initialTickedRef.current = initialTicked;
+
+  function closeAndClear(): void {
+    // The key leaves component state on every close, mid-save or not.
+    setApiKey("");
+    onClose();
+  }
+
+  async function loadModels(activePreset: ProviderPreset): Promise<void> {
+    setModelsLoading(true);
+    try {
+      const outcome = await listProviderModels(activePreset.id, activePreset.models);
+      setModelRows(outcome.rows);
+      setModelSource(outcome.source);
+      const known = new Set(outcome.rows.map((row) => row.id));
+      const fromRoute = initialTickedRef.current;
+      if (outcome.servedEnabled !== null) {
+        // The server's enabled list is the routing truth: it wins over the
+        // passed-in ticks whenever the route names it.
+        setTicked(outcome.servedEnabled.filter((id) => known.has(id)));
+      } else if (fromRoute !== undefined) {
+        // Manage models without a served truth: keep the current ticks,
+        // drop ids no longer listed.
+        setTicked(fromRoute.filter((id) => known.has(id)));
+      } else {
+        // Fresh connect: only the default (connect) model ticked, never all.
+        const first = activePreset.models[0];
+        setTicked(first === undefined ? [] : [first.id].filter((id) => known.has(id)));
+      }
+    } finally {
+      setModelsLoading(false);
+    }
+  }
 
   useEffect(() => {
     if (!open) {
       return undefined;
     }
+    const activePreset: ProviderPreset | null = preset;
     setApiKey("");
     setResult(null);
     setSaving(false);
+    setModelQuery("");
+    setModelSource(null);
+    setRefreshNote(null);
+    const first = activePreset?.models[0];
+    const fallbackTicked = first === undefined ? [] : [first.id];
+    setTicked(initialTicked ?? fallbackTicked);
+    if (initialStep === 2 && activePreset !== null) {
+      setStep(2);
+      setModelRows([]);
+      void loadModels(activePreset);
+    } else {
+      setStep(1);
+      setModelRows([]);
+    }
     return undefined;
-  }, [open, preset, preset_id]);
+  }, [open, preset, preset_id, initialStep]);
 
-  // L1: the key field takes focus whenever the modal opens, so the
-  // keyboard lands in the single input rather than on a button.
+  // L1: the key field takes focus whenever the modal opens on step 1, so
+  // the keyboard lands in the single input rather than on a button.
   useEffect(() => {
-    if (!open) {
+    if (!open || step !== 1) {
       return undefined;
     }
     if (keyRef.current !== null) {
       keyRef.current.focus();
     }
     return undefined;
-  }, [open, preset, preset_id]);
+  }, [open, preset, preset_id, step]);
 
   useEffect(() => {
     if (!open) {
       return undefined;
     }
+    // X, Esc and the backdrop always close, even during a pending save:
+    // the key leaves state with the close and the save settles unseen.
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === "Escape") {
+        setApiKey("");
         onClose();
       }
     };
@@ -171,6 +246,11 @@ export function ConnectDialog({
         text: t("providers.connect.connected", { label: activePreset.label }),
       });
       onConnected(preset_id, ref);
+      // Step 1 done: the same dialog moves to step 2 (Connected line plus
+      // the tickable model list). Done closes; X/Esc/backdrop close any time.
+      setStep(2);
+      setModelRows([]);
+      await loadModels(activePreset);
     } catch (err: unknown) {
       // Any failure (route or mirror write) shows an honest error: the
       // key never reached a store, so the provider stays disconnected.
@@ -181,18 +261,93 @@ export function ConnectDialog({
     }
   }
 
+  const needle = modelQuery.trim().toLowerCase();
+  const shownRows = needle.length === 0
+    ? modelRows
+    : modelRows.filter(
+        (row) =>
+          row.label.toLowerCase().includes(needle) ||
+          row.id.toLowerCase().includes(needle),
+      );
+
+  function toggleTicked(modelId: string): void {
+    setTicked((prev) =>
+      prev.includes(modelId)
+        ? prev.filter((id) => id !== modelId)
+        : [...prev, modelId],
+    );
+  }
+
+  function handleDone(): void {
+    // Done PUTs the ticked ids and closes at once (the dialog always
+    // closed synchronously on Done). The server's enabled list is the
+    // routing truth: a saved list that differs is reconciled back onto
+    // the page, and a failed save re-reads the served ticks so the page
+    // never shows ticks the server refused.
+    if (preset === null) {
+      return;
+    }
+    const activePreset: ProviderPreset = preset;
+    const ids = ticked;
+    onModelsDone?.(preset_id, ids);
+    closeAndClear();
+    void saveEnabledModels(activePreset.id, ids).then(
+      (saved) => {
+        if (JSON.stringify(saved) !== JSON.stringify(ids)) {
+          onModelsDone?.(preset_id, saved);
+        }
+      },
+      () => {
+        void listProviderModels(activePreset.id, activePreset.models).then(
+          (outcome) => {
+            if (outcome.servedEnabled !== null) {
+              onModelsDone?.(preset_id, outcome.servedEnabled);
+            }
+          },
+          () => undefined,
+        );
+      },
+    );
+  }
+
+  function handleRefresh(): void {
+    // Quiet Refresh: re-read the live list; any failure keeps the last
+    // list plus one calm line.
+    if (refreshing || preset === null || step !== 2) {
+      return;
+    }
+    const activePreset: ProviderPreset = preset;
+    setRefreshing(true);
+    setRefreshNote(null);
+    refreshProviderModels(activePreset.id, activePreset.models).then(
+      (outcome) => {
+        setRefreshing(false);
+        setModelRows(outcome.rows);
+        setModelSource(outcome.source);
+        const known = new Set(outcome.rows.map((row) => row.id));
+        if (outcome.servedEnabled !== null) {
+          setTicked(outcome.servedEnabled.filter((id) => known.has(id)));
+        }
+      },
+      () => {
+        setRefreshing(false);
+        setRefreshNote("Couldn't refresh the live list — keeping the last list.");
+      },
+    );
+  }
+
   return (
     <div
       data-testid="connect-backdrop"
       onClick={(event) => {
         if (event.target === event.currentTarget) {
-          onClose();
+          closeAndClear();
         }
       }}
       style={{
         position: "fixed",
         inset: 0,
-        backgroundColor: "rgba(0, 0, 0, 0.45)",
+        backgroundColor: "#000",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -217,25 +372,20 @@ export function ConnectDialog({
           type="button"
           data-variant="quiet"
           aria-label={t("providers.connect.close")}
-          onClick={onClose}
+          onClick={closeAndClear}
         >
           {t("providers.connect.closeGlyph")}
         </button>
       <h2>{t("providers.connect.title", { label: preset.label })}</h2>
-      <dl>
-        <div>
-          <dt>{t("providers.connect.providerId")}</dt>
-          <dd>{preset.id}</dd>
-        </div>
-        <div>
-          <dt>{t("providers.connect.kind")}</dt>
-          <dd>{preset.kind}</dd>
-        </div>
-        <div>
-          <dt>{t("providers.connect.baseUrl")}</dt>
-          <dd>{preset.baseUrl}</dd>
-        </div>
-      </dl>
+      <p data-variant="quiet">
+        <span>{preset.id}</span>
+        {" · "}
+        <span>{preset.kind}</span>
+        {" · "}
+        <span>{preset.baseUrl}</span>
+      </p>
+      {step === 1 ? (
+      <>
       <label>
         {t("providers.connect.apiKey")}
         <input
@@ -250,7 +400,7 @@ export function ConnectDialog({
       <p>{t("providers.connect.keyFormat", { hint: preset.keyHint })}</p>
       {showHintWarning ? <p>{t("providers.connect.hintMismatch")}</p> : null}
       {result !== null ? <p role="status">{result.text}</p> : null}
-      <button type="button" data-variant="quiet" onClick={onClose}>
+      <button type="button" data-variant="quiet" onClick={closeAndClear}>
         {t("providers.connect.cancel")}
       </button>
       <button
@@ -264,6 +414,81 @@ export function ConnectDialog({
       >
         {saving ? t("providers.connect.saving") : t("providers.connect.save")}
       </button>
+      </>
+      ) : (
+      <>
+      <p role="status" data-variant="quiet">
+        {t("providers.connect.connected", { label: preset.label })}
+      </p>
+      {modelsLoading ? (
+        <p role="status">Loading models...</p>
+      ) : (
+      <>
+      <div>
+      <button
+        type="button"
+        data-variant="quiet"
+        disabled={refreshing}
+        onClick={handleRefresh}
+      >
+        {refreshing ? "Refreshing models..." : "Refresh models"}
+      </button>
+      {refreshNote !== null ? <p data-variant="quiet">{refreshNote}</p> : null}
+      </div>
+      <label>
+        Filter models
+        <input
+          type="search"
+          aria-label="Filter models"
+          value={modelQuery}
+          onChange={(event) => setModelQuery(event.target.value)}
+        />
+      </label>
+      {modelSource === "catalog" ? (
+        <p data-variant="quiet">showing the known list</p>
+      ) : null}
+      <div
+        data-testid="connect-model-list"
+        style={{ maxHeight: 240, overflowY: "auto" }}
+      >
+        <ul>
+          {shownRows.map((row) => (
+            <li key={row.id} data-testid="connect-model-row">
+              <input
+                type="checkbox"
+                aria-label={`${preset.label} ${row.label}`}
+                checked={ticked.includes(row.id)}
+                onChange={() => toggleTicked(row.id)}
+              />{" "}
+              <span>{row.label}</span>{" "}
+              <small data-testid={`connect-model-id-${row.id}`}>{row.id}</small>{" "}
+              <span data-testid={`connect-model-price-${row.id}`}>
+                {modelPriceText(row.kb, row.price)}
+              </span>
+              {row.kbKnown === false ? (
+                <span data-testid={`connect-model-kb-${row.id}`}>
+                  {" "}not in capability base
+                </span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      </div>
+      </>
+      )}
+      <button type="button" data-variant="quiet" onClick={closeAndClear}>
+        {t("providers.connect.cancel")}
+      </button>
+      <button
+        type="button"
+        data-variant="primary"
+        style={{ fontWeight: 700 }}
+        onClick={handleDone}
+      >
+        Done
+      </button>
+      </>
+      )}
       </div>
     </div>
   );

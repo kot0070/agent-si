@@ -5,7 +5,15 @@
 // never reaches a log, a URL, or lasting state. Reads never send a token.
 
 import { ApiError, requestResponse } from "../../api/errors";
+import { PROVIDER_CATALOG } from "./catalog";
 import type { SecretRef } from "./types";
+
+// Local-kind presets and their runtime refs: a local connect attaches the
+// preset's base URL as the runtime, so the served local-models rows map
+// back to preset ids by exact base-URL match.
+const LOCAL_RUNTIME_PRESETS = PROVIDER_CATALOG.filter(
+  (preset) => preset.kind === "local",
+).map((preset) => ({ id: preset.id, baseUrl: preset.baseUrl }));
 
 export type ConnectRequestBody = {
   preset_id: string;
@@ -78,27 +86,55 @@ export async function connectLocal(runtimeRef: string): Promise<void> {
   });
 }
 
-// GET the provider cards state. Never throws: any failure yields an empty
-// list so a background refresh never disturbs the page.
+// GET the provider cards state. Served state is the truth: the registry
+// list (GET /api/v1/providers) plus the attached local runtime (GET
+// /api/v1/local/models rows carry the runtime ref in `model`; matched to
+// the local preset with the same base URL). Never throws: any failure
+// yields an empty list so a background refresh never disturbs the page.
+// Local presets attach a runtime instead of registering a provider, so
+// without the local half they would flip back to Connect on remount.
 export async function listConnectedProviders(): Promise<string[]> {
+  const ids: string[] = [];
   try {
     const response = await requestResponse("/api/v1/providers", {
       method: "GET",
     });
     const data: unknown = await response.json();
-    if (!isRecord(data) || !Array.isArray(data["providers"])) {
-      return [];
-    }
-    const ids: string[] = [];
-    for (const row of data["providers"] as unknown[]) {
-      if (isRecord(row) && typeof row["provider_id"] === "string") {
-        ids.push(row["provider_id"] as string);
+    if (isRecord(data) && Array.isArray(data["providers"])) {
+      for (const row of data["providers"] as unknown[]) {
+        if (isRecord(row) && typeof row["provider_id"] === "string") {
+          ids.push(row["provider_id"] as string);
+        }
       }
     }
-    return ids;
   } catch {
-    return [];
+    // Registry unreadable: fall through to the local half.
   }
+  try {
+    const response = await requestResponse("/api/v1/local/models", {
+      method: "GET",
+    });
+    const data: unknown = await response.json();
+    const rows: unknown[] = isRecord(data) && Array.isArray(data["models"])
+      ? (data["models"] as unknown[])
+      : Array.isArray(data)
+        ? (data as unknown[])
+        : [];
+    for (const row of rows) {
+      if (!isRecord(row) || typeof row["model"] !== "string") {
+        continue;
+      }
+      const runtime = row["model"] as string;
+      for (const preset of LOCAL_RUNTIME_PRESETS) {
+        if (runtime === preset.baseUrl && !ids.includes(preset.id)) {
+          ids.push(preset.id);
+        }
+      }
+    }
+  } catch {
+    // No local runtime attached (or no local route): registry list stands.
+  }
+  return ids;
 }
 
 // POST one disconnect request; the card follows a 2xx answer.

@@ -1,8 +1,16 @@
-# Hackathon Contributions
+# Hackathon contributions
 
-| component | package | what is new | evidence |
-| --------- | ------- | ----------- | -------- |
-| K12 merged (K12OPEN2 + K12R1 + K12OPEN1) | pkg/K12 into int | contributions served, 30 green [A: `a2778a0 Merge branch 'pkg/K12' into int (K12OPEN2: contributions served, 30 green)`]; ledger pkg K12 ts 2026-10-30 [B], 30 served green in int 6bc77f7 [B], auditor PASS [B] | int tip `6bc77f7 int: drop foreign K07MISS1 benchmark mount (module absent in int; broke 35 served tests)` [A: 35 served tests]; int history pinned: 355 commits at int 1eca7e0 (2026-11-01; the count grows with every merge) [A: git rev-list --count int] |
-| K12OPEN2 contributions served | pkg/K12 (`ab19b38 K12OPEN2: accept package` [A]) | R-350 + HC-3 served through create_app [C: RESULT_K12OPEN2.md:3]; auditor status PASS [C: K12OPEN2/VERDICT-Flint.md:3]; lane `2 passed in 2.40s` [C: VERDICT-Flint.md:37]; seam `609 passed, 34 xfailed in 6.30s` [C: VERDICT-Flint.md:41]; HD-CHECK `2 passed in 2.37s` [C: VERDICT-Flint.md:45]; native `2 passed in 2.39s` [C: VERDICT-Flint.md:49]; negative probe ALL_NEGATIVE_OK [C: VERDICT-Flint.md:59] | sha256 x3 match coder RETURN [C: VERDICT-Flint.md:23-26]; stub_scan --files/--wire exit 0 clean [C: VERDICT-Flint.md:67-68] |
-| K12R1 R-350 served tests | pkg/K12 (`50fdf5a K12R1: R-350 served tests (auditor PASS, HD PASS)` [A]) | auditor PASS [C: m-served/VERDICT.md:1]; `23 passed in 3.40s` [C: m-served/VERDICT.md:29]; ruff `All checks passed!` [C: m-served/VERDICT.md:30]; HD-CHECK `12 passed in 2.96s` [C: HD_VERDICT_K12R1.md:3]; stub_scan exit 0 [C: m-served/VERDICT.md:31, HD_VERDICT_K12R1.md:3] | sha256 match coder claim [C: m-served/VERDICT.md:5,13] |
-| K12OPEN1 R-350 + HC-3 | pkg/K12 (`0db39a4 K12OPEN1+K12OPEN3 batch: R-350/HC-3/HC-2 (auditors PASS, HD PASS)` [A]) | auditor VERDICT PASS [C: K12OPEN1/MGR1/VERDICT.md:2]; `11 passed in 2.84s` [C: MGR1/VERDICT.md:18]; RED 11x404 then GREEN 11 passed [C: RESULT_K12OPEN1.md:2]; HD-CHECK `11 passed` [C: HD_VERDICT_K12OPEN1.md:3]; stub_scan exit 0 clean [C: MGR1/VERDICT.md:24] | sha256 x5 match coder RETURN [C: MGR1/VERDICT.md:27-31] |
+Facts only. Each row names what is new in the product and where to check it.
+
+| contribution | where to check |
+| ------------ | -------------- |
+| Public text rules and check: read the published rules, check an idea text for violations [PROVEN: backend public-text routes and rules file] | `src/agent_si/backend/k12open1_routes.py`, `src/agent_si/backend/public_text.py` |
+| Submission scan: scan submitted files and notes for secrets and private paths [PROVEN: submission scan route and secret-scan file] | `src/agent_si/backend/k12open1_routes.py`, `src/agent_si/backend/secretscan.py` |
+| Contributions list served by the app [NEEDS FINAL PASS] | <<FINAL: confirm served contributions endpoint and its evidence>> |
+| Demo script: one 3-minute cut over fourteen functions, app page only [NEEDS FINAL PASS] | `SUBMISSION/K12/demo-script.md` <<FINAL: re-pin every click label against the current interface and re-time the cut>> |
+| Presentation and idea text: visitor texts only, number rule kept [PROVEN: visitor blocks present] | `SUBMISSION/K12/presentation.md`, `SUBMISSION/K12/idea-text.md` |
+| Scene plan matches the demo script scene for scene [PROVEN: same order and seconds in both files] | `SUBMISSION/K12/scene-plan.md`, `SUBMISSION/K12/demo-script.md` |
+
+No video file ships with the bundle. The script is the record until the final drive runs.
+
+<<FINAL: served test counts and auditor verdicts are confirmed only by the final drive on the packaged build>>

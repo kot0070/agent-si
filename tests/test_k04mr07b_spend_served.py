@@ -1,4 +1,4 @@
-"""K04MR07B: served spend for the priced meta contributor row via the updater.
+"""Served spend for the priced meta contributor row via the updater.
 
 Through the REAL app (create_app + store dir + secret_store memory +
 HTTP TestClient) with a fake ONLY at urllib urlopen. The priced row
@@ -8,7 +8,7 @@ user confirmation, then kb.bind_catalog): the base holds an honest
 all-UNKNOWN meta row, the fetched JSON carries ONLY the owner MODEL_KB
 facts below, UNKNOWN stays UNKNOWN.
 
-Owner facts (DIRECTOR/INBOX/MODEL_KB/sections/meta.md:84-112):
+Model facts (owner model-KB meta section):
 - "Model ID: muse-spark-1.3-contributor
   (https://dev.meta.ai/docs/models, retrieved 2026-10-11)."
 - "Price input per 1M tokens: 0.1

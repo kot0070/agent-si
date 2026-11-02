@@ -1195,6 +1195,7 @@ def create_app(settings: Any = None,
             )
             _k04_ctx.provider_facade = _k04_api
             _k04_ctx.credential_store = _k04_credstore
+            _k04_ctx.model_state_dir = _k04_dir
             _k04_ctx.audit_sink = _k04_auditsink
             try:
                 from agent_si.runtime import manager as _k04_mgr
