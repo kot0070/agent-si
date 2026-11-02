@@ -666,6 +666,9 @@ class ManagerSdkBridge:
             if seen.get("folder") != resolved:
                 seen["folder"] = resolved
                 yield {"type": "delta", "text": working}
+            # FXCTX: _manager_events threads app through run kwargs; the
+            # engine already takes it explicitly, so drop the duplicate.
+            kwargs.pop("app", None)
             yield from _devrun.run_dev_task(
                 effective, stream_state=state, app=app, **kwargs)
             # Remember the team this run showed, so the next turn stays
@@ -800,6 +803,10 @@ class ManagerSdkBridge:
             run_kwargs: dict[str, Any] = {"provider_adapter": routed}
         else:
             run_kwargs = {}
+        # FXCTX: hand the manager the app so its provider call carries
+        # the earlier turns; entries with no app seam keep old kwargs.
+        if app is not None:
+            run_kwargs["app"] = app
         try:
             run_events = run_task_streamed(request, **run_kwargs)
         except Exception as err:
@@ -940,8 +947,20 @@ class ManagerSdkBridge:
                 task_id=meter_shape["task_id"], run_id=run_id,
                 role=meter_role,
                 provider_id=meter_shape["provider_id"])
-            response = provider.invoke(
-                [{"role": "user", "content": request.message}])
+            # FXCTX: earlier turns of this project's chat ride along as
+            # context (best effort: a history read failure keeps the
+            # plain single-message call, the turn still answers).
+            try:
+                from agent_si.backend import chat_history as _chat_history
+
+                history_messages = _chat_history.chat_messages(
+                    app, project, message, exclude_run_id=run_id)
+            except Exception:
+                history_messages = None
+            if not history_messages:
+                history_messages = [
+                    {"role": "user", "content": request.message}]
+            response = provider.invoke(history_messages)
             captured["text"] = response.output_text
             captured["mock"] = bool(response.mock)
             captured["finish_reason"] = response.finish_reason

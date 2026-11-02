@@ -363,15 +363,17 @@ describe("H4 verdict stored with chat, quiet dot until opened", () => {
     // Sidebar plus ProjectsPage rows each carry the quiet dot.
     const dots = await screen.findAllByTestId("project-chat-dot-p-1");
     expect(dots).toHaveLength(2);
-    // Opening the chat clears the dot; the single error card shows.
+    // Opening the chat clears the dot; the single error line shows.
     render(
       <ApiClientProvider client={client}>
         <ChatArea projectId="p-1" />
       </ApiClientProvider>,
     );
-    const panels = await screen.findAllByTestId("kit-error-panel");
-    expect(panels).toHaveLength(1);
-    expect(await screen.findByTestId("chat-health-degraded")).toBeTruthy();
+    const lines = await screen.findAllByTestId("chat-error-line");
+    expect(lines).toHaveLength(1);
+    expect(screen.queryByTestId("kit-error-panel")).toBeNull();
+    expect(screen.queryByTestId("chat-health-degraded")).toBeNull();
+    expect(document.body.textContent).not.toContain("UNKNOWN");
     await waitFor(() => {
       expect(screen.queryByTestId("project-chat-dot-p-1")).toBeNull();
     });
@@ -533,7 +535,7 @@ describe("engine run verdict: log lines once, no card, time-only stamp", () => {
     });
   }
 
-  it("renders the engine log once with no verdict card", async () => {
+  it("renders the engine verdict first with the log behind a toggle", async () => {
     stubDevrunFetch();
     render(
       <ApiClientProvider client={new HttpApiClient()}>
@@ -541,14 +543,16 @@ describe("engine run verdict: log lines once, no card, time-only stamp", () => {
       </ApiClientProvider>,
     );
     promptAndSend("run it");
-    // The streamed log lines land in the one assistant block...
-    const block = await screen.findByTestId("chat-assistant-message");
-    const text = block.querySelector("p")?.textContent ?? "";
-    expect(text).toContain("Director: plan of 2 parts");
-    expect(text).toContain("Total: 10 input + 5 output = 15 tokens");
-    expect(text).toContain("run success: all 2 parts PASS");
-    // ...exactly once (the done-carried repeat is dropped, not appended).
-    expect(text.indexOf("run success")).toBe(text.lastIndexOf("run success"));
+    // The verdict line comes first...
+    const verdict = await screen.findByTestId("run-verdict");
+    expect(verdict.textContent).toContain("Done");
+    // ...the log lines stay in the DOM behind the toggle, unchanged.
+    const toggle = await screen.findByTestId("run-steps-toggle");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.getByText(/Director: plan of 2 parts/)).toBeTruthy();
+    expect(screen.getByText(/Total: 10 input/)).toBeTruthy();
+    expect(screen.getByText(/run success: all 2 parts PASS/)).toBeTruthy();
+    expect(screen.getByTestId("run-steps").hasAttribute("hidden")).toBe(true);
     // No verdict card for the engine run: no accept/edit/reject.
     await waitFor(() => {
       expect(screen.queryByTestId("chat-spinner")).toBeNull();

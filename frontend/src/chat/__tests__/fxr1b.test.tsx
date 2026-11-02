@@ -152,7 +152,9 @@ describe("B1 stopped turn never shows the approval card", () => {
     renderChat();
     expect(await screen.findByText("half an answer")).toBeTruthy();
     expect(screen.queryByTestId("approval-card")).toBeNull();
-    expect(await screen.findByTestId("kit-error-panel")).toBeTruthy();
+    const line = await screen.findByTestId("chat-error-line");
+    expect(line.textContent).toContain("do it");
+    expect(screen.queryByTestId("kit-error-panel")).toBeNull();
   });
 });
 

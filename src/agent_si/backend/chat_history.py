@@ -49,7 +49,7 @@ _HISTORY_FILE = "chat_history.jsonl"
 
 #: Only these fields ever persist; anything else in the body is dropped.
 _TURN_FIELDS = ("project_id", "user_text", "assistant_text", "time",
-                "id", "status", "run_id", "error_code")
+                "id", "status", "run_id", "error_code", "executed")
 
 #: Stored turn states: a run starts as running, ends ok / failed /
 #: stopped. Every terminal write lands, so restarts can show the last
@@ -228,6 +228,8 @@ def _memory(app: Any) -> dict:
                 for key in ("run_id", "error_code"):
                     if not isinstance(turn.get(key), str):
                         turn[key] = ""
+                if turn.get("executed") is not True:
+                    turn["executed"] = False
                 turns.setdefault(turn["project_id"], []).append(turn)
     return turns
 
@@ -257,7 +259,7 @@ def _new_turn_id() -> str:
 def record_turn(app: Any, project_id: str, user_text: str,
                 assistant_text: str, *, status: str = "ok",
                 run_id: str = "", error_code: str = "",
-                turn_id: str = "") -> dict:
+                turn_id: str = "", executed: bool = False) -> dict:
     """Store one scrubbed turn for a project; returns the stored turn.
 
     Atomic under the project's lock: the append plus its snapshot
@@ -272,6 +274,7 @@ def record_turn(app: Any, project_id: str, user_text: str,
         raise ValueError("chat history needs a known status")
     code = error_code if isinstance(error_code, str) else ""
     rid = run_id.strip() if isinstance(run_id, str) else ""
+    ran = executed is True
     lock = _lock_for(project)
     with lock:
         project_turns = _memory(app).setdefault(project, [])
@@ -285,6 +288,7 @@ def record_turn(app: Any, project_id: str, user_text: str,
                     turn["time"] = _utcnow()
                     turn["status"] = status
                     turn["error_code"] = code
+                    turn["executed"] = ran
                     stored = dict(turn)
                     break
         if stored is None:
@@ -298,6 +302,7 @@ def record_turn(app: Any, project_id: str, user_text: str,
                 "status": status,
                 "run_id": rid,
                 "error_code": code,
+                "executed": ran,
             }
             project_turns.append(dict(turn))
             stored = dict(turn)
@@ -305,10 +310,153 @@ def record_turn(app: Any, project_id: str, user_text: str,
         return stored
 
 
+def _disconnect_reason(app: Any, project: str, turn_time: Any) -> str:
+    """Server-side run-end reason for a client disconnect, else "".
+
+    A page reload or window close ends the run on the server
+    ("(client disconnect: children reaped)" in the run summary); the
+    chat's running turn never gets its terminal write, so the history
+    read passes the reason through on the row instead. Best effort:
+    never raises, never invents a reason. Only a disconnect recorded
+    at or after the turn started counts, so an old disconnect never
+    mislabels a newer running turn.
+    """
+    try:
+        from agent_si.runtime.devrun import records as _records
+    except Exception:
+        return ""
+    try:
+        rows = _records.runs_for_project(app, project)
+    except Exception:
+        return ""
+    try:
+        started = str(turn_time or "")
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            summary = row.get("summary")
+            if not (isinstance(summary, str)
+                    and "client disconnect" in summary):
+                continue
+            # Served rows name the stamp "end" ("UNKNOWN" when unset);
+            # raw records name it "ended_at".
+            ended = row.get("ended_at", row.get("end"))
+            if (isinstance(ended, str) and ended
+                    and ended != "UNKNOWN" and started
+                    and ended >= started):
+                return summary
+            return ""
+    except Exception:
+        return ""
+    return ""
+
+
 def _copy_turns(app: Any, project: str) -> list:
     """Snapshot copies of one project's turns, oldest first."""
     with _snapshot_lock:
         return [dict(turn) for turn in _memory(app).get(project, [])]
+
+
+#: FXCTX plain-chat context: how many earlier turns ride the next call.
+_CHAT_CONTEXT_TURNS = 6
+
+#: FXCTX plain-chat context budget: total chars of earlier-turn text.
+_CHAT_CONTEXT_CHARS = 6000
+
+#: FXCTX: one assistant reply never contributes more than this to context.
+_CHAT_REPLY_CUT = 1500
+
+#: FXCTX system line opening every history-carrying plain-chat call.
+_CHAT_CONTEXT_SYSTEM = (
+    "You are the assistant in this project. Answer in the user's "
+    "language. Earlier turns are context."
+)
+
+
+def _pairs_chars(pairs: list) -> int:
+    """Total chars of user + reply text across context pairs."""
+    return sum(len(user_text) + len(reply_text)
+               for user_text, reply_text in pairs)
+
+
+def recent_context(app: Any, project_id: str, *, limit: int = 6,
+                   cap_chars: int = 6000,
+                   exclude_run_id: str | None = None) -> list:
+    """Earlier turns as provider messages, oldest first, best effort.
+
+    Built on list_turns: each stored turn contributes its user text plus
+    its final reply text (already scrubbed at record time). A turn with
+    no final reply yet (the running row the server stored at stream
+    start) contributes nothing, so the current turn never appears twice;
+    rows carrying exclude_run_id are skipped too. Every reply is cut to
+    1500 chars; oldest pairs drop first until the text fits cap_chars.
+    A history read failure returns [] and never fails the turn.
+    """
+    try:
+        count = int(limit)
+    except (TypeError, ValueError):
+        count = _CHAT_CONTEXT_TURNS
+    if count <= 0:
+        return []
+    try:
+        cap = int(cap_chars)
+    except (TypeError, ValueError):
+        cap = _CHAT_CONTEXT_CHARS
+    if cap <= 0:
+        return []
+    try:
+        turns = list_turns(app, project_id, limit=count + 1)
+    except Exception:
+        return []
+    excluded = (exclude_run_id.strip()
+                if isinstance(exclude_run_id, str) else "")
+    pairs: list = []
+    for turn in turns:
+        if not isinstance(turn, dict):
+            continue
+        if excluded and turn.get("run_id") == excluded:
+            continue
+        user_text = turn.get("user_text")
+        reply_text = turn.get("assistant_text")
+        user_text = user_text if isinstance(user_text, str) else ""
+        reply_text = reply_text if isinstance(reply_text, str) else ""
+        if not reply_text:
+            continue
+        pairs.append((user_text, reply_text[:_CHAT_REPLY_CUT]))
+    pairs = pairs[-count:] if len(pairs) > count else pairs
+    while len(pairs) > 1 and _pairs_chars(pairs) > cap:
+        pairs.pop(0)
+    if pairs and _pairs_chars(pairs) > cap:
+        user_text, reply_text = pairs[0]
+        pairs[0] = (user_text[:max(cap - len(reply_text), 0)], reply_text)
+    messages: list = []
+    for user_text, reply_text in pairs:
+        if user_text:
+            messages.append({"role": "user", "content": user_text})
+        messages.append({"role": "assistant", "content": reply_text})
+    return messages
+
+
+def chat_messages(app: Any, project_id: str, message: str, *,
+                  exclude_run_id: str | None = None,
+                  limit: int = 6, cap_chars: int = 6000) -> list:
+    """Full plain-chat provider messages: system + history + current.
+
+    Best effort: a history read failure still returns system + current,
+    so the turn always answers.
+    """
+    current = message if isinstance(message, str) else ""
+    try:
+        context = recent_context(
+            app, project_id, limit=limit, cap_chars=cap_chars,
+            exclude_run_id=exclude_run_id)
+    except Exception:
+        context = []
+    if not isinstance(context, list):
+        context = []
+    return [{"role": "system", "content": _CHAT_CONTEXT_SYSTEM},
+            *context,
+            {"role": "user", "content": current}]
 
 
 def list_turns(app: Any, project_id: str, *, limit: int = _DEFAULT_LIMIT,
@@ -350,6 +498,15 @@ def history_page(app: Any, project_id: str, *, limit: int = _DEFAULT_LIMIT,
     total = len(turns)
     window = turns[-count:] if total > count else list(turns)
     older = total - len(window)
+    for turn in window:
+        # A running turn whose stream is gone ended on the server when
+        # the window closed: pass the recorded reason through the row
+        # (never persisted, recomputed on every read).
+        if turn.get("status") == "running":
+            turn["run_end_reason"] = _disconnect_reason(
+                app, project, turn.get("time"))
+        else:
+            turn["run_end_reason"] = ""
     return {
         "turns": window,
         "next_before": window[0]["id"] if older > 0 else None,
@@ -419,6 +576,7 @@ def register_chat_history_routes(app: Any) -> Any:
                 error_code=(body.get("error_code", "")
                             if isinstance(body.get("error_code"), str)
                             else ""),
+                executed=body.get("executed", False) is True,
             )
         except ValueError as err:
             raise HTTPException(status_code=400, detail=str(err)) from None
@@ -444,8 +602,10 @@ def register_chat_history_routes(app: Any) -> Any:
 
 
 __all__ = [
+    "chat_messages",
     "history_page",
     "list_turns",
+    "recent_context",
     "record_turn",
     "register_chat_history_routes",
 ]
