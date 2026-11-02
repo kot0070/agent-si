@@ -467,10 +467,10 @@ export function Inspector(props: InspectorProps): ReactElement {
           ) : (
             <>
               <p data-testid="ctx-percent">
-                {t("shell.cards.context.percent")} {unknown}
+                {t("shell.cards.context.percentValue", { value: unknown })}
               </p>
               <p data-testid="ctx-window">
-                {t("shell.cards.context.window")} {unknown}
+                {t("shell.cards.context.windowValue", { value: unknown })}
               </p>
               <p data-testid="ctx-source">
                 {t("shell.cards.context.source")}{" "}

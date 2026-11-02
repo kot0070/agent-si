@@ -51,6 +51,9 @@ export function SettingsLayout(props: SettingsLayoutProps): ReactElement {
           {t('projects.why_this_model.title')}
         </button>
       )}
+      <p data-testid="settings-why-detail">
+        {t('projects.why_this_model.detail')}
+      </p>
       {props.children}
       {props.advanced}
     </section>
