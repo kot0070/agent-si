@@ -16,6 +16,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import sys
 import uuid
 from typing import Any
@@ -933,7 +934,13 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
             failing=failing, reasons=reasons, message=message,
             publish=publish, check_stop=check_stop, live=live,
             call=call, attached=attached, stop_seen=stop_seen)
-        turn, attempt_ok = outcome
+        turn, attempt_ok, stop_note = outcome
+        if stop_note is not None:
+            turn += 1
+            yield _run_event(
+                "delta", turn, part_id,
+                "Part %s: %s" % (part_id, stop_note),
+                {"run_id": run_id, "part_id": part_id})
         if not attempt_ok:
             failing.append("agent loop failed")
         checks = _run_checks(
@@ -1133,13 +1140,20 @@ def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
                 message: str, publish: Any, check_stop: Any, live: Any,
                 call: Any, attached: Any = None,
                 stop_seen: Any = None) -> Any:
-    """Worker turn loop; return (next turn, attempt usable)."""
+    """Worker turn loop; return (next turn, attempt usable, stop line).
+
+    The stop line is set only when one identical failing run call hit
+    three times: the attempt ends with that honest line. A second
+    identical failure tells the worker to change approach in the reply;
+    different (or read-only) calls never count.
+    """
     from agent_si.runtime.devrun import protocol as _protocol
 
     worker_spec = _resolve_worker(app, project)
     history: list[dict[str, str]] = [
         {"role": "user", "content": _worker_prompt(
             spec, message, attempt, failing, reasons)}]
+    repeat_counts: dict[str, int] = {}
     for _ in range(max(1, int(turn_cap))):
         check_stop()
         response = call("worker", worker_spec, adapter, history,
@@ -1165,22 +1179,26 @@ def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
             except _protocol.AgentError as exc2:
                 row["reason"] = "agent output malformed twice: %s" % (
                     exc2,)
-                return turn, False
-        notes = _apply_actions(
+                return turn, False, None
+        notes, stop_note = _apply_actions(
             record=record, row=row, folder=folder, project=project,
             run_id=run_id, part_id=part_id, attempt=attempt,
             actions=parsed["actions"],
             spec=spec, state=state, procs=procs, live=live,
             worker_spec=worker_spec, check_stop=check_stop,
-            attached=attached, stop_seen=stop_seen)
+            attached=attached, stop_seen=stop_seen,
+            repeat_counts=repeat_counts)
         history.append({"role": "assistant",
                         "content": response.output_text or ""})
         history.append({"role": "user", "content": notes})
+        if stop_note is not None:
+            row["reason"] = stop_note
+            return turn, False, stop_note
         if parsed["done"]:
-            return turn, True
+            return turn, True, None
     row["reason"] = "turn budget reached after %d turns" % (
         max(1, int(turn_cap)))
-    return turn, False
+    return turn, False, None
 
 
 def _worker_prompt(spec: dict, message: str, attempt: int,
@@ -1215,12 +1233,21 @@ def _apply_actions(*, record: Any, row: Any, folder: str, project: str,
                    run_id: str, part_id: str, attempt: int,
                    actions: list, spec: dict, state: Any, procs: list,
                    live: Any, worker_spec: dict, check_stop: Any,
-                   attached: Any = None, stop_seen: Any = None) -> str:
-    """Apply one worker turn; every refusal returns as text."""
+                   attached: Any = None, stop_seen: Any = None,
+                   repeat_counts: dict | None = None) -> Any:
+    """Apply one worker turn; every refusal returns as text.
+
+    Returns (notes, stop_note): notes feed the worker's next turn;
+    stop_note carries the honest line when one identical failing run
+    call hit three times, ending the attempt. Only run actions count
+    (read-only calls stay free); different args never collide.
+    """
     from agent_si.runtime.devrun import actions as _actions
 
     notes: list[str] = []
     refusals: list[str] = []
+    counts = repeat_counts if isinstance(repeat_counts, dict) else {}
+    stop_note: str | None = None
     for action in actions:
         check_stop()
         name = action.get("action")
@@ -1255,13 +1282,30 @@ def _apply_actions(*, record: Any, row: Any, folder: str, project: str,
                         not isinstance(word, str) for word in argv):
                     notes.append("run: refused: argv must be a word list")
                     continue
-                notes.append(_run_agent_command(
+                note = _run_agent_command(
                     record=record, folder=folder, project=project,
                     run_id="%s-%s-a%d-agent" % (
                         run_id, part_id, attempt),
                     argv=[str(word) for word in argv], state=state,
                     procs=procs, attached=attached,
-                    stop_seen=stop_seen))
+                    stop_seen=stop_seen)
+                notes.append(note)
+                if re.search(r": exit 0(\n|$)", note) is None:
+                    key = json.dumps([str(word) for word in argv],
+                                     sort_keys=True)
+                    seen = int(counts.get(key, 0)) + 1
+                    counts[key] = seen
+                    if seen == 2:
+                        notes.append(
+                            "Note: this exact run call failed twice with "
+                            "the same result (%s); change the approach "
+                            "instead of repeating it verbatim."
+                            % (" ".join(str(word) for word in argv),))
+                    elif seen >= 3 and stop_note is None:
+                        stop_note = (
+                            "same failing call 3 times, ending attempt: "
+                            "run %s" % (" ".join(
+                                str(word) for word in argv),))
             else:
                 notes.append("%s: refused: unknown action" % (name,))
         except _actions.ActionRefused as exc:
@@ -1275,7 +1319,8 @@ def _apply_actions(*, record: Any, row: Any, folder: str, project: str,
             refusals.append("%s: %s" % (name, exc))
     if refusals:
         row.setdefault("refusals", []).extend(refusals)
-    return "\n".join(notes) if notes else "(no actions)"
+    text = "\n".join(notes) if notes else "(no actions)"
+    return text, stop_note
 
 
 def _run_agent_command(*, record: Any, folder: str, project: str,
