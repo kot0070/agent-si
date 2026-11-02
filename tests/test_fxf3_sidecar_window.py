@@ -84,9 +84,9 @@ class _FakeWebview:
         self.browser_urls = []
         self.missing_notes = []
 
-    def create_window(self, title, url, width=None, height=None):
+    def create_window(self, title, url, width=None, height=None, **kwargs):
         self.seen = {"title": title, "url": url,
-                     "width": width, "height": height}
+                     "width": width, "height": height, **kwargs}
         self.window = _FakeWindow(width, height)
         return self.window
 
@@ -157,6 +157,7 @@ def test_main_passes_default_size_and_saves_it(monkeypatch, tmp_path):
     assert fake.seen["height"] == 800
     assert fake.browser_urls == []
     assert fake.missing_notes == []
+    assert fake.seen.get("text_select") is True
     with open(sidecar._window_size_file_path(data_root),
               encoding="utf-8") as handle:
         saved = json.load(handle)
@@ -170,3 +171,4 @@ def test_main_caps_size_on_small_screen(monkeypatch, tmp_path):
     assert fake.seen["height"] == 700
     assert fake.browser_urls == []
     assert fake.missing_notes == []
+    assert fake.seen.get("text_select") is True
