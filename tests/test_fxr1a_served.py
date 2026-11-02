@@ -292,7 +292,108 @@ def test_install_evidence_served(tmp_path):
     assert bool(_records.combined_evidence(record)), "install on record"
 
 
-# -- G4: goal-named checks extracted, fitted, never dropped -----------
+# -- spent allow: second run asks again, check path and action path -
+
+def _types(sse_text):
+    return [e.get("type") for e in fx._parse_sse(sse_text)]
+
+
+def _chat_raw(app, project, folder, message="do it"):
+    folder.mkdir(parents=True, exist_ok=True)
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.post(
+        "/api/v1/chat/stream",
+        json={"project": project, "folder": str(folder),
+              "task": "task-%s" % project, "message": message},
+        headers=fx._auth())
+    assert resp.status_code == 200, resp.text
+    return resp.text
+
+def _allow_npm(app, project):
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.post(
+        _permissions.PERMISSIONS_DECIDE_ROUTE,
+        json={"tool_id": "install:%s:npm" % project, "decision": "allow",
+              "project_id": project},
+        headers=fx._auth())
+    assert resp.status_code == 200, resp.text
+
+
+def test_spent_allow_check_path_asks_again_served(tmp_path):
+    project = "fxr1a-spent-check"
+    folder = tmp_path / "proj-spent-check"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "package.json").write_text(
+        json.dumps({"name": "fxr1a-probe", "version": "0.0.0"}),
+        encoding="utf-8")
+    first = [{"part_id": "p1", "goal": "install deps",
+              "files": ["package-lock.json"],
+              "check_commands": [["findstr", "name",
+                                  "package-lock.json"]],
+              "depends_on": []}]
+
+    def _worker(n_calls, messages):
+        return json.dumps({
+            "actions": [{"action": "run", "argv": ["npm", "install"]}],
+            "done": True})
+
+    factory = fx._FakeFactory({
+        "director": [json.dumps({"parts": first})],
+        "manager": [json.dumps({"order": ["p1"]})],
+        "worker": _worker,
+        "auditor": [fx._audit_pass]})
+    app = fx._served_app(tmp_path, project, factory)
+    _allow_npm(app, project)
+    _chat(app, project, folder)
+    record = fx._run_record(app, project)
+    assert record["parts"][0]["verdict"] == "PASS", record["parts"]
+    # Second run: the once-allow is spent, the CHECK asks again.
+    plan2 = [{"part_id": "p1", "goal": "install deps again", "files": [],
+              "check_commands": [["npm", "install"]],
+              "depends_on": []}]
+    factory2 = fx._FakeFactory({
+        "director": [json.dumps({"parts": plan2})],
+        "manager": [json.dumps({"order": ["p1"]})],
+        "worker": [json.dumps({"actions": [], "done": True})],
+        "auditor": [fx._audit_pass]})
+    app2 = fx._served_app(tmp_path, project + "-2", factory2)
+    raw = _chat_raw(app2, project + "-2", folder)
+    assert "approval" in _types(raw), raw[:500]
+    assert "refused" not in raw.lower(), raw[:500]
+    record2 = fx._run_record(app2, project + "-2")
+    assert record2.get("held") is True, record2.get("summary")
+    for row in record2.get("parts", []):
+        for check in row.get("checks", []):
+            assert not check.get("refused"), check
+
+
+def test_spent_allow_action_path_asks_again_served(tmp_path):
+    project = "fxr1a-spent-action"
+    folder = tmp_path / "proj-spent-action"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "package.json").write_text(
+        json.dumps({"name": "fxr1a-probe", "version": "0.0.0"}),
+        encoding="utf-8")
+    plan = [{"part_id": "p1", "goal": "install deps", "files": [],
+             "check_commands": [], "why": "needed", "depends_on": []}]
+
+    def _worker(n_calls, messages):
+        return json.dumps({
+            "actions": [{"action": "run", "argv": ["npm", "install"]}],
+            "done": True})
+
+    factory = fx._FakeFactory({
+        "director": [json.dumps({"parts": plan})],
+        "manager": [json.dumps({"order": ["p1"]})],
+        "worker": _worker,
+        "auditor": [fx._audit_pass]})
+    app = fx._served_app(tmp_path, project, factory)
+    raw = _chat_raw(app, project, folder)
+    assert "approval" in _types(raw), raw[:800]
+    assert "refused" not in raw.lower(), raw[:800]
+    record = fx._run_record(app, project)
+    assert record.get("held") is True, record.get("summary")
+
 
 def test_g4_extractor_units():
     uk = "Запусти node tests/git/verify.mjs та node tests/code-audit/verify.mjs"
@@ -317,6 +418,11 @@ def test_g4_extractor_units():
         ["tests/git/verify.mjs"], "node tests/code-audit/verify.mjs") == 2
     assert _engine.goal_check_commands("do it") == []
     assert _engine.goal_check_commands("go") == []
+    # Install-evidence lines are never commands, even naming a runner.
+    assert _engine.goal_check_commands("$ npm install -> exit 0") == []
+    assert _engine.goal_check_commands(
+        "Installed already for this project:\n$ npm install -> exit 0"
+    ) == []
 
 
 def test_g4_named_check_served(tmp_path):

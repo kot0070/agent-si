@@ -453,9 +453,9 @@ def _is_goal_command(text: Any) -> bool:
         return False
     if len(stripped) > 500:
         return False
-    if re.search(r"->\s*exit\s+-?\d+", stripped):
-        # A result annotation ("$ npm install -> exit 0" from install
-        # evidence), never a runnable command.
+    # Run-note shapes ("$ ... -> exit N", evidence or prior output)
+    # are never commands, even when they name a real runner.
+    if "-> exit" in stripped or "->exit" in stripped:
         return False
     if stripped.startswith("$ "):
         stripped = stripped[2:].strip()
@@ -835,15 +835,30 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
     except Exception:
         record["install_runs_prior"] = []
     prior_installs = _records.prior_snapshot(record)
+    user_message = str(message or "")
+    worker_message = str(message or "")
     if prior_installs:
-        # A rerun after installs: the Director and the worker briefs
-        # carry the same real install record (do not install again,
-        # verify instead). The auditor reads it through judge().
+        # A rerun after installs: the Director brief carries the full
+        # real install record (do not install again, verify instead).
+        # The worker brief carries the same record as installer NAMES
+        # only: the "$ ... -> exit N" evidence shape would read as a
+        # runnable check to a literal follower, so it never rides the
+        # worker prompt. The auditor reads it through judge().
+        try:
+            _names = "; ".join(
+                " ".join(str(word) for word in (row.get("argv") or []))
+                for row in prior_installs)
+        except Exception:
+            _names = ""
         message = (message or "") + (
             "\nInstalled already for this project "
             "(do not install again, verify instead):\n%s" % (
                 "\n".join(
                     _records.format_install_runs(prior_installs)),))
+        worker_message = (worker_message or "") + (
+            "\nInstalled already for this project "
+            "(do not install again, verify instead)%s" % (
+                (": %s" % (_names,)) if _names else "",))
     procs: list[Any] = []
     attached: set[str] = set()
     known_parts: list[str] = []
@@ -1489,8 +1504,11 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
             # G4: goal-named checks the Director missed ride
             # along verbatim. The guard still judges each one later; a
             # refused check fails by name instead of vanishing.
+            # Extraction reads the raw user text only: the rerun brief
+            # appends install evidence ("$ ... -> exit N") to message,
+            # and evidence lines are never commands.
             try:
-                _missing = plan_missing_checks(parts, message)
+                _missing = plan_missing_checks(parts, user_message)
             except Exception:
                 _missing = []
             _added: list = []
@@ -1551,7 +1569,8 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                 record, manager, manager_adapter, parts, project,
                 run_id, _call)
             # FXPARALLEL BEGIN parts-call: run lock plus abort travel
-            # into the parallel scheduler.
+            # into the parallel scheduler. The worker side gets the
+            # names-only install brief (never "$ ... -> exit N").
             turn = yield from _run_parts(
                 record=record, app=app, parts=parts, order=order,
                 director=director, manager=manager, worker=worker,
@@ -1559,7 +1578,8 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                 folder=folder, project=project, task_id=task_id,
                 run_id=run_id, turn=turn, turn_cap=turn_cap,
                 state=state, attached=attached, procs=procs,
-                message=message, contract_hash=record["contract_hash"],
+                message=worker_message,
+                contract_hash=record["contract_hash"],
                 publish=_publish, check_stop=_check_stop,
                 stop_seen=_stop_seen, live=_live, call=_call,
                 lock=run_lock, abort=abort)
