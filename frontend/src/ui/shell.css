@@ -28,14 +28,14 @@ nav[data-testid="sidebar"] {
   min-width: 0;
   max-height: calc(100vh - 96px);
   overflow-y: auto;
-  border-right: 1px solid var(--agent-si-card-border);
+  border-right: 1px solid var(--fx-card-border);
   padding-right: 16px;
 }
 
 /* Links restyle stays inside the sidebar nav (link-colours lane stays open). */
 nav[data-testid="sidebar"] a {
   display: block;
-  color: var(--agent-si-accent);
+  color: var(--fx-accent);
   text-decoration: none;
 }
 
@@ -66,7 +66,7 @@ aside[data-testid="inspector"] {
   flex-wrap: wrap;
   align-items: center;
   gap: 12px;
-  border-bottom: 1px solid var(--agent-si-card-border);
+  border-bottom: 1px solid var(--fx-card-border);
 }
 
 /* W13: inner gaps — the pairing strip and the badge row keep their own
@@ -125,9 +125,9 @@ span[data-testid="kit-collapsed-line"] {
 /* Native controls take a token fill so neither theme shows browser defaults. */
 .fx-topbar select,
 .fx-topbar button {
-  background-color: var(--agent-si-card-border);
-  color: var(--agent-si-ink);
-  border: 1px solid var(--agent-si-accent);
+  background-color: var(--fx-input-bg);
+  color: var(--fx-ink);
+  border: 1px solid var(--fx-input-border);
   border-radius: 6px;
 }
 
@@ -184,4 +184,116 @@ div[data-testid^="inspector-card-"] > p[data-testid$="-sub"] {
     max-width: 100%;
     box-sizing: border-box;
   }
+}
+/* FXDESIGN1 S2: top-bar rhythm — brand, watcher pairing label and badge. */
+.fx-topbar > [data-testid="topbar-brand"] {
+  margin-right: 4px;
+}
+
+div[data-testid="pairing-strip"] > [data-testid="pairing-label"] {
+  margin-right: 4px;
+}
+
+div[data-testid="pairing-strip"] > [data-testid="pairing-badge"] {
+  padding: 2px 8px;
+  border: 1px solid var(--fx-card-border);
+  border-radius: 999px;
+}
+
+/* FXDESIGN1 S1: project tabs read as tabs. */
+nav [data-testid^="project-menu-"] {
+  display: inline-block;
+  padding: 6px 12px;
+  margin-right: 4px;
+  color: var(--fx-ink);
+  background-color: var(--fx-card-bg);
+  border: 1px solid var(--fx-card-border);
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+nav [data-testid^="project-menu-"]:hover {
+  border-color: var(--fx-accent);
+  color: var(--fx-accent);
+}
+
+nav [data-testid^="project-menu-"]:focus-visible {
+  outline: 2px solid var(--fx-focus-ring);
+  outline-offset: 2px;
+}
+
+/* FXDESIGN1 S3: team rows read as separated labelled fields; long refs
+   truncate with an ellipsis while the full ref stays in the title. */
+.fx-team-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: baseline;
+}
+
+.fx-team-field {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+}
+
+.fx-truncate {
+  display: inline-block;
+  max-width: 28ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+/* FXDESIGN1 S4: the shell never scrolls sideways; the rail scrolls
+   vertically as one column. */
+div[data-testid="app-shell"] {
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+main[data-testid="app-main"],
+nav[data-testid="sidebar"],
+aside[data-testid="inspector"] {
+  overflow-x: hidden;
+}
+
+/* FXDESIGN1 S5: comfortable centre column with vertical rhythm; the
+   composer lines up with Send next to the input. */
+main[data-testid="app-main"] {
+  max-width: 44rem;
+  margin-left: auto;
+  margin-right: auto;
+  padding: 16px 20px 32px;
+  line-height: 1.55;
+}
+
+main[data-testid="app-main"] > * + * {
+  margin-top: 16px;
+}
+
+div[data-testid="chat-composer"] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+div[data-testid="chat-composer"] > label {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+div[data-testid="chat-composer"] input {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+div[data-testid="chat-composer"] > button {
+  flex: none;
 }

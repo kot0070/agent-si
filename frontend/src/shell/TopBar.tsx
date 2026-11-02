@@ -169,6 +169,9 @@ export function TopBar(props: TopBarProps): ReactElement {
             current.select(event.target.value);
           }}
         >
+          {effective === null ? (
+            <option value="">{t("shell.topbar.projectPlaceholder")}</option>
+          ) : null}
           {options.map((project) => (
             <option
               key={project.project_id}
@@ -181,7 +184,7 @@ export function TopBar(props: TopBarProps): ReactElement {
           {effective !== null &&
           !options.some((project) => project.project_id === effective) ? (
             <option value={effective} title={effective}>
-              {effective}
+              {t("shell.topbar.projectPlaceholder")}
             </option>
           ) : null}
         </select>
@@ -199,11 +202,14 @@ export function TopBar(props: TopBarProps): ReactElement {
         {stopArmed ? t("shell.closing.confirm") : t("shell.topbar.stop_all")}
       </button>
       {stopStatus === null ? null : (
-        <span data-testid="stop-all-result">
-          {t("shell.topbar.stop_result", { status: stopStatus })}
+        <>
+          <span data-testid="stop-all-result">
+            {t("shell.topbar.stop_result", { status: stopStatus })}
+          </span>
           <button
             type="button"
             data-testid="stop-all-clear"
+            className="fx-btn-quiet"
             aria-label={t("shell.topbar.stop_clear")}
             onClick={() => {
               setStopStatus(null);
@@ -211,7 +217,7 @@ export function TopBar(props: TopBarProps): ReactElement {
           >
             {t("shell.topbar.stop_clear")}
           </button>
-        </span>
+        </>
       )}
       <label>
         {t("shell.topbar.language")}
