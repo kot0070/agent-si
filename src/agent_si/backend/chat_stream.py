@@ -893,13 +893,53 @@ class ManagerSdkBridge:
             _mirror_run_tasks(app, project, task, message, "stopped")
             return
         captured: dict[str, Any] = {}
+        meter_role = str(request.role or "chat")
+        meter_shape = {
+            "project_id": request.project or "chat",
+            "task_id": request.task or "chat",
+            "run_id": run_id,
+            "role": meter_role,
+            "provider_id": str(provider.config.provider_id),
+            "model": str(provider.config.model),
+        }
 
         def _runner(payload: dict[str, Any]) -> dict[str, Any]:
+            from agent_si.runtime.devrun import roles as _roles
+
+            gate = None
+            try:
+                app = getattr(self, "_app", None)
+                ctx = getattr(getattr(app, "state", None), "k04_ctx", None)
+                gate = getattr(ctx, "budget_state", None)
+            except Exception:
+                gate = None
+            if gate is None:
+                try:
+                    from agent_si.runtime import manager as _manager
+
+                    gate = _manager._BUDGET_GATE
+                except Exception:
+                    gate = None
+            _roles.admit_role_call(
+                gate, project_id=meter_shape["project_id"],
+                task_id=meter_shape["task_id"], run_id=run_id,
+                role=meter_role,
+                provider_id=meter_shape["provider_id"])
             response = provider.invoke(
                 [{"role": "user", "content": request.message}])
             captured["text"] = response.output_text
             captured["mock"] = bool(response.mock)
             captured["finish_reason"] = response.finish_reason
+            try:
+                _roles.settle_role_call(
+                    project_id=meter_shape["project_id"],
+                    task_id=meter_shape["task_id"], run_id=run_id,
+                    role=meter_role,
+                    provider_id=meter_shape["provider_id"],
+                    model=meter_shape["model"],
+                    usage=getattr(response, "usage", None))
+            except Exception:
+                pass
             return {"ok": True}
 
         decision = RoutingDecisionBinding(
