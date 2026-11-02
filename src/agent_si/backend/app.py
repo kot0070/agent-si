@@ -1052,6 +1052,13 @@ def create_app(settings: Any = None,
 
     _fxpar_parallel.register_parallelparts_routes(app)
 
+    # FXTEAM M2 team switch (additions-only): per-project "Team: on/off",
+    # default on, GET+PUT surface plus devrun_team.json persistence owned
+    # by teammode_routes; no existing surface above changes.
+    from agent_si.backend import teammode_routes as _fxteam_mode
+
+    _fxteam_mode.register_teammode_routes(app)
+
     # OC-K02 R-302/R-333 (additions-only): hierarchy run + control-plane
     # map and the routine-offload switch surface; no existing line above
     # or the K04 block below changes.

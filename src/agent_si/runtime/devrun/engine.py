@@ -390,6 +390,22 @@ def _parallel_limit(app: Any, project: str, default: Any) -> int:
         return 1
     return max(_PARALLEL_MIN, min(_PARALLEL_MAX, number))
 
+
+def _team_enabled(app: Any, project: str) -> bool:
+    """True when the team chain runs; default on, only explicit off skips.
+
+    Reads the per-project Team setting once at run start (in-memory
+    first, else the SAVED file). Missing, bad or unreadable reads as
+    on so Golden and hierarchy runs stay green. Never raises.
+    """
+    try:
+        from agent_si.backend import teammode_routes as _team
+        store = getattr(getattr(app, "state", None),
+                        "k02r3_store_dir", None)
+        return _team.team_enabled_for(store, str(project or ""))
+    except Exception:
+        return True
+
 #: Runner heads a goal-named check command may start with.
 _GOAL_RUNNERS = (
     "node", "npm", "npx", "pnpm", "yarn", "python", "py",
@@ -1196,6 +1212,158 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
             record["success"] = False
             _finish_task()
             raise
+        # FXTEAM M2: Team off runs one Worker, no Director/Manager/Auditor.
+        if not _team_enabled(app, project):
+            try:
+                solo_worker = _roles.resolve_role(app, project, "worker")
+            except _roles.RoleUnbound as exc:
+                record["summary"] = "run failed: %s" % (exc,)
+                record["success"] = False
+                _finish_task()
+                yield _run_event("delta", turn, task_id, record["summary"],
+                                 {"run_id": run_id, "success": False})
+                turn += 1
+                yield _run_event("done", turn, task_id, record["summary"],
+                                 {"run_id": run_id, "success": False})
+                return
+            try:
+                solo_adapter = _roles.build_adapter(app, solo_worker)
+            except _roles.RoleUnbound as exc:
+                record["summary"] = "run failed: %s" % (exc,)
+                record["success"] = False
+                _finish_task()
+                yield _run_event("delta", turn, task_id, record["summary"],
+                                 {"run_id": run_id, "success": False})
+                turn += 1
+                yield _run_event("done", turn, task_id, record["summary"],
+                                 {"run_id": run_id, "success": False})
+                return
+            record["team"] = "off"
+            record["manager_why"] = "team off"
+            record["managers"] = []
+            record["manager_count"] = 0
+            yield _run_event(
+                "delta", turn, task_id,
+                "Team off: one worker, no audit",
+                {"run_id": run_id, "part_id": None})
+            turn += 1
+            _check_stop()
+            from agent_si.runtime.devrun import protocol as _solo_proto
+            solo_spec: dict[str, Any] = {
+                "part_id": "solo", "goal": message or "(no task text)",
+                "files": []}
+            solo_row: dict[str, Any] = {"part_id": "solo"}
+            solo_history: list = [{
+                "role": "user",
+                "content": (
+                    "You are the worker. Project task: %s. Work in the "
+                    "project folder. Actions: read_file {path}, "
+                    "list_dir {path}, write_file {path, content}, run "
+                    "{argv}. Relative paths only, stays inside the "
+                    "project folder. To install packages, run the "
+                    "installer argv (for example [\"npm\", \"install\"]): "
+                    "the run action IS the permission ask the app shows "
+                    "the user. You may run checks. Return ONLY "
+                    "{\"actions\": [...], \"done\": bool}: done true only "
+                    "when the task is complete.%s" % (
+                        message or "(no task text)",
+                        _platform_guidance()))}]
+            for _turn in range(max(1, int(turn_cap))):
+                _check_stop()
+                try:
+                    _resp = _call(
+                        "worker", solo_worker, solo_adapter,
+                        list(solo_history), "solo", 0, waits=["solo"])
+                except _roles.ContextOverflow:
+                    record["success"] = False
+                    record["summary"] = _roles.CONTEXT_PLAIN
+                    _finish_task()
+                    yield _run_event(
+                        "delta", turn, task_id, record["summary"],
+                        {"run_id": run_id})
+                    turn += 1
+                    yield _run_event(
+                        "done", turn, task_id, record["summary"],
+                        {"run_id": run_id, "success": False})
+                    return
+                try:
+                    _parsed_solo = _solo_proto.parse_agent_reply(
+                        _resp.output_text or "")
+                except Exception as exc:
+                    solo_history.append({
+                        "role": "assistant",
+                        "content": _resp.output_text or ""})
+                    solo_history.append({
+                        "role": "user",
+                        "content": ("Your last reply was not valid JSON: %s "
+                                    "Return ONLY {\"actions\": [...], "
+                                    "\"done\": bool}, no prose.") % (exc,)})
+                    continue
+                # Team-off jail: any file inside the folder may be
+                # written; outside stays refused by jail_abs. Allow by
+                # extending the spec with inside-jail write targets.
+                try:
+                    from agent_si.runtime.devrun import actions as _solo_act
+                    for _act in (_parsed_solo.get("actions") or []):
+                        try:
+                            if (isinstance(_act, dict)
+                                    and _act.get("action") == "write_file"):
+                                _p = str(_act.get("path", ""))
+                                try:
+                                    _solo_act.jail_abs(folder, _p)
+                                except Exception:
+                                    continue
+                                _rel = _p.replace("\\", "/")
+                                if _rel not in solo_spec["files"]:
+                                    solo_spec["files"].append(_rel)
+                        except Exception:
+                            continue
+                except Exception:
+                    pass
+                _notes, _stop_note = _apply_actions(
+                    record=record, row=solo_row, folder=folder,
+                    project=project, run_id=run_id, part_id="solo",
+                    attempt=1, actions=_parsed_solo.get("actions", []),
+                    spec=solo_spec, state=state, procs=procs, live=_live,
+                    worker_spec=solo_worker, check_stop=_check_stop,
+                    attached=attached, stop_seen=_stop_seen,
+                    lock=run_lock)
+                solo_history.append({
+                    "role": "assistant",
+                    "content": _resp.output_text or ""})
+                solo_history.append({"role": "user", "content": _notes})
+                if _stop_note is not None:
+                    record["success"] = False
+                    record["summary"] = str(_stop_note)
+                    _finish_task()
+                    _publish()
+                    _close_live("BLOCKED")
+                    yield _run_event("delta", turn, task_id,
+                                     record["summary"],
+                                     {"run_id": run_id})
+                    turn += 1
+                    yield _run_event("cancelled", turn, task_id,
+                                     record["summary"],
+                                     {"run_id": run_id})
+                    return
+                if _parsed_solo.get("done"):
+                    break
+            _publish()
+            record["success"] = True
+            record["summary"] = "Done, not audited."
+            _finish_task()
+            _publish()
+            _close_live("RETURNED")
+            yield _run_event("delta", turn, task_id,
+                             _ledger_total_line(record),
+                             {"run_id": run_id})
+            turn += 1
+            yield _run_event("delta", turn, task_id, record["summary"],
+                             {"run_id": run_id, "success": True})
+            turn += 1
+            yield _run_event("done", turn, task_id, record["summary"],
+                             {"run_id": run_id, "success": True})
+            return
         try:
             director = _roles.resolve_role(app, project, "director")
             manager = _roles.resolve_role(app, project, "manager")
