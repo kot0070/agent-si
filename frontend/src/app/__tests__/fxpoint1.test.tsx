@@ -87,12 +87,15 @@ function installFetch(): void {
           })),
         });
       }
-      if (url === "/api/v1/providers/keys" && method === "POST") {
-        const preset = (body as { preset_id: string }).preset_id;
+      if (url === "/api/v1/providers/keys" && method === "POST") {        const preset = (body as { preset_id: string }).preset_id;
         return new Response(
           JSON.stringify({ key_ref: { secret_id: preset, provider_id: preset } }),
           { status: 201, headers: { "content-type": "application/json" } },
         );
+      }
+      // FXR2E two-step check (416ddaa, merged 0661228): read-only preflight.
+      if (url === "/api/v1/providers/keys/check" && method === "POST") {
+        return json({});
       }
       if (url === "/api/v1/providers/connect" && method === "POST") {
         const preset = (body as { preset_id: string }).preset_id;
@@ -288,6 +291,11 @@ describe("fxpoint1 R6 first-run prefill", () => {
       within(dialog).getByLabelText(en.providers.connect.apiKey),
       { target: { value: "fx-fake-key" } },
     );
+    // FXR2E two-step (416ddaa, merged 0661228): Check before Save.
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: en.providers.connect.check }),
+    );
+    await within(dialog).findByText(en.providers.connect.checked);
     fireEvent.click(
       within(dialog).getByRole("button", { name: en.providers.connect.save }),
     );
