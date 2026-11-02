@@ -3,7 +3,7 @@
 // pool shows a hint and never fires a save.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { PROVIDER_CATALOG } from "./ChatModelSelector";
+import { PROVIDER_CATALOG } from "./catalog";
 import { ChatModelSelector } from "./ChatModelSelector";
 import { RolePoolPicker } from "./RolePoolPicker";
 import type { PoolOption } from "./RolePoolPicker";
