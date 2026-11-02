@@ -3,8 +3,9 @@
 Row R-335: tick plus decide run behind the served watcher interface: the
 test resolves the owning lane through agent_si.watcher.interface
 REALIZATION_MAP (watcher.engine.tick, watcher.engine.decide), never
-importing the engine lane for those two calls; each firing records its
-WATCH_DECISION row; resolve_action carries restart-receipt support.
+importing the engine lane for those two calls; an idle firing journals
+nothing while an abnormal firing records its WATCH_DECISION row;
+resolve_action carries restart-receipt support.
 Row R-336: resolved actions are recorded plus pausable: resolve records
 one row, a paused action refuses with AUTOMATION_PAUSED until resumed.
 Row R-337: per-service usage stays queryable from stored facts only
@@ -96,8 +97,17 @@ def test_r335_tick_decide_served_interface():
     assert isinstance(fired.fired, tuple)
     assert set(fired.fired) == set(rule_cards.RULES)
     assert fired.checked_at != ""
+    # Idle tick: both cards rest on their base verdicts with no trigger
+    # facts, so the normal verdicts journal nothing (no row, no call).
+    assert journal_store.stored_rows(PROJ_TICK, "WATCH_DECISION") == ()
+    journal_store.append_event(
+        PROJ_TICK, "agent-x", "TAMPER_ATTEMPT", "tick probe",
+        ("ref-k08open6-tick",))
+    again = tick(PROJ_TICK)
+    assert set(again.fired) == set(rule_cards.RULES)
     watch_rows = journal_store.stored_rows(PROJ_TICK, "WATCH_DECISION")
-    assert len(watch_rows) == len(fired.fired)
+    assert len(watch_rows) == 1
+    assert "rule-tamper" in watch_rows[0].summary
 
     decision = decide(PROJ_TICK, CARD, "scripts/tamper_check.py", ("--x",))
     assert isinstance(decision, rule_cards.WatchDecision)
