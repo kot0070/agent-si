@@ -44,18 +44,19 @@ if not os.path.isfile(ENTRY_SCRIPT):
     print("sidecar spec NOT-DONE: entry absent, waits for K02 backend lane: " + ENTRY_SCRIPT)
 
 # Lane-owned payload dirs: (tree-relative source, in-freeze destination, owner).
-# Frozen destination names: frontend / migrations / locale / kb-data / watcher.
+# Frozen destination names: frontend / locale / kb-data / watcher.
 # Only sources present on disk enter `datas`; a missing source is skipped with
 # a build-log line and waits for its owning lane (never synthesized here).
+# (No `migrations` entry: the only migration script on disk,
+# 0390_localbench_evidence.sql, has no runtime reader in src, and its
+# evidence field environment_fingerprint lives via capability_store /
+# local adapter / localbench routes; shipping it would be dead payload.)
 #   frontend   <- K07 web build output (frontend/dist; build_app.ps1 stage 1)
-#   migrations <- K13 additive-only migration scripts
-#                 (src/agent_si/adapters/sqlite/migration_scripts)
 #   locale     <- K07 language packs (frontend/src/locale)
 #   kb-data    <- K04 model KB (src/agent_si/model_kb)
 #                 + K09 shipped KB (src/agent_si/kb)
 #   watcher    <- K08 watcher engine + standard scripts (src/agent_si/watcher)
 _DATA_CANDIDATES = [
-    ("src/agent_si/adapters/sqlite/migration_scripts", "migrations", "K13"),
     ("frontend/src/locale", "locale", "K07"),
     ("src/agent_si/model_kb", "kb-data/model_kb", "K04"),
     ("src/agent_si/kb", "kb-data/kb", "K09"),
