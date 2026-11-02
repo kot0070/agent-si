@@ -192,20 +192,43 @@ interface SliceUI {
 
 const sliceUI = new Map<string, SliceUI>();
 const blockingStash = new Map<string, BlockingError>();
-const askStash = new Map<string, InstallPermissionAsk>();
 
-// FXHARD1: the pending card may mirror in sessionStorage for the live
-// session only (the served store is the server: the origin port changes
-// per launch, so localStorage is never a store here). Leaving the page
-// restores from the stash or the mirror; a restart shows the served
-// running turn as interrupted with a resend instead.
-function askMirrorKey(key: string): string {
-  return `fxchat.ask.${key}`;
+// FXCHATV V3: the pending ask is keyed by PROJECT, not by slice.
+// A slice key changes mid-run (client swap, project switch, remount),
+// so a slice-keyed ask parks where no mounted UI ever reads it: the
+// rail says Blocked while no card is reachable. The project-keyed ask
+// reaches any mounted ChatArea of the same project, survives restart
+// through a stable per-project mirror, and the mount consumes it.
+const askByProject = new Map<string, InstallPermissionAsk>();
+const projectAskListeners = new Map<string, Set<() => void>>();
+
+const sliceProjectId = new Map<string, string>();
+
+function projectMirrorKey(projectId: string): string {
+  return `fxchat.ask.p.${projectId}`;
 }
 
-function readAskMirror(key: string): InstallPermissionAsk | null {
+function writeProjectMirror(
+  projectId: string,
+  ask: InstallPermissionAsk | null,
+): void {
   try {
-    const raw = window.sessionStorage.getItem(askMirrorKey(key));
+    if (ask === null) {
+      window.sessionStorage.removeItem(projectMirrorKey(projectId));
+      return;
+    }
+    window.sessionStorage.setItem(
+      projectMirrorKey(projectId),
+      JSON.stringify({ toolName: ask.toolName, messageId: ask.messageId }),
+    );
+  } catch {
+    return;
+  }
+}
+
+function readProjectMirror(projectId: string): InstallPermissionAsk | null {
+  try {
+    const raw = window.sessionStorage.getItem(projectMirrorKey(projectId));
     if (raw === null) {
       return null;
     }
@@ -227,38 +250,65 @@ function readAskMirror(key: string): InstallPermissionAsk | null {
   }
 }
 
-function writeAskMirror(key: string, ask: InstallPermissionAsk | null): void {
-  try {
-    if (ask === null) {
-      window.sessionStorage.removeItem(askMirrorKey(key));
-      return;
+export function subscribeProjectAsk(
+  projectId: string,
+  listener: () => void,
+): () => void {
+  let watchers = projectAskListeners.get(projectId);
+  if (watchers === undefined) {
+    watchers = new Set();
+    projectAskListeners.set(projectId, watchers);
+  }
+  watchers.add(listener);
+  return () => {
+    const live = projectAskListeners.get(projectId);
+    if (live !== undefined) {
+      live.delete(listener);
+      if (live.size === 0) {
+        projectAskListeners.delete(projectId);
+      }
     }
-    window.sessionStorage.setItem(
-      askMirrorKey(key),
-      JSON.stringify({ toolName: ask.toolName, messageId: ask.messageId }),
-    );
-  } catch {
+  };
+}
+
+function emitProjectAsk(projectId: string): void {
+  const watchers = projectAskListeners.get(projectId);
+  if (watchers === undefined) {
     return;
   }
+  for (const notify of [...watchers]) {
+    notify();
+  }
 }
 
-function stashAsk(key: string, ask: InstallPermissionAsk): void {
-  askStash.set(key, ask);
-  writeAskMirror(key, ask);
+export function readProjectAsk(projectId: string): InstallPermissionAsk | null {
+  return askByProject.get(projectId) ?? null;
 }
 
-function consumeAskStash(key: string): InstallPermissionAsk | null {
-  const stashed = askStash.get(key);
+function stashProjectAsk(projectId: string, ask: InstallPermissionAsk): void {
+  askByProject.set(projectId, ask);
+  writeProjectMirror(projectId, ask);
+  emitProjectAsk(projectId);
+}
+
+function consumeProjectAsk(projectId: string): InstallPermissionAsk | null {
+  const stashed = askByProject.get(projectId);
   if (stashed !== undefined) {
-    askStash.delete(key);
+    askByProject.delete(projectId);
     return stashed;
   }
-  return readAskMirror(key);
+  return readProjectMirror(projectId);
 }
 
-function clearAskStash(key: string): void {
-  askStash.delete(key);
-  writeAskMirror(key, null);
+function clearProjectAsk(projectId: string): void {
+  askByProject.delete(projectId);
+  writeProjectMirror(projectId, null);
+}
+
+/** Park without notifying (unmount path): the next mount consumes it. */
+function parkProjectAsk(projectId: string, ask: InstallPermissionAsk): void {
+  askByProject.set(projectId, ask);
+  writeProjectMirror(projectId, ask);
 }
 
 function consumeBlockingStash(key: string): BlockingError | null {
@@ -285,12 +335,24 @@ function clearSliceBlocking(key: string): void {
 }
 
 function emitAsk(key: string, ask: InstallPermissionAsk): void {
+  // FXCHATV V3: project-keyed delivery. A slice-keyed ask parks where
+  // no mounted UI ever reads it when the slice key changed mid-run, so
+  // the live ask goes to the project: any mounted ChatArea of the same
+  // project shows the card, otherwise the mount consumes the stash.
+  const projectId = sliceProjectId.get(key);
+  if (projectId !== undefined) {
+    const ui = sliceUI.get(key);
+    if (ui !== undefined) {
+      ui.onAsk(ask);
+    }
+    stashProjectAsk(projectId, ask);
+    return;
+  }
   const ui = sliceUI.get(key);
   if (ui !== undefined) {
     ui.onAsk(ask);
     return;
   }
-  stashAsk(key, ask);
 }
 
 // H4 quiet dot: slices whose run finished while no ChatArea showed them.
@@ -1035,6 +1097,7 @@ function startChatRun(
   if (pumps.has(key) || getChatState(key).runner.streaming) {
     return;
   }
+  sliceProjectId.set(key, projectId);
   clearSliceBlocking(key);
   lastSentBySlice.set(key, text);
   const at = Date.now();
@@ -1242,6 +1305,34 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
   // the oldest turn) plus the load-earlier busy flag.
   const [cursor, setCursor] = useState<string | null>(null);
   const [earlierBusy, setEarlierBusy] = useState(false);
+  // FXCHATV (b): one Connect CTA per state. The composer hint hides
+  // while the expanded hierarchy rows already offer the link (same
+  // localStorage expansion the rows read).
+  const [hierExpanded, setHierExpanded] = useState<boolean>(() => {
+    try {
+      return (
+        window.localStorage.getItem(
+          `agentsi.hierarchy.collapsed.${props.projectId}`,
+        ) === "expanded"
+      );
+    } catch {
+      return false;
+    }
+  });
+  // FXCHATV V4: one ticking second hand while a run works; the step
+  // line under the composer derives from the live deltas plus elapsed.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!chatState.runner.streaming) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [chatState.runner.streaming]);
   const pendingAskRef = useRef<InstallPermissionAsk | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   // FXRC1FIX P3: the message list owns the scroll inside the chat card;
@@ -1274,16 +1365,29 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
   // the device online state into the slice, loads served turns (H2) and
   // registers this mount for inline error plus permission UI. Unmount only
   // detaches: the pump keeps streaming into the store (H1).
+  // FXCHATV V3: the pending ask is project-keyed, so a hold that lands
+  // under any slice key of this project (client swap, project switch,
+  // remount) shows the card here without remount; the return restores
+  // it from the stash or the stable per-project mirror.
   useEffect(() => {
     mountedSlices.add(key);
     markSeenByKey(key);
+    try {
+      setHierExpanded(
+        window.localStorage.getItem(
+          `agentsi.hierarchy.collapsed.${props.projectId}`,
+        ) === "expanded",
+      );
+    } catch {
+      setHierExpanded(false);
+    }
     const stashedBlocking = consumeBlockingStash(key);
     if (stashedBlocking !== null) {
       setBlocking(stashedBlocking);
     }
     setPendingAsk(null);
     pendingAskRef.current = null;
-    const stashedAsk = consumeAskStash(key);
+    const stashedAsk = consumeProjectAsk(props.projectId);
     if (stashedAsk !== null) {
       pendingAskRef.current = stashedAsk;
       setPendingAsk(stashedAsk);
@@ -1298,16 +1402,24 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
       },
     };
     sliceUI.set(key, ui);
+    const unsubscribeAsk = subscribeProjectAsk(props.projectId, () => {
+      const ask = readProjectAsk(props.projectId);
+      if (ask !== null) {
+        pendingAskRef.current = ask;
+        setPendingAsk(ask);
+      }
+    });
     setChatOnline(key, readOnline());
     void loadHistoryOnce(key, props.projectId).then((next) => {
       setCursor(next);
     });
     return () => {
+      unsubscribeAsk();
       mountedSlices.delete(key);
-      // Leaving the page keeps the pending card: stash (plus the
-      // live-session mirror) so the return restores the same dialog.
+      // Leaving the page keeps the pending card: park it project-keyed
+      // (plus the stable mirror) so the return restores the same dialog.
       if (pendingAskRef.current !== null) {
-        stashAsk(key, pendingAskRef.current);
+        parkProjectAsk(props.projectId, pendingAskRef.current);
       }
       if (sliceUI.get(key) === ui) {
         sliceUI.delete(key);
@@ -1542,7 +1654,7 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
     }
     pendingAskRef.current = null;
     setPendingAsk(null);
-    clearAskStash(key);
+    clearProjectAsk(props.projectId);
     const command = installDisplayCommand(
       ask.toolName,
       props.projectId,
@@ -1743,6 +1855,14 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
     message.role === "assistant" ? extractChatTags(message.text) : [],
   );
   const visibleTags = [...new Set(channelTags)];
+  // FXCHATV V4: the live row is the newest unfinished assistant bubble.
+  const liveRow = [...messages]
+    .reverse()
+    .find((message) => message.role === "assistant" && !message.final);
+  const liveStep =
+    streaming && liveRow !== undefined
+      ? liveStepLine(liveRow.text, liveRow.at, nowMs)
+      : null;
 
   return (
     <section data-testid="chat-area" aria-label={t("shell.sidebar.chat")}>
@@ -2072,6 +2192,13 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
               <span className="fx-spin" aria-hidden="true" />
               {t("chat.abort.cancel")}
             </button>
+          ) : null}
+          {/* FXCHATV V4: while a run works, the step line in plain
+              words plus elapsed seconds sits under the composer. */}
+          {liveStep !== null ? (
+            <p data-testid="chat-live-step" role="status" className="fx-quiet">
+              {liveStep}
+            </p>
           ) : null}
           {online ? null : (
             <span data-testid="chat-offline-dot" role="status" className="fx-quiet">
