@@ -94,17 +94,23 @@ describe("l0b01 add-project refetch on the real route", () => {
       target: { value: "f-new" },
     });
     fireEvent.click(await screen.findByTestId("project-add-submit"));
-    expect(await screen.findByTestId("project-row-p-9")).toBeTruthy();
+    // U13: create opens the new project at once (ChatArea for p-9),
+    // never a stuck "No projects yet" after a served write.
+    expect(await screen.findByTestId("chat-area")).toBeTruthy();
 
     const posts = seen.filter(
       (request) => request.url === "/api/v1/projects" && request.method === "POST",
     );
-    expect(posts.length).toBeGreaterThanOrEqual(1);
+    // Exactly one write: no double submit while saving.
+    expect(posts.length).toBe(1);
     const first = posts[0];
     expect(first).toBeDefined();
     if (first === undefined) {
       throw new Error("missing write POST");
     }
     expect(first.headers["x-ui-session-token"]).toBe(TOKEN);
+    // The refreshed list carries the new row once back on /projects.
+    await router.navigate("/projects");
+    expect(await screen.findByTestId("project-row-p-9")).toBeTruthy();
   });
 });

@@ -142,6 +142,7 @@ export type LocaleKey =
   | 'projectView.models.liveTitle'
   | 'projects.list.created'
   | 'projectView.noLedger'
+  | 'projects.list.duplicate'
   | 'projects.list.empty'
   | 'projectView.noLive'
   | 'projects.list.subtitle'

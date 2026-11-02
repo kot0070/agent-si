@@ -110,6 +110,10 @@ describe("k07f1b session token behaviour", () => {
       target: { value: "f-new" },
     });
     fireEvent.click(await screen.findByTestId("project-add-submit"));
+    // U13: create opens the new project at once; the row is visible
+    // back on /projects after the shared-list refresh.
+    await screen.findByTestId("chat-area");
+    await router.navigate("/projects");
     await screen.findByTestId("project-row-p-9");
 
     const posts = seen.filter(
