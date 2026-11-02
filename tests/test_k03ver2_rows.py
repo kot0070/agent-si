@@ -24,6 +24,12 @@ TEST_TOKEN = "k03ver2-token"
 TEST_SETTINGS = {"testing": True, "ui_session_token": TEST_TOKEN}
 
 
+def _auth():
+    """Session headers (FXR2E: the local-tests write route is guarded)."""
+    return {"x-actor": "k03ver2-tester",
+            "x-ui-session-token": TEST_TOKEN}
+
+
 @pytest.fixture
 def client():
     from fastapi.testclient import TestClient
@@ -208,6 +214,7 @@ def test_row_m_p4_154_global_default_switch_tests_view(client):
         "/api/v1/teststage/local-tests",
         json={"project_id": project, "enabled": False,
               "updated_at": "2026-10-29T00:00:00+00:00"},
+        headers=_auth(),
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["enabled"] is False
@@ -221,6 +228,7 @@ def test_row_m_p4_154_global_default_switch_tests_view(client):
         "/api/v1/teststage/local-tests",
         json={"project_id": project, "enabled": True,
               "updated_at": "2026-10-29T00:00:00+00:00"},
+        headers=_auth(),
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["enabled"] is True
