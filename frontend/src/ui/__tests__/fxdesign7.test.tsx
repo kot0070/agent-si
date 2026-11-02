@@ -309,6 +309,9 @@ describe("fxdesign7 inspector deferred", () => {
             integrity_ok: true,
             journal_head: "jh-1",
             generated_at: "t-0",
+            last_action:
+              "rule-tamper BLOCK model=fx-local-1 action=scripts/tamper_check.py",
+            last_check_at: "2026-02-11T06:42:44Z",
           });
         }
         if (
@@ -388,7 +391,7 @@ describe("fxdesign7 inspector deferred", () => {
     expect(screen.queryByTestId("ctx-percent")).toBeNull();
   });
 
-  it("watcher model is human with fallback state; action is local time", async () => {
+  it("watcher model is human with fallback state; action is plain words", async () => {
     stubInspector(LIVE_KNOWN);
     const { router } = renderInspectorAt();
     await openProject(router);
@@ -397,9 +400,11 @@ describe("fxdesign7 inspector deferred", () => {
     expect(model.textContent).not.toContain("local");
     expect(model.textContent).not.toContain("Configured model");
     const action = await screen.findByTestId("watcher-action");
-    expect(action.textContent).toContain("e-1");
-    expect(action.textContent).toContain("2026");
-    expect(action.textContent).not.toContain("T06:42:44Z");
+    expect(action.textContent).toContain(t("watcher.tab.actionBlocked"));
+    expect(action.textContent).not.toContain("e-1");
+    const checks = await screen.findByTestId("watcher-checks");
+    expect(checks.textContent).toContain("2026");
+    expect(checks.textContent).not.toContain("T06:42:44Z");
   });
 
   it("metric cards keep a heading toggle", async () => {
