@@ -8,6 +8,8 @@ event naming the role, never a silent substitute.
 
 from __future__ import annotations
 
+import threading
+import time
 from typing import Any
 
 
@@ -21,6 +23,119 @@ class _BudgetOut(RuntimeError):
     """The run stops before the call: provider cap or hard limit."""
 
     code: str = "DEVRUN_BUDGET_STOP"
+
+
+class ModelTimeout(RuntimeError):
+    """A model call exceeded its bounded timeout; the attempt continues."""
+
+    code: str = "DEVRUN_MODEL_TIMEOUT"
+
+
+class ModelStopped(RuntimeError):
+    """A model call was stopped while waiting; the run unwinds."""
+
+    code: str = "DEVRUN_MODEL_STOPPED"
+
+
+#: Default per-call model timeout in seconds (bounded by the max).
+_CALL_TIMEOUT_S = 300.0
+
+#: Upper bound for any per-call model timeout in seconds.
+_CALL_TIMEOUT_MAX = 900.0
+
+#: Quiet waiting notice: first after this many seconds, then every this
+#: many seconds while one call is still running.
+_WAIT_FIRST_S = 20.0
+_WAIT_EVERY_S = 30.0
+
+
+def _clamp_timeout(value: Any) -> float:
+    """Bound one per-call timeout to [1, _CALL_TIMEOUT_MAX] seconds."""
+    if value is None:
+        return float(_CALL_TIMEOUT_S)
+    try:
+        clamped = float(value)
+    except (TypeError, ValueError):
+        return float(_CALL_TIMEOUT_S)
+    return min(max(clamped, 1.0), float(_CALL_TIMEOUT_MAX))
+
+
+def waiting_line(role: str, elapsed_s: float) -> str:
+    """One quiet chat status line for a still-running model call."""
+    return "Waiting for the model: %s, %d s" % (
+        str(role), int(max(0, elapsed_s)))
+
+
+def invoke_timed(adapter: Any, messages: list, *,
+                 timeout_s: Any = None,
+                 first_notice_s: Any = None,
+                 notice_every_s: Any = None,
+                 tick_s: float = 0.2,
+                 stop_seen: Any = None,
+                 on_waiting: Any = None) -> Any:
+    """Run one adapter.invoke off the stream thread with a bounded wait.
+
+    The call runs in a daemon thread; this thread waits in slices so a
+    stop is honoured at once (never the full timeout) and a quiet
+    waiting notice fires after first_notice_s seconds and then every
+    notice_every_s seconds. A stop raises ModelStopped; an expired
+    bound raises ModelTimeout; an adapter failure re-raises unchanged.
+    """
+    limit = _clamp_timeout(timeout_s)
+    try:
+        first = float(first_notice_s
+                      if first_notice_s is not None else _WAIT_FIRST_S)
+    except (TypeError, ValueError):
+        first = float(_WAIT_FIRST_S)
+    try:
+        every = float(notice_every_s
+                      if notice_every_s is not None else _WAIT_EVERY_S)
+    except (TypeError, ValueError):
+        every = float(_WAIT_EVERY_S)
+    try:
+        tick = max(0.05, float(tick_s))
+    except (TypeError, ValueError):
+        tick = 0.2
+    box: dict[str, Any] = {}
+
+    def _target() -> None:
+        try:
+            box["response"] = adapter.invoke(messages)
+        except BaseException as exc:  # noqa: BLE001 -- re-raised below
+            box["error"] = exc
+
+    worker = threading.Thread(target=_target, daemon=True,
+                              name="devrun-model-call")
+    worker.start()
+    start = time.monotonic()
+    noticed = False
+    last_notice = 0.0
+    while True:
+        worker.join(timeout=tick)
+        if not worker.is_alive():
+            break
+        if stop_seen is not None:
+            try:
+                stopped = bool(stop_seen())
+            except Exception:
+                stopped = False
+            if stopped:
+                raise ModelStopped("model call stopped")
+        elapsed = time.monotonic() - start
+        if elapsed >= limit:
+            raise ModelTimeout(
+                "model call timed out after %d s" % (int(limit),))
+        if on_waiting is not None and elapsed >= first and (
+                not noticed or elapsed - last_notice >= every):
+            noticed = True
+            last_notice = elapsed
+            try:
+                on_waiting(elapsed)
+            except Exception:
+                pass
+    if "error" in box:
+        raise box["error"]
+    return box.get("response")
 
 
 def _role_table(app: Any) -> Any:
@@ -472,6 +587,12 @@ def invoke(
     run_id: str,
     part: Any = None,
     attempt: int = 0,
+    timeout_s: Any = None,
+    first_notice_s: Any = None,
+    notice_every_s: Any = None,
+    tick_s: float = 0.2,
+    stop_seen: Any = None,
+    on_waiting: Any = None,
 ) -> Any:
     """One model call: charge with a per-call id, ledger, budget-cap stop.
 
@@ -481,13 +602,36 @@ def invoke(
     manager path is unchanged. Returns (response, over_cap): over_cap
     is True only when the call's own cost exceeds the remaining budget.
     A reached provider cap or hard limit raises _BudgetOut before call.
+    The call itself runs off the stream thread with a bounded timeout
+    (default 300 s): a stop raises ModelStopped at once, an expired
+    bound raises ModelTimeout and the attempt continues.
     """
     provider = str(resolution["provider"])
     model = str(resolution["model"])
     blocked = _cap_block(app, project_id, provider)
     if blocked is not None:
         raise _BudgetOut(blocked)
-    response = adapter.invoke(messages)
+    try:
+        from agent_si.budget.gate import BudgetBlockedError as _AdmitBlocked
+        from agent_si.runtime import manager as _manager
+
+        ctx = getattr(getattr(app, "state", None), "k04_ctx", None)
+        _manager.admit_budget_call(
+            getattr(ctx, "budget_state", None), str(project_id),
+            provider, str(record.get("task") if isinstance(
+                record, dict) else ""),
+            str(run_id),
+            "admit-%s-%s-a%d" % (run_id, str(part), int(attempt)))
+    except _BudgetOut:
+        raise
+    except _AdmitBlocked as _admit_exc:
+        raise _BudgetOut(str(_admit_exc)) from None
+    except Exception:
+        pass
+    response = invoke_timed(
+        adapter, messages, timeout_s=timeout_s,
+        first_notice_s=first_notice_s, notice_every_s=notice_every_s,
+        tick_s=tick_s, stop_seen=stop_seen, on_waiting=on_waiting)
     usage = getattr(response, "usage", {}) or {}
     cost: Any = None
     try:

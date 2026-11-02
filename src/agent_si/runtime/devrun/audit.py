@@ -16,13 +16,26 @@ from typing import Any
 
 
 def snapshot_files(folder: str, files: list[str]) -> dict[str, str | None]:
-    """Read the current text of the part's files (None when missing)."""
+    """Read the current text of the part's files (None when missing).
+
+    Binary files snapshot as a one-line marker (size plus sha256,
+    never contents) so the diff lists them instead of reporting no
+    changes; secret-class files stay None, never described.
+    """
     from agent_si.runtime.devrun import actions as _actions
 
     snap: dict[str, str | None] = {}
     for path in files:
         try:
             snap[path] = _actions.read_file(folder, path)
+        except _actions.ActionRefused as exc:
+            if "binary" not in str(exc).lower():
+                snap[path] = None
+                continue
+            try:
+                snap[path] = _actions.describe_binary(folder, path)
+            except Exception:
+                snap[path] = None
         except Exception:
             snap[path] = None
     return snap
@@ -106,8 +119,16 @@ def judge(
     files_diff: str,
     checks: list[dict[str, Any]],
     artifact_refs: list[str],
+    timeout_s: Any = None,
+    stop_seen: Any = None,
+    on_waiting: Any = None,
 ) -> dict[str, Any]:
-    """Run one audit: invoke, parse, store; return the stored row."""
+    """Run one audit: invoke, parse, store; return the stored row.
+
+    The audit call shares the bounded model timeout (a stall raises
+    ModelTimeout to the caller); waiting notices and the stop hook
+    ride the same parameters as any role call.
+    """
     from agent_si.runtime.devrun import protocol as _protocol
     from agent_si.runtime.devrun import roles as _roles
 
@@ -115,7 +136,8 @@ def judge(
     response, over = _roles.invoke(
         app, adapter, resolution, messages, record=record,
         project_id=project_id, run_id=run_id, part=part_id,
-        attempt=attempt)
+        attempt=attempt, timeout_s=timeout_s, stop_seen=stop_seen,
+        on_waiting=on_waiting)
     entry: dict[str, Any] = {
         "part_id": str(part_id), "attempt": int(attempt),
         "producer_ref": str(producer_ref),

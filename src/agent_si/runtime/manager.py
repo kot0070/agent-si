@@ -343,6 +343,83 @@ class _RecordingAssuranceHook:
         return True
 
 
+def admit_budget_call(gate: Any, project_id: str, provider_id: str,
+                      task_id: str, run_id: str,
+                      admission_id: str) -> None:
+    """Block one billable call before it runs when the gate refuses.
+
+    A zero-amount admission reserve runs before any provider call: a
+    provider cap or hard limit of 0, or spent/reserved already at or
+    over the cap/hard, raises the gate's own BudgetBlockedError
+    (existing refusal text, existing incident row) before the call.
+    A held admission is released before returning, so racing calls
+    serialize on the gate lock (reserve, then settle) instead of
+    passing the limit. A missing gate, project or provider id allows
+    the call (the post-call charge still reports UNAVAILABLE); any
+    other gate failure also allows it, never breaking the run.
+    """
+    from agent_si.budget.gate import BudgetBlockedError as _Blocked
+
+    if gate is None:
+        return None
+    pid = str(project_id or "run")
+    prov = str(provider_id or "")
+    if not prov:
+        return None
+    try:
+        state = gate.get_state(pid)
+    except Exception:
+        return None
+    try:
+        from decimal import Decimal as _Dec
+
+        hard = _Dec(str(getattr(state, "hard_limit", "0") or "0"))
+        if hard <= 0:
+            raise _Blocked(
+                "hard budget limit blocks new billable cloud work: "
+                "project %s task %s run %s requested 0 %s would exceed "
+                "hard %s %s (spent %s, reserved %s) [BUDGET_HARD_BLOCKED]"
+                % (pid, str(task_id or ""), str(run_id or ""),
+                   str(getattr(state, "currency", "") or ""),
+                   getattr(state, "hard_limit", "0"),
+                   str(getattr(state, "currency", "") or ""),
+                   getattr(state, "spent", "0"),
+                   getattr(state, "reserved", "0")))
+        caps = getattr(state, "provider_spend_caps", None) or {}
+        cap = caps.get(prov)
+        if cap is not None and _Dec(str(cap)) <= 0:
+            raise _Blocked(
+                "provider budget spend cap blocks new billable cloud work"
+                ": project %s provider %s requested 0 %s would exceed "
+                "cap %s %s [PROVIDER_SPEND_CAP_BLOCKED]"
+                % (pid, prov,
+                   str(getattr(state, "currency", "") or ""), cap,
+                   str(getattr(state, "currency", "") or "")))
+    except _Blocked:
+        raise
+    except Exception:
+        return None
+    try:
+        gate.compare_and_reserve({
+            "project_id": pid, "task_id": str(task_id or ""),
+            "run_id": str(run_id or ""),
+            "reservation_id": str(admission_id),
+            "estimated_amount": "0",
+            "reserved_at": "2026-10-26T00:00:00Z",
+            "expires_at": "2026-10-27T00:00:00Z",
+            "provider_id": prov,
+        })
+    except _Blocked:
+        raise
+    except Exception:
+        return None
+    try:
+        gate.release(str(admission_id), "admission ok")
+    except Exception:
+        pass
+    return None
+
+
 def _request_value(request: Any, name: str, default: Any = None) -> Any:
     if request is None:
         return default
@@ -679,6 +756,41 @@ def run_task_streamed(
             secret_refs=_secret_refs_only(shape["secret_refs"]),
             run_config=sdk_run_config,
         )
+        from agent_si.budget.gate import (
+            BudgetBlockedError as _AdmitBlocked,
+        )
+        try:
+            _admit_provider = str(
+                getattr(getattr(provider, "config", None),
+                        "provider_id", "") or "")
+            if _admit_provider and _BUDGET_GATE is not None:
+                admit_budget_call(
+                    _BUDGET_GATE, str(shape["project_id"] or "run"),
+                    _admit_provider,
+                    str(shape["task_id"] or validated.subtask_id),
+                    active_run_id,
+                    "admit-%s-t%d" % (active_run_id, turn))
+        except _AdmitBlocked as _admit_exc:
+            _finish("budget_stop")
+            try:
+                from agent_si.watcher import journal as _admit_journal
+
+                _admit_journal.append_event(
+                    str(shape["project_id"] or "run"), "budget",
+                    "GUARD_BLOCK", "budget stop: %s" % (_admit_exc,),
+                    (active_run_id,))
+            except Exception:
+                pass
+            yield _emit(RunEvent(
+                event="budget_stop", turn=turn,
+                subtask_id=validated.subtask_id,
+                detail="budget stop: %s" % (_admit_exc,),
+                data={"budget": budget, "turns": turn,
+                      "run_id": active_run_id,
+                      "reason": str(_admit_exc),
+                      "error": str(_admit_exc)},
+            ))
+            return
         try:
             result = interface.run_turn(turn_request)
         except Exception:
