@@ -1,0 +1,133 @@
+/* FXFIRSTRUN2 focused first-run page. Provenance: authored for the
+   FXFIRSTRUN2 advisor fix (juror's first 30 seconds). Token-only colours
+   (var(--fx-*)), so dark + light themes hold; lengths only otherwise. */
+
+/* Focused card: 640px centred, no right panel, no project list. The page
+   component owns no shell, so the focus is scoped with :has(): while the
+   firstrun card is mounted the shell drops to two columns and the inspector
+   plus the sidebar project list stay unmounted visually. */
+section[data-testid="firstrun"].fx-firstrun {
+  max-width: 640px;
+  width: 100%;
+  margin-left: auto;
+  margin-right: auto;
+  box-sizing: border-box;
+}
+
+div[data-testid="app-shell"]:has(section[data-testid="firstrun"]) {
+  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-areas:
+    "topbar topbar"
+    "sidebar main";
+}
+
+div[data-testid="app-shell"]:has(section[data-testid="firstrun"]) > aside[data-testid="inspector"],
+div[data-testid="app-shell"]:has(section[data-testid="firstrun"]) .fx-project-list {
+  display: none;
+}
+
+/* The gate's bottom-edge Skip/Runs duplicates stay out of the focused
+   card: the card carries its own quiet Skip. Scoped to the mounted card,
+   so the gate keeps working everywhere else (and in jsdom, which never
+   applies this sheet). */
+div[data-testid="app-shell"]:has(section[data-testid="firstrun"]) > p[data-testid="firstrun-gate-links"] {
+  display: none;
+}
+
+/* Progress line of 4 steps: one row, the current step marked. */
+ol.fx-firstrun-steps {
+  display: flex;
+  gap: 0;
+  margin: 12px 0;
+  padding: 0;
+  list-style: none;
+}
+
+ol.fx-firstrun-steps > li {
+  flex: 1 1 0;
+  min-width: 0;
+  padding-top: 8px;
+  border-top: 2px solid var(--fx-card-border);
+  margin-right: 8px;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+ol.fx-firstrun-steps > li:last-child {
+  margin-right: 0;
+}
+
+ol.fx-firstrun-steps > li[aria-current="step"] {
+  border-top-color: var(--fx-accent);
+  opacity: 1;
+  font-weight: 600;
+}
+
+ol.fx-firstrun-steps > li h3 {
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+
+/* Provider rows: name, one plain line, Connect. */
+ul.fx-firstrun-providers {
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+}
+
+li.fx-firstrun-provider {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--fx-card-border);
+}
+
+li.fx-firstrun-provider:first-child {
+  border-top: none;
+}
+
+li.fx-firstrun-provider h4 {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+}
+
+li.fx-firstrun-provider p {
+  flex: 1 1 100%;
+  margin: 0;
+  opacity: 0.8;
+  font-size: 13px;
+}
+
+/* Quiet controls: the skip link and secondary actions never read primary. */
+section[data-testid="firstrun"] .fx-btn-quiet {
+  background-color: transparent;
+  color: var(--fx-btn-quiet-ink);
+  border: 1px solid var(--fx-input-border);
+  border-radius: 6px;
+}
+
+section[data-testid="firstrun"] .fx-btn-quiet:hover:not(:disabled) {
+  background-color: transparent;
+  border-color: var(--fx-accent);
+}
+
+/* Quiet optional list on the last step: note plus one calm row each. */
+section.fx-firstrun-optional ul {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+section.fx-firstrun-optional li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 6px 0;
+  border-top: 1px solid var(--fx-card-border);
+  font-size: 13px;
+  opacity: 0.85;
+}

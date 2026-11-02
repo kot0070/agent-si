@@ -80,6 +80,9 @@ function installFetch(): void {
         }
         return json({ path: '/chosen/dir' });
       }
+      if (url === '/api/v1/providers' && method === 'GET') {
+        return json({ providers: [{ provider_id: 'openai' }] });
+      }
       if (url === '/api/v1/projects' && method === 'GET') {
         return json({ projects });
       }
@@ -229,6 +232,12 @@ describe('FXFOLDER folder picker on the first-run folder step', () => {
   it('choose fills the folder input and submit posts it exactly', async () => {
     renderAt('/firstrun');
     expect(await screen.findByText(en.firstrun.title)).toBeTruthy();
+    await waitFor(() => {
+      expect(
+        (screen.getByRole('button', { name: en.firstrun.next }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false);
+    });
     fireEvent.click(screen.getByRole('button', { name: en.firstrun.next }));
     fireEvent.click(screen.getByRole('button', { name: en.firstrun.next }));
     const input = (await screen.findByRole('textbox', {
@@ -254,6 +263,12 @@ describe('FXFOLDER folder picker on the first-run folder step', () => {
     pickMode = 'unavailable';
     renderAt('/firstrun');
     expect(await screen.findByText(en.firstrun.title)).toBeTruthy();
+    await waitFor(() => {
+      expect(
+        (screen.getByRole('button', { name: en.firstrun.next }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false);
+    });
     fireEvent.click(screen.getByRole('button', { name: en.firstrun.next }));
     fireEvent.click(screen.getByRole('button', { name: en.firstrun.next }));
     await screen.findByRole('textbox', {

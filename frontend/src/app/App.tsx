@@ -87,6 +87,12 @@ export const ROUTES: RouteTable = {
 // lane; the literal path below matches the merged project route shape.
 export const TESTS_ROUTE_PATH = "/projects/:projectId/tests";
 
+// FXCHATHIST Part 2: the Chat tab route path, same pattern as the Tests
+// tab above (frozen RouteTable untouched). Every project entry point
+// (Sidebar, TopBar, ProjectsPage) lands here: the mounted ChatArea reads
+// the store slice plus the served history for that project.
+export const CHAT_TAB_ROUTE_PATH = "/projects/:projectId/chat";
+
 const ChatAreaView = lazy(() =>
   import("../chat/index").then((module) => ({ default: module.ChatArea })),
 );
@@ -500,6 +506,24 @@ function LocalAiRoute(props: { projectId: string }): ReactElement {
   );
 }
 
+// FXCHATHIST Part 2: the project Chat tab. Renders the same ChatArea as
+// the root chat route, bound to the URL project; selects it into the
+// current project so the shell (TopBar, Sidebar, Inspector) follows.
+function ChatTabRoute(): ReactElement {
+  const params = useParams();
+  const current = useCurrentProject();
+  const projectId = params.projectId;
+  useEffect(() => {
+    if (projectId !== undefined && projectId !== current.projectId) {
+      current.select(projectId);
+    }
+  }, [projectId, current]);
+  if (projectId === undefined) {
+    return <ProjectsPageView />;
+  }
+  return <ChatAreaView projectId={projectId} />;
+}
+
 function ProjectSubview(props: { view: ProjectViewName }): ReactElement {
   const params = useParams();
   const [search] = useSearchParams();
@@ -783,6 +807,7 @@ function AppShell(): ReactElement {
                 path={TESTS_ROUTE_PATH}
                 element={<ProjectSubview view="tests" />}
               />
+              <Route path={CHAT_TAB_ROUTE_PATH} element={<ChatTabRoute />} />
               <Route path="/settings" element={<SettingsIndexRoute />} />
               <Route
                 path="/settings/:section"

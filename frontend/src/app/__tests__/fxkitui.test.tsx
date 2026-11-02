@@ -8,6 +8,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
@@ -76,6 +77,20 @@ function installFetch(): void {
             provider_id,
           })),
         });
+      }
+      if (url === "/api/v1/providers/keys" && method === "POST") {
+        const preset = (body as { preset_id: string }).preset_id;
+        return new Response(
+          JSON.stringify({ key_ref: { secret_id: preset, provider_id: preset } }),
+          { status: 201, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url === "/api/v1/providers/connect" && method === "POST") {
+        const preset = (body as { preset_id: string }).preset_id;
+        if (!mockState.providers.includes(preset)) {
+          mockState.providers.push(preset);
+        }
+        return json({ provider: { provider_id: preset } });
       }
       if (url.startsWith("/api/v1/tasks") && method === "POST") {
         const payload = body as { title: string; scope: string[] };
@@ -195,6 +210,24 @@ describe("fxkitui fresh profile opens the guided first run", () => {
   it("finishing the flow lands in chat and is remembered", async () => {
     const router = renderApp("/");
     expect(await screen.findByText(en.firstrun.title)).toBeTruthy();
+    const openaiRow = await screen.findByTestId("firstrun-provider-openai");
+    fireEvent.click(
+      within(openaiRow).getByRole("button", { name: "Connect OpenAI" }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(
+      within(dialog).getByLabelText(en.providers.connect.apiKey),
+      { target: { value: "fx-fake-key" } },
+    );
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: en.providers.connect.save }),
+    );
+    await waitFor(() => {
+      expect(
+        (screen.getByRole("button", { name: en.firstrun.next }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false);
+    });
     fireEvent.click(screen.getByRole("button", { name: en.firstrun.next }));
     fireEvent.change(
       screen.getByRole("textbox", { name: en.shell.topbar.project }),

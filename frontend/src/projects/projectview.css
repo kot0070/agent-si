@@ -2,12 +2,13 @@
    selected state, and real fact rows with a gap between label and value.
    Layout only; every string stays in the locale tables. */
 
+/* FXVIEWS3: the tab row wraps inside the main column (the D6 shell gives
+   it less room); tabs never slide under the inspector rail. */
 .fxpv-tabs {
   display: flex;
   flex-direction: row;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 0.25rem;
-  overflow-x: auto;
   padding: 0.25rem 0;
 }
 
@@ -52,6 +53,26 @@
 
 .fxpv-note {
   opacity: 0.85;
+}
+
+/* FXVIEWS3 rework: one run is one stacked card, never a squeezed table
+   row. The run id rides last and quiet, never first. */
+.fxpv-run {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.5rem 0;
+}
+
+.fxpv-run ul {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.fxpv-quiet {
+  opacity: 0.65;
+  font-size: 0.85em;
+  word-break: break-all;
 }
 
 /* FXVIEWS-10: task rows stack title, status chip and date on their own
