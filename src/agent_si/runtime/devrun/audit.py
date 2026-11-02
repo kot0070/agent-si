@@ -63,17 +63,147 @@ def diff_text(before: dict[str, str | None],
     return text
 
 
+#: Workspace dirs never snapshotted (caches, history, the run's own
+#: outputs, local virtualenvs): undeclared-file detection stays about
+#: project work, never tool noise.
+_WS_EXCLUDE_DIRS = frozenset({
+    "node_modules", ".git", ".devrun", "__pycache__", ".venv",
+})
+
+#: Snapshot bounds: per-file bytes plus a file count, so a huge tree
+#: cannot stall an attempt.
+_WS_FILE_CAP = 256 * 1024
+_WS_MAX_FILES = 2000
+
+
+def _snapshot_one(folder: str, rel: str) -> str | None:
+    """Text or binary marker for one workspace file; never contents."""
+    from agent_si.runtime.devrun import actions as _actions
+
+    try:
+        return _actions.read_file(folder, rel)
+    except _actions.ActionRefused as exc:
+        if "binary" not in str(exc).lower():
+            return None
+        try:
+            return _actions.describe_binary(folder, rel)
+        except Exception:
+            return None
+    except Exception:
+        return None
+
+
+def snapshot_workspace(folder: str) -> dict[str, str | None]:
+    """Map of workspace files to text/marker (declared and not).
+
+    Walks the project folder, skipping the excluded dirs; each file
+    snapshots exactly like a declared file (text capped, binaries as
+    size+sha markers, unreadable as None). Never raises.
+    """
+    snap: dict[str, str | None] = {}
+    try:
+        base = os.path.abspath(str(folder))
+    except Exception:
+        return snap
+    try:
+        walker = os.walk(base)
+    except Exception:
+        return snap
+    try:
+        for root, dirs, files in walker:
+            try:
+                dirs[:] = [name for name in dirs
+                           if name not in _WS_EXCLUDE_DIRS]
+            except Exception:
+                pass
+            for name in sorted(files):
+                if len(snap) >= _WS_MAX_FILES:
+                    return snap
+                try:
+                    full = os.path.join(root, name)
+                    rel = os.path.relpath(full, base).replace(
+                        os.sep, "/")
+                except Exception:
+                    continue
+                if not rel or rel.startswith(".."):
+                    continue
+                snap[rel] = _snapshot_one(folder, rel)
+    except Exception:
+        pass
+    return snap
+
+
+def diff_undeclared(before: dict[str, str | None],
+                    after: dict[str, str | None],
+                    declared: Any) -> tuple[str, list[str]]:
+    """Diff of workspace files outside the declared set, labelled.
+
+    Returns (text, changed paths): entries the part never declared
+    are marked "(not in the part's files)" so the auditor judges
+    them knowingly. A correct file written elsewhere shows up here
+    instead of vanishing into "(no changes)"; a stray or deleted
+    file is never invisible. Empty when nothing undeclared changed.
+    """
+    try:
+        declared_set = {str(item) for item in (declared or [])}
+    except Exception:
+        declared_set = set()
+    chunks: list[str] = []
+    changed: list[str] = []
+    try:
+        paths = sorted(set(before) | set(after))
+    except Exception:
+        return "", []
+    for path in paths:
+        try:
+            if path in declared_set:
+                continue
+            old = before.get(path)
+            new = after.get(path)
+            if old == new:
+                continue
+            changed.append(str(path))
+            old_lines = (old or "").splitlines(keepends=True)
+            new_lines = (new or "").splitlines(keepends=True)
+            chunks.append("".join(difflib.unified_diff(
+                old_lines, new_lines,
+                fromfile="a/%s (not in the part's files)" % (path,),
+                tofile="b/%s (not in the part's files)" % (path,))))
+        except Exception:
+            continue
+    if not chunks:
+        return "", changed
+    text = "\n".join(chunks)
+    if len(text) > 12000:
+        text = text[:12000] + "\n[... diff truncated ...]"
+    return text, changed
+
+
 def auditor_messages(
     goal: str,
     files_diff: str,
     checks: list[dict[str, Any]],
+    install_runs: Any = (),
+    prior_install_runs: Any = (),
+    part_diff: str = "",
 ) -> list[dict[str, str]]:
-    """The auditor's NEW message list: goal, diff, checks with output."""
+    """The auditor's NEW message list: goal, diff, checks with output.
+
+    Installers the app ran carry their own evidence section, built
+    only from the engine's real install record, never from model
+    text: an empty diff with such a record is explained, without one
+    it stays empty work. Installs already run for the project ride a
+    second section (the rerun must verify, not reinstall).
+    """
+    from agent_si.runtime.devrun import records as _records
+
     lines = [
         "You are the auditor for one development part.",
         "Goal: %s" % (goal,),
         "Files (diff vs attempt start):",
         files_diff,
+        "Files (whole part changes since part start):",
+        part_diff if part_diff else "(no changes)",
         "Checks (command, exit code, real output tail):",
     ]
     if not checks:
@@ -83,6 +213,15 @@ def auditor_messages(
         lines.append("exit: %s" % (check.get("exit_code"),))
         tail = str(check.get("output_tail") or "")
         lines.append(tail if tail else "(no output)")
+    install_lines = _records.format_install_runs(install_runs)
+    if install_lines:
+        lines.append("Installers the app ran for this run:")
+        lines.extend(install_lines)
+    prior_lines = _records.format_install_runs(prior_install_runs)
+    if prior_lines:
+        lines.append("Installers already run for this project "
+                     "(do not reinstall, verify instead):")
+        lines.extend(prior_lines)
     lines.append(
         'Return ONLY JSON: {"result": "PASS"|"FAIL", '
         '"reasons": ["..."]}. Judge the real files and real outputs '
@@ -119,6 +258,7 @@ def judge(
     files_diff: str,
     checks: list[dict[str, Any]],
     artifact_refs: list[str],
+    part_diff: str = "",
     lock: Any = None,
     timeout_s: Any = None,
     stop_seen: Any = None,
@@ -131,9 +271,13 @@ def judge(
     ride the same parameters as any role call.
     """
     from agent_si.runtime.devrun import protocol as _protocol
+    from agent_si.runtime.devrun import records as _install_records
     from agent_si.runtime.devrun import roles as _roles
 
-    messages = auditor_messages(goal, files_diff, checks)
+    evidence = _install_records.run_install_runs(record)
+    prior = _install_records.prior_snapshot(record)
+    messages = auditor_messages(goal, files_diff, checks, evidence,
+                                prior, part_diff=part_diff)
     # FXPARALLEL BEGIN charge-lock: auditor charges under the run lock.
     response, over, _row = _roles.invoke_owned(
         app, adapter, resolution, messages, record=record,

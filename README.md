@@ -6,13 +6,11 @@ Agent SI is a desktop app that takes one task in plain words and returns a check
 You describe the goal, the app plans the work, runs the checks, and a fresh audit gives the final verdict.
 It uses connected model providers for the work and keeps every run, decision, and audit record with the project.
 
-<<SHOT: main chat screen>>
-
 ## Requirements
 
 - Windows 10 or 11, 64-bit.
 - WebView2 runtime. If it is missing, the app shows a message with the download link and also opens the app in the default browser.
-- No Python install needed. No administrator rights needed. The portable build runs from its own folder.
+- No Python install needed to run the app. Code tests on Python projects need a real Python: install Python (so `python` runs) or set `AGENT_SI_PYTHON` to a python executable. On Windows, a `python` that only opens the Microsoft Store never counts: the app skips that stub and tries the `py` launcher instead. No administrator rights needed. The portable build runs from its own folder.
 - The bundle carries the licence text and the third-party notices; both are also shown on the About screen.
 
 ## Download and verify
@@ -28,24 +26,20 @@ Get-FileHash -Algorithm SHA256 AgentSI.exe
 3. Compare both values with `SHA256SUMS.txt`. Do not run the app if they differ.
 4. Unpack the zip into an empty folder and start `AgentSI.exe` by double-click.
 
-<<FINAL: release hashes and file names are stamped at release time; re-verify against SHA256SUMS.txt in the bundle>>
-
 The build is unsigned, so on first start Windows SmartScreen shows "Windows protected your PC" with publisher Unknown. This is expected for this release. Click More info, then Run anyway — only after the SHA256 values above match. Do not run the app if they differ.
 
 ## First run, step by step
 
 The app opens a first-run guide with four steps. The guide reads its state from the server, never from local guesses. A step counts as done only when the server confirms it.
 
-1. Connect a provider. The guide shows the provider rows and a Connect button for each. The Next button stays disabled until the server reports at least one connected provider. A Skip control is also shown.
-2. One-click team. Enter a team name and save. The app creates or reuses a project and saves the default team setup for every role.
+1. Connect a provider. The guide shows the provider rows and a Connect button for each. The Next button stays disabled until the server reports at least one connected provider. A Skip control moves on without connecting: the guide still finishes, but the chat waits for a provider (it shows "No model bound yet." with a link to Settings -> Models, and the status reads Blocked until you connect).
+2. One-click team. Enter a team name and save. The app creates or reuses a project and saves Automatic for every role. Next moves on with or without saving.
 3. Project and folder. Enter a folder value, optionally use Choose folder to pick it with the system dialog, then Create. The app creates the project through the real project service.
 4. First task. Enter a task title and Create. The app creates the task through the real task service and shows the created task. The Continue control finishes the guide and opens the chat with the task title ready.
 
 The last step also shows an optional quiet list: local AI, watcher preset, automations, and knowledge bases. Each can be skipped.
 
 To open the guide again, go to `/firstrun`.
-
-<<SHOT: first-run guide>>
 
 ## Connect a provider
 
@@ -57,9 +51,11 @@ Go to Settings -> Models, or use the Setup wizard on the first-run screen.
 
 Search filters the list by provider or model name. Model checkboxes are enabled only when the provider is connected. An optional setup wizard, role pools, and a chat-model picker are on the same page.
 
-Supported providers include a hosted Meta option, OpenAI, Anthropic, and local servers for local models.
+The connect dialog shows the expected key format, and a key that does not fit shows "This key does not match the expected format." before you save (a warning only). Connecting itself is two steps: paste the key, press Check, then Save. Check tries the key against the live provider without storing anything: a good key answers "Key checked. Save to connect." and enables Save (local providers check at once, with no network). A wrong key answers "The provider refused this key. Paste the full key again." and nothing is stored — a failed replace keeps the old working key; an unreachable provider answers "Could not reach the provider.". Save stores the checked key (the server checks once more first) and only then reports "Connected {label}. Reference saved."; the local reference copy is written only after the server answers.
 
-<<SHOT: providers page>>
+Model checkboxes switch models on and off for the team: only ticked models reach Auto, the role pools, and the chat picker. A fresh connect ticks only the default model. On the project Models route a team quick-fix card can apply the routing's suggested binding (Accept) or drop it (Dismiss).
+
+Supported providers include a hosted Meta option, OpenAI, Anthropic, and local servers for local models.
 
 ## Keys: Windows credential store only
 
@@ -75,29 +71,26 @@ Provider keys are stored only in the Windows Credential Manager under the app na
 ## Remove and closing
 
 - Remove: delete the app folder. Data lives in the `data` folder next to `AgentSI.exe` by default (`%LOCALAPPDATA%\AgentSI\data` when the app folder is not writable; the `AGENT_SI_DATA_DIR` folder path overrides both). Delete that data folder too for a full removal. Provider keys live in the Windows Credential Manager under `app:<provider>` — Disconnect removes the entry.
-- Closing is safe: history and records stay on disk and reappear on the next start. A run stops when the window closes (stop the whole `AgentSI.exe` tree, not just the starter).
+- Closing is safe: history and records stay on disk and reappear on the next start. Closing the window ends the backend, so an active run stops with it.
+- One copy at a time: starting the app again focuses the first window instead of starting a second copy.
 
 ## First task and Stop
 
 1. Create or open a project.
-2. Type the task in the chat box and send. With no project, sending creates a project named from the first words and then creates the task.
+2. Type the task in the chat box and send. With no project, sending creates a project named from the start of the message and then creates the task.
 3. Watch progress in the chat, the team panel, and the Tests tab.
 4. The result appears in the chat with its checks and the audit verdict. Reports and the evidence index stay with the project.
 
 Stop: the top bar has Stop all. Stopping is a two-step control and also answers to the Escape key. It stops the active runs at once and keeps partial outputs and records.
-
-<<SHOT: project view with tests tab>>
 
 ## Known limits
 
 - Unsigned build: SmartScreen warns. Verify hashes first.
 - WebView2 is required for the desktop window. Without it the app shows the download notice and falls back to the browser.
 - The folder picker needs a native window. Where no native dialog exists, the Choose control hides itself instead of failing.
-- Local models need a running local server on the loopback address. If none answers, local checks report not configured.
-- Budget has a default currency and default soft and hard limits. When the budget is exhausted, new work is blocked with a plain message.
+- Local models need a running local server on the loopback address: Ollama at localhost:11434, LM Studio at localhost:1234/v1, any OpenAI-compatible server at localhost:8080/v1. If none answers, local checks report not configured.
+- Budget starts at USD 5.00 per project with a soft limit of 4.00 and a hard limit of 5.00. When the budget is exhausted, new work is blocked with a plain message.
 - Some screens show empty or unknown states until the server has records. The app never invents numbers.
-
-<<FINAL: exact default budget numbers and local server addresses are verified against the release bundle at final pass>>
 
 ## Licence
 
