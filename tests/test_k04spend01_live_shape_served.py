@@ -64,8 +64,10 @@ class _FakeResp:
 
 def _patch_urlopen(monkeypatch, usage):
     def _fake(request, timeout=None):
-        return _FakeResp({"choices": [{"message": {"content": CANNED_TEXT},
-                                       "finish_reason": "stop"}],
+        # Director-protocol answer shape: one provider call answers the turn.
+        return _FakeResp({"choices": [{"message": {"content": json.dumps(
+            {"answer": CANNED_TEXT})},
+                                        "finish_reason": "stop"}],
                           "usage": dict(usage)})
     monkeypatch.setattr(_urlreq, "urlopen", _fake)
 

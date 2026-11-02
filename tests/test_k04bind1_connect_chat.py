@@ -48,7 +48,10 @@ class _FakeResp:
 
 
 def _ok_body():
-    return {"choices": [{"message": {"content": CANNED_TEXT},
+    # Director-protocol answer shape: one provider call answers the turn
+    # (no parts, no repair); the canned text rides the answer.
+    return {"choices": [{"message": {"content": json.dumps(
+        {"answer": CANNED_TEXT})},
                          "finish_reason": "stop"}],
             "usage": dict(CANNED_USAGE)}
 

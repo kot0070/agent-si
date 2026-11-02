@@ -53,8 +53,10 @@ class _FakeResp:
 
 
 def _openai_body():
+    # Director-protocol answer shape: one provider call answers the turn.
     return {
-        "choices": [{"message": {"content": CANNED_TEXT},
+        "choices": [{"message": {"content": json.dumps(
+            {"answer": CANNED_TEXT})},
                      "finish_reason": "stop"}],
         "usage": dict(OPENAI_USAGE),
     }
