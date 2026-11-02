@@ -17,6 +17,8 @@ if _SRC not in sys.path:
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+import pytest  # noqa: E402
+
 from agent_si.backend.app import create_app  # noqa: E402
 from agent_si.watcher import engine as _engine  # noqa: E402
 from agent_si.watcher import journal as _journal  # noqa: E402
@@ -49,6 +51,32 @@ def teardown_function(_func):
     _engine.reset_state()
     _status.reset_state()
     _stats.reset_state()
+
+
+# Fail-closed gate needs a real gate: the abnormal path admits the
+# watcher model call before invoking the transport. Generous limits,
+# all static project ids, restored after (same ordered pattern as the
+# C5 neighbours, incl. FXLOC2's fxr2c fixture).
+_FXWATCH_GATE_PROJECTS = (
+    "fxwatch-quiet-1",
+    "fxwatch-hot-1",
+    "fxwatch-served-1",
+)
+
+
+@pytest.fixture(autouse=True)
+def _fxwatch_real_budget_gate():
+    from agent_si.budget.gate import BudgetGate
+    from agent_si.runtime import manager as _manager
+
+    prev = _manager._BUDGET_GATE
+    gate = BudgetGate()
+    for project in _FXWATCH_GATE_PROJECTS:
+        gate.configure_project(
+            project, "USD", "1000000.00", "900000.00", "1000000.00")
+    _manager.set_budget_gate(gate)
+    yield
+    _manager.set_budget_gate(prev)
 
 
 class _FakeTransport:
