@@ -308,20 +308,11 @@ export function TopBar(props: TopBarProps): ReactElement {
         {t("shell.topbar.panels")}
       </button>
       <span data-testid="k07open10-shell" aria-hidden="true" />
-      <div data-testid="pairing-strip">
-        <span data-testid="pairing-label">
-          <Link data-testid="topbar-watcher" to="/watcher">
-            {t("shell.topbar.watcher")}
-          </Link>
-        </span>{" "}
-        {badge === null ? (
-          <span data-testid="pairing-badge" hidden />
-        ) : (
-          <span data-testid="pairing-badge">{t(placementKey(badge))}</span>
-        )}
-      </div>
-      <label>
-        {t("shell.topbar.project")}
+      {/* FXDESIGN6: the project name reads as the ref title dropdown. The
+          visible label text is visually hidden (aria-label carries it) so
+          long uk names never wrap the strip. */}
+      <label className="fx-topbar-project">
+        <span className="fx-vh">{t("shell.topbar.project")}</span>
         <select
           data-testid="topbar-project"
           /* FXDESIGN5 S3/S7: explicit accessible name on the project
@@ -352,46 +343,60 @@ export function TopBar(props: TopBarProps): ReactElement {
           ) : null}
         </select>
       </label>
-      <button
-        type="button"
-        data-testid="topbar-stop-all"
-        onClick={() => {
-          void stopAll();
-        }}
-      >
-        {stopArmed ? t("shell.closing.confirm") : t("shell.topbar.stop_all")}
-      </button>
-      {stopText === null ? null : (
-        <>
-          <span data-testid="stop-all-result">{stopText}</span>
-          <button
-            type="button"
-            data-testid="stop-all-clear"
-            className="fx-btn-quiet"
-            aria-label={t("shell.topbar.stop_clear")}
-            onClick={() => {
-              setStopText(null);
-            }}
-          >
-            {t("shell.topbar.stop_clear")}
-          </button>
-        </>
-      )}
-      <label>
-        {t("shell.topbar.language")}
-        <select
-          data-testid="topbar-language"
-          aria-label={t("shell.topbar.language")}
-          value={locale}
-          onChange={(event) => {
-            changeLocale(event.target.value === "uk" ? "uk" : "en");
+      <div data-testid="topbar-right" className="fx-topbar-right">
+        <div data-testid="pairing-strip">
+          <span data-testid="pairing-label">
+            <Link data-testid="topbar-watcher" to="/watcher">
+              {t("shell.topbar.watcher")}
+            </Link>
+          </span>{" "}
+          {badge === null ? (
+            <span data-testid="pairing-badge" hidden />
+          ) : (
+            <span data-testid="pairing-badge">{t(placementKey(badge))}</span>
+          )}
+        </div>
+        <button
+          type="button"
+          data-testid="topbar-stop-all"
+          onClick={() => {
+            void stopAll();
           }}
         >
-          <option value="en">en</option>
-          <option value="uk">uk</option>
-        </select>
-      </label>
-      <ThemeToggle />
+          {stopArmed ? t("shell.closing.confirm") : t("shell.topbar.stop_all")}
+        </button>
+        {stopText === null ? null : (
+          <>
+            <span data-testid="stop-all-result">{stopText}</span>
+            <button
+              type="button"
+              data-testid="stop-all-clear"
+              className="fx-btn-quiet"
+              aria-label={t("shell.topbar.stop_clear")}
+              onClick={() => {
+                setStopText(null);
+              }}
+            >
+              {t("shell.topbar.stop_clear")}
+            </button>
+          </>
+        )}
+        <label className="fx-topbar-language">
+          <span className="fx-vh">{t("shell.topbar.language")}</span>
+          <select
+            data-testid="topbar-language"
+            aria-label={t("shell.topbar.language")}
+            value={locale}
+            onChange={(event) => {
+              changeLocale(event.target.value === "uk" ? "uk" : "en");
+            }}
+          >
+            <option value="en">en</option>
+            <option value="uk">uk</option>
+          </select>
+        </label>
+        <ThemeToggle />
+      </div>
     </header>
   );
 }

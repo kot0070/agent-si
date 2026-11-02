@@ -18,6 +18,11 @@ import type { InspectorProps as InspectorBaseProps } from "../app/iface";
 import { useApiClient } from "../app/ApiClientProvider";
 import { formatNumber, t } from "../locale/index";
 import { shortenLiveRef } from "../agents/agentsApi";
+import {
+  placementForRow,
+  placementKey,
+} from "../agents/agentsApi";
+import { Icon } from "../ui/icons";
 import { remainingBudget } from "../projects/projectsApi";
 import { MetricCard } from "../ui/MetricCard";
 import { fetchAppsCard } from "../watcher/AppsCard";
@@ -372,6 +377,80 @@ export function Inspector(props: InspectorProps): ReactElement {
   }, [client, projectId]);
 
   const rows = (liveRows ?? []).filter(isLiveRowActive);
+
+  const [resultsOpen, setResultsOpen] = useState(false);
+  const [backgroundOpen, setBackgroundOpen] = useState(false);
+
+  // FXDESIGN6: the ref legend splits the bar by role. Grouped from the live
+  // rows' own extras (role + tokens); with no live token data the legend
+  // reads a single UNKNOWN row, never an invented split.
+  interface RoleSlice {
+    key: string;
+    label: string;
+    tokens: number;
+  }
+
+  function tokensOfRow(row: PartRow): number {
+    const tokens = readExtra(row, "tokens");
+    if (typeof tokens !== "object" || tokens === null) {
+      return 0;
+    }
+    const bag = tokens as Record<string, unknown>;
+    let sum = 0;
+    for (const kind of ["input", "output"]) {
+      const value = bag[kind];
+      if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+        sum += value;
+      }
+    }
+    return sum;
+  }
+
+  const roleSlices: RoleSlice[] = (() => {
+    const unknownLabel = t("shell.common.unknown");
+    const byRole = new Map<string, { label: string; tokens: number }>();
+    for (const row of rows) {
+      const raw = readExtra(row, "role");
+      const key =
+        typeof raw === "string" && raw !== "" ? raw.toLowerCase() : "unknown";
+      const label =
+        typeof raw === "string" && raw !== ""
+          ? readRoleText(raw)
+          : unknownLabel;
+      const entry = byRole.get(key) ?? { label, tokens: 0 };
+      entry.tokens += tokensOfRow(row);
+      byRole.set(key, entry);
+    }
+    const slices = [...byRole.entries()].map(([key, entry]) => ({
+      key,
+      label: entry.label,
+      tokens: entry.tokens,
+    }));
+    slices.sort((a, b) => b.tokens - a.tokens);
+    const withTokens = slices.filter((slice) => slice.tokens > 0);
+    if (withTokens.length === 0) {
+      return [{ key: "unknown", label: unknownLabel, tokens: 0 }];
+    }
+    return withTokens;
+  })();
+
+  const roleTotal = roleSlices.reduce((sum, slice) => sum + slice.tokens, 0);
+
+  function slicePercent(slice: RoleSlice): string {
+    if (!(roleTotal > 0)) {
+      return t("shell.common.unknown");
+    }
+    return `${Math.round((slice.tokens / roleTotal) * 100)}%`;
+  }
+
+  const LEGEND_COLORS = [
+    "var(--agent-si-chart-a)",
+    "var(--agent-si-chart-b)",
+    "var(--agent-si-chart-c)",
+    "var(--agent-si-chart-d)",
+    "var(--agent-si-chart-e)",
+    "var(--agent-si-chart-f)",
+  ];
   const warnings: Array<{ agent: string; error: string }> = [];
   for (const row of rows) {
     const errors = readExtra(row, "errors");
@@ -440,18 +519,15 @@ export function Inspector(props: InspectorProps): ReactElement {
       aria-label={t("shell.inspector.live_agents")}
       data-project={projectId ?? ""}
     >
-      <div
-        data-testid="inspector-scroll"
-        style={{ maxHeight: "320px", overflowY: "auto" }}
-      >
+      <div data-testid="inspector-scroll" style={{ overflowY: "auto" }}>
         <section
           data-testid="inspector-card-team"
           aria-label={t("shell.cards.team.title")}
         >
-          <span>{t("shell.cards.team.title")}</span>
-          <p data-testid="inspector-card-team-sub">
-            {t("shell.cards.team.subtitle")}
-          </p>
+          <h2 className="fx-section-title">
+            <Icon name="play" />
+            <span>{t("shell.cards.team.title")}</span>
+          </h2>
           {warnings.length === 0 ? null : (
             <div data-testid="team-warnings">
               <span>{t("shell.cards.team.warnings")}</span>
@@ -474,12 +550,19 @@ export function Inspector(props: InspectorProps): ReactElement {
                 const lastActionRef = readRef(readExtra(row, "last_action"));
                 const scopeRef = shortenLiveRef(row.scope);
                 const deliverableRef = shortenLiveRef(row.deliverable);
+                const place = placementForRow(row);
                 return (
                   <li
                     key={row.agent}
                     data-testid={`team-row-${row.agent}`}
                     className="fx-team-row"
                   >
+                    <span
+                      data-testid={`team-place-${row.agent}`}
+                      className="fx-place-badge"
+                    >
+                      {t(placementKey(place))}
+                    </span>
                     <span className="fx-team-field">{row.agent}</span>
                     <span className="fx-team-field">
                       {t("agents.row.scope")}{" "}
@@ -554,117 +637,116 @@ export function Inspector(props: InspectorProps): ReactElement {
           data-testid="inspector-card-context"
           aria-label={t("shell.cards.context.title")}
         >
-          <span>{t("shell.cards.context.title")}</span>
-          <p data-testid="inspector-card-context-sub">
-            {t("shell.cards.context.subtitle")}
-          </p>
+          <h2 className="fx-section-title">
+            <Icon name="chart" />
+            <span>{t("shell.cards.context.title")}</span>
+          </h2>
           {liveRows === null ? (
             <p data-testid="context-empty">{t("empty.generic")}</p>
           ) : newest === null ? (
             <>
-              <p data-testid="ctx-percent">
-                {t("shell.cards.context.percentValue", { value: unknown })}
-              </p>
-              <p data-testid="ctx-window">
-                {t("shell.cards.context.windowValue", { value: unknown })}
-              </p>
-              <div data-testid="ctx-bar">
+              <div data-testid="ctx-top" className="fx-ctx-top">
+                <p data-testid="ctx-percent">
+                  {t("shell.cards.context.percentValue", { value: unknown })}
+                </p>
+                <p data-testid="ctx-window">{unknown}</p>
+              </div>
+              <div data-testid="ctx-bar" className="fx-ctx-bar">
                 <div
                   data-testid="ctx-bar-input"
+                  className="fx-ctx-seg"
                   style={{
                     width: `${fractionOf(tokenIn, tokenTotal) * 100}%`,
                   }}
                 />
                 <div
                   data-testid="ctx-bar-output"
+                  className="fx-ctx-seg"
                   style={{
                     width: `${fractionOf(tokenOut, tokenTotal) * 100}%`,
                   }}
                 />
               </div>
-              <div data-testid="ctx-legend">
-                <span>
-                  {t("shell.cards.context.input")} {formatNumber(tokenIn)}
-                </span>
-                <span>
-                  {t("shell.cards.context.output")} {formatNumber(tokenOut)}
-                </span>
-              </div>
+              <ul data-testid="ctx-legend" className="fx-legend">
+                {roleSlices.map((slice, index) => (
+                  <li
+                    key={slice.key}
+                    data-testid={`ctx-legend-role-${slice.key}`}
+                    className="fx-legend-row"
+                  >
+                    <span
+                      className="fx-legend-dot"
+                      style={{
+                        backgroundColor:
+                          LEGEND_COLORS[index % LEGEND_COLORS.length] ??
+                          "var(--agent-si-chart-a)",
+                      }}
+                    />
+                    <span className="fx-legend-name">{slice.label}</span>
+                    <span className="fx-legend-tokens">
+                      {formatNumber(slice.tokens)}
+                    </span>
+                    <span className="fx-legend-pct">
+                      {slicePercent(slice)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
             </>
           ) : (
             <>
-              <p data-testid="ctx-percent">
-                {t("shell.cards.context.percentValue", { value: percentText })}
-              </p>
-              <p data-testid="ctx-window">
-                {t("shell.cards.context.windowValue", { value: windowText })}
-              </p>
-              <p data-testid="ctx-used">
+              <div data-testid="ctx-top" className="fx-ctx-top">
+                <p data-testid="ctx-percent">
+                  {t("shell.cards.context.percentValue", { value: percentText })}
+                </p>
+                <p data-testid="ctx-window">
+                  {usedText} / {windowText}
+                </p>
+              </div>
+              <p data-testid="ctx-used" hidden>
                 {t("shell.cards.context.percentValue", { value: usedText })}
               </p>
-              <p data-testid="ctx-source">
+              <p data-testid="ctx-source" className="fx-quiet">
                 {t("shell.cards.context.source")} last call
               </p>
-              <div data-testid="ctx-bar">
+              <div data-testid="ctx-bar" className="fx-ctx-bar">
                 <div
                   data-testid="ctx-bar-input"
+                  className="fx-ctx-seg"
                   style={{
                     width: `${fractionOf(tokenIn, tokenTotal) * 100}%`,
                   }}
                 />
                 <div
                   data-testid="ctx-bar-output"
+                  className="fx-ctx-seg"
                   style={{
                     width: `${fractionOf(tokenOut, tokenTotal) * 100}%`,
                   }}
                 />
               </div>
-              <div data-testid="ctx-legend">
-                <span>
-                  {t("shell.cards.context.input")} {formatNumber(tokenIn)}
-                </span>
-                <span>
-                  {t("shell.cards.context.output")} {formatNumber(tokenOut)}
-                </span>
-              </div>
-            </>
-          )}
-        </section>
-
-        <section
-          data-testid="inspector-card-results"
-          aria-label={t("shell.cards.results.title")}
-        >
-          <span>{t("shell.cards.results.title")}</span>
-          <p data-testid="inspector-card-results-sub">
-            {t("shell.cards.results.subtitle")}
-          </p>
-          {projectId === null ||
-          ledger === null ||
-          lastPackages.length === 0 ? (
-            <p data-testid="results-empty">{t("empty.generic")}</p>
-          ) : (
-            <>
-              {nudge === null ? null : (
-                <p data-testid="result-nudge">
-                  {t("shell.cards.results.next")}: {nudge}
-                </p>
-              )}
-              <ul>
-                {lastPackages.map((entry) => (
+              <ul data-testid="ctx-legend" className="fx-legend">
+                {roleSlices.map((slice, index) => (
                   <li
-                    key={entry.package_id}
-                    data-testid={`result-row-${entry.package_id}`}
+                    key={slice.key}
+                    data-testid={`ctx-legend-role-${slice.key}`}
+                    className="fx-legend-row"
                   >
-                    <span>{entry.package_id}</span>
-                    <span>{formatNumber(entry.agents)}</span>
-                    <span>{formatNumber(entry.wall_time_s)}</span>
-                    <Link
-                      data-testid={`result-open-${entry.package_id}`}
-                      to={reportsHref}
-                    >
-                      {t("shell.cards.results.open")}
-                    </Link>
+                    <span
+                      className="fx-legend-dot"
+                      style={{
+                        backgroundColor:
+                          LEGEND_COLORS[index % LEGEND_COLORS.length] ??
+                          "var(--agent-si-chart-a)",
+                      }}
+                    />
+                    <span className="fx-legend-name">{slice.label}</span>
+                    <span className="fx-legend-tokens">
+                      {formatNumber(slice.tokens)}
+                    </span>
+                    <span className="fx-legend-pct">
+                      {slicePercent(slice)}
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -673,26 +755,121 @@ export function Inspector(props: InspectorProps): ReactElement {
         </section>
 
         <section
+          data-testid="inspector-card-results"
+          aria-label={t("shell.cards.results.title")}
+        >
+          <h2 className="fx-section-title">
+            <Icon name="file" />
+            <span>{t("shell.cards.results.title")}</span>
+          </h2>
+          {projectId === null ||
+          ledger === null ||
+          lastPackages.length === 0 ? (
+            <p data-testid="results-empty">{t("empty.generic")}</p>
+          ) : (
+            <>
+              {nudge === null ? null : (
+                <p data-testid="result-nudge" className="fx-quiet">
+                  {t("shell.cards.results.next")}: {nudge}
+                </p>
+              )}
+              <ul className="fx-result-list">
+                {(resultsOpen ? lastPackages : lastPackages.slice(0, 5)).map(
+                  (entry) => (
+                    <li
+                      key={entry.package_id}
+                      data-testid={`result-row-${entry.package_id}`}
+                      className="fx-result-row"
+                    >
+                      <Icon name="file" />
+                      <span className="fx-truncate">{entry.package_id}</span>
+                      <Link
+                        data-testid={`result-open-${entry.package_id}`}
+                        to={reportsHref}
+                        className="fx-btn-quiet"
+                      >
+                        {t("shell.cards.results.open")}
+                      </Link>
+                    </li>
+                  ),
+                )}
+              </ul>
+              {lastPackages.length > 5 ? (
+                <button
+                  type="button"
+                  data-testid="results-show-more"
+                  className="fx-btn-quiet fx-show-more"
+                  aria-expanded={resultsOpen}
+                  onClick={() => {
+                    setResultsOpen(!resultsOpen);
+                  }}
+                >
+                  <Icon name="expand" />
+                  <span>
+                    {resultsOpen
+                      ? t("shell.cards.showLess")
+                      : t("shell.cards.showMore")}
+                  </span>
+                </button>
+              ) : null}
+            </>
+          )}
+        </section>
+
+        <section
           data-testid="inspector-card-background"
           aria-label={t("shell.cards.background.title")}
         >
-          <span>{t("shell.cards.background.title")}</span>
-          <p data-testid="inspector-card-background-sub">
-            {t("shell.cards.background.subtitle")}
-          </p>
+          <h2 className="fx-section-title">
+            <Icon name="play" />
+            <span>{t("shell.cards.background.title")}</span>
+            <span data-testid="background-count" className="fx-count">
+              {formatNumber(activeTasks.length)}
+            </span>
+          </h2>
           {projectId === null ||
           tasks === null ||
           activeTasks.length === 0 ? (
             <p data-testid="background-empty">{t("empty.generic")}</p>
           ) : (
-            <ul>
-              {activeTasks.map((task) => (
-                <li key={task.task_id} data-testid={`bg-row-${task.task_id}`}>
-                  <span>{task.title}</span>
-                  <span>{readTaskStatus(task.status)}</span>
-                </li>
-              ))}
-            </ul>
+            <>
+              <ul className="fx-bg-list">
+                {(backgroundOpen
+                  ? activeTasks
+                  : activeTasks.slice(0, 5)
+                ).map((task) => (
+                  <li
+                    key={task.task_id}
+                    data-testid={`bg-row-${task.task_id}`}
+                    className="fx-bg-row"
+                  >
+                    <Icon name="play" />
+                    <span className="fx-truncate">{task.title}</span>
+                    <span className="fx-quiet">
+                      {readTaskStatus(task.status)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {activeTasks.length > 5 ? (
+                <button
+                  type="button"
+                  data-testid="background-show-more"
+                  className="fx-btn-quiet fx-show-more"
+                  aria-expanded={backgroundOpen}
+                  onClick={() => {
+                    setBackgroundOpen(!backgroundOpen);
+                  }}
+                >
+                  <Icon name="expand" />
+                  <span>
+                    {backgroundOpen
+                      ? t("shell.cards.showLess")
+                      : t("shell.cards.showMore")}
+                  </span>
+                </button>
+              ) : null}
+            </>
           )}
         </section>
 
@@ -700,10 +877,10 @@ export function Inspector(props: InspectorProps): ReactElement {
           data-testid="inspector-card-watcher"
           aria-label={t("shell.cards.watcher.title")}
         >
-          <span>{t("shell.cards.watcher.title")}</span>
-          <p data-testid="inspector-card-watcher-sub">
-            {t("shell.cards.watcher.subtitle")}
-          </p>
+          <h2 className="fx-section-title">
+            <Icon name="watch" />
+            <span>{t("shell.cards.watcher.title")}</span>
+          </h2>
           {projectId === null ||
           watcherFailed ||
           watcherStatus === null ? (

@@ -142,6 +142,10 @@ export interface ChatChunk {
   stream_id: string;
   delta: string;
   done: boolean;
+  // D6(b): the typed done event of an executed engine turn carries
+  // executed:true; plain answers and legacy chunks omit it. Optional so
+  // every existing producer and test still typechecks unchanged.
+  executed?: boolean;
 }
 
 export interface ChatStream {

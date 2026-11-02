@@ -10,7 +10,6 @@ import type { PartRow } from "../api/iface";
 import { ApiError, apiErrorLocaleKey } from "../api/errors";
 import { useApiClient } from "../app/ApiClientProvider";
 import { t, useLocale } from "../locale/index";
-import { Card } from "../ui/Card";
 import { EmptyState } from "../ui/EmptyState";
 import { ErrorPanel } from "../ui/ErrorPanel";
 import { LoadingState } from "../ui/LoadingState";
@@ -96,7 +95,6 @@ export function AgentsLive(props: AgentsLiveProps): ReactElement {
     code: string;
   } | null>(null);
   const [nonce, setNonce] = useState(0);
-  const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -169,16 +167,17 @@ export function AgentsLive(props: AgentsLiveProps): ReactElement {
   const counts = countPlacements(live);
 
   return (
-    <Card
-      cardId="agents-live"
-      titleKey="agents.live.title"
-      collapsed={collapsed}
-      onToggle={(expanded) => {
-        setCollapsed(!expanded);
-      }}
+    // D6(e): the live panel reads plain: no card box, no chevron toggle.
+    // kit-card-agents-live + kit-empty-state testids stay for the frozen
+    // shell/inspector contracts; the heading stays an h2.
+    <section
+      data-testid="kit-card-agents-live"
+      aria-label={t("agents.live.title")}
+      className="fx-live-panel"
     >
-      <div>
-        <span>{t("shell.topbar.project")}</span>
+      <h2 className="fx-section-title">{t("agents.live.title")}</h2>
+      <div className="fx-live-pair">
+        <span className="fx-live-label">{t("shell.topbar.project")}</span>
         <span data-testid="agents-live-project">{projectName ?? t("shell.topbar.project")}</span>
       </div>
       <div>
@@ -240,12 +239,17 @@ export function AgentsLive(props: AgentsLiveProps): ReactElement {
                     {formatLiveText(readLiveExtra(row, "provider"))}
                   </span>
                 </span>
-                <span>
-                  {resolveStatusHuman(readStatusHuman(row), row.status, locale)}
-                </span>
-                <span data-testid={`agent-row-place-${row.agent}`}>
-                  {t(placementKey(placement))}
-                </span>
+                <div className="fx-live-status">
+                  <span>
+                    {resolveStatusHuman(readStatusHuman(row), row.status, locale)}
+                  </span>
+                  <span
+                    data-testid={`agent-row-place-${row.agent}`}
+                    className="fx-place-badge"
+                  >
+                    {t(placementKey(placement))}
+                  </span>
+                </div>
                 <div
                   data-testid={`agent-row-detail-${row.agent}`}
                   style={{
@@ -290,6 +294,6 @@ export function AgentsLive(props: AgentsLiveProps): ReactElement {
           })}
         </div>
       )}
-    </Card>
+    </section>
   );
 }

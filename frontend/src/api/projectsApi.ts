@@ -167,6 +167,7 @@ export const ChatChunkSchema: z.ZodType<ChatChunk> = z.object({
   stream_id: z.string().min(1),
   delta: z.string(),
   done: z.boolean(),
+  executed: z.boolean().optional(),
 });
 
 export const ChatStreamEventSchema = z.object({
@@ -182,6 +183,9 @@ export const ChatStreamEventSchema = z.object({
   // older events without them parse exactly as before.
   tool_id: z.string().optional(),
   approval_requested: z.boolean().optional(),
+  // D6(b): executed engine turns mark their done event; plain answers
+  // and older events omit it.
+  executed: z.boolean().optional(),
 });
 
 export type ChatStreamEvent = z.infer<typeof ChatStreamEventSchema>;

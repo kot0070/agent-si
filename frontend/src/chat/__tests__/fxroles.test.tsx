@@ -185,10 +185,14 @@ describe("fxroles chat hierarchy rows", () => {
     await expandRows();
     fireEvent.click(await screen.findByTestId("hierarchy-collapse"));
     expect(await screen.findByTestId("hierarchy-collapsed")).toBeTruthy();
+    // D6A: the collapsed summary renders one span per locale value with
+    // the ": " and middle-dot dividers as CSS (locale-only contract), so
+    // textContent concatenates without them. Same asserted values+order
+    // as before; visual text is unchanged (separators come from CSS).
     expect(
       (await screen.findByTestId("hierarchy-collapsed")).textContent,
     ).toBe(
-      "Director: Anthropic \u2014 Advanced \u00B7 Manager: Auto \u00B7 Agents: OpenAI \u2014 Standard",
+      "DirectorAnthropic \u2014 AdvancedManagerAutoAgentsOpenAI \u2014 Standard",
     );
     fireEvent.click(await screen.findByTestId("hierarchy-collapsed"));
     expect(await screen.findByTestId("hierarchy-row-director")).toBeTruthy();

@@ -216,6 +216,13 @@ export function HierarchyRows({
       .then(() => refresh());
   }
 
+  // FXDESIGN6-D6A: locale-driven role labels (shared by the collapsed
+  // summary and the expanded rows, so no hard-coded English role name
+  // ever renders as a text node).
+  const directorLabel = pt("chat.hierarchy.director", "Director");
+  const managerLabel = pt("chat.hierarchy.manager", "Manager");
+  const agentsLabel = pt("chat.hierarchy.agents", "Agents");
+
   if (projectId === "") {
     return (
       <section
@@ -245,9 +252,29 @@ export function HierarchyRows({
           aria-label={pt("chat.hierarchy.expand", "Show model hierarchy")}
           onClick={() => toggle(true)}
         >
-          {connected !== null && profiles !== null
-            ? `Director: ${exactModelText(profiles.director)} \u00B7 Manager: ${exactModelText(profiles.manager)} \u00B7 Agents: ${exactModelText(profiles.worker)}`
-            : t("providers.page.rolePoolsTitle")}
+          {connected !== null && profiles !== null ? (
+            // FXDESIGN6-D6A: one span per locale value; the ": " and
+            // middle-dot dividers are CSS (fx-hsummary in shell.css), so
+            // the locale-only contract sees exactly the locale values as
+            // text nodes. Visual and announced order match the old
+            // single-line summary.
+            <span className="fx-hsummary">
+              <span className="fx-hsummary-item">
+                <span>{directorLabel}</span>
+                <span>{exactModelText(profiles.director)}</span>
+              </span>
+              <span className="fx-hsummary-item">
+                <span>{managerLabel}</span>
+                <span>{exactModelText(profiles.manager)}</span>
+              </span>
+              <span className="fx-hsummary-item">
+                <span>{agentsLabel}</span>
+                <span>{exactModelText(profiles.worker)}</span>
+              </span>
+            </span>
+          ) : (
+            t("providers.page.rolePoolsTitle")
+          )}
         </button>
       </section>
     );
@@ -312,9 +339,6 @@ export function HierarchyRows({
     );
   }
 
-  const directorLabel = pt("chat.hierarchy.director", "Director");
-  const managerLabel = pt("chat.hierarchy.manager", "Manager");
-  const agentsLabel = pt("chat.hierarchy.agents", "Agents");
   const rows =
     connected !== null && profiles !== null ? (
       <>
