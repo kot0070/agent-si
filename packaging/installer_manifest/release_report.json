@@ -1,14 +1,14 @@
 {
-  "built_from_commit": "6c017652695808ba90e201d95efa859eea5cbbf6",
+  "built_from_commit": "c8d1b62ce25711b2c91910b8d751f40bcdef2684",
   "bundle": {
     "dist/AgentSI-portable-0.1.0.zip": {
-      "bytes": 190596229
+      "bytes": 97909330
     },
-    "dist/portable/app/AgentSI.exe": {
-      "bytes": 96221965
+    "dist/AgentSI-setup-0.1.0.exe": {
+      "bytes": 84152826
     },
-    "dist/sidecar/AgentSI.exe": {
-      "bytes": 96221965
+    "dist/stage/AgentSI.exe": {
+      "bytes": 39873937
     }
   },
   "components": {
@@ -46,7 +46,7 @@
     }
   },
   "exe": "AgentSI.exe",
-  "sha256": "530b4b6190e1e6a7c5b70e49b6334d343738a28ce257039586c1066f350de028",
+  "sha256": "3c4a0fda9207128f639d2d28b414b23d600250232bef27c7e6ba17b869605d37",
   "signature": {
     "reason": "no cert in sandbox",
     "status": "UNSIGNED-BLOCKED"

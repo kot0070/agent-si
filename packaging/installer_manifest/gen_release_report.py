@@ -19,8 +19,13 @@ Key to source path plus rule:
   (pywebview, pythonnet, clr_loader, bottle, proxy_tools) plus the app
   runtime (fastapi, openai-agents, uvicorn), each measured from the
   running interpreter's installed dist metadata; absent when missing.
-- bundle: dist/sidecar/AgentSI.exe plus dist/portable/app/AgentSI.exe
-  plus dist/AgentSI-portable-0.1.0.zip (bytes measured, absent if missing).
+- bundle (FXDIR one-folder): dist/stage/AgentSI.exe (the folder exe at
+  the stage root, either freeze target) plus
+  dist/AgentSI-portable-0.1.0.zip (the single-top-folder portable)
+  plus dist/AgentSI-setup-0.1.0.exe (the installer, once ISCC built
+  it) — bytes measured, absent if missing. An exe hash alone never
+  proves the build: the zip, the installer and the folder manifest
+  (MANIFEST/HASH above) prove it together.
 - texts: LICENSE, docs/third_party_notices/NOTICES.md,
   docs/third_party_notices/licenses/MIT_LICENSE.txt (present flags).
 """
@@ -58,9 +63,9 @@ SIDECAR_COMPONENTS = (
 RUNTIME_COMPONENTS = ("fastapi", "openai-agents", "uvicorn")
 
 BUNDLE_PATHS = (
-    "dist/sidecar/AgentSI.exe",
-    "dist/portable/app/AgentSI.exe",
+    "dist/stage/AgentSI.exe",
     "dist/AgentSI-portable-0.1.0.zip",
+    "dist/AgentSI-setup-0.1.0.exe",
 )
 
 

@@ -11,15 +11,17 @@ Static legs (fast, stdlib only):
   every files[] payload on disk re-hashes to its entry.
 - the frozen exe sha matches across the exe file, the MANIFEST entry,
   HASH.json, and the recomputed canonical hash (hash x4).
-- the sidecar spec freezes console=False windowed output.
+- the sidecar spec freezes console=False windowed output and keeps
+  both the one-file and the one-dir (EXE + COLLECT) targets.
 - NOTICES.md names the frozen sidecar bundle components.
-- the portable zip plus the held hidden-window launcher are present.
+- the portable zip holds the single top folder AgentSI/ with
+  AgentSI.exe at its root, plus the folder launcher.
 
 Live leg (real frozen exe, fresh store, neutral cwd, scrubbed env):
 - the exe boots with no venv on PATH, serves / plus the provider
   matrix, holds no plaintext secrets in the fresh store, then stops
-  by PID. The portable launcher resolves the bundled exe and its
-  DryRun leaves a fresh data dir empty with the marker beside it.
+  by PID. The portable launcher resolves the folder exe beside it and
+  forwards arguments to it.
 """
 
 import hashlib
@@ -31,6 +33,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -43,10 +46,11 @@ SMOKE_PATH = MANIFEST_DIR / "SMOKE.json"
 GEN_SMOKE = MANIFEST_DIR / "gen_smoke.py"
 SPEC_PATH = ROOT / "packaging" / "sidecar" / "agent_si_sidecar.spec"
 NOTICES_PATH = ROOT / "docs" / "third_party_notices" / "NOTICES.md"
-STAGE_EXE = ROOT / "dist" / "sidecar" / "AgentSI.exe"
+STAGE_EXE = ROOT / "dist" / "stage" / "AgentSI.exe"
 PORTABLE_DIR = ROOT / "dist" / "portable"
-PORTABLE_EXE = PORTABLE_DIR / "app" / "AgentSI.exe"
-PORTABLE_LAUNCHER = PORTABLE_DIR / "start_agent_si.ps1"
+PORTABLE_TOP = PORTABLE_DIR / "AgentSI"
+PORTABLE_EXE = PORTABLE_TOP / "AgentSI.exe"
+PORTABLE_LAUNCHER = PORTABLE_TOP / "Start-AgentSI.ps1"
 PORTABLE_ZIP = ROOT / "dist" / "AgentSI-portable-0.1.0.zip"
 
 EXE_NAME = "AgentSI.exe"
@@ -89,8 +93,8 @@ def load_json(path):
 
 def exe_manifest_entry(manifest):
     for entry in manifest.get("files", []):
-        rel = entry.get("path", "")
-        if rel.replace("\\", "/").endswith("sidecar/" + EXE_NAME):
+        rel = entry.get("path", "").replace("\\", "/")
+        if rel == "dist/stage/" + EXE_NAME:
             return entry
     return None
 
@@ -169,6 +173,11 @@ def test_sidecar_spec_freezes_windowed_exe():
     assert "ENTRY_SCRIPT" in text
     assert "sidecar.py" in text
     assert "console=False" in text
+    # FXDIR: both freeze targets stay buildable (one-file default,
+    # one-dir EXE + COLLECT folder with the exe at its root).
+    assert "COLLECT" in text, "spec lost the one-dir target"
+    assert "AGENT_SI_SIDECAR_ONEDIR" in text
+    assert "exclude_binaries" in text
 
 
 def test_notices_name_frozen_bundle_components():
@@ -182,18 +191,23 @@ def test_notices_name_frozen_bundle_components():
 
 @NEEDS_EXE
 def test_portable_bundle_layout():
-    """Portable zip plus hidden-window launcher plus staged copies."""
+    """Portable zip holds the single top folder with the folder exe."""
     assert PORTABLE_ZIP.is_file() and PORTABLE_ZIP.stat().st_size > 0
     assert PORTABLE_EXE.is_file()
     assert PORTABLE_EXE.read_bytes() == STAGE_EXE.read_bytes()
+    with zipfile.ZipFile(str(PORTABLE_ZIP)) as zf:
+        names = zf.namelist()
+    assert names, "portable zip is empty"
+    assert all(n.startswith("AgentSI/") for n in names), \
+        "zip does not hold the single top folder: %r" % (names[:5],)
+    assert "AgentSI/AgentSI.exe" in names, \
+        "folder exe not at the zip top folder root"
     text = PORTABLE_LAUNCHER.read_text(encoding="utf-8")
     assert "AgentSI.exe" in text
-    assert "Start-Process" in text
-    assert "-WindowStyle Hidden" in text
-    assert ".agent-si-portable-migrated" in text
-    assert (PORTABLE_DIR / "MANIFEST.json").is_file()
-    assert (PORTABLE_DIR / "LICENSE").is_file()
-    assert (PORTABLE_DIR / "SHA256SUMS.txt").is_file()
+    assert "Start-AgentSI" in PORTABLE_LAUNCHER.name
+    for name in ("MANIFEST.json", "LICENSE", "SHA256SUMS.txt"):
+        assert (PORTABLE_TOP / name).is_file(), \
+            f"portable top folder misses {name}"
 
 
 def _scrubbed_env(store_dir):
@@ -208,7 +222,8 @@ def _scrubbed_env(store_dir):
 def _wait_for_port_listening(proc, timeout_s=280):
     """Read the sidecar listening line; return (port, child output).
 
-    A one-file cold start extracts before serving. A reader thread
+    A one-file cold start extracts before serving; a one-dir start
+    serves in place. A reader thread
     drains the pipe without blocking; EOF with a dead child ends the
     wait instead of spinning. The caller must never read the pipe
     again (the pump owns it); use the returned output for failure
@@ -318,26 +333,22 @@ def test_live_frozen_exe_clean_profile_fresh_store(tmp_path):
 
 
 @NEEDS_EXE
-def test_portable_launcher_dryrun_clean_install(tmp_path):
-    """Held launcher DryRun on real bundle bytes: empty data, marker."""
+def test_portable_launcher_forwards_to_folder_exe(tmp_path):
+    """Folder launcher runs the folder exe beside it, args forwarded."""
     if POWERSHELL is None:
         pytest.skip("no powershell on PATH")
     bundle = tmp_path / "bundle"
-    (bundle / "app").mkdir(parents=True)
-    shutil.copyfile(PORTABLE_EXE, bundle / "app" / EXE_NAME)
-    shutil.copyfile(PORTABLE_LAUNCHER,
-                    bundle / "start_agent_si.ps1")
-    home = tmp_path / "home-no-legacy"
-    home.mkdir()
+    bundle.mkdir(parents=True)
+    shutil.copyfile(PORTABLE_EXE, bundle / EXE_NAME)
+    shutil.copyfile(PORTABLE_LAUNCHER, bundle / "Start-AgentSI.ps1")
     proc = subprocess.run(
         [POWERSHELL, "-NoProfile", "-NonInteractive",
          "-ExecutionPolicy", "Bypass", "-File",
-         str(bundle / "start_agent_si.ps1"), "-DryRun"],
+         str(bundle / "Start-AgentSI.ps1"), "--version"],
         cwd=str(bundle),
-        env={**os.environ, "APPDATA": str(home)},
+        env={**os.environ,
+             "AGENT_SI_DATA_DIR": str(tmp_path / "data"),
+             "AGENT_SI_SECRET_STORE": "memory"},
         capture_output=True, text=True, timeout=120)
     assert proc.returncode == 0, proc.stderr
-    data = bundle / "data"
-    assert data.is_dir()
-    assert list(data.iterdir()) == []
-    assert (bundle / ".agent-si-portable-migrated").is_file()
+    assert ("agent-si %s" % VERSION) in (proc.stdout or "")

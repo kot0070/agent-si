@@ -2,13 +2,20 @@
 ; Agent SI installer (Inno Setup 6).
 ;
 ; Payload: the exe-build stage folder (dist/stage) produced by
-; packaging/build_app.ps1 — the frozen sidecar exe
-; (stage/sidecar/AgentSI.exe), the web tree, the lane data dirs,
-; LICENSE and docs/third_party_notices/NOTICES.md with the
-; per-component licence texts. packaging/installer/build.py scans
-; that folder clean (no projects, runs, keys, test data) before
-; compiling this script, so a fresh install starts clean: nothing
-; from the build machine rides in the payload.
+; packaging/build_app.ps1 — the frozen sidecar exe at the folder
+; root (stage/AgentSI.exe, one-file or the one-dir folder), the web
+; tree, the lane data dirs, LICENSE and
+; docs/third_party_notices/NOTICES.md with the per-component licence
+; texts. packaging/installer/build.py scans that folder clean (no
+; projects, runs, keys, test data) before compiling this script, so
+; a fresh install starts clean: nothing from the build machine rides
+; in the payload.
+;
+; Shortcuts (owner 2026-11-02): Start-menu entry + desktop shortcut,
+; BOTH checked by default in the wizard, both named 'Agent SI' with
+; the SI icon (the exe carries icon.ico), opening AgentSI.exe in its
+; folder with the working directory set to it. Uninstall removes
+; both; the data folder stays unless the user opts into deleting it.
 ;
 ; Compile from the checkout root with ISCC.exe on PATH:
 ;   ISCC.exe /Odist "/F AgentSI-setup-{#AppVersion}" /DAppVersion=0.1.0 packaging/installer/agent_si.iss
@@ -40,7 +47,7 @@ LicenseFile=..\..\LICENSE
 WizardStyle=modern
 Compression=lzma2
 SolidCompression=yes
-UninstallDisplayIcon={app}\sidecar\AgentSI.exe
+UninstallDisplayIcon={app}\AgentSI.exe
 
 [Languages]
 Name: "en"; MessagesFile: "compiler:Default.isl"
@@ -53,21 +60,23 @@ en.DeleteDataPrompt=Also delete your Agent SI data folder (projects, tasks, sett
 uk.DeleteDataPrompt=Також видалити папку даних Agent SI (проєкти, завдання, налаштування та запуски)? Типово вона зберігається.
 
 [Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+; No Flags: unchecked — the desktop shortcut installs by default
+; (owner 2026-11-02: both shortcuts checked by default in the wizard).
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Files]
 Source: "..\..\dist\stage\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-; The entry above installs the whole stage tree: sidecar/AgentSI.exe,
+; The entry above installs the whole stage tree: AgentSI.exe,
 ; web/, migrations/, locale/, kb-data/, watcher/, LICENSE and
 ; docs/third_party_notices/NOTICES.md (licence + third-party notices).
 
 [Icons]
-Name: "{group}\Agent SI"; Filename: "{app}\sidecar\AgentSI.exe"
+Name: "{group}\Agent SI"; Filename: "{app}\AgentSI.exe"; WorkingDir: "{app}"
 Name: "{group}\{cm:UninstallProgram,Agent SI}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\Agent SI"; Filename: "{app}\sidecar\AgentSI.exe"; Tasks: desktopicon
+Name: "{autodesktop}\Agent SI"; Filename: "{app}\AgentSI.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\sidecar\AgentSI.exe"; Description: "{cm:LaunchAgentSI}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\AgentSI.exe"; Description: "{cm:LaunchAgentSI}"; Flags: nowait postinstall skipifsilent
 
 ; Uninstall removes the app tree but leaves the user's data folder
 ; ({app}\data from a writable install, %LOCALAPPDATA%\AgentSI\data

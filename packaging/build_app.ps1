@@ -3,12 +3,18 @@
 #
 # Stages (in order):
 #   1. web build         (frontend -> dist/stage/web, local tools only)
-#   2. sidecar freeze    (PyInstaller spec -> dist/sidecar/AgentSI.exe)
-#   3. staging           (collect REAL lane outputs into dist/stage: web tree,
-#                         sidecar exe, lane data dirs, licence + notices)
+#   2. sidecar freeze    (PyInstaller spec -> dist/sidecar/AgentSI.exe,
+#                         or -OneDir -> dist/sidecar/AgentSI/AgentSI.exe
+#                         plus support files)
+#   3. staging           (collect REAL lane outputs into dist/stage, the
+#                         app folder: AgentSI.exe at its root with its
+#                         support files beside it, web tree, lane data
+#                         dirs, licence + notices)
 #   4. offline manifests (write MANIFEST.json, HASH.json, SMOKE.json)
-#   5. portable assembly (copy stage tree + manifests into dist/portable and
-#                         generate the portable start scripts)
+#   5. portable assembly (copy the app folder + manifests into
+#                         dist/portable/AgentSI/ and generate the
+#                         portable start scripts; the zip holds the
+#                         single top folder AgentSI/)
 #
 # OFFLINE: no network calls anywhere in this script (no downloads, uploads,
 # installs, or remote fetches of any kind). The only build invocation allowed
@@ -24,9 +30,13 @@
 #   ARTIFACT <path>
 #
 # Frozen cross-file contracts (0C wins; this script refuses drift):
-#   exe          = AgentSI.exe
+#   exe          = AgentSI.exe (at the app-folder root on every target)
 #   version      = 0.1.0
-#   portable dir = dist/portable
+#   portable dir = dist/portable (holds the single top folder AgentSI/)
+#   app folder   = dist/stage (installed as-is; the zip top folder
+#                  mirrors it plus manifests, launchers, README, sums)
+#   default freeze target = one-file (owner flips the default later;
+#                  -OneDir builds the one-dir folder instead; both stage)
 #   manifest dir = packaging/installer_manifest/
 #     MANIFEST.json {version, exe, files:[{path, sha256, bytes}]} (sha256 lowercase hex)
 #     HASH.json     {sha256, built_from_commit, built_at, signature:{status}}
@@ -49,7 +59,8 @@ param(
     [string]$ExeName = "AgentSI.exe",
     [string]$StageDir = "dist/stage",
     [string]$PortableDir = "dist/portable",
-    [string]$ManifestDir = "packaging/installer_manifest"
+    [string]$ManifestDir = "packaging/installer_manifest",
+    [switch]$OneDir
 )
 
 Set-StrictMode -Version Latest
@@ -65,6 +76,11 @@ $SignatureReason = "no cert in sandbox"
 $SidecarSpec = "packaging/sidecar/agent_si_sidecar.spec"
 $SidecarEntry = "src/agent_si/sidecar.py"
 $SidecarOutDir = "dist/sidecar"
+# FXDIR: one-dir freeze output (PyInstaller COLLECT target).
+$SidecarOneDirFolder = Join-Path $SidecarOutDir "AgentSI"
+# FXDIR: portable top folder inside the portable dir (the zip holds
+# this single folder with AgentSI.exe at its root).
+$PortableTopName = "AgentSI"
 
 # Per-input staging outcomes (honest SMOKE input checks read these).
 $script:staged = @{
@@ -172,8 +188,9 @@ function Get-Sha256HexOfString {
 }
 
 function Get-PlanArtifacts {
+    Write-Artifact "dist/stage/AgentSI.exe"
+    Write-Artifact "dist/stage/_internal"
     Write-Artifact "dist/stage/web/index.html"
-    Write-Artifact "dist/stage/sidecar/AgentSI.exe"
     Write-Artifact "dist/stage/migrations"
     Write-Artifact "dist/stage/locale"
     Write-Artifact "dist/stage/kb-data"
@@ -184,16 +201,15 @@ function Get-PlanArtifacts {
     Write-Artifact "packaging/installer_manifest/HASH.json"
     Write-Artifact "packaging/installer_manifest/HASH.json.sha256"
     Write-Artifact "packaging/installer_manifest/SMOKE.json"
-    Write-Artifact "dist/portable/sidecar/AgentSI.exe"
-    Write-Artifact "dist/portable/Start-AgentSI.ps1"
-    Write-Artifact "dist/portable/Start-AgentSI.cmd"
-    Write-Artifact "dist/portable/MANIFEST.json"
-    Write-Artifact "dist/portable/HASH.json"
-    Write-Artifact "dist/portable/HASH.json.sha256"
-    Write-Artifact "dist/portable/SMOKE.json"
-    Write-Artifact "dist/portable/app/AgentSI.exe"
-    Write-Artifact "dist/portable/README.txt"
-    Write-Artifact "dist/portable/SHA256SUMS.txt"
+    Write-Artifact "dist/portable/AgentSI/AgentSI.exe"
+    Write-Artifact "dist/portable/AgentSI/Start-AgentSI.ps1"
+    Write-Artifact "dist/portable/AgentSI/Start-AgentSI.cmd"
+    Write-Artifact "dist/portable/AgentSI/MANIFEST.json"
+    Write-Artifact "dist/portable/AgentSI/HASH.json"
+    Write-Artifact "dist/portable/AgentSI/HASH.json.sha256"
+    Write-Artifact "dist/portable/AgentSI/SMOKE.json"
+    Write-Artifact "dist/portable/AgentSI/README.txt"
+    Write-Artifact "dist/portable/AgentSI/SHA256SUMS.txt"
     Write-Artifact "dist/AgentSI-portable-0.1.0.zip"
 }
 
@@ -215,9 +231,16 @@ function Invoke-WebBuild {
 function Invoke-SidecarFreeze {
     $tool = Get-Command pyinstaller -ErrorAction SilentlyContinue
     if (($null -ne $tool) -and (Test-Path -LiteralPath $SidecarSpec) -and (Test-Path -LiteralPath $SidecarEntry)) {
+        # FXDIR: -OneDir selects the spec one-dir target (EXE + COLLECT);
+        # default stays one-file until the owner flips the default.
+        if ($OneDir) { $env:AGENT_SI_SIDECAR_ONEDIR = "1" } else { Remove-Item Env:\AGENT_SI_SIDECAR_ONEDIR -ErrorAction SilentlyContinue }
         & pyinstaller --noconfirm --distpath $SidecarOutDir --workpath dist/pywork $SidecarSpec
         if (-not $?) { throw "sidecar freeze failed" }
-        Write-Artifact (Join-Path $SidecarOutDir $ExeName)
+        if ($OneDir) {
+            Write-Artifact (Join-Path $SidecarOneDirFolder $ExeName)
+        } else {
+            Write-Artifact (Join-Path $SidecarOutDir $ExeName)
+        }
     } else {
         Write-Warning "sidecar freeze SKIPPED: need pyinstaller + $SidecarSpec + $SidecarEntry (K06/K07/K08 app lanes); staged nothing, recorded in SMOKE.json, never faked."
     }
@@ -225,14 +248,24 @@ function Invoke-SidecarFreeze {
 
 function Invoke-Staging {
     Ensure-Dir $StageDir
-    $exePath = Join-Path $SidecarOutDir $ExeName
-    if (Test-Path -LiteralPath $exePath) {
-        Ensure-Dir (Join-Path $StageDir "sidecar")
-        Copy-Item -LiteralPath $exePath -Destination (Join-Path $StageDir "sidecar/$ExeName") -Force
-        Write-Artifact (Join-Path $StageDir "sidecar/$ExeName")
+    # FXDIR: stage the WHOLE freeze folder. One-dir output
+    # (dist/sidecar/AgentSI/) lands with AgentSI.exe at the stage
+    # root and its support files beside it; one-file output lands as
+    # the single stage/AgentSI.exe. Either way the stage root is the
+    # app folder the zip and the installer ship as-is.
+    if ((Test-Path -LiteralPath $SidecarOneDirFolder) -and (Test-Path -LiteralPath (Join-Path $SidecarOneDirFolder $ExeName))) {
+        Copy-TreeArtifacts -From $SidecarOneDirFolder -To $StageDir
+        Write-Artifact (Join-Path $StageDir $ExeName)
         $script:staged.exe = $true
     } else {
-        Write-Warning "sidecar staging SKIPPED: $exePath absent; recorded in SMOKE.json, never faked."
+        $exePath = Join-Path $SidecarOutDir $ExeName
+        if (Test-Path -LiteralPath $exePath) {
+            Copy-Item -LiteralPath $exePath -Destination (Join-Path $StageDir $ExeName) -Force
+            Write-Artifact (Join-Path $StageDir $ExeName)
+            $script:staged.exe = $true
+        } else {
+            Write-Warning "sidecar staging SKIPPED: neither $SidecarOneDirFolder/$ExeName nor $exePath present; recorded in SMOKE.json, never faked."
+        }
     }
     # Lane inputs: REAL product sources per packaging/sidecar/agent_si_sidecar.spec
     # _DATA_CANDIDATES (migrations <- K13 src/agent_si/adapters/sqlite/migration_scripts;
@@ -381,7 +414,7 @@ function Write-OfflineManifests {
         }
     } catch { $hashOk = $false }
 
-    $stageExe = Join-Path $StageDir "sidecar/$ExeName"
+    $stageExe = Join-Path $StageDir $ExeName
     $exeOk = Test-Path -LiteralPath $stageExe
 
     $smokePath = Join-Path $ManifestDir "SMOKE.json"
@@ -414,69 +447,75 @@ function Write-OfflineManifests {
 }
 
 function Invoke-PortableAssembly {
-    # M-P3-89: portable dir mirrors the stage tree plus manifests, and gains
-    # start scripts that launch the staged exe with the same args/env contract
-    # as the installed path (all args forwarded unchanged, env inherited).
+    # M-P3-89: portable dir holds the single top folder AgentSI/ (the app
+    # folder plus manifests), and gains start scripts that launch the
+    # folder exe with the same args/env contract as the installed path
+    # (all args forwarded unchanged, env inherited). FXDIR: the zip
+    # holds that one top folder with AgentSI.exe at its root.
     if (-not (Test-Path -LiteralPath $StageDir)) {
         Write-Warning "portable assembly: stage dir absent; portable will carry manifests + launcher only."
         Ensure-Dir $StageDir
     }
-    Copy-TreeArtifacts -From $StageDir -To $PortableDir
+    $topDir = Join-Path $PortableDir $PortableTopName
+    Copy-TreeArtifacts -From $StageDir -To $topDir
     foreach ($name in @("MANIFEST.json", "HASH.json", "HASH.json.sha256", "SMOKE.json")) {
         $src = Join-Path $ManifestDir $name
         if (Test-Path -LiteralPath $src) {
-            Copy-Item -LiteralPath $src -Destination (Join-Path $PortableDir $name) -Force
-            Write-Artifact (Join-Path $PortableDir $name)
+            Copy-Item -LiteralPath $src -Destination (Join-Path $topDir $name) -Force
+            Write-Artifact (Join-Path $topDir $name)
         }
     }
     $ps1Lines = @(
         '# Copyright (c) 2026 Ivan Soprun',
         '# Start-AgentSI.ps1 — portable launcher (M-P3-89).',
         '# Same args/env contract as the installed path: forwards every argument',
-        '# unchanged to the staged exe and inherits the caller environment.',
+        '# unchanged to the folder exe (AgentSI.exe beside this script) and',
+        '# inherits the caller environment.',
         '# Generated by packaging/build_app.ps1; do not hand-edit.',
         '$ErrorActionPreference = "Stop"',
-        ('$exe = Join-Path $PSScriptRoot (Join-Path "sidecar" "{0}")' -f $ExeName),
+        ('$exe = Join-Path $PSScriptRoot "{0}"' -f $ExeName),
         'if (-not (Test-Path -LiteralPath $exe)) { Write-Error ("AgentSI.exe not found at " + $exe); exit 1 }',
         '& $exe @args',
         'exit $LASTEXITCODE'
     )
-    Write-FileAtomic -Path (Join-Path $PortableDir "Start-AgentSI.ps1") -Text ($ps1Lines -join "`n")
+    Write-FileAtomic -Path (Join-Path $topDir "Start-AgentSI.ps1") -Text ($ps1Lines -join "`n")
     $cmdLines = @(
         '@echo off',
         'rem Copyright (c) 2026 Ivan Soprun',
         'rem Start-AgentSI.cmd — portable launcher (M-P3-89). Same args/env contract',
-        'rem as the installed path: forwards every argument unchanged to the staged exe.',
+        'rem as the installed path: forwards every argument unchanged to the folder exe.',
         'rem Generated by packaging/build_app.ps1; do not hand-edit.',
-        ('if not exist "%~dp0sidecar\{0}" (echo AgentSI.exe not found at "%~dp0sidecar\{0}" 1>&2 & exit /b 1)' -f $ExeName, $ExeName),
-        ('"%~dp0sidecar\{0}" %*' -f $ExeName)
+        ('if not exist "%~dp0{0}" (echo AgentSI.exe not found at "%~dp0{0}" 1>&2 & exit /b 1)' -f $ExeName, $ExeName),
+        ('"%~dp0{0}" %*' -f $ExeName)
     )
-    Write-FileAtomic -Path (Join-Path $PortableDir "Start-AgentSI.cmd") -Text ($cmdLines -join "`r`n")
+    Write-FileAtomic -Path (Join-Path $topDir "Start-AgentSI.cmd") -Text ($cmdLines -join "`r`n")
 
-    # LANE FIT (INSTALLB): held-launcher layout (app/AgentSI.exe), bundle
-    # readme + sha256 index (both generated here from measured values only),
-    # and the portable zip. All hashes come from real Get-FileHash reads.
-    $stageExePath = Join-Path $StageDir "sidecar/$ExeName"
+    # FXDIR: single top folder (AgentSI/AgentSI.exe), bundle readme +
+    # sha256 index (both generated here from measured values only),
+    # and the portable zip holding that one top folder. All hashes
+    # come from real Get-FileHash reads.
+    $stageExePath = Join-Path $StageDir $ExeName
     if (Test-Path -LiteralPath $stageExePath) {
-        $appDir = Join-Path $PortableDir "app"
-        Ensure-Dir $appDir
-        Copy-Item -LiteralPath $stageExePath -Destination (Join-Path $appDir $ExeName) -Force
-        Write-Artifact (Join-Path $appDir $ExeName)
         $hashDoc = Get-Content -LiteralPath (Join-Path $ManifestDir "HASH.json") -Raw -Encoding utf8 | ConvertFrom-Json
-        $appExeHash = (Get-FileHash -LiteralPath (Join-Path $appDir $ExeName) -Algorithm SHA256).Hash.ToLowerInvariant()
+        $appExeHash = (Get-FileHash -LiteralPath (Join-Path $topDir $ExeName) -Algorithm SHA256).Hash.ToLowerInvariant()
         $readmeLines = @(
             'Agent SI portable bundle 0.1.0',
             'Copyright (c) 2026 Ivan Soprun (MIT; see LICENSE).',
             '',
             'WINDOWS BUILD, UNSIGNED: no certificate in this build (no cert in sandbox).',
-            'Verify before running (PowerShell):',
-            ('  $exe = Get-FileHash -LiteralPath "app\{0}" -Algorithm SHA256' -f $ExeName),
+            'Verify before running (PowerShell, from inside the unzipped AgentSI folder):',
+            ('  $exe = Get-FileHash -LiteralPath "{0}" -Algorithm SHA256' -f $ExeName),
             ('  expected AgentSI.exe sha256: {0}' -f $appExeHash),
             ('  MANIFEST/HASH sha256:        {0}' -f $hashDoc.sha256),
             '[STRING_PLACEHOLDER_1]',
             '',
-            'Start: unzip to a writable folder and double-click Start-AgentSI.cmd,',
-            ('or run Start-AgentSI.ps1 from a console (forwards arguments to app\{0}).' -f $ExeName),
+            'Start: unzip to a writable folder, open the AgentSI folder inside it,',
+            'and run AgentSI.exe there (double-click it, or Start-AgentSI.cmd).',
+            'Never copy the exe out of its folder: it needs its support files',
+            'beside it. Or run Start-AgentSI.ps1 from a console (it forwards',
+            'arguments to the folder exe). Prefer the installer first:',
+            'AgentSI-setup-0.1.0.exe installs this same folder per user;',
+            'this zip is the portable second option.',
             'First start opens the guided first run (/firstrun) by itself; a stranger needs no setup.',
             '',
             'WebView2 REQUIRED: the window needs the Microsoft Edge WebView2 runtime.',
@@ -513,18 +552,20 @@ function Invoke-PortableAssembly {
             'Models -> Connect), finish /firstrun (connect, team, folder, first task).',
             'First screen on a fresh profile is the /firstrun wizard; afterwards Chat.'
         )
-        Write-FileAtomic -Path (Join-Path $PortableDir "README.txt") -Text ($readmeLines -join "`r`n")
-        $portRoot = (Resolve-Path -LiteralPath $PortableDir).Path
+        Write-FileAtomic -Path (Join-Path $topDir "README.txt") -Text ($readmeLines -join "`r`n")
+        $portRoot = (Resolve-Path -LiteralPath $topDir).Path
         $sumLines = @()
         foreach ($f in (Get-ChildItem -LiteralPath $portRoot -Recurse -File | Sort-Object { $_.FullName })) {
             $rel = $f.FullName.Substring($portRoot.Length + 1)
             $h = (Get-FileHash -LiteralPath $f.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
             $sumLines += ('{0}  {1}' -f $h, ($rel -replace '\\', '/'))
         }
-        Write-FileAtomic -Path (Join-Path $PortableDir "SHA256SUMS.txt") -Text (($sumLines -join "`n") + "`n")
-        $zipPath = Join-Path (Split-Path -Parent $portRoot) "AgentSI-portable-0.1.0.zip"
+        Write-FileAtomic -Path (Join-Path $topDir "SHA256SUMS.txt") -Text (($sumLines -join "`n") + "`n")
+        $zipPath = Join-Path (Split-Path -Parent (Split-Path -Parent $portRoot)) "AgentSI-portable-0.1.0.zip"
         if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
-        Compress-Archive -Path (Join-Path $portRoot "*") -DestinationPath $zipPath -CompressionLevel Optimal
+        # FXDIR: archive the top folder itself, so the zip holds the
+        # single top folder AgentSI/ with AgentSI.exe at its root.
+        Compress-Archive -Path $portRoot -DestinationPath $zipPath -CompressionLevel Optimal
         Write-Artifact $zipPath
     } else {
         Write-Warning "portable extras SKIPPED: staged exe absent; recorded in SMOKE.json, never faked."

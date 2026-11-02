@@ -1,9 +1,13 @@
-# Release notes — Agent SI portable 0.1.0 (RC4 dry-run values)
+# Release notes — Agent SI 0.1.0 (RC4 dry-run values)
+
+Prefer the installer first: `AgentSI-setup-0.1.0.exe` installs this same
+folder per user (see README "Download and verify"). This package is the
+portable second option: an unsigned portable folder build for Windows —
+unzip the folder, run AgentSI.exe inside it, never copy the exe out.
 
 Agent SI is a desktop app for running a small team of AI agents:
 one task becomes a plan, the plan splits into parallel work, checks
-run, and a fresh auditor gives an honest verdict. This package is the
-unsigned portable build for Windows: unzip and start, no installer.
+run, and a fresh auditor gives an honest verdict.
 
 This build is not code-signed - verify the SHA256 below.
 
@@ -15,10 +19,10 @@ PowerShell, from the folder holding the zip:
 Get-FileHash -LiteralPath .\AgentSI-portable-RC4-0.1.0.zip -Algorithm SHA256
 ```
 
-Unzip, then:
+Unzip, open the `AgentSI` folder inside it, then (from the folder holding the zip):
 
 ```powershell
-Get-FileHash -LiteralPath .\app\AgentSI.exe -Algorithm SHA256
+Get-FileHash -LiteralPath .\AgentSI\AgentSI.exe -Algorithm SHA256
 ```
 
 Expected values (measured at pack time from the exact files shipped):
@@ -27,9 +31,11 @@ Expected values (measured at pack time from the exact files shipped):
 - AgentSI.exe SHA256: 30a109dac4adc14cd2c709326211d3704eac11b69103a96231e7df8f0eb268ca
 - MANIFEST canonical SHA256 (HASH.json): 73f947a738d82edfdea9785a9088d18b379549729f25ff60285b795fffdbdda3
 
-The MANIFEST value is the hash of the canonical manifest bytes, not
-of the exe; the exe value above is the one to compare against
-app\AgentSI.exe. The pack step regenerates all three values from the
+Run AgentSI.exe inside it (double-click it, or `Start-AgentSI.cmd`
+beside it). Never copy the exe out of its folder: it needs its support
+files beside it. The MANIFEST value is the hash of the canonical manifest
+bytes, not of the exe; the exe value above is the one to compare against
+AgentSI\AgentSI.exe. The pack step regenerates all three values from the
 shipped files; a release whose values differ from a fresh measurement
 must not ship. Expect one Windows SmartScreen warning ("Windows protected
 your PC", publisher Unknown): the exe is unsigned. Click More info, then

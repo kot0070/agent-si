@@ -31,10 +31,10 @@ the published hashes. The exact line lives in step S04 only.
 All four hash records must hold equal values before anything ships. Every
 manifest value is written only by script from real values, never by hand.
 
-| S06 | hash exe | record: SHA256 computed from the frozen dist AgentSI.exe | expected: RECORD-AT-RELEASE value stored in the release record | verdict: INSTALLB brief R5 |
+| S06 | hash exe | record: SHA256 computed from the staged folder exe dist/stage/AgentSI.exe | expected: RECORD-AT-RELEASE value stored in the release record | verdict: INSTALLB brief R5 |
 | S07 | hash portable | record: SHA256 computed from the portable zip | expected: RECORD-AT-RELEASE value stored in the release record | verdict: INSTALLB brief R5 |
-| S08 | hash manifest | record: MANIFEST.json runtime file list with per-file hashes and byte counts | expected: MANIFEST entries for the exe and the zip equal S06 and S07 | verdict: INSTALLB brief R5 and R9 |
-| S09 | hash x4 equality | record: HASH.json plus the canonical HASH.json.sha256 file | expected: exe value, zip value, MANIFEST entries, HASH.json and HASH.json.sha256 all equal and printed together | verdict: INSTALLB brief R5 |
+| S08 | hash manifest | record: MANIFEST.json runtime file list for the staged folder plus the in-zip SHA256SUMS index covering every zip member | expected: MANIFEST entry for the folder exe plus per-member zip hashes equal S06 and S07 | verdict: INSTALLB brief R5 and R9 |
+| S09 | hash x4 equality | record: folder-exe value plus zip value plus setup value plus MANIFEST entries plus HASH.json plus the canonical HASH.json.sha256 file | expected: all values recorded and printed together with both SHA256SUMS indexes agreeing | verdict: INSTALLB brief R5 |
 
 ## 4 - Manifest license notices evidence
 
