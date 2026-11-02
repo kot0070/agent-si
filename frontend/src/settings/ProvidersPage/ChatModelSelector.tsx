@@ -11,7 +11,7 @@ import { useState } from "react";
 import { PROVIDER_CATALOG } from "./catalog";
 import { ChatSelector, withConnectedSeed } from "./ChatSelector";
 import { t } from "../../locale/index";
-import type { ProviderState } from "./types";
+import type { ProviderPreset, ProviderState } from "./types";
 
 export const CONTRIBUTOR_MODEL_ID = "muse-spark-1.3-contributor";
 
@@ -33,6 +33,7 @@ export function defaultContributorWarnings(
 type ChatModelSelectorProps = {
   project_id: string;
   states?: Record<string, ProviderState>;
+  catalog?: ProviderPreset[];
   onChange?: (modelId: string) => void;
   warnings?: Record<string, string>;
   lang?: "en" | "uk";
@@ -63,8 +64,12 @@ function defaultLocaleWarnings(): Record<string, string> {
   return { [CONTRIBUTOR_MODEL_ID]: t("providers.chat.contributorWarning") };
 }
 
-export function ChatModelSelector({ project_id = "local", states = {}, onChange, warnings, lang = "en" }: ChatModelSelectorProps) {
-  const catalog = PROVIDER_CATALOG;
+export function ChatModelSelector({ project_id = "local", states = {}, catalog, onChange, warnings, lang = "en" }: ChatModelSelectorProps) {
+  const effectiveCatalog = catalog ?? PROVIDER_CATALOG;
+  // The picker reads the same merged model list the page builds (served
+  // provider listing plus KB catalog); without an explicit catalog it
+  // falls back to the static KB catalog.
+  const resolvedCatalog = effectiveCatalog;
   const [value, setValue] = useState("");
   function handleChange(modelId: string): void {
     setValue(modelId);
@@ -83,7 +88,7 @@ export function ChatModelSelector({ project_id = "local", states = {}, onChange,
           {warning}
         </p>
       ) : null}
-      <ChatSelector catalog={catalog} states={withConnectedSeed(catalog, states)} value={value} onChange={handleChange} />
+      <ChatSelector catalog={resolvedCatalog} states={withConnectedSeed(resolvedCatalog, states)} value={value} onChange={handleChange} />
     </div>
   );
 }
