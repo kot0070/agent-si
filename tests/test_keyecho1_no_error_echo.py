@@ -88,27 +88,18 @@ def test_invalid_header_bait_never_echoed(tmp_path, monkeypatch):
     monkeypatch.setattr(_urlreq, "urlopen", _no_network)
     client, app = _make_client(tmp_path)
     pid = _create_project(client)
+    # The newline key is refused at save (preflight never fires):
+    # nothing stored, nothing echoed, card stays Connect.
     resp = client.post("/api/v1/providers/keys",
                        json={"preset_id": "openai", "key_value": BAIT_NL},
                        headers=HEADERS)
-    assert resp.status_code == 201, resp.text
+    assert resp.status_code == 400, resp.text
     assert CORE_NL not in resp.text
-    key_ref = resp.json()["key_ref"]
-    conn = client.post("/api/v1/providers/connect",
-                       json={"preset_id": "openai", "model": "m-echo1",
-                             "key_ref": key_ref},
-                       headers=HEADERS)
-    assert conn.status_code == 200, conn.text
-    assert CORE_NL not in conn.text
-    prov = (conn.json() or {}).get("provider", {})
-    assert prov.get("provider_id") == "openai", conn.text
+    assert BAIT_NL not in str(app.state.k04_ctx.audit_sink.records)
     listed = client.get("/api/v1/providers", headers=HEADERS)
     assert listed.status_code == 200, listed.text
-    rows = {r["provider_id"]: r for r in listed.json()["providers"]}
-    assert "openai" in rows, rows
-    assert rows["openai"]["health"] == "ERROR", rows
-    assert rows["openai"].get("error") == "provider check failed", rows
-    assert CORE_NL not in listed.text
+    assert listed.json()["providers"] == [], listed.text
+    assert "openai" not in app.state.k04_ctx.credential_store
     chat = client.post("/api/v1/chat/stream",
                        json={"project": pid, "message": "hi echo1"},
                        headers=HEADERS)
@@ -126,29 +117,25 @@ def test_transport_exception_text_never_echoed(tmp_path, monkeypatch):
     monkeypatch.setattr(_urlreq, "urlopen", _fail)
     client, app = _make_client(tmp_path)
     pid = _create_project(client)
+    # Unreachable at save: 503 unreachable text, nothing stored or echoed.
     resp = client.post("/api/v1/providers/keys",
                        json={"preset_id": "openai", "key_value": BAIT_MSG},
                        headers=HEADERS)
-    assert resp.status_code == 201, resp.text
-    key_ref = resp.json()["key_ref"]
-    conn = client.post("/api/v1/providers/connect",
-                       json={"preset_id": "openai", "model": "m-echo2",
-                             "key_ref": key_ref},
-                       headers=HEADERS)
-    assert conn.status_code == 200, conn.text
-    assert BAIT_MSG not in conn.text
-    assert (conn.json().get("error") == "provider check failed"
-            or "error" not in conn.json()), conn.text
+    assert resp.status_code == 503, resp.text
+    assert resp.json() == {"code": "EVIDENCE_PROBE_NETWORK",
+                           "message": "Could not reach the provider."}, resp.text
+    assert BAIT_MSG not in resp.text
+    assert "simulated outage" not in resp.text
+    assert "openai" not in app.state.k04_ctx.credential_store
     listed = client.get("/api/v1/providers", headers=HEADERS)
     assert listed.status_code == 200, listed.text
-    rows = {r["provider_id"]: r for r in listed.json()["providers"]}
-    assert rows["openai"].get("error") == "provider check failed", rows
-    assert BAIT_MSG not in listed.text
+    assert listed.json()["providers"] == [], listed.text
     assert "simulated outage" not in listed.text
     chat = client.post("/api/v1/chat/stream",
                        json={"project": pid, "message": "hi echo2"},
                        headers=HEADERS)
     assert chat.status_code == 200, chat.text
+    assert "NO_PROVIDER_BOUND" in chat.text, chat.text
     assert BAIT_MSG not in chat.text
     assert "simulated outage" not in chat.text
     assert BAIT_MSG not in _connections_text(tmp_path)
