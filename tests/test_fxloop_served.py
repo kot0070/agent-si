@@ -191,6 +191,29 @@ def test_l2_overflow_markers_unit():
     assert _roles._is_context_overflow(no_marker) is False
 
 
+def test_l10_timeout_classification_unit():
+    from agent_si.providers.adapters.base import ProviderTimeoutError
+    assert _roles._classify_call_error(ProviderTimeoutError(
+        "provider request timed out", "ref:timeout")) == "TIMEOUT"
+    assert _roles._classify_call_error(
+        _roles.ModelTimeout("slow")) == "TIMEOUT"
+    assert _roles._classify_call_error(TimeoutError("timed out")) == "TIMEOUT"
+
+    class ReadTimeout(Exception):
+        pass
+
+    assert _roles._classify_call_error(
+        ReadTimeout("httpx read timeout")) == "TIMEOUT"
+    assert _roles._classify_call_error(
+        ConnectionError("connection refused")) == "PROVIDER_RETRY"
+    assert _roles._classify_call_error(
+        RuntimeError("empty reply from provider")) == "FORMAT_RETRY"
+    assert _roles._classify_call_error(
+        RuntimeError("boom")) == "NON_RETRYABLE"
+    assert _roles._classify_call_error(
+        _roles.ModelStopped("stop")) == "NON_RETRYABLE"
+
+
 def test_l2_worker_overflow_shrink_then_plain(tmp_path):
     project = "fxloop-l2"
     folder = _project_dir(tmp_path, project)
@@ -244,7 +267,7 @@ def test_l2_worker_overflow_shrink_then_plain(tmp_path):
     assert record.get("success") is True, record.get("summary")
 
 
-# -- L9: provider timeout maps to ModelTimeout ----------------------------------
+# -- L9/L10: provider timeout retries inside the wrapper --------------------
 
 def test_l9_provider_timeout_retries(tmp_path):
     project = "fxloop-l9"
@@ -291,11 +314,14 @@ def test_l9_provider_timeout_retries(tmp_path):
     assert "internal" not in resp.text.lower(), resp.text[:500]
     events = _parse_sse(resp.text)
     assert [e.get("type") for e in events][-1] == "done", resp.text[:800]
-    assert seen["worker"] == 4, seen
+    assert seen["worker"] == 3, seen
     assert seen["auditor"] == 2, seen
     record = _run_record(app, project)
     assert record is not None
     assert record.get("success") is True, record.get("summary")
+    row = {p["part_id"]: p for p in record.get("parts", [])}["p1"]
+    assert row["attempts"] == 1, row
+    assert row["verdict"] == "PASS", row
 
 
 # -- L3: per-attempt snapshot + whole part diff ---------------------------------

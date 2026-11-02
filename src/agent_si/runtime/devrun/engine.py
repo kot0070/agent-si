@@ -453,6 +453,10 @@ def _is_goal_command(text: Any) -> bool:
         return False
     if len(stripped) > 500:
         return False
+    if re.search(r"->\s*exit\s+-?\d+", stripped):
+        # A result annotation ("$ npm install -> exit 0" from install
+        # evidence), never a runnable command.
+        return False
     if stripped.startswith("$ "):
         stripped = stripped[2:].strip()
     if stripped.startswith("./"):
