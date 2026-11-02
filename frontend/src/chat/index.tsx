@@ -529,6 +529,9 @@ plus a collapsed Details disclosure, never twice. Markers are the
 engine's own vocabulary (Working folder, Team, Director, Part, Check,
 Total, run success/fail, cost lines): a juror reads the verdict, the
 full log stays behind Details. Plain answers keep the verdict card. */
+/** R05: plain (non-engine-looking) output has no engine structure to
+summarise, so its verdict view opens on the assistant message text:
+the return-to-chat rows read the text itself, never a bare verdict. */
 const ENGINE_LOG_MARKERS =
   /^(?:working folder|team|director|part\s+\S+|check\s+\S+|total|run (?:success|fail)|.*cost:)/im;
 
@@ -725,17 +728,25 @@ export function EngineTurnView(props: {
 }): ReactElement {
   const summary = summarizeEngineTurn(props.text, props.status);
   const costNote = costKnown(props.text) ? "" : ", cost not known";
-  const [open, setOpen] = useState(!summary.done);
+  // R05: the disclosure collapses only recognised engine logs. Plain
+  // output (no engine markers) opens on the assistant message text, so
+  // live and return-to-chat rows render the identical visible text.
+  const [open, setOpen] = useState(
+    !summary.done || !looksLikeEngineLog(props.text),
+  );
   return (
     <>
       <p data-testid="run-verdict" style={{ whiteSpace: "pre-wrap" }}>
         {shortProgramLine(engineVerdictLine(summary, costNote))}
       </p>
       {summary.planChanged !== null ? (
-        <p data-testid="plan-changed" style={{ whiteSpace: "pre-wrap" }}>
-          {summary.planChanged}
-        </p>
-      ) : null}
+        <>
+          {" "}
+          <p data-testid="plan-changed" style={{ whiteSpace: "pre-wrap" }}>
+            {summary.planChanged}
+          </p>
+        </>
+      ) : null}{" "}
       <button
         type="button"
         data-testid="run-steps-toggle"
@@ -746,10 +757,11 @@ export function EngineTurnView(props: {
         }}
       >
         {pt("chat.run.steps", "Details")}
-      </button>
+      </button>{" "}
       <div data-testid="run-steps" hidden={!open}>
         {summary.lines.map((line, index) => (
           <p key={`${index}`} style={{ whiteSpace: "pre-wrap" }}>
+            {index > 0 ? " " : null}
             {shortProgramLine(line)}
           </p>
         ))}
@@ -2112,54 +2124,60 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
                 <p style={{ whiteSpace: "pre-wrap" }}>
                   {shortProgramLine(message.text)}
                 </p>
-              )}
+              )}{" "}
               {message.role === "assistant" &&
               message.final &&
               message.text !== "" ? (
-                <button
-                  type="button"
-                  data-testid="chat-copy"
-                  className="fx-btn-quiet"
-                  title={pt("chat.message.copy", "Copy")}
-                  aria-label={pt("chat.message.copy", "Copy")}
-                  onClick={() => {
-                    copyQuiet(message.text);
-                  }}
-                >
-                  <CopyGlyph />
-                </button>
+                <>
+                  <button
+                    type="button"
+                    data-testid="chat-copy"
+                    className="fx-btn-quiet"
+                    title={pt("chat.message.copy", "Copy")}
+                    aria-label={pt("chat.message.copy", "Copy")}
+                    onClick={() => {
+                      copyQuiet(message.text);
+                    }}
+                  >
+                    <CopyGlyph />
+                  </button>{" "}
+                </>
               ) : null}
               <time
                 data-testid="chat-timestamp"
                 title={t("chat.stream.timestamp")}
               >
                 {formatChatTime(message.at)}
-              </time>
+              </time>{" "}
               {message.resendPrompt !== undefined ? (
-                <button
-                  type="button"
-                  data-testid="chat-resend"
-                  className="fx-btn-quiet"
-                  onClick={() => {
-                    startChatRun(
-                      client,
-                      props.projectId,
-                      message.resendPrompt ?? "",
-                    );
-                  }}
-                >
-                  {pt("chat.stream.resend", "Resend")}
-                </button>
+                <>
+                  <button
+                    type="button"
+                    data-testid="chat-resend"
+                    className="fx-btn-quiet"
+                    onClick={() => {
+                      startChatRun(
+                        client,
+                        props.projectId,
+                        message.resendPrompt ?? "",
+                      );
+                    }}
+                  >
+                    {pt("chat.stream.resend", "Resend")}
+                  </button>{" "}
+                </>
               ) : null}
               {message.role === "assistant" &&
               stoppedAssistants.has(message.id) ? (
-                <span
-                  data-testid="chat-stopped-line"
-                  role="status"
-                  className="fx-quiet"
-                >
-                  {pt("chat.stream.stopped", "Stopped")}
-                </span>
+                <>
+                  <span
+                    data-testid="chat-stopped-line"
+                    role="status"
+                    className="fx-quiet"
+                  >
+                    {pt("chat.stream.stopped", "Stopped")}
+                  </span>{" "}
+                </>
               ) : null}
               {/* FXCHATV V2: the card shows ONLY for a live plain
                   answer waiting for its verdict (Accept / Edit /
