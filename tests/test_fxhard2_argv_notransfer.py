@@ -88,5 +88,5 @@ def test_install_allow_exact_runs_wider_refused(tmp_path):
         _actions.spawn_checked(
             project, "run-wider", folder,
             ["npm", "install", "--force"], wider_log, "logs/wider.log")
-    assert "approval" in str(excinfo.value).lower()
+    assert "allow" in str(excinfo.value).lower()
     assert not os.path.exists(wider_log)

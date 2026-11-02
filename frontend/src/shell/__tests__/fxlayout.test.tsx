@@ -265,13 +265,12 @@ describe("fxlayout shell over the real app", () => {
       "/agents/live",
     );
 
-    expect(await screen.findByTestId("ctx-percent")).toBeTruthy();
-    expect(screen.getByTestId("ctx-percent").textContent).toContain(
-      t("shell.common.unknown"),
-    );
-    expect(screen.getByTestId("ctx-window").textContent).toContain(
-      t("shell.common.unknown"),
-    );
+    // FXTABS T9: with no window served the rail shows just the used
+    // count, never "Unknown / Unknown" and no percent off thin air.
+    expect(screen.queryByTestId("ctx-percent")).toBeNull();
+    const ctxWindow = screen.getByTestId("ctx-window");
+    expect(ctxWindow.textContent).toContain(t("shell.common.unknown"));
+    expect(ctxWindow.textContent).not.toContain("/");
     expect(screen.getByTestId("ctx-source").textContent).toContain(
       t("shell.cards.context.sourceLive"),
     );
@@ -301,11 +300,14 @@ describe("fxlayout shell over the real app", () => {
       t("shell.cards.watcher.ok"),
     );
     expect(screen.getByTestId("watcher-model").textContent).toContain(
-      t("watcher.tab.modelLocal"),
+      t("watcher.tab.modelApi"),
     );
-    expect(screen.getByTestId("watcher-action").textContent).toContain(
+    const action = screen.getByTestId("watcher-action");
+    expect(action.textContent).toContain(
       t("watcher.tab.actionBlocked"),
     );
+    expect(action.textContent).not.toContain("e-1");
+    expect(action.getAttribute("title")).toBe("e-1");
     expect(screen.getByTestId("watcher-open").getAttribute("href")).toBe(
       "/watcher",
     );

@@ -16,8 +16,6 @@ A React shell inside a desktop window talks over loopback HTTP and events to a l
 [Windows Credential Manager: keys only]
 ```
 
-<<SHOT: architecture diagram>>
-
 ## Shell and backend
 
 - Shell: React single-page app with routes for chat, live agents, watcher, projects, project views, settings, first run, about, migration, and how-it-works. Served locally and shown in the desktop window.

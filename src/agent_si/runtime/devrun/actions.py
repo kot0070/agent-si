@@ -42,9 +42,47 @@ class SpawnNotInstalled(ValueError):
     code: str = "DEVRUN_SPAWN_NOT_INSTALLED"
 
     def __init__(self, word: str) -> None:
-        super().__init__(
-            "could not start: %s is not installed" % (word,))
+        super().__init__(_missing_tool_line(word))
         self.word = str(word)
+
+
+#: Where to get a missing tool; a bare PC never auto-installs, so the
+#: line names the tool plus its source and the plain next step.
+_MISSING_TOOL_SOURCES = {
+    "node": "nodejs.org",
+    "npm": "nodejs.org",
+    "npx": "nodejs.org",
+    "python": "python.org",
+    "python3": "python.org",
+    "py": "python.org",
+    "pytest": "python.org",
+    "pip": "python.org",
+    "pip3": "python.org",
+    "git": "git-scm.com",
+}
+
+
+def _missing_tool_line(word: Any) -> str:
+    """One plain line for a missing executable: name, source, next step.
+
+    Never a stack, never raw exit text as the headline, never an
+    auto-install: the user installs it, then sends the task again.
+    """
+    try:
+        name = str(word)
+    except Exception:
+        name = ""
+    head = name.replace("\\", "/").rsplit("/", 1)[-1].lower()
+    for suffix in (".exe", ".bat", ".cmd", ".com"):
+        if head.endswith(suffix) and len(head) > len(suffix):
+            head = head[: -len(suffix)]
+    source = _MISSING_TOOL_SOURCES.get(head, "")
+    if source:
+        return ("could not start: %s is not installed on this machine; "
+                "get it at %s, install it, then send the task again"
+                % (name, source))
+    return ("could not start: %s is not installed on this machine; "
+            "install it, then send the task again" % (name,))
 
 
 class InstallAskNeeded(PermissionError):
@@ -313,11 +351,17 @@ def write_file(
 #: npx rides here verb-gated like the rest: `npx install` asks while
 #: `npx tsc` (no install verb) keeps its normal class.
 _INSTALL_PROGRAMS = frozenset({
-    "pip", "pip3", "npm", "npx", "yarn", "pnpm", "poetry", "uv", "pipx",
-    "cargo", "go", "dotnet", "nuget", "winget", "choco", "apt",
-    "apt-get", "brew",
+    "pip", "pip3", "npm", "npx", "yarn", "pnpm", "poetry", "uv", "uvx",
+    "pipx", "corepack", "cargo", "go", "dotnet", "nuget", "winget",
+    "choco", "apt", "apt-get", "brew",
 })
 _INSTALL_VERBS = frozenset({"install", "add", "require"})
+
+#: Fetch-and-run heads: always the install class (they download before
+#: they run, whatever the subcommand). `npx`/`pipx`/`uvx`/`corepack`
+#: bare, plus the `dlx`/`exec` fetch verbs of the JS managers.
+_ALWAYS_INSTALL_HEADS = frozenset({"npx", "uvx", "pipx", "corepack"})
+_FETCH_VERBS = frozenset({"dlx", "exec"})
 
 #: Python launchers whose `-m <module>` form runs the module as the
 #: effective tool (workspace `.venv` pythons resolve here by basename,
@@ -452,6 +496,11 @@ def classify_argv(argv: list[str]) -> str:
             module = ""
         if module:
             effective = module.strip().lower().rsplit("/", 1)[-1]
+    if effective in _ALWAYS_INSTALL_HEADS:
+        return "install"
+    if effective in ("yarn", "pnpm", "npm") and words[:1] \
+            and words[0].lower() in _FETCH_VERBS:
+        return "install"
     if effective in _INSTALL_PROGRAMS and any(
             word.lower() in _INSTALL_VERBS for word in words):
         return "install"
@@ -467,6 +516,67 @@ def classify_argv(argv: list[str]) -> str:
     if head in ("tsc", "webpack", "cargo", "go", "dotnet", "make"):
         return "build"
     return "read-only"
+
+
+def _windows_findstr_files(words: list[str]) -> list[str]:
+    """Backslash file operands for findstr on Windows (F13).
+
+    Windows findstr cannot open forward-slash paths, so on Windows
+    only, for a findstr head, file operands get ``\\`` separators.
+    Flags (words starting with ``/`` or ``-``) and the search string
+    (the first non-flag word, unless ``/C:`` or ``/G:`` already names
+    the pattern or file source) are never touched. Off Windows, or
+    for any other head, the words pass through unchanged.
+    """
+    if os.name != "nt" or not words:
+        return words
+    if _bare_head(words[0]) != "findstr":
+        return words
+    lowered = [str(word).lower() for word in words[1:]]
+    pattern_sourced = any(
+        word == "/c:" or word.startswith("/c:")
+        or word == "/g:" or word.startswith("/g:")
+        for word in lowered)
+    out = [words[0]]
+    first_operand = True
+    for word in words[1:]:
+        text = str(word)
+        if text.startswith("/") or text.startswith("-"):
+            out.append(text)
+            continue
+        if first_operand and not pattern_sourced:
+            first_operand = False
+            out.append(text)
+            continue
+        out.append(text.replace("/", os.sep))
+    return out
+
+
+def _installer_name(words: list[str]) -> str:
+    """Installer name for the ask ledger: the effective installer head.
+
+    A ``-m`` launcher form names its module (``python -m pip install``
+    asks as ``pip``, never ``python``); every other installer names
+    argv[0]. Only called for the install class, so bare interpreters
+    (never install) keep no ask. Matches classify_argv's effective
+    head exactly.
+    """
+    try:
+        items = [str(word) for word in list(words or [])]
+        if not items:
+            return ""
+        head = _bare_head(items[0])
+        rest = items[1:]
+        if head in _PYTHON_LAUNCHERS and "-m" in rest:
+            module = str(rest[rest.index("-m") + 1])
+            if module and module.strip().lower() in _INSTALL_PROGRAMS:
+                return module.strip().lower()
+    except Exception:
+        pass
+    try:
+        return str(list(words or [""])[0])
+    except Exception:
+        return ""
 
 
 def _deny_shape(argv: list[str]) -> str:
@@ -669,6 +779,13 @@ def scrub_env() -> dict[str, str]:
     env.pop("PYTHONPATH", None)
     env.pop("PYTHONHOME", None)
     env["PYTHONNOUSERSITE"] = "1"
+    # A7: install managers must never self-fetch. On Windows the
+    # Python install-manager alias (and the py launcher) auto-download
+    # a full runtime when the child probes `python --version`; pin
+    # both switches off. Project-local values (LOCALAPPDATA, APPDATA,
+    # HOME, ...) still pass through untouched above.
+    env["PYTHON_MANAGER_AUTOMATIC_INSTALL"] = "false"
+    env["PYLAUNCHER_ALLOW_INSTALL"] = "0"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     return env
 
@@ -814,8 +931,9 @@ def spawn_checked(
     if kind == "install":
         from agent_si.toolguard import permissions as _ask_permissions
 
+        _ask_name = _installer_name(words)
         _ask_tool_id = _ask_permissions.install_tool_id(
-            str(project_id), words[0])
+            str(project_id), _ask_name)
         _ask_decision = _ask_permissions.get_decision(
             tool_id=_ask_tool_id)
         # FXR1B project grant: the same installer head and subcommand
@@ -842,12 +960,12 @@ def spawn_checked(
                     project_id=str(project_id))
             raise InstallAskNeeded(
                 _ask_tool_id,
-                f"refused: install-class command {words[0]!r} needs "
+                f"refused: install-class command {_ask_name!r} needs "
                 "install permission (ungranted runs continue without "
                 "the install)")
         if not _ask_project_grant and _ask_decision == "deny":
             raise PermissionError(
-                f"refused: install-class command {words[0]!r} needs "
+                f"refused: install-class command {_ask_name!r} needs "
                 "install permission (ungranted runs continue without "
                 "the install)")
         if not _ask_project_grant and not _ask_run_allow:
@@ -904,6 +1022,7 @@ def spawn_checked(
     missing = _missing_head(words, str(folder))
     if missing is not None:
         raise SpawnNotInstalled(missing)
+    words = _windows_findstr_files(words)
     job: dict[str, Any] = {
         "project_id": str(project_id),
         "check_run_id": str(run_id),
