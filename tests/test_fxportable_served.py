@@ -15,7 +15,6 @@
 # are RC3 pre-check notes (built exe, clean env), not unit tests.
 import os
 import shutil
-import socket
 import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))

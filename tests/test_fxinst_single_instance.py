@@ -4,7 +4,6 @@
 # exits 0; stale is removed, start proceeds; window closed but backend
 # ending: wait up to 5 s, then start; browser fallback only for no-WebView2.
 # AGENT_SI_ALLOW_MULTI=1 skips the lock for test copies only.
-import json
 import os
 import socket
 import sys
@@ -21,9 +20,7 @@ _ROOT = os.path.abspath(os.path.join(_HERE, ".."))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-import pytest  # noqa: E402
-
-from agent_si import sidecar  # noqa: E402
+from agent_si import sidecar
 
 
 class _ProbeHandler(BaseHTTPRequestHandler):
@@ -280,7 +277,7 @@ def test_fxinst_five_concurrent_starts_one_backend_one_window(
     def _run(index):
         try:
             results[index] = sidecar.main([])
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             results[index] = "EXC %r" % (exc,)
 
     threads = [threading.Thread(target=_run, args=(i,), daemon=True)
