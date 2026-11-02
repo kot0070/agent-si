@@ -2058,9 +2058,24 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
         files_diff = _audit.diff_text(before, after)
         try:
             ws_after = _audit.snapshot_workspace(folder)
+            try:
+                _known: set = set()
+                for _p in (record.get("plan") or []):
+                    try:
+                        for _f in (_p.get("files") or []):
+                            _known.add(str(_f))
+                    except Exception:
+                        continue
+                try:
+                    for _f in (spec.get("files") or []):
+                        _known.add(str(_f))
+                except Exception:
+                    pass
+            except Exception:
+                _known = set(spec.get("files") or [])
             undeclared_diff, undeclared_changed = \
                 _audit.diff_undeclared(
-                    ws_before, ws_after, spec.get("files") or [])
+                    ws_before, ws_after, sorted(_known))
         except Exception:
             undeclared_diff, undeclared_changed = "", []
         if undeclared_changed:
