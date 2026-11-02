@@ -310,9 +310,23 @@ def _gate_fail_reason(*, spec: Any, goal: Any, files_diff: str,
     if install_ok:
         return None
     if not declared:
-        # Verify-only part (no declared files): the outer PASS branch
-        # still requires green checks that ran plus the auditor PASS.
-        return None
+        # Verify-only part (no declared files): PASS needs a green
+        # check that ran or an install record — never auditor words
+        # alone with nothing executed.
+        try:
+            green = [
+                check for check in (check_rows or [])
+                if not check.get("could_not_start")
+                and not check.get("refused")
+                and isinstance(check.get("exit_code"), int)
+                and not isinstance(check.get("exit_code"), bool)
+                and check.get("exit_code") == 0]
+        except Exception:
+            green = []
+        if green:
+            return None
+        return ("verify-only part ran no green check and no installer ran: "
+                "name a check that exercises the goal")
     try:
         runnable = [
             check for check in (check_rows or [])
@@ -977,6 +991,16 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                 scope = "fxdevrun:%s:%s:%s" % (project, part, role)
                 key = "%s/%s/%s/%s" % (run_id, part, role, attempt)
                 label = str(part)
+            # A progress heartbeat (cost None/UNKNOWN) never erases a
+            # settled price on the same row: keep the cached cost so a
+            # later write_file/run note cannot turn a priced row UNKNOWN.
+            try:
+                _kept = (live_cache.get(key) or {}).get("cost")
+            except Exception:
+                _kept = None
+            if (cost is None or cost == "UNKNOWN") and _kept not in (
+                    None, "UNKNOWN", ""):
+                cost = _kept
             placement = _placement_for_provider(app, provider)
             row_input = row_tokens.get("input")
             row_context: Any = (row_input if isinstance(row_input, int)
@@ -1847,6 +1871,32 @@ def _director_history_block(app: Any, project: str, folder: str,
     except Exception:
         pass
     try:
+        import shutil as _shutil
+
+        _bits: list[str] = []
+        for _tool in ("python", "node", "npm", "git", "pytest"):
+            try:
+                _bits.append("%s: %s" % (
+                    _tool, "found" if _shutil.which(_tool) else "missing"))
+            except Exception:
+                _bits.append("%s: missing" % (_tool,))
+        try:
+            _venv = any(os.path.isfile(os.path.join(base, cand))
+                        for cand in (".venv/Scripts/python.exe",
+                                     ".venv/bin/python",
+                                     ".venv/Scripts/python",
+                                     "venv/bin/python",
+                                     "venv/Scripts/python.exe"))
+        except Exception:
+            _venv = False
+        _bits.append("venv: %s (never auto-installed)"
+                     % ("present" if _venv else "absent"))
+        tools_line = ", ".join(_bits)
+    except Exception:
+        tools_line = ("python: missing, node: missing, npm: missing, "
+                      "git: missing, pytest: missing, venv: absent "
+                      "(never auto-installed)")
+    try:
         for record in full:
             try:
                 user_text = str(record.get("message")
@@ -1885,6 +1935,7 @@ def _director_history_block(app: Any, project: str, folder: str,
         if goal_line:
             out.append(str(goal_line)[:500])
         out.extend(facts)
+        out.append("Tools on this machine: %s" % (tools_line,))
         out.append("workspace files: %s" % (
             ", ".join(listing) if listing else "(empty: this is a new project)"))
         return out
@@ -3278,6 +3329,32 @@ def _install_denied(project: Any, folder: Any, argv: Any) -> str:
         return ""
 
 
+def _spawn_held(*, project: Any, run_id: str, folder: str,
+                argv: list, log_path: str, log_rel: str,
+                lock: Any = None, grant_run_id: str = "") -> Any:
+    """One spawn_checked that never leaks the install ask as a refusal.
+
+    InstallAskNeeded always becomes _InstallHeld (the run holds with a
+    terminal approval event). Every spawn site goes through here, so no
+    present or future path can swallow the ask in a broad
+    PermissionError net (InstallAskNeeded subclasses PermissionError).
+    """
+    from agent_si.runtime.devrun import actions as _spawn_actions
+
+    try:
+        if lock is not None:
+            with lock:
+                return _spawn_actions.spawn_checked(
+                    project, run_id, folder, list(argv), log_path,
+                    log_rel, grant_run_id=grant_run_id)
+        return _spawn_actions.spawn_checked(
+            project, run_id, folder, list(argv), log_path, log_rel,
+            grant_run_id=grant_run_id)
+    except _spawn_actions.InstallAskNeeded as exc:
+        raise _InstallHeld(exc.tool_id, " ".join(
+            str(word) for word in (argv or []))) from None
+
+
 def _run_agent_command(*, record: Any, folder: str, project: str,
                        run_id: str, argv: list, state: Any,
                        procs: list, attached: Any = None,
@@ -3302,19 +3379,16 @@ def _run_agent_command(*, record: Any, folder: str, project: str,
                            "%s.log" % (stamp,)).replace("\\", "/")
     log_path = os.path.join(str(folder), ".devrun", "agent",
                             "%s.log" % (stamp,))
-    # FXPARALLEL BEGIN spawn-lock: the run lock covers spawn_checked
+    # FXPARALLEL BEGIN spawn-lock: the run lock covers the spawn
     # only (dispatcher keeps lock-guarded shared tables at
     # worker_tools/dispatcher.py:111-114), never the wait below.
+    # _spawn_held converts the ask to _InstallHeld; the InstallAskNeeded
+    # except below stays as a backstop for direct spawn_checked calls.
     try:
-        if lock is not None:
-            with lock:
-                spawn = _actions.spawn_checked(
-                    project, run_id, folder, argv, log_path, log_rel,
-                    grant_run_id=grant_run_id)
-        else:
-            spawn = _actions.spawn_checked(
-                project, run_id, folder, argv, log_path, log_rel,
-                grant_run_id=grant_run_id)
+        spawn = _spawn_held(
+            project=project, run_id=run_id, folder=folder, argv=argv,
+            log_path=log_path, log_rel=log_rel, lock=lock,
+            grant_run_id=grant_run_id)
     except _actions.InstallAskNeeded as exc:
         raise _InstallHeld(exc.tool_id, " ".join(argv)) from None
     except (PermissionError, ValueError) as exc:
@@ -3412,20 +3486,17 @@ def _run_checks(*, record: Any, spec: dict, row: dict, folder: str,
                                         "word list",
                          "pid": 0})
             continue
-        # FXPARALLEL BEGIN spawn-lock: lock around spawn_checked
+        # FXPARALLEL BEGIN spawn-lock: lock around the spawn
         # only (never around the wait below); id lands after attach.
+        # _spawn_held converts an ungranted install to _InstallHeld,
+        # which propagates to the run-level hold (approval event) —
+        # never a refused row. _InstallHeld is not a PermissionError,
+        # so the broad net below cannot eat it.
         try:
-            if lock is not None:
-                with lock:
-                    spawn = _actions.spawn_checked(
-                        project, check_id, folder,
-                        [str(word) for word in command],
-                        log_path, log_rel)
-            else:
-                spawn = _actions.spawn_checked(
-                    project, check_id, folder,
-                    [str(word) for word in command],
-                    log_path, log_rel)
+            spawn = _spawn_held(
+                project=project, run_id=check_id, folder=folder,
+                argv=[str(word) for word in command],
+                log_path=log_path, log_rel=log_rel, lock=lock)
         except _actions.SpawnNotInstalled as exc:
             rows.append({"argv": [str(word) for word in command],
                          "exit_code": None, "output_file": log_rel,

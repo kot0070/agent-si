@@ -790,8 +790,12 @@ def test_golden_04c_force_args_ask(golden):
 
 def test_golden_04d_other_project_asks(golden):
     P2 = golden.use(PROJECT2, "dock-golden-2")
+    folder = golden.folder(PROJECT2)
+    checks = os.path.join(folder, "checks")
+    os.makedirs(checks, exist_ok=True)
+    _seed(os.path.join(checks, "ping.mjs"), "process.exit(0);\n")
     other_chat = golden.chat(P2, "Install dependencies with npm install",
-                             folder=golden.folder(PROJECT2),
+                             folder=folder,
                              task="task-npm-other")
     assert other_chat.status_code == 200, other_chat.text
     assert "approval" in _types(_parse_sse(other_chat.text)), (

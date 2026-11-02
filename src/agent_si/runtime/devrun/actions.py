@@ -42,9 +42,47 @@ class SpawnNotInstalled(ValueError):
     code: str = "DEVRUN_SPAWN_NOT_INSTALLED"
 
     def __init__(self, word: str) -> None:
-        super().__init__(
-            "could not start: %s is not installed" % (word,))
+        super().__init__(_missing_tool_line(word))
         self.word = str(word)
+
+
+#: Where to get a missing tool; a bare PC never auto-installs, so the
+#: line names the tool plus its source and the plain next step.
+_MISSING_TOOL_SOURCES = {
+    "node": "nodejs.org",
+    "npm": "nodejs.org",
+    "npx": "nodejs.org",
+    "python": "python.org",
+    "python3": "python.org",
+    "py": "python.org",
+    "pytest": "python.org",
+    "pip": "python.org",
+    "pip3": "python.org",
+    "git": "git-scm.com",
+}
+
+
+def _missing_tool_line(word: Any) -> str:
+    """One plain line for a missing executable: name, source, next step.
+
+    Never a stack, never raw exit text as the headline, never an
+    auto-install: the user installs it, then sends the task again.
+    """
+    try:
+        name = str(word)
+    except Exception:
+        name = ""
+    head = name.replace("\\", "/").rsplit("/", 1)[-1].lower()
+    for suffix in (".exe", ".bat", ".cmd", ".com"):
+        if head.endswith(suffix) and len(head) > len(suffix):
+            head = head[: -len(suffix)]
+    source = _MISSING_TOOL_SOURCES.get(head, "")
+    if source:
+        return ("could not start: %s is not installed on this machine; "
+                "get it at %s, install it, then send the task again"
+                % (name, source))
+    return ("could not start: %s is not installed on this machine; "
+            "install it, then send the task again" % (name,))
 
 
 class InstallAskNeeded(PermissionError):
