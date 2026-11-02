@@ -175,7 +175,7 @@ describe("fxask install-permission-asked-once dialog", () => {
       expect(screen.queryByTestId("permission-dialog")).toBeNull();
     });
     expect(
-      await screen.findByText(`Install permission granted for '${TOOL}'.`),
+      await screen.findByText(`Install permission granted for ${TOOL}`),
     ).toBeTruthy();
   });
 
@@ -193,14 +193,16 @@ describe("fxask install-permission-asked-once dialog", () => {
     expect(f1Tools()).toContain(TOOL);
   });
 
-  it("falls back to English labels when the locale table lacks the new keys", async () => {
+  it("renders real Ukrainian labels for the dialog keys", async () => {
     setLocale("uk");
     renderChat();
     promptAndSend("please install the helper");
     const dialog = await screen.findByTestId("permission-dialog");
     expect(dialog).toBeTruthy();
-    expect(dialog.getAttribute("aria-label")).toBe("Install permission");
-    expect(screen.getByTestId("permission-allow").textContent).toBe("Allow");
+    expect(dialog.getAttribute("aria-label")).toBe("Дозвіл на встановлення");
+    expect(screen.getByTestId("permission-allow").textContent).toBe(
+      "Дозволити раз",
+    );
   });
 
   it("Deny tells the run and closes the dialog", async () => {
@@ -215,7 +217,7 @@ describe("fxask install-permission-asked-once dialog", () => {
       expect(screen.queryByTestId("permission-dialog")).toBeNull();
     });
     expect(
-      await screen.findByText(`Install permission denied for '${TOOL}'.`),
+      await screen.findByText(`Install permission denied for ${TOOL}`),
     ).toBeTruthy();
   });
 

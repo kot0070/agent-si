@@ -624,7 +624,14 @@ def spawn_checked(
             str(project_id), words[0])
         _ask_decision = _ask_permissions.get_decision(
             tool_id=_ask_tool_id)
-        if _ask_decision is None:
+        # FXR1B project grant: the same installer head and subcommand
+        # in this project do not ask again; flags and registries still
+        # ask (see install_grant_allows). Read-only here by design.
+        _ask_project_grant = (
+            _ask_decision is None
+            and _ask_permissions.install_grant_allows(
+                str(project_id), words))
+        if _ask_decision is None and not _ask_project_grant:
             with contextlib.suppress(Exception):
                 _ask_permissions.record_install_request(
                     tool_id=_ask_tool_id,
@@ -635,13 +642,16 @@ def spawn_checked(
                 f"refused: install-class command {words[0]!r} needs "
                 "install permission (ungranted runs continue without "
                 "the install)")
-        if _ask_decision != "allow":
+        if not _ask_project_grant and _ask_decision != "allow":
             raise PermissionError(
                 f"refused: install-class command {words[0]!r} needs "
                 "install permission (ungranted runs continue without "
                 "the install)")
-        _ask_approved = _ask_permissions.get_install_argv(
-            tool_id=_ask_tool_id)
+        _ask_approved = (
+            [str(word) for word in words]
+            if _ask_project_grant
+            else _ask_permissions.get_install_argv(
+                tool_id=_ask_tool_id))
         if _ask_approved is None:
             with contextlib.suppress(Exception):
                 _ask_approved = _ask_permissions.pin_install_argv(

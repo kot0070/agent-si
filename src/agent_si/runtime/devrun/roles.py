@@ -556,8 +556,8 @@ def _cap_block(app: Any, project_id: str, provider: str) -> str | None:
 
 def _record_usage(app: Any, record: Any, project_id: str, run_id: str,
                   provider: str, model: str, usage: Any,
-                  role: str = "devrun", cost: Any = None) -> None:
-    """One telemetry row per call, plus the metered-call log; never raises."""
+                  role: Any = None, cost: Any = None) -> None:
+    """One telemetry row per call (with role), plus metered-call log; never raises."""
     try:
         task_id = ""
         try:
@@ -573,7 +573,8 @@ def _record_usage(app: Any, record: Any, project_id: str, run_id: str,
             _store.record_provider_usage(
                 project_id=str(project_id), task_id=task_id,
                 run_id=str(run_id), provider=str(provider),
-                model=str(model), usage=usage)
+                model=str(model), usage=usage,
+                role=str(role) if isinstance(role, str) and role else None)
         except Exception:
             pass
         try:
@@ -792,7 +793,9 @@ def invoke_owned(
             pass
         _record_usage(app, record, project_id, run_id,
                       provider, model, usage,
-                      role=str(resolution.get("role", "devrun")), cost=cost)
+                      role=resolution.get("role")
+                      if isinstance(resolution, dict) else None,
+                      cost=cost)
         over = _over_cap(app, project_id, provider, model, usage)
         return row, over
 
