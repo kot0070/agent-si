@@ -424,6 +424,14 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         if abort.is_set():
             return True
         try:
+            from agent_si.backend import stop_all as _stop_all
+
+            if _stop_all.stop_requested(str(project), str(run_id)):
+                abort.set()
+                return True
+        except Exception:
+            pass
+        try:
             if dict(state).get("cancelled"):
                 abort.set()
                 return True
@@ -608,6 +616,12 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                       "task_id": task_id})
     turn += 1
     try:
+        try:
+            from agent_si.backend import stop_all as _stop_all_live
+
+            _stop_all_live.mark_run_live(project, run_id)
+        except Exception:
+            pass
         if not os.path.isdir(str(folder)):
             record["summary"] = (
                 "run failed: project folder %r is not a directory"
@@ -916,6 +930,11 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         _close_live("BLOCKED")
         yield _run_event("done", turn, task_id, record["summary"],
                          {"run_id": run_id, "success": False})
+    finally:
+        with contextlib.suppress(Exception):
+            from agent_si.backend import stop_all as _stop_all_done
+
+            _stop_all_done.mark_run_done(project, run_id)
 
 
 def _platform_guidance() -> str:
