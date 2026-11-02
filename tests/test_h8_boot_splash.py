@@ -79,6 +79,8 @@ def _stub_webview(monkeypatch):
 
     def _start(*args, **kwargs):
         stub.started.append((args, kwargs))
+        if args and callable(args[0]):
+            args[0]()
         return None
 
     stub.start = _start

@@ -18,6 +18,12 @@ const DIAGNOSTICS_ENTRIES = [
   { name: "bench-history", labelKey: "diagnostics.benchHistory" },
 ] as const;
 
+/** B2: the log-folder line never shows the machine's user profile
+segment (C:\Users\<name>); the rest of the path stays for support. */
+export function maskLogDir(path: string): string {
+  return path.replace(/([A-Za-z]:\\Users\\)[^\\]+/g, "$1…");
+}
+
 export function DiagnosticsSection(): ReactElement {
   return (
     <>
@@ -68,7 +74,7 @@ export function DiagnosticsLogFiles(): ReactElement {
   }
   return (
     <p data-testid="diagnostics-log-files">
-      {t("diagnostics.logFiles", { path: logDir })}{" "}
+      {t("diagnostics.logFiles", { path: maskLogDir(logDir) })}{" "}
       <button
         type="button"
         data-testid="diagnostics-open-logs"

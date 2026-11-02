@@ -220,6 +220,12 @@ class _CountWebview:
             width = kwargs.get("width", 1280)
             height = kwargs.get("height", 800)
 
+            def __init__(self):
+                self.loaded = []
+
+            def load_url(self, url):
+                self.loaded.append(url)
+
             def show(self):
                 pass
 
@@ -233,7 +239,9 @@ class _CountWebview:
         self.windows.append(window)
         return window
 
-    def start(self, private_mode=False, storage_path=None):
+    def start(self, func=None, private_mode=False, storage_path=None):
+        if callable(func):
+            func()
         self._gate.wait(120)
 
 
