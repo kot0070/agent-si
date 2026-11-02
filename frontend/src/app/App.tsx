@@ -831,15 +831,25 @@ function AppShell(): ReactElement {
   // FXPROJ J1: first selection rides the shared list load in the same
   // tick (no extra fetch, no extra render hop). Later loads never
   // reselect: the ref guards the null case at call time.
+  // FXSAVED item 3: a stored pick restores as-is (ApiClientProvider
+  // inits from the same localStorage); a stored id of a deleted
+  // project is a ghost: fall back to rows[0] and rewrite the store
+  // through select. No second clear here: FXOPEN owns
+  // CurrentProject.clear() (SH-04) and reuses this same key.
   const selectionRef = useRef(current.projectId);
   selectionRef.current = current.projectId;
   const selectFirst = useCallback(
     (rows: ProjectRecord[]) => {
-      if (selectionRef.current !== null) {
+      const first = rows[0];
+      if (first === undefined) {
         return;
       }
-      const first = rows[0];
-      if (first !== undefined) {
+      const stored = selectionRef.current;
+      if (stored === null) {
+        current.select(first.project_id);
+        return;
+      }
+      if (!rows.some((row) => row.project_id === stored)) {
         current.select(first.project_id);
       }
     },
