@@ -1,14 +1,28 @@
-import { useState } from 'react';
+// FXFIRSTRUN2 focused first-run page: a 640-wide card, a 4-step progress
+// line, provider rows with the real connect modal, one-click team, the real
+// folder picker, the first-message box, and one quiet optional list on the
+// last step. Connected state always comes from served data (GET
+// /api/v1/providers); nothing is marked done unless the server says so.
+// Bare unit mounts (no ApiClientProvider above) keep the legacy synchronous
+// walk so unit tests never touch the network.
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { FormEvent, ReactElement } from 'react';
-import { Link, useInRouterContext } from 'react-router-dom';
+import './firstrun.css';
 import { t } from '../../locale/index';
-import { ApiError, apiErrorLocaleKey, requestResponse } from '../../api/errors';
+import { ApiError, apiErrorLocaleKey, getUiToken, requestResponse } from '../../api/errors';
 import type { ApiClient, TaskRecord } from '../../api/iface';
 import { useApiClient, useCurrentProject } from '../ApiClientProvider';
 import type { CurrentProject } from '../ApiClientProvider';
 import { saveRoleProfile } from '../../settings/index';
 import { ROLE_PROFILE_ROLES } from '../../settings/roleProfilesApi';
 import { ErrorPanel } from '../../ui/ErrorPanel';
+import { PROVIDER_CATALOG, getPreset } from '../../settings/ProvidersPage/catalog';
+import { listConnectedProviders } from '../../settings/ProvidersPage/connectApi';
+import { ConnectDialog } from '../../settings/ProvidersPage/ConnectDialog';
+import { DisconnectDialog } from '../../settings/ProvidersPage/DisconnectDialog';
+import { createMemorySecretStore, secretIdForProvider } from '../../settings/ProvidersPage/secretStore';
+import type { SecretStorePort } from '../../settings/ProvidersPage/secretStore';
+import { roleLabel } from '../../settings/ProvidersPage/types';
 
 export type FirstRunStep = 'connectProvider' | 'oneClickTeam' | 'projectFolder' | 'firstTask';
 
@@ -22,6 +36,9 @@ export interface FirstRunFlowProps {
 const REQUIRED_STEPS: FirstRunStep[] = ['connectProvider', 'oneClickTeam', 'projectFolder', 'firstTask'];
 
 const OPTIONAL_STEPS: OptionalFirstRunStep[] = ['localAI', 'watcherPreset', 'automations', 'kbs'];
+
+// Juror-first-30-seconds rows: the two biggest clouds, Anthropic, and local.
+const FIRST_RUN_PRESET_IDS = ['meta', 'openai', 'anthropic', 'ollama'];
 
 const FOLDER_PICK_URL = '/api/v1/sidecar/pick-folder';
 const FOLDER_PICK_UNAVAILABLE = 409;
@@ -93,7 +110,33 @@ function useOptionalCurrentProject(): CurrentProject | null {
 export function FirstRunFlow(props: FirstRunFlowProps): ReactElement {
   const client = useOptionalApiClient();
   const selection = useOptionalCurrentProject();
-  const inRouter = useInRouterContext();
+  const served = client !== null && selection !== null;
+  const [storeInstance] = useState<SecretStorePort>(() => createMemorySecretStore(getUiToken() ?? ''));
+  const presets = useMemo(
+    () =>
+      FIRST_RUN_PRESET_IDS.map((id) => getPreset(PROVIDER_CATALOG, id)).filter(
+        (preset) => preset !== undefined,
+      ),
+    [],
+  );
+  // Served connected ids; null until the first GET answers. The Next gate
+  // and every row badge read this, never localStorage.
+  const [connectedIds, setConnectedIds] = useState<string[] | null>(null);
+  const [connectId, setConnectId] = useState<string | null>(null);
+  const [disconnectId, setDisconnectId] = useState<string | null>(null);
+  const [providerSkipped, setProviderSkipped] = useState<boolean>(false);
+  const refreshConnected = useCallback((): void => {
+    if (!served || client === null) {
+      return;
+    }
+    void listConnectedProviders().then((ids) => {
+      setConnectedIds(ids);
+    });
+  }, [served, client]);
+  useEffect(() => {
+    refreshConnected();
+  }, [refreshConnected]);
+  const hasConnected = (connectedIds ?? []).length > 0;
   const [skipped, setSkipped] = useState<OptionalFirstRunStep[]>([]);
   const [index, setIndex] = useState<number>(() => {
     const at = REQUIRED_STEPS.indexOf(props.initialStep ?? 'connectProvider');
@@ -103,7 +146,7 @@ export function FirstRunFlow(props: FirstRunFlowProps): ReactElement {
   const [folder, setFolder] = useState<string>('');
   const [taskTitle, setTaskTitle] = useState<string>('');
   const [projectId, setProjectId] = useState<string | null>(null);
-  const [teamProjectId, setTeamProjectId] = useState<string | null>(null);
+  const [teamResult, setTeamResult] = useState<{ name: string; projectId: string } | null>(null);
   const [folderProjectId, setFolderProjectId] = useState<string | null>(null);
   const [teamBusy, setTeamBusy] = useState<boolean>(false);
   const [folderBusy, setFolderBusy] = useState<boolean>(false);
@@ -118,7 +161,11 @@ export function FirstRunFlow(props: FirstRunFlowProps): ReactElement {
   const skip = (step: OptionalFirstRunStep): void => {
     setSkipped((prev: OptionalFirstRunStep[]) => (prev.includes(step) ? prev : [...prev, step]));
   };
+  const providerGate = current === 'connectProvider' && served && !hasConnected && !providerSkipped;
   const goNext = (): void => {
+    if (providerGate) {
+      return;
+    }
     setIndex((at: number) => Math.min(at + 1, REQUIRED_STEPS.length - 1));
   };
   const goBack = (): void => {
@@ -161,7 +208,7 @@ export function FirstRunFlow(props: FirstRunFlowProps): ReactElement {
       for (const role of ROLE_PROFILE_ROLES) {
         await saveRoleProfile(pid, { role, mode: 'AUTO' });
       }
-      setTeamProjectId(pid);
+      setTeamResult({ name, projectId: pid });
     } catch (error) {
       setTeamError(toStepError(error));
     } finally {
@@ -245,10 +292,18 @@ export function FirstRunFlow(props: FirstRunFlowProps): ReactElement {
       }
     })();
   };
+  const connectPreset = connectId === null ? null : (presets.find((p) => p.id === connectId) ?? null);
+  const disconnectPreset =
+    disconnectId === null ? null : (presets.find((p) => p.id === disconnectId) ?? null);
+  const teamRolesLine =
+    teamResult === null
+      ? null
+      : ROLE_PROFILE_ROLES.map((role) => roleLabel(role)).join(', ') +
+        `: ${t('providers.rolepool.modeAuto')}`;
   return (
-    <section>
+    <section data-testid="firstrun" className="fx-firstrun">
       <h2>{t('firstrun.title')}</h2>
-      <ol>
+      <ol className="fx-firstrun-steps">
         {REQUIRED_STEPS.map((step) => (
           <li
             key={step}
@@ -263,22 +318,70 @@ export function FirstRunFlow(props: FirstRunFlowProps): ReactElement {
           </li>
         ))}
       </ol>
-      <section>
+      <section className="fx-firstrun-card">
         {current === 'connectProvider' ? (
           <>
-            <label>
-              {t('settings.roleProfile.providerLabel')}
-              <input
-                type="text"
-                aria-label={t('settings.roleProfile.providerLabel')}
-                placeholder={t('chat.composer.prompt')}
-              />
-            </label>
-            {inRouter ? (
-              <Link to="/settings/models">{t('settings.models.title')}</Link>
-            ) : (
-              <a href="/settings/models">{t('settings.models.title')}</a>
-            )}
+            <ul className="fx-firstrun-providers">
+              {presets.map((preset) => {
+                const connected = (connectedIds ?? []).includes(preset.id);
+                return (
+                  <li
+                    key={preset.id}
+                    data-testid={`firstrun-provider-${preset.id}`}
+                    className="fx-firstrun-provider"
+                  >
+                    <h4>{preset.label}</h4>
+                    <p>
+                      {connected
+                        ? t('providers.connect.connected', { label: preset.label })
+                        : t('providers.setup.hint')}
+                    </p>
+                    {connected ? (
+                      <button
+                        type="button"
+                        className="fx-btn-quiet"
+                        aria-label={t('providers.page.disconnectCta', { label: preset.label })}
+                        onClick={() => setDisconnectId(preset.id)}
+                      >
+                        {t('providers.page.disconnectLabel')}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        aria-label={t('providers.page.connectCta', { label: preset.label })}
+                        onClick={() => setConnectId(preset.id)}
+                      >
+                        {t('providers.page.connectLabel')}
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+            <ConnectDialog
+              preset_id={connectId ?? ''}
+              preset={connectPreset}
+              open={connectId !== null}
+              store={storeInstance}
+              onClose={() => setConnectId(null)}
+              onConnected={() => {
+                setConnectId(null);
+                refreshConnected();
+              }}
+            />
+            <DisconnectDialog
+              provider_id={disconnectId ?? ''}
+              providerLabel={disconnectPreset?.label ?? ''}
+              secretId={disconnectId === null ? '' : secretIdForProvider(disconnectId)}
+              open={disconnectId !== null}
+              store={storeInstance}
+              sessionToken={getUiToken() ?? ''}
+              onClose={() => setDisconnectId(null)}
+              onDisconnected={() => {
+                setDisconnectId(null);
+                refreshConnected();
+              }}
+            />
           </>
         ) : null}
         {current === 'oneClickTeam' ? (
@@ -295,10 +398,6 @@ export function FirstRunFlow(props: FirstRunFlowProps): ReactElement {
                 }}
               />
             </label>
-            <label>
-              <input type="checkbox" aria-label={t('settings.roleProfile.modeLabel')} />
-              {t('settings.roleProfile.modeLabel')}
-            </label>
             <button
               type="button"
               disabled={teamBusy}
@@ -308,8 +407,10 @@ export function FirstRunFlow(props: FirstRunFlowProps): ReactElement {
             >
               {t('settings.roleProfile.title')}
             </button>
-            {teamProjectId !== null ? (
-              <p data-testid="firstrun-team-result">{teamProjectId}</p>
+            {teamResult !== null ? (
+              <p data-testid="firstrun-team-result">
+                {teamResult.name} · {teamResult.projectId} · {teamRolesLine}
+              </p>
             ) : null}
             {teamError !== null ? (
               <ErrorPanel errorKey={teamError.errorKey} code={teamError.code} onRetry={null} />
@@ -390,29 +491,45 @@ export function FirstRunFlow(props: FirstRunFlowProps): ReactElement {
         ) : (
           <>
             {previous === undefined ? null : (
-              <button type="button" onClick={goBack}>
+              <button type="button" className="fx-btn-quiet" onClick={goBack}>
                 {t(`firstrun.steps.${previous}`)}
               </button>
             )}
-            <button type="button" onClick={goNext}>
+            <button type="button" disabled={providerGate} onClick={goNext}>
               {t('firstrun.next')}
             </button>
+            {current === 'connectProvider' ? (
+              <button
+                type="button"
+                className="fx-btn-quiet"
+                onClick={() => {
+                  setProviderSkipped(true);
+                  setIndex((at: number) => Math.min(at + 1, REQUIRED_STEPS.length - 1));
+                }}
+              >
+                {t('firstrun.skip')}
+              </button>
+            ) : null}
           </>
         )}
       </section>
-      <p>{t('firstrun.optionalNote')}</p>
-      <ul>
-        {OPTIONAL_STEPS.map((step) => (
-          <li key={step}>
-            {t(`firstrun.optional.${step}`)}
-            {skipped.includes(step) ? null : (
-              <button type="button" onClick={() => skip(step)}>
-                {t('firstrun.skip')}
-              </button>
-            )}
-          </li>
-        ))}
-      </ul>
+      {current === 'firstTask' ? (
+        <section className="fx-firstrun-optional" aria-label={t('firstrun.optionalNote')}>
+          <p>{t('firstrun.optionalNote')}</p>
+          <ul>
+            {OPTIONAL_STEPS.map((step) => (
+              <li key={step}>
+                {t(`firstrun.optional.${step}`)}
+                {skipped.includes(step) ? null : (
+                  <button type="button" className="fx-btn-quiet" onClick={() => skip(step)}>
+                    {t('firstrun.skip')}
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
     </section>
   );
 }

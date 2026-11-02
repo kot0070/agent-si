@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { FirstRunFlow } from '../firstrun/FirstRunFlow';
+import { PROVIDER_CATALOG } from '../../settings/ProvidersPage/catalog';
 import { About, AGENT_SI_NAME, APP_ID, LICENCE_LINE, MIT_LICENSE_REF } from '../About';
 import { MigrationView, runMigration } from '../migration/MigrationView';
 import { HOW_IT_WORKS_KEYS, HowItWorks } from '../HowItWorks';
@@ -28,6 +29,8 @@ function leafValues(node: Nested, acc: string[] = []): string[] {
 const ALLOWED_TEXT = new Set<string>([
   ...leafValues(en as unknown as Nested),
   ...leafValues(uk as unknown as Nested),
+  // FXFIRSTRUN2: provider rows show catalog brand names (proper nouns).
+  ...PROVIDER_CATALOG.map((preset) => preset.label),
   AGENT_SI_NAME,
   LICENCE_LINE,
   ...Object.values(HOW_IT_WORKS_KEYS),
@@ -67,16 +70,15 @@ describe('FirstRunFlow', () => {
     for (const step of Object.values(en.firstrun.steps)) {
       expect(screen.getByText(step)).toBeTruthy();
     }
-    const skips = screen.getAllByRole('button', { name: en.firstrun.skip });
-    expect(skips.length).toBe(4);
-    fireEvent.click(skips[0]!);
-    expect(screen.getAllByRole('button', { name: en.firstrun.skip }).length).toBe(3);
+    // Step 1 carries one quiet skip; the optional list lives on the last step.
+    expect(screen.getAllByRole('button', { name: en.firstrun.skip }).length).toBe(1);
+    fireEvent.click(screen.getAllByRole('button', { name: en.firstrun.skip })[0]!);
     expect(done).toBe(false);
     // kit BUILD_PLAN:868-869: "Guided first run (connect provider, one-click team, project plus folder, first task; local AI, watcher preset, automations, KBs clearly optional and skippable)"
     fireEvent.click(screen.getByRole('button', { name: /next/i }));
     fireEvent.click(screen.getByRole('button', { name: /next/i }));
-    fireEvent.click(screen.getByRole('button', { name: /next/i }));
     expect(done).toBe(false);
+    expect(screen.getAllByRole('button', { name: en.firstrun.skip }).length).toBe(4);
     fireEvent.click(screen.getByRole('button', { name: en.tasks.creator.create }));
     expect(done).toBe(true);
     expect(container.textContent).toContain(en.firstrun.optionalNote);
