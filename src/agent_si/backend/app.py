@@ -3823,4 +3823,39 @@ def create_app(settings: Any = None,
 
     _demof3_routing_auto.register_routing_auto_routes(app)
 
+    # FXWATCHLOOP-BEGIN
+    from contextlib import asynccontextmanager as _fxwatchloop_cm
+    from agent_si.watcher import watch_loop as _fxwatchloop_loop
+
+    _fxwatchloop_interval = 30.0
+    try:
+        if isinstance(settings, Mapping):
+            _fxwatchloop_raw = settings.get("watch_loop_interval_s", 30.0)
+        elif settings is not None:
+            _fxwatchloop_raw = getattr(
+                settings, "watch_loop_interval_s", 30.0)
+        else:
+            _fxwatchloop_raw = 30.0
+        _fxwatchloop_interval = float(_fxwatchloop_raw)
+        if _fxwatchloop_interval <= 0:
+            _fxwatchloop_interval = 30.0
+    except (TypeError, ValueError):
+        _fxwatchloop_interval = 30.0
+    _fxwatchloop_prior = app.router.lifespan_context
+
+    @_fxwatchloop_cm
+    async def _fxwatchloop_lifespan(inner):
+        prior = _fxwatchloop_prior
+        if prior is None:
+            async with _fxwatchloop_loop.lifespan(
+                    inner, interval_s=_fxwatchloop_interval):
+                yield
+        else:
+            async with prior(inner):
+                async with _fxwatchloop_loop.lifespan(
+                        inner, interval_s=_fxwatchloop_interval):
+                    yield
+
+    app.router.lifespan_context = _fxwatchloop_lifespan
+    # FXWATCHLOOP-END
     return app

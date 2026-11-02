@@ -58,6 +58,7 @@ __all__ = (
     "observe_budget",
     "service_ids",
     "services_for_project",
+    "declared_probe_targets",
     "declare_service",
     "record_usage",
     "record_egress",
@@ -212,6 +213,34 @@ def services_for_project(project_id: str) -> Tuple[str, ...]:
         for service_id, row in _SERVICES.items()
         if row["project_id"] == project_id
     )
+
+def declared_probe_targets() -> Tuple[Tuple[str, str, str], ...]:
+    """Declared http/tcp probe targets: (project_id, service_id, kind).
+
+    Stored facts only: no probe, no write, no invented rows. Container
+    rows are excluded (read-only descriptors, never probed); protected
+    rows are included and refused at probe time by :func:`run_check`
+    (the refusal journals, the loop logs it and moves on). The kind is
+    the :func:`run_check` check name (``HTTP`` or ``TCP``).
+    """
+    targets = []
+    for service_id, row in _SERVICES.items():
+        if not isinstance(row, dict):
+            continue
+        kind = str(row.get("kind", ""))
+        if kind == "http":
+            check = "HTTP"
+        elif kind == "tcp":
+            check = "TCP"
+        else:
+            continue
+        project_id = str(row.get("project_id", ""))
+        if not project_id:
+            continue
+        targets.append((project_id, str(service_id), check))
+    return tuple(targets)
+
+
 
 
 #: Service kinds a declared row may carry. Container rows accept only the
