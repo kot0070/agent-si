@@ -2229,6 +2229,11 @@ def create_app(settings: Any = None,
             _k04_make_endpoint(_k04_keys.save_key, True, "save_key"),
             methods=["POST"],
             name="k04_save_key")
+        app.add_api_route(
+            "/api/v1/providers/keys/check",
+            _k04_make_endpoint(_k04_keys.check_key, True, "check_key"),
+            methods=["POST"],
+            name="k04_check_key")
     except Exception:
         pass
 

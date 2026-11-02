@@ -228,8 +228,57 @@ def save_key(ctx: Any, query: Any, body: Any) -> Tuple[int, Dict[str, Any]]:
     return 201, {"key_ref": key_ref}
 
 
+def check_key(ctx: Any, query: Any, body: Any) -> Tuple[int, Dict[str, Any]]:
+    """Check a pasted key against the live provider; never stores.
+
+    Same preflight as save_key (live GET /models with the pasted key),
+    but read-only: 200 {"ok": true} when the provider accepts the key,
+    otherwise the same reason classes as a failed save (401/503/400)
+    with no key_ref and nothing written. Lets the dialog offer
+    paste + Check, then Save.
+    """
+    if not isinstance(body, dict):
+        return 400, {"code": KEY_CHECK_FAILED_CODE,
+                     "message": "body must carry preset_id and key_value"}
+    preset_id = body.get("preset_id")
+    key_value = body.get("key_value")
+    if not isinstance(preset_id, str) or not preset_id:
+        return 400, {"code": KEY_CHECK_FAILED_CODE,
+                     "message": "preset_id is required"}
+    if not isinstance(key_value, str) or not key_value:
+        return 400, {"code": KEY_CHECK_FAILED_CODE,
+                     "message": "key_value is required"}
+    try:
+        from .presets import get_preset
+    except Exception:
+        return 500, {"code": KEY_CHECK_FAILED_CODE,
+                     "message": "preset catalog unbound"}
+    try:
+        preset = get_preset(preset_id)
+    except KeyError:
+        return 400, {"code": KEY_CHECK_FAILED_CODE,
+                     "message": "unknown preset %r" % (preset_id,)}
+    _pre_ok, _pre_kind, _pre_status = _preflight_live_models(
+        ctx, preset, key_value)
+    if not _pre_ok:
+        if _pre_kind == "auth":
+            return 401, {"code": KEY_REFUSED_CODE,
+                         "message": KEY_REFUSED_MESSAGE}
+        if _pre_kind == "network":
+            return 503, {"code": PROVIDER_UNREACHABLE_CODE,
+                         "message": PROVIDER_UNREACHABLE_MESSAGE}
+        if isinstance(_pre_status, int) and _pre_status:
+            return 400, {"code": KEY_CHECK_FAILED_CODE,
+                         "message": "provider answered HTTP %d"
+                                    % (_pre_status,)}
+        return 400, {"code": KEY_CHECK_FAILED_CODE,
+                     "message": "provider check failed"}
+    return 200, {"ok": True}
+
+
 ROUTES = (
     ("post", "/api/v1/providers/keys", "save_key", save_key),
+    ("post", "/api/v1/providers/keys/check", "check_key", check_key),
 )
 
-__all__ = ["KEY_SAVE_TIMEOUT", "ROUTES", "save_key"]
+__all__ = ["KEY_SAVE_TIMEOUT", "ROUTES", "save_key", "check_key"]

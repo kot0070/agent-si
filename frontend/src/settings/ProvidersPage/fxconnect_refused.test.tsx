@@ -67,12 +67,21 @@ async function saveWrongKey(): Promise<void> {
   fireEvent.change(within(dialog).getByLabelText("API key"), {
     target: { value: "abc" },
   });
-  fireEvent.click(within(dialog).getByText("Save"));
+  // Two-step dialog: paste + Check first (read-only route, never
+  // stores); a refused/unreachable key reports here and Save stays
+  // disabled. Save is covered by the success path below.
+  fireEvent.click(within(dialog).getByText("Check"));
 }
 
 describe("FXR2E refused key stays disconnected", () => {
   it("401 shows the refused text and the card stays Connect", async () => {
     stubFetch((url) => {
+      if (url === "/api/v1/providers/keys/check") {
+        return json(
+          { code: "PROVIDER_KEY_REFUSED", message: REFUSED },
+          401,
+        );
+      }
       if (url === "/api/v1/providers/keys") {
         return json(
           { code: "PROVIDER_KEY_REFUSED", message: REFUSED },
@@ -88,6 +97,12 @@ describe("FXR2E refused key stays disconnected", () => {
 
   it("503 shows the unreachable text and the card stays Connect", async () => {
     stubFetch((url) => {
+      if (url === "/api/v1/providers/keys/check") {
+        return json(
+          { code: "EVIDENCE_PROBE_NETWORK", message: UNREACHABLE },
+          503,
+        );
+      }
       if (url === "/api/v1/providers/keys") {
         return json(
           { code: "EVIDENCE_PROBE_NETWORK", message: UNREACHABLE },
@@ -103,6 +118,12 @@ describe("FXR2E refused key stays disconnected", () => {
 
   it("no fallback code is shown for a coded refusal", async () => {
     stubFetch((url) => {
+      if (url === "/api/v1/providers/keys/check") {
+        return json(
+          { code: "PROVIDER_KEY_REFUSED", message: REFUSED },
+          401,
+        );
+      }
       if (url === "/api/v1/providers/keys") {
         return json(
           { code: "PROVIDER_KEY_REFUSED", message: REFUSED },
@@ -118,5 +139,40 @@ describe("FXR2E refused key stays disconnected", () => {
         "CONTEXT_WRONG_CONTRACT_VERSION",
       );
     });
+  });
+
+  it("Check then Save success stores and shows Connected", async () => {
+    stubFetch((url) => {
+      if (url === "/api/v1/providers/keys/check") {
+        return json({ ok: true }, 200);
+      }
+      if (url === "/api/v1/providers/keys") {
+        return json(
+          { key_ref: { secret_id: "openai", provider_id: "openai" } },
+          201,
+        );
+      }
+      if (url === "/api/v1/providers/connect") {
+        return json({ status: "connected" }, 200);
+      }
+      return baseStub(url);
+    });
+    render(<ProvidersPage project_id="local" />);
+    fireEvent.click(screen.getByLabelText("Connect OpenAI"));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText("API key"), {
+      target: { value: "good-key" },
+    });
+    expect(
+      (within(dialog).getByText("Save") as HTMLButtonElement).disabled,
+    ).toBe(true);
+    fireEvent.click(within(dialog).getByText("Check"));
+    await screen.findByText("Key checked. Save to connect.");
+    expect(
+      (within(dialog).getByText("Save") as HTMLButtonElement).disabled,
+    ).toBe(false);
+    fireEvent.click(within(dialog).getByText("Save"));
+    const connected = await screen.findAllByText(/Connected OpenAI/);
+    expect(connected.length).toBeGreaterThan(0);
   });
 });

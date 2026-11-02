@@ -148,3 +148,64 @@ def test_network_failure_saves_nothing(tmp_path, monkeypatch):
     assert body.get("code") == "EVIDENCE_PROBE_NETWORK", body
     assert _providers(client) == []
     assert "openai" not in app.state.k04_ctx.credential_store
+
+
+def _check(client, key_value, preset="openai"):
+    return client.post(
+        "/api/v1/providers/keys/check",
+        json={"preset_id": preset, "key_value": key_value},
+        headers=ACTOR_HEADERS)
+
+
+def test_check_route_refused_stores_nothing(tmp_path, monkeypatch):
+    """Check-only 401: same refused text, nothing written, card Connect."""
+    monkeypatch.setattr(_urlreq, "urlopen", _http_401)
+    client, app = _client(tmp_path)
+    resp = _check(client, BAD)
+    assert resp.status_code == 401, resp.text
+    assert resp.json().get("code") == "PROVIDER_KEY_REFUSED", resp.text
+    assert resp.json().get("message") == REFUSED, resp.text
+    assert _providers(client) == []
+    assert "openai" not in app.state.k04_ctx.credential_store
+
+
+def _check_then_save_ok(request, timeout=None):
+    url = getattr(request, "full_url", "")
+    if url.rstrip("/").endswith("/models"):
+        return _models_ok(request, timeout)
+    body = json.dumps({"choices": [{"message": {"content": "ok"},
+                                    "finish_reason": "stop"}],
+                       "usage": {"input_tokens": 1,
+                                 "output_tokens": 1}}).encode("utf-8")
+
+    class _Resp2:
+        def read(self):
+            return body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    return _Resp2()
+
+
+def test_check_then_save_success_connects(tmp_path, monkeypatch):
+    """Check 200, then Save 201 + connect 200: Connected, models live."""
+    monkeypatch.setattr(_urlreq, "urlopen", _check_then_save_ok)
+    client, app = _client(tmp_path)
+    checked = _check(client, GOOD)
+    assert checked.status_code == 200, checked.text
+    assert checked.json().get("ok") is True, checked.text
+    assert _providers(client) == [], "check alone never connects"
+    saved = _save(client, GOOD)
+    assert saved.status_code == 201, saved.text
+    conn = client.post(
+        "/api/v1/providers/connect",
+        json={"preset_id": "openai", "model": "gpt-4o",
+              "key_ref": saved.json()["key_ref"]},
+        headers=ACTOR_HEADERS)
+    assert conn.status_code == 200, conn.text
+    rows = _providers(client)
+    assert any(r["provider_id"] == "openai" for r in rows), rows
