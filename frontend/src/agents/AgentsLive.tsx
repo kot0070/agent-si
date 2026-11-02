@@ -33,6 +33,22 @@ interface LiveSubscriber {
 
 const POLL_MS = 2000;
 
+// N1: the live panel shows only live rows. Run-end paths move rows out
+// of RUNNING (RETURNED on success, BLOCKED on stop/budget/held) and the
+// parts register closes to RETURNED/ACCEPTED/REJECTED/BLOCKED; those
+// ended rows drop out while QUEUED/RUNNING/HANDOFF stay visible.
+// Rows carrying errors stay visible through their live status.
+const ENDED_LIVE_STATUSES: ReadonlySet<string> = new Set([
+  "RETURNED",
+  "ACCEPTED",
+  "REJECTED",
+  "BLOCKED",
+]);
+
+function isLiveRowActive(row: PartRow): boolean {
+  return !ENDED_LIVE_STATUSES.has(String(row.status).toUpperCase());
+}
+
 function readStatusHuman(row: PartRow): unknown {
   return (row as unknown as Record<string, unknown>).status_human;
 }
@@ -149,7 +165,8 @@ export function AgentsLive(props: AgentsLiveProps): ReactElement {
     };
   }, [client, props.projectId]);
 
-  const counts = countPlacements(rows ?? []);
+  const live = (rows ?? []).filter(isLiveRowActive);
+  const counts = countPlacements(live);
 
   return (
     <Card
@@ -181,7 +198,7 @@ export function AgentsLive(props: AgentsLiveProps): ReactElement {
         />
       ) : rows === null ? (
         <LoadingState loadingKey="ui.loading.more" />
-      ) : rows.length === 0 ? (
+      ) : live.length === 0 ? (
         <EmptyState
           stateKey="agents.live.empty"
           actionKey={null}
@@ -192,7 +209,7 @@ export function AgentsLive(props: AgentsLiveProps): ReactElement {
           data-testid="agents-live-rows"
           style={{ maxHeight: "240px", overflowY: "auto", overflowX: "hidden" }}
         >
-          {rows.map((row) => {
+          {live.map((row) => {
             const placement = placementForRow(row);
             const scopeRef = shortenLiveRef(row.scope);
             const deliverableRef = shortenLiveRef(row.deliverable);

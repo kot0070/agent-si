@@ -5,7 +5,7 @@
 // window event carries the new locale to App for a full re-render.
 
 import { Link, useLocation } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import type { PartRow, ProjectRecord } from "../api/iface";
 import { ApiError, requestResponse } from "../api/errors";
@@ -149,6 +149,39 @@ export function TopBar(props: TopBarProps): ReactElement {
 
   const effective = props.projectId ?? current.projectId;
   const options = projects ?? [];
+  // FXRC1FIX P4: the mount list predates a first-message project, so the
+  // select would show "Select a project" for the new id. Refetch once per
+  // unknown id; the fresh options then show the project name.
+  const refetchedRef = useRef<string | null>(null);
+  const effectiveMissing =
+    effective !== null &&
+    projects !== null &&
+    !options.some((project) => project.project_id === effective);
+  useEffect(() => {
+    if (!effectiveMissing || effective === null) {
+      return undefined;
+    }
+    if (refetchedRef.current === effective) {
+      return undefined;
+    }
+    refetchedRef.current = effective;
+    let alive = true;
+    client.listProjects().then(
+      (rows) => {
+        if (alive) {
+          setProjects(rows);
+        }
+      },
+      () => {
+        if (alive) {
+          setProjects([]);
+        }
+      },
+    );
+    return () => {
+      alive = false;
+    };
+  }, [client, effective, effectiveMissing]);
 
   // Top placement badge truth: the placement of the current live rows;
   // with none running, the default route of the connected providers;

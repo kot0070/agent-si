@@ -125,6 +125,32 @@ def _window_for_model(provider: str, model: str) -> Any:
     return "UNKNOWN"
 
 
+def _team_reason(mode: str) -> str:
+    """One short chat-visible reason per role mode (full why in plan)."""
+    if mode == "AUTO":
+        return "Auto: cheapest known price among connected providers"
+    if mode == "pool":
+        return "Pool pick"
+    return "Pinned"
+
+
+def _team_lines(team: list) -> list[str]:
+    """Short chat team lines: one line when all roles share provider,
+    model and mode (FXRC1FIX P2: the raw why JSON flooded chat); one
+    short line per role otherwise. The full why stays in DEVRUN_PLAN."""
+    pairs = {(str(res.get("provider")), str(res.get("model")))
+             for _, res in team}
+    modes = {str(res.get("mode")) for _, res in team}
+    if len(pairs) == 1 and len(modes) == 1:
+        provider, model = next(iter(pairs))
+        return ["Team: director, manager, worker, auditor on %s/%s (%s)"
+                % (provider, model, _team_reason(next(iter(modes))))]
+    return ["Role %s: %s/%s (%s)"
+            % (role_name, res.get("provider"), res.get("model"),
+               _team_reason(str(res.get("mode"))))
+            for role_name, res in team]
+
+
 def _journal_event(project: str, kind: str, summary: str) -> None:
     """One devrun journal row; a journal failure never breaks the run."""
     try:
@@ -443,21 +469,11 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
             yield _run_event("done", turn, task_id, record["summary"],
                              {"run_id": run_id, "success": False})
             return
-        for role_name, resolution in (
+        for line in _team_lines([
                 ("director", director), ("manager", manager),
-                ("worker", worker), ("auditor", auditor)):
-            try:
-                why = json.dumps(resolution.get("why", {}),
-                                 sort_keys=True, default=str)
-            except Exception:
-                why = "{}"
-            yield _run_event(
-                "delta", turn, task_id,
-                "Role %s: %s/%s (%s why: %s)"
-                % (role_name, resolution.get("provider"),
-                   resolution.get("model"),
-                   resolution.get("mode"), why),
-                {"run_id": run_id, "part_id": None})
+                ("worker", worker), ("auditor", auditor)]):
+            yield _run_event("delta", turn, task_id, line,
+                             {"run_id": run_id, "part_id": None})
             turn += 1
         _check_stop()
         director_text = _call(
@@ -602,6 +618,7 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         if not record.get("stopped"):
             record["run_end"] = _run_end_tests(
                 project_id=project, run_id=run_id, task_id=task_id)
+        _close_live("BLOCKED")
         _journal("DEVRUN_END", record.get("summary") or "run ended")
         status = "Needs your permission to install: %s" % (exc.command,)
         yield _run_event("delta", turn, task_id, status,
