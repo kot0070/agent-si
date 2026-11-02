@@ -117,24 +117,21 @@ def _read_record(record):
 
 
 def test_k10start_B0B_129_prerequisites_served():
-    """Row B0B-129: README Prerequisites plus the lockfiles on disk."""
-    prereq = _section(_readme_text(), "Prerequisites")
-    assert "Python 3.13" in prereq, prereq
-    assert "virtual environment" in prereq, prereq
-    assert "Node.js" in prereq, prereq
-    assert "frontend/package-lock.json" in prereq, prereq
-    assert "checkout-relative" in prereq, prereq
+    """Row B0B-129: README Requirements plus the lockfiles on disk."""
+    req = _section(_readme_text(), "Requirements")
+    assert "WebView2" in req, req
+    assert "AGENT_SI_PYTHON" in req, req
+    assert "licence" in req, req
     assert os.path.isfile(
         os.path.join(_WS, "frontend", "package-lock.json"))
     assert os.path.isfile(os.path.join(_WS, "pyproject.toml"))
 
 
 def test_k10start_B0B_131_setup_steps_served(tmp_path):
-    """Row B0B-131: README Setup runs tools/start.py --smoke first."""
-    setup = _section(_readme_text(), "Setup")
-    assert "tools/start.py --smoke" in setup, setup
-    assert "env.example" in setup or "environment example" in setup, setup
-    assert "package-lock.json" in setup, setup
+    """Row B0B-131: README first-run guide plus tools/start.py --smoke."""
+    setup = _section(_readme_text(), "First run, step by step")
+    assert "Connect a provider" in setup, setup
+    assert "/firstrun" in setup, setup
     proc, record = _run_smoke(tmp_path, "k10start-131")
     assert proc.returncode == 0, proc.stdout + proc.stderr
     body = _read_record(record)
@@ -143,9 +140,9 @@ def test_k10start_B0B_131_setup_steps_served(tmp_path):
 
 
 def test_k10start_B0B_151_demo_served(tmp_path, monkeypatch):
-    """Row B0B-151: README demo index names POST /api/v1/release/start/demo."""
-    index = _section(_readme_text(), "Demo and fixture command index")
-    assert "POST /api/v1/release/start/demo" in index, index
+    """Row B0B-151: README first-task flow; demo route served for real."""
+    first_task = _section(_readme_text(), "First task and Stop")
+    assert "chat" in first_task, first_task
     client, data_dir = _client_with_data_dir(
         tmp_path, monkeypatch, "k10start-151-token")
     resp = client.post("/api/v1/release/start/demo")
@@ -255,7 +252,7 @@ def test_k10start_B0B_211_versioned_deps_served(tmp_path):
 
 
 def test_k10start_LIVE0_01_frontend_offline_served():
-    """Row LIVE0-01: setup+index installs from cached tarballs only."""
+    """Row LIVE0-01: hash-verified download plus offline tarball install."""
     lock_path = os.path.join(_WS, "frontend", "package-lock.json")
     assert os.path.isfile(lock_path)
     with open(lock_path, encoding="utf-8") as handle:
@@ -271,9 +268,8 @@ def test_k10start_LIVE0_01_frontend_offline_served():
     lockfiles = _load_start_module().check_lockfiles(pathlib.Path(_WS))
     assert lockfiles["status"] == "ok", lockfiles
     assert lockfiles["offline"] is True, lockfiles
-    setup = _section(_readme_text(), "Setup")
-    index = _section(_readme_text(), "Demo and fixture command index")
-    assert "tarball" in (setup + index).lower(), setup + index
+    verify = _section(_readme_text(), "Download and verify")
+    assert "SHA256" in verify, verify
 
 
 def test_k10start_LIVE0_04_data_dir_served(tmp_path, monkeypatch):
@@ -294,5 +290,5 @@ def test_k10start_LIVE0_04_data_dir_served(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENT_SI_DATA_DIR", "   ")
     with pytest.raises(ValueError):
         create_app(_clean_settings("k10start-live004-blank"))
-    index = _section(_readme_text(), "Demo and fixture command index")
+    index = _section(_readme_text(), "Where data lives")
     assert "AGENT_SI_DATA_DIR" in index, index

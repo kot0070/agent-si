@@ -9,8 +9,8 @@
 // even while collapsed, so the collapsed button can name the
 // Director/Manager/Agents values at once; before data arrives it carries only
 // the Role pools title from the locale files, so the chat page renders no
-// hard-coded string before data arrives. Label keys live in
-// _task/FXROLES/HITS.md with English
+// hard-coded string before data arrives. Label keys live in the roles
+// lane hits record with English
 // defaults; missing locale keys fall back to English and no locale file is
 // touched here.
 import { useEffect, useState } from "react";

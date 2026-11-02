@@ -24,8 +24,9 @@ packaged-build acceptance drive are tracked separately in
 
 ## Sources
 
-Frozen records: [RECORDS/day0/K13_MANIFEST.md](../../RECORDS/day0/K13_MANIFEST.md)
-and the frozen interface stubs under [iface/](../../iface/): `iface/frozen_k04/K04_INTERFACE_STUB.py`,
+Frozen records: `RECORDS/day0/K13_MANIFEST.md` (record store, not
+shipped in this bundle) and the frozen interface stubs under
+[iface/](../../iface/): `iface/frozen_k04/K04_INTERFACE_STUB.py`,
 `iface/frozen_k04/K04_INTERFACE_STUB_v2_MAP13.py`,
 `iface/frozen_k04/K04_INTERFACE_STUB_v3_ADD412.py`,
 `iface/frozen_manifest/interface_stub.py`, `iface/frozen_manifest/manifest.py`,

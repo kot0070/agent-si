@@ -2,7 +2,7 @@
 
 Project licence: MIT, Copyright (c) 2026 Ivan Soprun. See `LICENSE` at the checkout root. The About screen shows the product name, the copyright line, the licence text, and the third-party list.
 
-This file lists every third-party component shipped with the release. Versions come from the lock files: `frontend/package-lock.json` for the interface and `pyproject.toml` plus the frozen sidecar metadata for the desktop bundle. Texts for components that need them are vendored in `licenses/`.
+This file lists every third-party component shipped with the release. Versions come from the lock files: `frontend/package-lock.json` for the interface and `pyproject.toml` plus the frozen sidecar metadata for the desktop bundle. Texts for components that need them are vendored in `licenses/` (this directory's `licenses/` subfolder; in the bundle under `docs/third_party_notices/licenses/`).
 
 ## Interface runtime
 
