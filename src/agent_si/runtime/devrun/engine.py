@@ -565,6 +565,16 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                       str(resolution.get("provider", "")))
 
         try:
+            # A5: the row goes up BEFORE the model call returns, so the
+            # Live panel shows a RUNNING row during long Director
+            # planning instead of "No agents running".
+            _live(str(role), str(resolution.get("model", "")),
+                  part, attempt, "calling", "",
+                  {}, None, list(waits or []),
+                  str(resolution.get("provider", "")))
+        except Exception:
+            pass
+        try:
             # FXPARALLEL BEGIN own-row: cost from the row this call
             # wrote, never the ledger tail (A2). Per-call ids are int's
             # B4 scheme (run-c<seq>); the post-call block stays one
