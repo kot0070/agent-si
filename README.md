@@ -32,8 +32,10 @@ Get-FileHash -Algorithm SHA256 AgentSI-setup-0.1.0.exe
 3. Compare the value with the `AgentSI-setup-0.1.0.exe` line in
 `SHA256SUMS.txt`.
 4. Double-click the installer and follow the wizard. It installs per user
-(no administrator rights needed), adds a Start-menu entry, and can add a
-desktop icon and start the app at the end. Uninstalling keeps your data
+(no administrator rights needed), adds a Start-menu entry and a desktop
+shortcut (both named 'Agent SI', both checked by default in the wizard,
+opening AgentSI.exe in its folder), and can start the app at the end.
+Uninstalling removes both shortcuts and keeps your data
 folder unless you answer Yes to deleting it (see Remove below).
 
 The build is unsigned, so Windows SmartScreen shows "Windows protected your PC" with publisher Unknown for the installer and again on first start.
@@ -51,10 +53,14 @@ Get-FileHash -Algorithm SHA256 AgentSI-portable-0.1.0.zip
 ```
 
 3. Compare the value with the `AgentSI-portable-0.1.0.zip` line in
-`SHA256SUMS.txt`. The zip also carries its own `SHA256SUMS.txt` inside,
-with the hash of every file including `app/AgentSI.exe`.
+`SHA256SUMS.txt`. The zip holds one top folder `AgentSI/` and carries its
+own `SHA256SUMS.txt` inside, with the hash of every file including
+`AgentSI.exe` at the top folder root.
 4. If the zip was downloaded, unblock it before unzipping: right-click the zip -> Properties -> check Unblock -> OK (or PowerShell: Unblock-File -LiteralPath .\AgentSI-portable-0.1.0.zip).
-5. Unpack the zip into an empty folder and start `AgentSI.exe` by double-click.
+5. Unpack the zip into an empty folder, open the `AgentSI` folder inside it,
+and run AgentSI.exe inside it by double-click (or run `Start-AgentSI.cmd`
+beside it). Never copy the exe out of its folder: it needs its support
+files beside it.
 
 The same SmartScreen warning as above appears on first start (unsigned
 build, publisher Unknown): More info, then Run anyway - only after the
