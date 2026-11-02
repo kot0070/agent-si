@@ -125,3 +125,22 @@ def test_served_status_route_carries_numbers():
     journal = client.get("/api/v1/watcher/journal",
                          params={"project_id": pid})
     assert journal.status_code == 200
+
+
+def test_locale_en_uk_not_known_and_rules():
+    import json as _json
+
+    for path in (
+        os.path.join(_WS, "frontend", "src", "locale", "en.json"),
+        os.path.join(_WS, "frontend", "src", "locale", "uk.json"),
+    ):
+        with open(path, encoding="utf-8") as handle:
+            table = _json.load(handle)
+        tab = table["watcher"]["tab"]
+        assert tab["notKnown"] in ("not known", "невідомо"), path
+        for key in ("checks", "alerts", "lastCheck", "modelCalls",
+                    "watches", "lastAction", "rulesTitle", "journalTitle",
+                    "looksHang", "looksGuard", "looksTamper"):
+            assert tab.get(key), "%s missing %s" % (path, key)
+        rail = table["shell"]["cards"]["watcher"]
+        assert rail["notKnown"] in ("not known", "невідомо"), path
