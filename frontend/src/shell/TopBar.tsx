@@ -5,7 +5,7 @@
 // window event carries the new locale to App for a full re-render.
 
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import type { PartRow, ProjectRecord } from "../api/iface";
 import { ApiError, requestResponse } from "../api/errors";
@@ -18,6 +18,7 @@ import {
 } from "../agents/agentsApi";
 import type { Placement } from "../agents/agentsApi";
 import { listConnectedProviders } from "../settings/ProvidersPage/connectApi";
+import { useLiveRows } from "../agents/liveStore";
 import {
   DEFAULT_LOCALE,
   LOCALE_STORAGE_KEY,
@@ -66,7 +67,10 @@ export function TopBar(props: TopBarProps): ReactElement {
   const [projects, setProjects] = useState<ProjectRecord[] | null>(null);
   const [stopArmed, setStopArmed] = useState(false);
   const [stopText, setStopText] = useState<string | null>(null);
-  const [liveRows, setLiveRows] = useState<PartRow[] | null>(null);
+  // FXDESIGN8: the shared agents-live store owns the single poller;
+  // the top bar only subscribes.
+  const live = useLiveRows(client);
+  const liveRows = live.rows;
   const [connected, setConnected] = useState<string[] | null>(null);
 
   // W1: apply the stored locale to the locale module at boot so the
@@ -109,30 +113,6 @@ export function TopBar(props: TopBarProps): ReactElement {
     );
     return () => {
       alive = false;
-    };
-  }, [client]);
-
-  useEffect(() => {
-    let alive = true;
-    async function load(): Promise<void> {
-      try {
-        const next = await client.listAgentsLive();
-        if (alive) {
-          setLiveRows(next);
-        }
-      } catch {
-        if (alive) {
-          setLiveRows([]);
-        }
-      }
-    }
-    void load();
-    const timer = setInterval(() => {
-      void load();
-    }, 2000);
-    return () => {
-      alive = false;
-      clearInterval(timer);
     };
   }, [client]);
 
@@ -186,8 +166,9 @@ export function TopBar(props: TopBarProps): ReactElement {
 
   // Top placement badge truth: the placement of the current live rows;
   // with none running, the default route of the connected providers;
-  // hidden when neither is sourced. Never a guess.
-  function topPlacement(): Placement | null {
+  // hidden when neither is sourced. Never a guess. Memoised: the shared
+  // tick replaces state only on change, and this skips the rescan anyway.
+  const badge = useMemo<Placement | null>(() => {
     const running = (liveRows ?? []).filter(
       (row) => row.status === "RUNNING",
     );
@@ -221,9 +202,7 @@ export function TopBar(props: TopBarProps): ReactElement {
       return [...route][0] ?? null;
     }
     return "SPLIT";
-  }
-
-  const badge = topPlacement();
+  }, [liveRows, connected]);
 
   function changeLocale(next: SupportedLocale): void {
     if (next === locale) {

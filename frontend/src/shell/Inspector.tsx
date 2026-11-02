@@ -5,7 +5,7 @@
 // records; a missing record renders the shared empty line or UNKNOWN,
 // never an invented value.
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type {
@@ -16,12 +16,18 @@ import type {
 } from "../api/iface";
 import type { InspectorProps as InspectorBaseProps } from "../app/iface";
 import { useApiClient } from "../app/ApiClientProvider";
+import { useLiveRows } from "../agents/liveStore";
+import { readLedgerWithRuns } from "../api/projectsApi";
+import type { RunLedgerRow } from "../api/projectsApi";
+import { readProjectTelemetry } from "../k07next2/k07next2Api";
+import type { ProjectTelemetry } from "../k07next2/k07next2Api";
 import { formatNumber, t } from "../locale/index";
 import { formatDateTime } from "../locale/index";
 import { shortenLiveRef } from "../agents/agentsApi";
 import {
   placementForRow,
   placementKey,
+  statusHumanKey,
 } from "../agents/agentsApi";
 import { Icon } from "../ui/icons";
 import { remainingBudget } from "../projects/projectsApi";
@@ -45,13 +51,8 @@ export interface InspectorProps extends InspectorBaseProps {
   live: ReactNode;
 }
 
-const LIVE_POLL_MS = 2000;
 const PROJECT_POLL_MS = 15000;
 const DASH = "\u2013";
-
-interface LiveSubscriber {
-  subscribe?: (listener: (rows: PartRow[]) => void) => () => void;
-}
 
 function readExtra(row: PartRow, name: string): unknown {
   return (row as unknown as Record<string, unknown>)[name];
@@ -134,6 +135,16 @@ function readRef(value: unknown): RefText {
   return text.length > 40 ? { text, title: text } : { text };
 }
 
+// FXDESIGN8 short model name: the registry tail after the last slash or
+// colon (provider prefixes never render in the one-line row).
+function shortModelName(value: string): string {
+  const afterSlash = value.split("/");
+  const tail = afterSlash[afterSlash.length - 1] ?? value;
+  const afterColon = tail.split(":");
+  const head = afterColon[afterColon.length - 1] ?? tail;
+  return head === "" ? value : head;
+}
+
 function readTaskStatus(status: string): string {
   if (status === "RUNNING") {
     return t("tasks.status.running");
@@ -144,20 +155,11 @@ function readTaskStatus(status: string): string {
   return status;
 }
 
-// N1: Team-now shows only live rows. Run-end paths move rows out of
-// RUNNING (RETURNED on success, BLOCKED on stop/budget/held) and the
-// parts register closes to RETURNED/ACCEPTED/REJECTED/BLOCKED; those
-// ended rows drop out while QUEUED/RUNNING/HANDOFF stay visible.
-// Rows carrying errors stay visible through their live status.
-const ENDED_LIVE_STATUSES: ReadonlySet<string> = new Set([
-  "RETURNED",
-  "ACCEPTED",
-  "REJECTED",
-  "BLOCKED",
-]);
-
-function isLiveRowActive(row: PartRow): boolean {
-  return !ENDED_LIVE_STATUSES.has(String(row.status).toUpperCase());
+// FXDESIGN8: Team now lists every served row, including finished runs:
+// after a run the rail still shows the last run's team with its real
+// state (real state or none, never an Unknown chip).
+function isLiveRowActive(_row: PartRow): boolean {
+  return true;
 }
 
 function fractionOf(value: number, total: number): number {
@@ -170,8 +172,13 @@ function fractionOf(value: number, total: number): number {
 export function Inspector(props: InspectorProps): ReactElement {
   const client = useApiClient();
   const projectId = props.projectId;
-  const [liveRows, setLiveRows] = useState<PartRow[] | null>(null);
+  // FXDESIGN8: the shared agents-live store owns the single poller;
+  // the rail only subscribes.
+  const live = useLiveRows(client);
+  const liveRows = live.rows;
   const [ledger, setLedger] = useState<LedgerRow[] | null>(null);
+  const [runs, setRuns] = useState<RunLedgerRow[] | null>(null);
+  const [telemetry, setTelemetry] = useState<ProjectTelemetry | null>(null);
   const [nudge, setNudge] = useState<string | null>(null);
   const [tasks, setTasks] = useState<TaskRecord[] | null>(null);
   const [budget, setBudget] = useState<BudgetState | null>(null);
@@ -199,45 +206,7 @@ export function Inspector(props: InspectorProps): ReactElement {
   );
   const [appsCollapsed, onAppsToggle] = useCollapsedCard("fx-apps", true);
 
-  useEffect(() => {
-    let alive = true;
-    let stop: (() => void) | undefined;
-    let timer: ReturnType<typeof setInterval> | undefined;
-    async function load(): Promise<void> {
-      try {
-        const next = await client.listAgentsLive();
-        if (alive) {
-          setLiveRows(next);
-        }
-      } catch {
-        if (alive) {
-          setLiveRows([]);
-        }
-      }
-    }
-    void load();
-    const source = client as unknown as LiveSubscriber;
-    if (typeof source.subscribe === "function") {
-      stop = source.subscribe((next) => {
-        if (alive) {
-          setLiveRows([...next]);
-        }
-      });
-    } else {
-      timer = setInterval(() => {
-        void load();
-      }, LIVE_POLL_MS);
-    }
-    return () => {
-      alive = false;
-      if (stop !== undefined) {
-        stop();
-      }
-      if (timer !== undefined) {
-        clearInterval(timer);
-      }
-    };
-  }, [client]);
+  // FXDESIGN8: the live snapshot comes from the shared store above.
 
   // §6: the newest WATCH_DECISION row proves the watcher decided; the
   // served receipt carries no model, so the value stays the configured
@@ -276,11 +245,14 @@ export function Inspector(props: InspectorProps): ReactElement {
     let alive = true;
     async function loadProject(target: string): Promise<void> {
       try {
-        const rows = await client.readLedger(target);
+        // FXDESIGN8: one ledger-route round trip serves both the package
+        // rows and the runs key (last run verdict/tokens/files).
+        const { rows, runs: runRows } = await readLedgerWithRuns(target);
         if (!alive) {
           return;
         }
         setLedger(rows);
+        setRuns(runRows);
         const last = rows[rows.length - 1];
         if (last === undefined) {
           setNudge(null);
@@ -301,7 +273,23 @@ export function Inspector(props: InspectorProps): ReactElement {
       } catch {
         if (alive) {
           setLedger([]);
+          setRuns([]);
           setNudge(null);
+        }
+      }
+      // FXDESIGN8: the runs key of the same ledger route is already
+      // loaded above with the package rows; no second round trip.
+      // FXDESIGN8: token totals per model plus the project totals, read
+      // from served telemetry (metric names are served text:
+      // tokens_total, cloud_calls, cost). Never invented, never a guess.
+      try {
+        const doc = await readProjectTelemetry(target);
+        if (alive) {
+          setTelemetry(doc);
+        }
+      } catch {
+        if (alive) {
+          setTelemetry(null);
         }
       }
       try {
@@ -356,6 +344,8 @@ export function Inspector(props: InspectorProps): ReactElement {
     }
     if (projectId === null) {
       setLedger(null);
+      setRuns(null);
+      setTelemetry(null);
       setNudge(null);
       setTasks(null);
       setBudget(null);
@@ -408,7 +398,7 @@ export function Inspector(props: InspectorProps): ReactElement {
     return sum;
   }
 
-  const roleSlices: RoleSlice[] = (() => {
+  const roleSlices: RoleSlice[] = useMemo(() => {
     const unknownLabel = t("shell.common.unknown");
     const byRole = new Map<string, { label: string; tokens: number }>();
     for (const row of rows) {
@@ -434,7 +424,7 @@ export function Inspector(props: InspectorProps): ReactElement {
       return [{ key: "unknown", label: unknownLabel, tokens: 0 }];
     }
     return withTokens;
-  })();
+  }, [rows]);
 
   const roleTotal = roleSlices.reduce((sum, slice) => sum + slice.tokens, 0);
 
@@ -453,15 +443,18 @@ export function Inspector(props: InspectorProps): ReactElement {
     "var(--agent-si-chart-e)",
     "var(--agent-si-chart-f)",
   ];
-  const warnings: Array<{ agent: string; error: string }> = [];
-  for (const row of rows) {
-    const errors = readExtra(row, "errors");
-    if (Array.isArray(errors)) {
-      for (const error of errors) {
-        warnings.push({ agent: row.agent, error: String(error) });
+  const warnings: Array<{ agent: string; error: string }> = useMemo(() => {
+    const found: Array<{ agent: string; error: string }> = [];
+    for (const row of rows) {
+      const errors = readExtra(row, "errors");
+      if (Array.isArray(errors)) {
+        for (const error of errors) {
+          found.push({ agent: row.agent, error: String(error) });
+        }
       }
     }
-  }
+    return found;
+  }, [rows]);
 
   // §3: Used is the input tokens of the role's last call, Window the
   // model's KB context size when known; the percent renders only when
@@ -469,10 +462,63 @@ export function Inspector(props: InspectorProps): ReactElement {
   // live row everything reads UNKNOWN and no source line renders.
   const newest = rows.length === 0 ? null : (rows[rows.length - 1] ?? null);
 
+  const lastPackages = (ledger ?? []).slice(-3);
+  // FXDESIGN8: the last run of the runs key carries the verdict plus the
+  // produced files; package rows stay as the per-package list below.
+  const lastRun = (runs ?? []).length === 0 ? null : runs?.[(runs?.length ?? 0) - 1] ?? null;
+  const lastRunTokens =
+    lastRun !== null &&
+    typeof lastRun.tokens === "number" &&
+    Number.isFinite(lastRun.tokens) &&
+    lastRun.tokens >= 0
+      ? lastRun.tokens
+      : null;
+
   const tokenIn = readTokenSum(rows, "input");
   const tokenOut = readTokenSum(rows, "output");
-  const tokenTotal = tokenIn + tokenOut;
+  const liveTokenTotal = tokenIn + tokenOut;
   const unknown = t("shell.common.unknown");
+
+  // FXDESIGN8 exact cause: readTokenSum/tokensOfRow read only live extras,
+  // which end with the run. Tokens + Context legend read live rows while a
+  // run is live, otherwise the project's served totals: the last run's
+  // tokens from the runs key first (the chat Total line shows the same
+  // number), then telemetry tokens_total. No invented zero, no chip.
+  const runLive = useMemo(
+    () => rows.some((row) => String(row.status).toUpperCase() === "RUNNING"),
+    [rows],
+  );
+  const telemetryTotals = telemetry?.totals ?? null;
+  const telemetryTokensTotal =
+    telemetryTotals !== null &&
+    typeof telemetryTotals["tokens_total"] === "number" &&
+    Number.isFinite(telemetryTotals["tokens_total"])
+      ? (telemetryTotals["tokens_total"] as number)
+      : null;
+  const idleTokenTotal = lastRunTokens ?? telemetryTokensTotal;
+  const tokenTotal = runLive
+    ? liveTokenTotal
+    : (idleTokenTotal ?? liveTokenTotal);
+  const tokensKnown =
+    liveRows === null
+      ? false
+      : runLive
+        ? rows.some((row) => tokensOfRow(row) > 0)
+        : idleTokenTotal !== null;
+  // Served per-model tokens for the idle legend (raw model names, never a
+  // locale lookup; UNAVAILABLE rows carry no number and stay out).
+  const modelSlices = useMemo(() => {
+    const models = telemetry?.models ?? [];
+    const slices = [];
+    for (const model of models) {
+      if (typeof model.tokens === "number" && Number.isFinite(model.tokens)) {
+        slices.push({ model: model.model, tokens: model.tokens });
+      }
+    }
+    slices.sort((a, b) => b.tokens - a.tokens);
+    return slices;
+  }, [telemetry]);
+  const modelTotal = modelSlices.reduce((sum, slice) => sum + slice.tokens, 0);
 
   const usedCount =
     newest === null ? null : readCount(readExtra(newest, "context"));
@@ -485,7 +531,26 @@ export function Inspector(props: InspectorProps): ReactElement {
   const usedText = usedCount !== null ? formatNumber(usedCount) : unknown;
   const windowText = windowCount !== null ? formatNumber(windowCount) : unknown;
 
-  const lastPackages = (ledger ?? []).slice(-3);
+  // FXDESIGN8: the last run of the runs key carries the verdict plus the
+  // produced files; package rows stay as the per-package list below.
+  // (lastRun itself is derived above, beside the token totals.)
+  const lastRunVerdicts =
+    lastRun === null
+      ? []
+      : (lastRun.parts ?? [])
+          .map((part) => {
+            const record = part as Record<string, unknown>;
+            const verdict = record["verdict"];
+            const partId = record["part_id"];
+            if (typeof verdict === "string" && verdict !== "") {
+              return typeof partId === "string" && partId !== ""
+                ? `${partId}: ${verdict}`
+                : verdict;
+            }
+            return null;
+          })
+          .filter((text): text is string => text !== null);
+  const lastRunFiles = lastRun?.files ?? [];
   const activeTasks = (tasks ?? []).filter(
     (task) => task.status === "RUNNING" || task.status === "QUEUED",
   );
@@ -556,78 +621,136 @@ export function Inspector(props: InspectorProps): ReactElement {
                 const scopeRef = shortenLiveRef(row.scope);
                 const deliverableRef = shortenLiveRef(row.deliverable);
                 const place = placementForRow(row);
+                // FXDESIGN8 one-liner: role, short model name, status chip,
+                // step. The rest rides under the row disclosure. Unevidenced
+                // values render nothing: real state or none, never Unknown.
+                const roleRaw = readExtra(row, "role");
+                const roleKnown =
+                  typeof roleRaw === "string" && roleRaw !== "";
+                const modelRaw = readExtra(row, "model");
+                const modelShort =
+                  typeof modelRaw === "string" && modelRaw !== ""
+                    ? shortModelName(modelRaw)
+                    : null;
+                const stepRaw = readExtra(row, "step");
+                const stepKnown =
+                  typeof stepRaw === "number" &&
+                  Number.isFinite(stepRaw) &&
+                  stepRaw > 0;
                 return (
                   <li
                     key={row.agent}
                     data-testid={`team-row-${row.agent}`}
                     className="fx-team-row"
                   >
-                    <span
-                      data-testid={`team-place-${row.agent}`}
-                      className="fx-place-badge"
-                    >
-                      {t(placementKey(place))}
-                    </span>
-                    <span className="fx-team-field">{row.agent}</span>
-                    <span className="fx-team-field">
-                      {t("agents.row.scope")}{": "}
-                      <span
-                        className="fx-team-value fx-truncate"
-                        title={scopeRef.title}
+                    <details data-testid={`team-detail-${row.agent}`}>
+                      <summary
+                        data-testid={`team-line-${row.agent}`}
+                        className="fx-team-line"
                       >
-                        {scopeRef.text}
-                      </span>
-                    </span>
-                    <span className="fx-team-field">
-                      {t("agents.row.deliverable")}{": "}
-                      <span
-                        className="fx-team-value fx-truncate"
-                        title={deliverableRef.title}
-                      >
-                        {deliverableRef.text}
-                      </span>
-                    </span>
-                    <span className="fx-team-field">
-                      {t("settings.roleProfile.roleLabel")}{": "}
-                      {readRoleText(readExtra(row, "role"))}
-                    </span>
-                    <span className="fx-team-field">
-                      {t("settings.roleProfile.providerLabel")}{": "}
-                      {readText(readExtra(row, "provider"))}
-                    </span>
-                    <span className="fx-team-field">
-                      {t("settings.roleProfile.modelLabel")}{": "}
-                      {readText(readExtra(row, "model"))}
-                    </span>
-                    <span className="fx-team-field">
-                      {t("shell.cards.team.step")}{": "}
-                      {readText(readExtra(row, "step"))}
-                    </span>
-                    <span className="fx-team-field">
-                      {t("shell.cards.team.file")}{": "}
-                      <span
-                        className="fx-team-value fx-truncate"
-                        title={fileRef.title}
-                      >
-                        {fileRef.text}
-                      </span>
-                    </span>
-                    <span className="fx-team-field">
-                      {t("shell.cards.team.lastAction")}{": "}
-                      <span
-                        className="fx-team-value fx-truncate"
-                        title={lastActionRef.title}
-                      >
-                        {lastActionRef.text}
-                      </span>
-                    </span>
-                    <span className="fx-team-field">
-                      {readSilent(readExtra(row, "silent_min"))}
-                    </span>
-                    <span className="fx-team-field">
-                      {t("shell.cards.team.waiting")}{": "}
-                      {readWaiting(readExtra(row, "waits"))}
-                    </span>
+                        <span className="fx-team-field">{row.agent}</span>
+                        {roleKnown ? (
+                          <span className="fx-team-field">
+                            {readRoleText(roleRaw)}
+                          </span>
+                        ) : null}
+                        {modelShort === null ? null : (
+                          <span
+                            className="fx-team-field fx-truncate"
+                            title={
+                              modelShort === String(modelRaw)
+                                ? undefined
+                                : String(modelRaw)
+                            }
+                          >
+                            {modelShort}
+                          </span>
+                        )}
+                        <span
+                          data-testid={`team-status-${row.agent}`}
+                          className="fx-status-chip"
+                        >
+                          {t(statusHumanKey(row.status))}
+                        </span>
+                        {stepKnown ? (
+                          <span className="fx-team-field">
+                            {t("shell.cards.team.step")}{": "}
+                            {String(stepRaw)}
+                          </span>
+                        ) : null}
+                        {place === "UNKNOWN" ? null : (
+                          <span
+                            data-testid={`team-place-${row.agent}`}
+                            className="fx-place-badge"
+                          >
+                            {t(placementKey(place))}
+                          </span>
+                        )}
+                      </summary>
+                      <div className="fx-team-detail">
+                        <span className="fx-team-field">
+                          {t("agents.row.scope")}{": "}
+                          <span
+                            className="fx-team-value fx-truncate"
+                            title={scopeRef.title}
+                          >
+                            {scopeRef.text}
+                          </span>
+                        </span>
+                        <span className="fx-team-field">
+                          {t("agents.row.deliverable")}{": "}
+                          <span
+                            className="fx-team-value fx-truncate"
+                            title={deliverableRef.title}
+                          >
+                            {deliverableRef.text}
+                          </span>
+                        </span>
+                        <span className="fx-team-field">
+                          {t("settings.roleProfile.roleLabel")}{": "}
+                          {roleKnown
+                            ? readRoleText(roleRaw)
+                            : DASH}
+                        </span>
+                        <span className="fx-team-field">
+                          {t("settings.roleProfile.providerLabel")}{": "}
+                          {readText(readExtra(row, "provider"))}
+                        </span>
+                        <span className="fx-team-field">
+                          {t("settings.roleProfile.modelLabel")}{": "}
+                          {readText(readExtra(row, "model"))}
+                        </span>
+                        <span className="fx-team-field">
+                          {t("shell.cards.team.step")}{": "}
+                          {stepKnown ? String(stepRaw) : DASH}
+                        </span>
+                        <span className="fx-team-field">
+                          {t("shell.cards.team.file")}{": "}
+                          <span
+                            className="fx-team-value fx-truncate"
+                            title={fileRef.title}
+                          >
+                            {fileRef.text}
+                          </span>
+                        </span>
+                        <span className="fx-team-field">
+                          {t("shell.cards.team.lastAction")}{": "}
+                          <span
+                            className="fx-team-value fx-truncate"
+                            title={lastActionRef.title}
+                          >
+                            {lastActionRef.text}
+                          </span>
+                        </span>
+                        <span className="fx-team-field">
+                          {readSilent(readExtra(row, "silent_min"))}
+                        </span>
+                        <span className="fx-team-field">
+                          {t("shell.cards.team.waiting")}{": "}
+                          {readWaiting(readExtra(row, "waits"))}
+                        </span>
+                      </div>
+                    </details>
                   </li>
                 );
               })}
@@ -656,7 +779,7 @@ export function Inspector(props: InspectorProps): ReactElement {
             >
               {t("shell.cards.context.noUsage")}
             </p>
-          ) : (
+          ) : runLive ? (
             <>
               {usedCount !== null && windowCount !== null ? (
                 <>
@@ -725,6 +848,57 @@ export function Inspector(props: InspectorProps): ReactElement {
               </ul>
               ) : null}
             </>
+          ) : (
+            // Idle: no run live, so the meter reads the project's served
+            // totals (last run first, then telemetry) with a per-model
+            // legend from the telemetry doc. No window is served idle, so
+            // no percent is rendered; unevidenced reads one quiet line.
+            <>
+              {idleTokenTotal === null ? (
+                <p
+                  data-testid="ctx-unknown"
+                  className="fx-quiet-line"
+                  title={unknown}
+                >
+                  &mdash;
+                </p>
+              ) : (
+                <p data-testid="ctx-used" className="fx-quiet">
+                  {t("shell.cards.context.percentValue", {
+                    value: formatNumber(idleTokenTotal),
+                  })}
+                </p>
+              )}
+              {modelTotal > 0 ? (
+                <ul data-testid="ctx-legend" className="fx-legend">
+                  {modelSlices.map((slice, index) => (
+                    <li
+                      key={slice.model}
+                      data-testid={`ctx-legend-model-${slice.model}`}
+                      className="fx-legend-row"
+                    >
+                      <span
+                        className="fx-legend-dot"
+                        style={{
+                          backgroundColor:
+                            LEGEND_COLORS[index % LEGEND_COLORS.length] ??
+                            "var(--agent-si-chart-a)",
+                        }}
+                      />
+                      <span className="fx-legend-name">{slice.model}</span>
+                      <span className="fx-legend-tokens">
+                        {formatNumber(slice.tokens)}
+                      </span>
+                      <span className="fx-legend-pct">
+                        {modelTotal > 0
+                          ? `${Math.round((slice.tokens / modelTotal) * 100)}%`
+                          : unknown}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </>
           )}
         </section>
 
@@ -747,6 +921,53 @@ export function Inspector(props: InspectorProps): ReactElement {
                   {t("shell.cards.results.next")}: {nudge}
                 </p>
               )}
+              {/* FXDESIGN8: the last run's verdict plus its files, read from
+                  the runs key of the ledger route; served facts only. */}
+              {lastRun === null ? null : (
+                <div data-testid="result-last" className="fx-result-row">
+                  <Icon name="file" />
+                  <span
+                    data-testid="result-last-verdict"
+                    className="fx-truncate"
+                    title={
+                      lastRun.summary !== undefined && lastRun.summary !== ""
+                        ? lastRun.summary
+                        : undefined
+                    }
+                  >
+                    {lastRun.run_id}
+                    {lastRun.summary !== undefined && lastRun.summary !== ""
+                      ? `: ${lastRun.summary}`
+                      : null}
+                    {lastRunVerdicts.length === 0
+                      ? null
+                      : ` (${lastRunVerdicts.join(", ")})`}
+                  </span>{" "}
+                  <Link
+                    data-testid={`result-open-${lastRun.run_id}`}
+                    to={reportsHref}
+                    className="fx-why-quiet"
+                  >
+                    {t("shell.cards.results.open")}
+                  </Link>
+                </div>
+              )}
+              {lastRunFiles.length === 0 ? null : (
+                <ul data-testid="result-last-files" className="fx-bg-list">
+                  {lastRunFiles.map((file, index) => (
+                    <li
+                      key={`${file}-${index}`}
+                      data-testid={`result-file-${index}`}
+                      className="fx-bg-row"
+                    >
+                      <Icon name="file" />
+                      <span className="fx-truncate" title={file}>
+                        {file}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
               <ul className="fx-result-list">
                 {(resultsOpen ? lastPackages : lastPackages.slice(0, 5)).map(
                   (entry) => (
@@ -760,7 +981,7 @@ export function Inspector(props: InspectorProps): ReactElement {
                       <Link
                         data-testid={`result-open-${entry.package_id}`}
                         to={reportsHref}
-                        className="fx-btn-quiet"
+                        className="fx-why-quiet"
                       >
                         {t("shell.cards.results.open")}
                       </Link>
@@ -887,29 +1108,69 @@ export function Inspector(props: InspectorProps): ReactElement {
           )}
         </section>
 
-        <MetricCard
-          cardId="fx-tokens"
-          titleKey="shell.cards.tokens.title"
-          subtitleKey="shell.cards.tokens.subtitle"
-          totalKey="shell.cards.tokens.total"
-          totalText={liveRows === null ? unknown : formatNumber(tokenTotal)}
-          segments={[
-            {
-              segmentKey: "shell.cards.context.input",
-              fraction: fractionOf(tokenIn, tokenTotal),
-            },
-            {
-              segmentKey: "shell.cards.context.output",
-              fraction: fractionOf(tokenOut, tokenTotal),
-            },
-          ]}
-          segmentTexts={{
-            "shell.cards.context.input": formatNumber(tokenIn),
-            "shell.cards.context.output": formatNumber(tokenOut),
-          }}
-          collapsed={tokensCollapsed}
-          onToggle={onTokensToggle}
-        />
+        {tokensKnown ? (
+          <>
+            <MetricCard
+              cardId="fx-tokens"
+              titleKey="shell.cards.tokens.title"
+              subtitleKey="shell.cards.tokens.subtitle"
+              totalKey="shell.cards.tokens.total"
+              totalText={formatNumber(tokenTotal)}
+              segments={
+                runLive
+                  ? [
+                      {
+                        segmentKey: "shell.cards.context.input",
+                        fraction: fractionOf(tokenIn, tokenTotal),
+                      },
+                      {
+                        segmentKey: "shell.cards.context.output",
+                        fraction: fractionOf(tokenOut, tokenTotal),
+                      },
+                    ]
+                  : []
+              }
+              segmentTexts={
+                runLive
+                  ? {
+                      "shell.cards.context.input": formatNumber(tokenIn),
+                      "shell.cards.context.output": formatNumber(tokenOut),
+                    }
+                  : undefined
+              }
+              collapsed={tokensCollapsed}
+              onToggle={onTokensToggle}
+            />
+            {runLive || modelSlices.length === 0 ? null : (
+              <ul data-testid="tokens-extra-kinds" className="fx-legend">
+                {modelSlices.map((slice) => (
+                  <li key={slice.model} data-testid={`tokens-kind-${slice.model}`}>
+                    <span className="fx-legend-name">{slice.model}</span>{" "}
+                    <span className="fx-legend-tokens">
+                      {formatNumber(slice.tokens)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        ) : (
+          <>
+            <MetricCard
+              cardId="fx-tokens"
+              titleKey="shell.cards.tokens.title"
+              subtitleKey="shell.cards.tokens.subtitle"
+              totalKey="shell.cards.tokens.total"
+              totalText={unknown}
+              segments={[]}
+              collapsed={tokensCollapsed}
+              onToggle={onTokensToggle}
+            />
+            <p data-testid="tokens-unknown" className="fx-quiet-line">
+              {t("shell.cards.context.noUsage")}
+            </p>
+          </>
+        )}
         <MetricCard
           cardId="fx-tests"
           titleKey="shell.cards.tests.title"
