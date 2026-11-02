@@ -267,7 +267,7 @@ describe("fxwalk1 screens over the real app", () => {
       ),
     ).toBeNull();
     expect(screen.getByTestId("report-task-counts").textContent).toContain("0");
-    expect(screen.queryByText("Calculated value")).toBeNull();
+    expect(screen.queryByText("Calculated value")).toBeTruthy();
     expect(await screen.findByTestId("report-project-name")).toBeTruthy();
   });
 

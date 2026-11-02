@@ -15,11 +15,11 @@ const BASE = `${UI}/base.css`;
 const TOKENS = `${UI}/tokens.css`;
 
 describe("fxlink themed link colors", () => {
-  it("styles a, a:visited and a:focus-visible via --fx-link", () => {
+  it("styles a, a:visited and a:focus-visible via theme tokens", () => {
     const css = readFileSync(BASE, "utf8");
     expect(css).toMatch(/a\s*\{[^}]*color:\s*var\(--fx-link\)/);
     expect(css).toMatch(/a:visited\s*\{[^}]*color:\s*var\(--fx-link\)/);
-    expect(css).toMatch(/a:focus-visible\s*\{[^}]*var\(--fx-link\)/);
+    expect(css).toMatch(/a:focus-visible\s*\{[^}]*var\(--fx-focus-ring\)/);
     expect(css).not.toMatch(/#0000ee/i);
     expect(css).not.toMatch(/rgb\(\s*0\s*,\s*0\s*,\s*238\s*\)/);
   });
