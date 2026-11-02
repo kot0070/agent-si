@@ -185,6 +185,7 @@ def auditor_messages(
     checks: list[dict[str, Any]],
     install_runs: Any = (),
     prior_install_runs: Any = (),
+    part_diff: str = "",
 ) -> list[dict[str, str]]:
     """The auditor's NEW message list: goal, diff, checks with output.
 
@@ -201,6 +202,8 @@ def auditor_messages(
         "Goal: %s" % (goal,),
         "Files (diff vs attempt start):",
         files_diff,
+        "Files (whole part changes since part start):",
+        part_diff if part_diff else "(no changes)",
         "Checks (command, exit code, real output tail):",
     ]
     if not checks:
@@ -223,6 +226,8 @@ def auditor_messages(
         'Return ONLY JSON: {"result": "PASS"|"FAIL", '
         '"reasons": ["..."]}. Judge the real files and real outputs '
         "above, nothing else.")
+    from agent_si.runtime.devrun import roles as _roles
+    lines.append(_roles.reply_language_line())
     return [{"role": "user", "content": "\n".join(lines)}]
 
 
@@ -255,6 +260,7 @@ def judge(
     files_diff: str,
     checks: list[dict[str, Any]],
     artifact_refs: list[str],
+    part_diff: str = "",
     lock: Any = None,
     timeout_s: Any = None,
     stop_seen: Any = None,
@@ -273,7 +279,7 @@ def judge(
     evidence = _install_records.run_install_runs(record)
     prior = _install_records.prior_snapshot(record)
     messages = auditor_messages(goal, files_diff, checks, evidence,
-                                prior)
+                                prior, part_diff=part_diff)
     # FXPARALLEL BEGIN charge-lock: auditor charges under the run lock.
     response, over, _row = _roles.invoke_owned(
         app, adapter, resolution, messages, record=record,

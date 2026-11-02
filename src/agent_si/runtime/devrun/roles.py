@@ -32,6 +32,130 @@ class ModelTimeout(RuntimeError):
     code: str = "DEVRUN_MODEL_TIMEOUT"
 
 
+class ContextOverflow(RuntimeError):
+    """A model call died for input size (HTTP 400/413 + a length marker).
+
+    The worker loop shrinks its history and retries once; a second hit
+    ends the attempt with the plain line. Director and auditor call
+    sites show the same plain line, never an internal dump.
+    """
+
+    code: str = "DEVRUN_CONTEXT_OVERFLOW"
+
+
+#: Plain line for every context-overflow end (worker attempt, director,
+#: auditor): the user gets this sentence, never "internal".
+CONTEXT_PLAIN = ("The task outgrew the model's context. "
+                 "Try smaller parts or a model with a larger window.")
+
+#: Provider length-error markers (matched on the lowered error text).
+_CONTEXT_MARKERS = (
+    "context_length",
+    "maximum context",
+    "too many tokens",
+    "prompt is too long",
+    "input is too long",
+    "request too large",
+)
+
+#: Bare 400/413 in the error text (the last resort when the provider
+#: error carries no status attribute).
+_CONTEXT_STATUS = re.compile(r"\b(400|413)\b")
+
+
+def _is_context_overflow(exc: BaseException) -> bool:
+    """True for provider length errors: status 400/413 + a length marker.
+
+    Timeouts, stops and marker-free errors are never an overflow.
+    """
+    if isinstance(exc, (ModelStopped, ModelTimeout)):
+        return False
+    try:
+        text = str(exc or "").lower()
+    except Exception:
+        return False
+    if not text:
+        return False
+    if not any(marker in text for marker in _CONTEXT_MARKERS):
+        return False
+    try:
+        status = getattr(exc, "status", None)
+        if status is None:
+            status = getattr(exc, "status_code", None)
+        if status is None:
+            status = getattr(exc, "code", None)
+        if status is not None and int(status) in (400, 413):
+            return True
+    except (TypeError, ValueError):
+        pass
+    except Exception:
+        pass
+    return _CONTEXT_STATUS.search(text) is not None
+
+
+#: Call-error reasons, classified in exactly one place
+#: (_classify_call_error). Each reason has its own retry max inside
+#: the single model-call wrapper (invoke_owned): the retry repeats
+#: only the failed call with the same messages, so attempt counters,
+#: per-attempt audits and attempt memory never see it.
+_CALL_TIMEOUT = "TIMEOUT"
+_CALL_PROVIDER_RETRY = "PROVIDER_RETRY"
+_CALL_FORMAT_RETRY = "FORMAT_RETRY"
+_CALL_NON_RETRYABLE = "NON_RETRYABLE"
+
+#: Max wrapper tries per reason (first try + repeats).
+_CALL_TRIES = {
+    _CALL_TIMEOUT: 2,  # one silent repeat of a timed-out call
+    _CALL_PROVIDER_RETRY: 2,  # connection/5xx, as before
+    _CALL_FORMAT_RETRY: 2,  # one silent repeat of a garbled reply
+}
+
+#: Timeout class names (matched by name so httpx/asyncio variants
+#: need no import): ours, the provider's own, the builtins.
+_TIMEOUT_NAMES = frozenset({
+    "ProviderTimeoutError",
+    "ModelTimeout",
+    "TimeoutError",
+    "TimeoutException",
+    "ConnectTimeout",
+    "ReadTimeout",
+    "WriteTimeout",
+    "PoolTimeout",
+})
+
+#: Garbled-reply markers (matched on the lowered error text).
+_FORMAT_MARKERS = (
+    "empty reply",
+    "malformed response",
+    "invalid response",
+    "unexpected response",
+)
+
+
+def _classify_call_error(exc: BaseException) -> str:
+    """One reason per failed model call: TIMEOUT, PROVIDER_RETRY,
+    FORMAT_RETRY or NON_RETRYABLE. Never raises."""
+    if isinstance(exc, ModelStopped):
+        return _CALL_NON_RETRYABLE
+    try:
+        name = type(exc).__name__ or ""
+    except Exception:
+        name = ""
+    if name in _TIMEOUT_NAMES:
+        return _CALL_TIMEOUT
+    if isinstance(exc, ModelTimeout):
+        return _CALL_TIMEOUT
+    try:
+        text = str(exc or "").lower()
+    except Exception:
+        text = ""
+    if text and any(marker in text for marker in _FORMAT_MARKERS):
+        return _CALL_FORMAT_RETRY
+    if _is_outage_error(exc):
+        return _CALL_PROVIDER_RETRY
+    return _CALL_NON_RETRYABLE
+
+
 class ModelStopped(RuntimeError):
     """A model call was stopped while waiting; the run unwinds."""
 
@@ -160,6 +284,16 @@ def waiting_line(role: str, elapsed_s: float) -> str:
     """One quiet chat status line for a still-running model call."""
     return "Waiting for the model: %s, %d s" % (
         str(role), int(max(0, elapsed_s)))
+
+
+def reply_language_line() -> str:
+    """The reply-language rule every prompt builder carries (FXPICK).
+
+    The reply follows the user's message language; code, file names,
+    commands and JSON keys stay unchanged so protocol replies parse.
+    """
+    return ("Reply in the language of the user's message. "
+            "Keep code, file names, commands and JSON keys unchanged.")
 
 
 def invoke_timed(adapter: Any, messages: list, *,
@@ -831,8 +965,10 @@ def invoke_owned(
     exceeds the remaining budget. A reached provider cap or hard
     limit raises _BudgetOut before call. The call itself runs off the
     stream thread with a bounded timeout (default 300 s): a stop
-    raises ModelStopped at once, an expired bound raises ModelTimeout
-    and the attempt continues.
+    raises ModelStopped at once; a timeout or garbled reply repeats
+    only that call once with the same messages inside this wrapper
+    (attempt counters and audits never see it); a repeated timeout
+    raises ModelTimeout and the attempt continues.
     """
     provider = str(resolution["provider"])
     model = str(resolution["model"])
@@ -858,10 +994,13 @@ def invoke_owned(
         raise _BudgetOut(str(_admit_exc)) from None
     except Exception:
         pass
-    _missing: Any = object()
-    response: Any = _missing
-    failures: list[BaseException] = []
-    for _try in range(max(1, int(_OUTAGE_ATTEMPTS))):
+    tries_left = {
+        _CALL_TIMEOUT: int(_CALL_TRIES[_CALL_TIMEOUT]),
+        _CALL_FORMAT_RETRY: int(_CALL_TRIES[_CALL_FORMAT_RETRY]),
+    }
+    outage_failures: list[BaseException] = []
+    response: Any = None
+    while True:
         try:
             response = invoke_timed(
                 adapter, messages, timeout_s=timeout_s,
@@ -870,18 +1009,33 @@ def invoke_owned(
                 tick_s=tick_s, stop_seen=stop_seen,
                 on_waiting=on_waiting)
             break
-        except (ModelStopped, ModelTimeout):
+        except ModelStopped:
             raise
         except Exception as exc:
-            if not _is_outage_error(exc):
+            if _is_context_overflow(exc):
+                raise ContextOverflow(
+                    str(exc) or "model context overflow") from exc
+            reason = _classify_call_error(exc)
+            if reason in (_CALL_TIMEOUT, _CALL_FORMAT_RETRY):
+                tries_left[reason] -= 1
+                if tries_left[reason] > 0:
+                    continue
+                if reason == _CALL_TIMEOUT:
+                    raise ModelTimeout(
+                        "model call timed out: %s" % (exc,)) from exc
                 raise
-            failures.append(exc)
-    if response is _missing:
-        last = failures[-1] if failures else RuntimeError("no response")
-        _signal_outage_once(app, record, project_id, provider, last)
-        raise ProviderUnreachable(
-            "provider %s unreachable after %d tries: %s"
-            % (provider, _OUTAGE_ATTEMPTS, _clean_outage_text(last)))
+            if reason == _CALL_PROVIDER_RETRY:
+                outage_failures.append(exc)
+                if len(outage_failures) < max(1, int(_OUTAGE_ATTEMPTS)):
+                    continue
+                _signal_outage_once(
+                    app, record, project_id, provider,
+                    outage_failures[-1])
+                raise ProviderUnreachable(
+                    "provider %s unreachable after %d tries: %s"
+                    % (provider, _OUTAGE_ATTEMPTS,
+                       _clean_outage_text(outage_failures[-1])))
+            raise
     usage = getattr(response, "usage", {}) or {}
 
     # FXPARALLEL BEGIN charge-lock: post-call block as one unit.

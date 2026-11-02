@@ -77,6 +77,9 @@ async function openStep2() {
   fireEvent.click(screen.getByLabelText("Connect OpenAI"));
   const dialog = screen.getByRole("dialog");
   fireEvent.change(within(dialog).getByLabelText("API key"), { target: { value: "sk-test-1" } });
+  // FXR2E two-step (416ddaa, merged 0661228): Check before Save.
+  fireEvent.click(within(dialog).getByText("Check"));
+  await within(dialog).findByText("Key checked. Save to connect.");
   fireEvent.click(within(dialog).getByText("Save"));
   await within(dialog).findByText("Connected OpenAI. Reference saved.");
   return dialog;

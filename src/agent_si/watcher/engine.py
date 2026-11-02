@@ -28,6 +28,7 @@ from agent_si.watcher import guard as guard_home
 from agent_si.watcher import integrity as integrity_store
 from agent_si.watcher import journal as journal_store
 from agent_si.watcher import rules as rule_cards
+from agent_si.watcher import stats as stats_home
 from agent_si.watcher.journal import ERROR_CODES, WatcherError
 
 __all__ = (
@@ -150,18 +151,26 @@ def reset_state() -> None:
     _RECORDED.clear()
     _ACTION_PAUSED.clear()
     _SERVICE_BASELINE.clear()
+    stats_home.reset_state()
 
 
 def tick(project_id: str) -> EngineTick:
     """Fire due rule cards now; each firing records its journal row."""
     fired = []
+    decisions = []
     for card_id in DUE_CARDS:
-        rule_cards.evaluate(project_id, card_id)
+        decision = rule_cards.evaluate(project_id, card_id)
         fired.append(card_id)
+        decisions.append((str(card_id), str(decision.journal_entry_id or "")))
+    checked = _utcnow()
+    try:
+        stats_home.record_tick(project_id, checked, tuple(decisions))
+    except Exception:
+        pass
     return EngineTick(
         project_id=str(project_id),
         fired=tuple(fired),
-        checked_at=_utcnow(),
+        checked_at=checked,
     )
 
 

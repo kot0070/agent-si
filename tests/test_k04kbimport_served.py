@@ -34,6 +34,9 @@ from agent_si.backend import modelkb
 from agent_si.model_kb import kb, loader, updater
 
 SECTIONS_DIR = os.path.abspath(
+    os.path.join(_HERE, "fixtures", "kb_sections"))
+# Legacy bundle path (git-excluded DIRECTOR inbox, kept as fallback only).
+_LEGACY_SECTIONS_DIR = os.path.abspath(
     os.path.join(_HERE, "..", "DIRECTOR", "INBOX", "MODEL_KB", "sections"))
 TSX_PATH = os.path.abspath(os.path.join(
     _HERE, "..", "frontend", "src", "settings", "ProvidersPage",

@@ -222,7 +222,8 @@ def _wants_runnable_hint(check_rows: Any) -> str:
 def _gate_fail_reason(*, spec: Any, goal: Any, files_diff: str,
                       check_rows: Any, entry_ok: bool,
                       install_ok: bool, record: Any, folder: Any,
-                      ws_keys: Any, ws_start: Any = None) -> str | None:
+                      ws_keys: Any, ws_start: Any = None,
+                      part_diff: str = "") -> str | None:
     """Deterministic PASS gate; None when the part may PASS.
 
     PASS needs the auditor's PASS plus EITHER a real change, OR a
@@ -304,6 +305,8 @@ def _gate_fail_reason(*, spec: Any, goal: Any, files_diff: str,
                 return ("no successful read of %s in the run log"
                         % (name,))
     changed = str(files_diff or "") != "(no changes)"
+    if str(part_diff or "") != "(no changes)":
+        changed = True
     if install_ok:
         return None
     if not declared:
@@ -1249,6 +1252,19 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                              {"run_id": run_id, "part_id": None})
             turn += 1
         _check_stop()
+
+        def _context_dead() -> Any:
+            """Plain-line terminal end for a director context overflow."""
+            record["success"] = False
+            record["summary"] = _roles.CONTEXT_PLAIN
+            _finish_task()
+            yield _run_event(
+                "delta", turn, task_id, _roles.CONTEXT_PLAIN,
+                {"run_id": run_id})
+            yield _run_event(
+                "done", turn + 1, task_id, _roles.CONTEXT_PLAIN,
+                {"run_id": run_id, "success": False})
+
         try:
             director_text = _call(
                 "director", director, director_adapter,
@@ -1256,6 +1272,9 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                     message, _director_history_block(
                         app, project, folder, run_id))}],
                 None, 0, waits=["plan"])
+        except _roles.ContextOverflow:
+            yield from _context_dead()
+            return
         except _roles.ModelTimeout as exc:
             _journal("SERVICE_STATE",
                      "model call timed out (director, one retry left): "
@@ -1279,6 +1298,9 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                                   "ONLY the corrected JSON object, "
                                   "no prose.") % (exc,)}],
                     None, 0, waits=["plan repair"])
+            except _roles.ContextOverflow:
+                yield from _context_dead()
+                return
             except _roles.ModelTimeout as exc2:
                 record["summary"] = (
                     "run failed: director timed out twice: %s" % (exc2,))
@@ -1309,6 +1331,9 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                                   "Return ONLY the corrected JSON object, "
                                   "no prose.") % (exc,)}],
                     None, 0, waits=["plan repair"])
+            except _roles.ContextOverflow:
+                yield from _context_dead()
+                return
             except _roles.ModelTimeout as exc_timeout:
                 record["summary"] = (
                     "run failed: director timed out on repair: %s"
@@ -1337,6 +1362,45 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                                  record["summary"],
                                  {"run_id": run_id, "success": False})
                 return
+        _build_answer_twice = False
+        if "answer" in parsed and _looks_like_build_task(message):
+            # An answer on a build task reads as success with nothing
+            # built: re-ask once for parts. A second answer is shown,
+            # but the run is not a success ("Nothing was built.").
+            _check_stop()
+            try:
+                _retry_text = _call(
+                    "director", director, director_adapter,
+                    [{"role": "user",
+                      "content": _director_prompt(
+                          message, _director_history_block(
+                              app, project, folder, run_id))},
+                     {"role": "assistant",
+                      "content": director_text.output_text or ""},
+                     {"role": "user",
+                      "content": ("That task needs files and checks, not "
+                                  "prose. Return ONLY the JSON object with "
+                                  "parts, no prose.")}],
+                    None, 0, waits=["plan repair"])
+            except _roles.ModelTimeout:
+                _retry_text = None
+            except _roles.ContextOverflow:
+                yield from _context_dead()
+                return
+            if _retry_text is None:
+                _build_answer_twice = True
+            else:
+                try:
+                    _parsed2 = _protocol.parse_director_reply(
+                        _retry_text.output_text or "")
+                except _protocol.PlanError:
+                    _parsed2 = {"answer": (
+                        _retry_text.output_text or "")}
+                if "parts" in _parsed2:
+                    parsed = _parsed2
+                else:
+                    parsed = {"answer": _parsed2.get("answer", "")}
+                    _build_answer_twice = True
         if "parts" in parsed:
             try:
                 _missing = _protocol.missing_check_targets(
@@ -1362,6 +1426,9 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                                       "Return ONLY the corrected JSON "
                                       "object, no prose.") % (_names,)}],
                         None, 0, waits=["plan repair"])
+                except _roles.ContextOverflow:
+                    yield from _context_dead()
+                    return
                 except _roles.ModelTimeout as exc_timeout:
                     record["summary"] = (
                         "run failed: director timed out on repair: %s"
@@ -1419,8 +1486,12 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                         return
         if "answer" in parsed:
             answer = parsed["answer"]
-            record["success"] = True
-            record["summary"] = "run answered: plain answer, no parts"
+            if _build_answer_twice:
+                record["success"] = False
+                record["summary"] = "Nothing was built."
+            else:
+                record["success"] = True
+                record["summary"] = "run answered: plain answer, no parts"
             yield _run_event("delta", turn, task_id, answer,
                              {"run_id": run_id})
             turn += 1
@@ -1966,10 +2037,11 @@ def _director_prompt(message: str, history: str = "") -> str:
         "result (for example a check that runs the installed tool or "
         "reads the real lock file), never a stub.%s" % (
             message or "(no task text)", _platform_guidance()))
+    from agent_si.runtime.devrun import roles as _roles
+    base = "%s %s" % (base, _roles.reply_language_line())
     if history:
         return "%s\n\n%s" % (base, history)
     return base
-
 
 
 def _manager_order(record: Any, manager: dict, adapter: Any,
@@ -2284,7 +2356,7 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
     part_id = str(spec["part_id"])
     producer_base = "producer-%s-%s" % (run_id, part_id)
     auditor_ref = _roles.new_identity("auditor-%s-%s" % (run_id, part_id))
-    before = _audit.snapshot_files(folder, spec["files"])
+    part_before = _audit.snapshot_files(folder, spec["files"])
     try:
         ws_run_start = _audit.snapshot_workspace(folder)
     except Exception:
@@ -2294,20 +2366,32 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
     for attempt in range(1, _EXTRA_ATTEMPTS + 2):
         row["attempts"] = int(attempt)
         check_stop()
+        before = _audit.snapshot_files(folder, spec["files"])
+        try:
+            prior_files = sorted(
+                str(path) for path in (spec.get("files") or [])
+                if before.get(path) != part_before.get(path))
+        except Exception:
+            prior_files = []
+        try:
+            last_fail = str(failing[-1]) if failing else ""
+        except Exception:
+            last_fail = ""
         ws_before = _audit.snapshot_workspace(folder)
-        worker_adapter = _roles.build_adapter(app, _resolve_worker(
-            app, project))
+        worker_spec = _resolve_worker(app, project)
+        worker_adapter = _roles.build_adapter(app, worker_spec)
         producer_ref = "%s-a%d" % (producer_base, attempt)
         turn += 1
         outcome = _agent_loop(
             record=record, app=app, spec=spec, row=row,
-            adapter=worker_adapter, folder=folder, project=project,
+            adapter=worker_adapter, worker_spec=worker_spec,
+            folder=folder, project=project,
             run_id=run_id, part_id=part_id, attempt=attempt,
             turn=turn, turn_cap=turn_cap, state=state, procs=procs,
             failing=failing, reasons=reasons, message=message,
             publish=publish, check_stop=check_stop, live=live,
             call=call, attached=attached, stop_seen=stop_seen,
-            lock=lock)
+            lock=lock, prior_files=prior_files, last_fail=last_fail)
         turn, attempt_ok, stop_note = outcome
         if stop_note is not None:
             turn += 1
@@ -2362,6 +2446,7 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
                 {"run_id": run_id, "part_id": part_id})
         after = _audit.snapshot_files(folder, spec["files"])
         files_diff = _audit.diff_text(before, after)
+        part_diff = _audit.diff_text(part_before, after)
         try:
             ws_after = _audit.snapshot_workspace(folder)
             try:
@@ -2417,6 +2502,7 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
                     attempt=attempt, producer_ref=producer_ref,
                     auditor_ref=auditor_ref, contract_hash=contract_hash,
                     goal=spec["goal"], files_diff=files_diff,
+                    part_diff=part_diff,
                     checks=check_rows,
                     artifact_refs=["%s/%s" % (part_id, path)
                                    for path in spec["files"]],
@@ -2434,6 +2520,20 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
                 with contextlib.suppress(Exception):
                     record["outage_part"] = part_id
                 raise _OutagePaused(str(exc)) from None
+            except _roles.ContextOverflow:
+                entry = {
+                    "producer_ref": str(producer_ref),
+                    "audit_ref": str(auditor_ref),
+                    "audit_id": "",
+                    "audit_session": "",
+                    "result": "FAIL",
+                    "reasons": [_roles.CONTEXT_PLAIN],
+                    "over_cap": False,
+                }
+                _journal_event(
+                    project, "DEVRUN_AUDIT",
+                    "audit %s attempt %d: FAIL (context overflow) [%s]"
+                    % (part_id, attempt, auditor_ref))
             except _roles.ModelTimeout as exc:
                 entry = {
                     "producer_ref": str(producer_ref),
@@ -2481,6 +2581,7 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
             gate_reason = _gate_fail_reason(
                 spec=spec, goal=spec.get("goal", ""),
                 files_diff=files_diff, check_rows=check_rows,
+                part_diff=part_diff,
                 entry_ok=bool(
                     entry is not None and entry.get("result") == "PASS"),
                 install_ok=bool(_records.combined_evidence(record)),
@@ -2537,7 +2638,33 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
                              or ["auditor gave no reason"]),
                    auditor_ref))
         auditor_ok = entry is not None and entry["result"] == "PASS"
-        if auditor_ok and (checks_ok or not spec.get("check_commands")):
+        no_commands = not spec.get("check_commands")
+        part_changed = str(part_diff or "") != "(no changes)"
+        if auditor_ok and no_commands and not part_changed:
+            # A part with no check commands passes only on real file
+            # work plus the auditor PASS; without changes it fails
+            # (a why note never substitutes for doing nothing).
+            if attempt >= _EXTRA_ATTEMPTS + 1:
+                row["verdict"] = "FAIL"
+                row["reason"] = ("no file changes vs part start and no "
+                                 "checks ran")
+                turn += 1
+                yield _run_event(
+                    "delta", turn, part_id,
+                    "Part %s: FAILED (%s)" % (part_id, row["reason"]),
+                    {"run_id": run_id, "part_id": part_id})
+                publish()
+                return "FAIL", turn
+            turn += 1
+            yield _run_event(
+                "delta", turn, part_id,
+                "Part %s: no file changes yet, retrying with attempt %d"
+                % (part_id, attempt + 1),
+                {"run_id": run_id, "part_id": part_id,
+                 "attempt": attempt + 1})
+            publish()
+            continue
+        if auditor_ok and (checks_ok or (no_commands and part_changed)):
             if checks_ok:
                 row["verdict"] = "PASS"
                 row["reason"] = "checks green, auditor PASS"
@@ -2619,30 +2746,273 @@ def _resolve_worker(app: Any, project: str) -> dict[str, Any]:
     return _roles.resolve_role(app, project, "worker")
 
 
+#: Worker history budget: absolute char cap, or 60 percent of the model
+#: window when the model KB knows it (chars = tokens x 3).
+_HISTORY_MAX_CHARS = 120000
+#: Turn pairs kept verbatim; older pairs fold into one summary line.
+_HISTORY_KEEP_PAIRS = 6
+#: Note caps: run output head+tail, read_file head.
+_NOTE_RUN_HEAD = 1000
+_NOTE_RUN_TAIL = 4000
+_NOTE_READ_HEAD = 20000
+
+
+def _history_cap_chars(provider: Any, model: Any) -> int:
+    """History char cap: 60 percent of the KB window, else the flat cap.
+
+    Unknown model (no KB row, unparsable window): the flat cap. Never
+    raises.
+    """
+    try:
+        from agent_si.model_kb import kb as _kb
+        from agent_si.model_kb import loader as _loader
+
+        row = _loader.find_row(
+            _kb.bound_catalog(), str(provider or ""),
+            str(model or ""))
+        fields = (row or {}).get("fields", {}) or {}
+        value = (fields.get("context_window", {}) or {}).get("value")
+        try:
+            tokens = int(str(value).strip())
+        except (TypeError, ValueError, AttributeError):
+            tokens = 0
+        if tokens > 0:
+            return min(_HISTORY_MAX_CHARS, int(tokens * 3 * 0.6))
+    except Exception:
+        pass
+    return _HISTORY_MAX_CHARS
+
+
+def _cap_run_tail(tail: Any) -> str:
+    """Cap run output for the worker note: head + tail, never the middle."""
+    text = str(tail or "")
+    if len(text) > _NOTE_RUN_HEAD + _NOTE_RUN_TAIL:
+        return "%s\n...cut...\n%s" % (
+            text[:_NOTE_RUN_HEAD], text[-_NOTE_RUN_TAIL:])
+    return text
+
+
+def _cap_read_note(out: Any) -> str:
+    """Cap read_file output for the worker note: head plus a marker."""
+    text = str(out or "")
+    if len(text) > _NOTE_READ_HEAD:
+        return "%s\n[...file continues, %d more chars...]" % (
+            text[:_NOTE_READ_HEAD], len(text) - _NOTE_READ_HEAD)
+    return text
+
+
+def _history_chars(history: Any) -> int:
+    """Total chars of one worker history (never raises)."""
+    try:
+        return sum(len(str((msg or {}).get("content", "")) or "")
+                   for msg in history or [])
+    except Exception:
+        return 0
+
+
+def _remember_seen(seen: list, value: Any) -> None:
+    """Append a summary path once, in first-seen order (never raises)."""
+    try:
+        text = str(value or "")
+    except Exception:
+        return
+    if text and text not in seen:
+        seen.append(text)
+
+
+def _render_summary(wrote: list, read: list, ran: list) -> str:
+    """Render one deterministic compaction line from accumulated lists."""
+    segments: list[str] = []
+    if wrote:
+        segments.append("wrote %s" % (", ".join(wrote),))
+    if read:
+        segments.append("read %s" % (", ".join(read),))
+    if ran:
+        segments.append("ran %s" % (", ".join(ran),))
+    if not segments:
+        return "Earlier in this attempt: no file actions recorded."
+    return "Earlier in this attempt: %s." % ("; ".join(segments),)
+
+
+def _collect_drop_pairs(pairs: Any, wrote: list, read: list,
+                        ran: list) -> None:
+    """Fold compacted turn pairs into the accumulator (no model call).
+
+    Runs match their exit code by exact argv against the concatenated
+    user notes of the same drop, so pair misalignment never mislabels
+    an exit. Stale summary lines contribute nothing; their content
+    already lives in the accumulator.
+    """
+    try:
+        user_text = "\n".join(
+            str(msg.get("content", "") or "")
+            for pair in (pairs or []) for msg in (pair or [])
+            if isinstance(msg, dict) and msg.get("role") == "user")
+    except Exception:
+        user_text = ""
+    for pair in pairs or []:
+        assistant_text = ""
+        try:
+            for msg in pair or []:
+                if (isinstance(msg, dict)
+                        and msg.get("role") == "assistant"
+                        and not assistant_text):
+                    assistant_text = str(msg.get("content", "") or "")
+        except Exception:
+            continue
+        try:
+            data = json.loads(assistant_text) if assistant_text else {}
+        except Exception:
+            continue
+        actions = data.get("actions") if isinstance(data, dict) else None
+        if not isinstance(actions, list):
+            continue
+        for action in actions:
+            if not isinstance(action, dict):
+                continue
+            name = action.get("action")
+            if name == "write_file":
+                _remember_seen(wrote, action.get("path", ""))
+            elif name == "read_file":
+                _remember_seen(read, action.get("path", ""))
+            elif name == "run":
+                argv = action.get("argv", [])
+                words = " ".join(
+                    str(word) for word in argv) if isinstance(
+                        argv, list) else ""
+                if not words:
+                    continue
+                try:
+                    found = re.search(
+                        "%s: exit (-?\\d+)" % (re.escape(words),),
+                        user_text)
+                except Exception:
+                    found = None
+                if found is not None:
+                    _remember_seen(
+                        ran, "%s exit %s" % (words, found.group(1)))
+                else:
+                    _remember_seen(ran, words)
+
+
+def _compact_history(history: Any, cap_chars: int,
+                     accum: Any = None) -> list:
+    """Bound one worker history: brief verbatim + last pairs verbatim.
+
+    Older pairs fold into one deterministic summary line accumulated
+    across compactions of this attempt (stale summaries are replaced,
+    never re-parsed); the total stays under cap_chars (oldest kept
+    pairs drop first, the newest pair always stays). Never raises.
+    """
+    if accum is None:
+        accum = ([], [], [])
+    try:
+        wrote, read, ran = accum
+    except Exception:
+        wrote, read, ran = [], [], []
+    try:
+        current = list(history or [])
+    except Exception:
+        return history
+    if len(current) <= 1:
+        return current
+    try:
+        cap = max(1, int(cap_chars))
+    except (TypeError, ValueError):
+        cap = _HISTORY_MAX_CHARS
+    except Exception:
+        cap = _HISTORY_MAX_CHARS
+    brief = current[0]
+    tail = current[1:]
+    pairs = [tail[index:index + 2] for index in range(0, len(tail), 2)]
+    if len(pairs) > _HISTORY_KEEP_PAIRS:
+        drop = pairs[:-_HISTORY_KEEP_PAIRS]
+        keep = pairs[-_HISTORY_KEEP_PAIRS:]
+        try:
+            _collect_drop_pairs(drop, wrote, read, ran)
+            summary = _render_summary(wrote, read, ran)
+        except Exception:
+            summary = "Earlier in this attempt: no file actions recorded."
+        rebuilt: list = [brief]
+        if summary:
+            rebuilt.append({"role": "user", "content": summary})
+        for pair in keep:
+            rebuilt.extend(pair)
+        current = rebuilt
+    while _history_chars(current) > cap and len(current) > 3:
+        if len(current) > 1 and isinstance(current[1], dict) and str(
+                current[1].get("content", "") or "").startswith(
+                    "Earlier in this attempt:"):
+            del current[2:4]
+        else:
+            del current[1:3]
+        if len(current) <= 3:
+            break
+    return current
+
+
+#: Build-task verbs (English + Ukrainian imperatives): a Director
+#: answer on such a task is re-asked once for parts.
+_BUILD_VERBS = (
+    "write", "create", "build", "make", "fix", "implement", "add",
+    "update", "generate", "refactor", "run", "install",
+    "напиши", "створи", "зроби", "виправ", "додай", "онови",
+    "згенеруй", "запусти", "побудуй", "реалізуй",
+)
+
+
+def _looks_like_build_task(message: Any) -> bool:
+    """True when the user text asks for file/check work (word verbs)."""
+    try:
+        text = str(message or "").lower()
+    except Exception:
+        return False
+    if not text.strip():
+        return False
+    for verb in _BUILD_VERBS:
+        try:
+            if re.search(r"\b%s\b" % (re.escape(verb),), text):
+                return True
+        except Exception:
+            continue
+    return False
+
+
 def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
-                adapter: Any, folder: str, project: str, run_id: str,
+                adapter: Any, worker_spec: dict, folder: str,
+                project: str, run_id: str,
                 part_id: str, attempt: int, turn: int, turn_cap: int,
                 state: Any, procs: list, failing: list, reasons: list,
                 message: str, publish: Any, check_stop: Any, live: Any,
                 call: Any, attached: Any = None,
-                stop_seen: Any = None, lock: Any = None) -> Any:
+                stop_seen: Any = None, lock: Any = None,
+                prior_files: Any = None, last_fail: str = "") -> Any:
     """Worker turn loop; return (next turn, attempt usable, stop line).
 
     The stop line is set only when one identical failing run call hit
-    three times: the attempt ends with that honest line. A second
-    identical failure tells the worker to change approach in the reply;
-    different (or read-only) calls never count. A timed-out model call
-    feeds a timeout note back to the worker and continues within the
-    turn budget; the attempt is never lost to a stall.
+    three times (or the model context overflowed twice): the attempt
+    ends with that honest line. A second identical failure tells the
+    worker to change approach in the reply; different (or read-only)
+    calls never count. A timed-out model call feeds a timeout note back
+    to the worker and continues within the turn budget; the attempt is
+    never lost to a stall. The history is compacted before every model
+    call (brief verbatim, last pairs verbatim, older pairs one line).
     """
     from agent_si.runtime.devrun import protocol as _protocol
     from agent_si.runtime.devrun import roles as _call_roles
 
-    worker_spec = _resolve_worker(app, project)
+    try:
+        cap_chars = _history_cap_chars(
+            worker_spec.get("provider"), worker_spec.get("model"))
+    except Exception:
+        cap_chars = _HISTORY_MAX_CHARS
     history: list[dict[str, str]] = [
         {"role": "user", "content": _worker_prompt(
-            spec, message, attempt, failing, reasons)}]
+            spec, message, attempt, failing, reasons,
+            prior_files=prior_files, last_fail=last_fail)}]
     repeat_counts: dict[str, int] = {}
+    overflowed = False
+    accum: list = [[], [], []]
 
     def _timed_out_note(exc: BaseException) -> dict[str, str]:
         return {"role": "user", "content": (
@@ -2673,6 +3043,7 @@ def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
 
     for _ in range(max(1, int(turn_cap))):
         check_stop()
+        history = _compact_history(history, cap_chars, accum)
         try:
             response = call("worker", worker_spec, adapter, history,
                             part_id, attempt,
@@ -2680,6 +3051,14 @@ def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
         except _call_roles.ModelTimeout as exc:
             history.append(_timed_out_note(exc))
             continue
+        except _call_roles.ContextOverflow:
+            if not overflowed:
+                overflowed = True
+                history = [history[0]] + history[-4:] if len(
+                    history) > 1 else history
+                continue
+            row["reason"] = _call_roles.CONTEXT_PLAIN
+            return turn, False, _call_roles.CONTEXT_PLAIN
         reply_no += 1
         _log_reply("reply", response.output_text)
         empty_retries = 0
@@ -2704,6 +3083,7 @@ def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
                     history.append({"role": "user",
                                     "content": _protocol.EMPTY_REPLY_RETRY})
                     check_stop()
+                    history = _compact_history(history, cap_chars, accum)
                     try:
                         response = call(
                             "worker", worker_spec, adapter, history,
@@ -2712,6 +3092,24 @@ def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
                     except _call_roles.ModelTimeout as exc:
                         history.append(_timed_out_note(exc))
                         break
+                    except _call_roles.ContextOverflow:
+                        if not overflowed:
+                            overflowed = True
+                            history = [history[0]] + history[-4:] if len(
+                                history) > 1 else history
+                            history = _compact_history(
+                                history, cap_chars, accum)
+                            try:
+                                response = call(
+                                    "worker", worker_spec, adapter, history,
+                                    part_id, attempt,
+                                    waits=["agent:%s" % (part_id,)])
+                            except _call_roles.ContextOverflow:
+                                row["reason"] = _call_roles.CONTEXT_PLAIN
+                                return turn, False, _call_roles.CONTEXT_PLAIN
+                        else:
+                            row["reason"] = _call_roles.CONTEXT_PLAIN
+                            return turn, False, _call_roles.CONTEXT_PLAIN
                     reply_no += 1
                     _log_reply("empty-retry", response.output_text)
                     continue
@@ -2727,6 +3125,7 @@ def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
                     "Return ONLY {\"actions\": [...], \"done\": bool}, "
                     "no prose.") % (exc,)})
                 check_stop()
+                history = _compact_history(history, cap_chars, accum)
                 try:
                     response = call("worker", worker_spec, adapter,
                                     history, part_id, attempt,
@@ -2734,6 +3133,24 @@ def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
                 except _call_roles.ModelTimeout as exc:
                     history.append(_timed_out_note(exc))
                     break
+                except _call_roles.ContextOverflow:
+                    if not overflowed:
+                        overflowed = True
+                        history = [history[0]] + history[-4:] if len(
+                            history) > 1 else history
+                        history = _compact_history(
+                            history, cap_chars, accum)
+                        try:
+                            response = call(
+                                "worker", worker_spec, adapter, history,
+                                part_id, attempt,
+                                waits=["agent:%s" % (part_id,)])
+                        except _call_roles.ContextOverflow:
+                            row["reason"] = _call_roles.CONTEXT_PLAIN
+                            return turn, False, _call_roles.CONTEXT_PLAIN
+                    else:
+                        row["reason"] = _call_roles.CONTEXT_PLAIN
+                        return turn, False, _call_roles.CONTEXT_PLAIN
                 reply_no += 1
                 _log_reply("repair-retry", response.output_text)
         notes, stop_note = _apply_actions(
@@ -2758,7 +3175,9 @@ def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
 
 
 def _worker_prompt(spec: dict, message: str, attempt: int,
-                   failing: list, reasons: list) -> str:
+                   failing: list, reasons: list,
+                   prior_files: Any = None,
+                   last_fail: str = "") -> str:
     """Worker brief for one attempt: its part only, never other parts."""
     head = ("You are the worker for part %s (attempt %d). Goal: %s. "
             "Project task: %s. Files you may write: %s. "
@@ -2783,7 +3202,23 @@ def _worker_prompt(spec: dict, message: str, attempt: int,
                  "Auditor reasons: %s. Fix the part." % (
                      " | ".join(failing) or "no output",
                      " | ".join(reasons) or "no reason"))
+        try:
+            known = [str(path) for path in (prior_files or [])
+                     if str(path or "").strip()]
+        except Exception:
+            known = []
+        try:
+            last_text = str(last_fail or "").strip()
+        except Exception:
+            last_text = ""
+        if known or last_text:
+            head += (" Attempt memory: files already written in earlier "
+                     "attempts: %s. Last failing command output: %s." % (
+                         ", ".join(known) if known else "(none)",
+                         last_text[:2000] if last_text else "(none)"))
     head += _platform_guidance()
+    from agent_si.runtime.devrun import roles as _roles
+    head = "%s %s" % (head, _roles.reply_language_line())
     return head
 
 
@@ -2815,7 +3250,7 @@ def _apply_actions(*, record: Any, row: Any, folder: str, project: str,
                 out = _actions.read_file(
                     folder, str(action.get("path", "")))
                 notes.append("read_file %s: %s" % (
-                    action.get("path"), out[:2000]))
+                    action.get("path"), _cap_read_note(out)))
                 with contextlib.suppress(Exception):
                     record.setdefault("reads", []).append({
                         "path": str(action.get("path", "")),
@@ -3072,7 +3507,7 @@ def _run_agent_command(*, record: Any, folder: str, project: str,
         exit_code = proc.poll()
     except Exception:
         exit_code = None
-    tail = _actions.finalize_log(log_path)
+    tail = _cap_run_tail(_actions.finalize_log(log_path))
     if outcome == "stopped":
         raise _Stopped()
     if outcome == "timeout":
