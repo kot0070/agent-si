@@ -7,7 +7,7 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
-import type { PartRow, ProjectRecord } from "../api/iface";
+import type { PartRow } from "../api/iface";
 import { ApiError, requestResponse } from "../api/errors";
 import type { TopBarProps } from "../app/iface";
 import { useApiClient, useCurrentProject } from "../app/ApiClientProvider";
@@ -19,6 +19,7 @@ import {
 import type { Placement } from "../agents/agentsApi";
 import { listConnectedProviders } from "../settings/ProvidersPage/connectApi";
 import { useLiveRows } from "../agents/liveStore";
+import { useProjectList } from "../projects/projectList";
 import {
   DEFAULT_LOCALE,
   LOCALE_STORAGE_KEY,
@@ -64,8 +65,9 @@ export function TopBar(props: TopBarProps): ReactElement {
   const location = useLocation();
   const navigate = useNavigate();
   const [locale, setLocaleUi] = useState<SupportedLocale>(readStoredLocale);
-  const [projects, setProjects] = useState<ProjectRecord[] | null>(null);
-  const [projectsFailed, setProjectsFailed] = useState(false);
+  // J8: the one project-name source is the shared project list (the same
+  // store Sidebar and ProjectsPage read); the top bar keeps no own copy.
+  const { projects, refresh: refreshProjects } = useProjectList();
   const [stopArmed, setStopArmed] = useState(false);
   const [stopText, setStopText] = useState<string | null>(null);
   // FXDESIGN8: the shared agents-live store owns the single poller;
@@ -100,27 +102,6 @@ export function TopBar(props: TopBarProps): ReactElement {
 
   useEffect(() => {
     let alive = true;
-    client.listProjects().then(
-      (rows) => {
-        if (alive) {
-          setProjects(rows);
-          setProjectsFailed(false);
-        }
-      },
-      () => {
-        if (alive) {
-          setProjects([]);
-          setProjectsFailed(true);
-        }
-      },
-    );
-    return () => {
-      alive = false;
-    };
-  }, [client]);
-
-  useEffect(() => {
-    let alive = true;
     void listConnectedProviders().then((ids) => {
       if (alive) {
         setConnected(ids);
@@ -133,49 +114,38 @@ export function TopBar(props: TopBarProps): ReactElement {
 
   const effective = props.projectId ?? current.projectId;
   const options = projects ?? [];
+  // J8: an empty served list is "No project yet" in the top bar, never
+  // the "Select a project" placeholder (kept for loading and choice).
+  const emptyNoProject =
+    effective === null && projects !== null && projects.length === 0;
+  const nullOptionText = emptyNoProject
+    ? t("shell.topbar.noProject")
+    : t("shell.topbar.projectPlaceholder");
   // U11: the truncated project value keeps its full name as a tooltip.
   const effectiveName =
     effective === null
-      ? t("shell.topbar.projectPlaceholder")
+      ? nullOptionText
       : (options.find((project) => project.project_id === effective)?.name ??
-        t("shell.topbar.projectPlaceholder"));
+        nullOptionText);
   // FXRC1FIX P4: the mount list predates a first-message project, so the
-  // select would show "Select a project" for the new id. Refetch once per
-  // unknown id; the fresh options then show the project name.
+  // select would show the placeholder for the new id. Refresh the shared
+  // list once per unknown id; the fresh options then show the name.
   const refetchedRef = useRef<string | null>(null);
   const effectiveMissing =
     effective !== null &&
     projects !== null &&
     !options.some((project) => project.project_id === effective);
   useEffect(() => {
-    if (!effectiveMissing || effective === null || projectsFailed) {
-      // No blind second round trip after a failed list: a dead server
-      // would just burn another bounded retry sequence per mount.
+    if (!effectiveMissing || effective === null) {
       return undefined;
     }
     if (refetchedRef.current === effective) {
       return undefined;
     }
     refetchedRef.current = effective;
-    let alive = true;
-    client.listProjects().then(
-      (rows) => {
-        if (alive) {
-          setProjects(rows);
-          setProjectsFailed(false);
-        }
-      },
-      () => {
-        if (alive) {
-          setProjects([]);
-          setProjectsFailed(true);
-        }
-      },
-    );
-    return () => {
-      alive = false;
-    };
-  }, [client, effective, effectiveMissing]);
+    refreshProjects();
+    return undefined;
+  }, [effective, effectiveMissing, refreshProjects]);
 
   // Top placement badge truth: the placement of the current live rows;
   // with none running, the default route of the connected providers;
@@ -325,7 +295,7 @@ export function TopBar(props: TopBarProps): ReactElement {
           }}
         >
           {effective === null ? (
-            <option value="">{t("shell.topbar.projectPlaceholder")}</option>
+            <option value="">{nullOptionText}</option>
           ) : null}
           {options.map((project) => (
             <option
@@ -339,7 +309,7 @@ export function TopBar(props: TopBarProps): ReactElement {
           {effective !== null &&
           !options.some((project) => project.project_id === effective) ? (
             <option value={effective} title={effective}>
-              {t("shell.topbar.projectPlaceholder")}
+              {nullOptionText}
             </option>
           ) : null}
         </select>
