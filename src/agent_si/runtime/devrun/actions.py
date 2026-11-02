@@ -160,8 +160,24 @@ def write_file(
     parent = os.path.dirname(target)
     if parent:
         os.makedirs(parent, exist_ok=True)
-    with open(target, "w", encoding="utf-8", newline="") as handle:
-        handle.write(content)
+    # FXPARALLEL BEGIN atomic-write: temp file plus replace in the
+    # same folder, so a peer part never reads a half-written file.
+    # The temp name is dot-prefixed plus .tmp (never a project file,
+    # never inside the part's allowed list) and is removed on failure.
+    import uuid as _uuid_mod
+    tmp_name = ".%s.%s.tmp" % (os.path.basename(target),
+                               _uuid_mod.uuid4().hex[:8])
+    tmp_path = os.path.join(parent or os.path.abspath(str(folder)),
+                            tmp_name)
+    try:
+        with open(tmp_path, "w", encoding="utf-8", newline="") as handle:
+            handle.write(content)
+        os.replace(tmp_path, target)
+    except Exception:
+        with contextlib.suppress(OSError):
+            os.remove(tmp_path)
+        raise
+    # FXPARALLEL END atomic-write.
     digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
     return {
         "path": rel,

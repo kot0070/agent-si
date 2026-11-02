@@ -407,12 +407,17 @@ def invoke(
     run_id: str,
     part: Any = None,
     attempt: int = 0,
+    lock: Any = None,
 ) -> Any:
     """One model call: charge, ledger, budget-cap stop signal.
 
-    Returns (response, over_cap): over_cap is True only when the
-    call's own cost exceeds the remaining budget. A reached
-    provider cap or hard limit raises _BudgetOut before the call.
+    Returns (response, over_cap, ledger_row): over_cap is True only
+    when the call's own cost exceeds the remaining budget, and
+    ledger_row is the row this call wrote (callers read their own
+    row, never the ledger tail). A reached provider cap or hard
+    limit raises _BudgetOut before the call. The model call always
+    runs outside the lock; the whole post-call block (charge,
+    ledger, telemetry, over-cap) runs under it as one unit.
     """
     provider = str(resolution["provider"])
     model = str(resolution["model"])
@@ -421,25 +426,37 @@ def invoke(
         raise _BudgetOut(blocked)
     response = adapter.invoke(messages)
     usage = getattr(response, "usage", {}) or {}
-    cost: Any = None
-    try:
-        from agent_si.runtime import manager as _manager
-        cost = _manager._charge_budget_gate(
-            str(project_id), provider, model, usage, str(run_id))
-    except Exception:
-        cost = None
-    try:
-        from agent_si.runtime.devrun import records as _records
-        _records.ledger_add(
-            record, role=resolution["role"],
-            provider=provider, model=model,
-            part=part, attempt=attempt, usage=usage, cost=cost)
-    except Exception:
-        pass
-    _record_usage(app, record, project_id, run_id,
-                  provider, model, usage)
-    over = _over_cap(app, project_id, provider, model, usage)
-    return response, over
+
+    # FXPARALLEL BEGIN charge-lock: post-call block as one unit.
+    def _charge_locked() -> Any:
+        cost: Any = None
+        try:
+            from agent_si.runtime import manager as _manager
+            cost = _manager._charge_budget_gate(
+                str(project_id), provider, model, usage, str(run_id))
+        except Exception:
+            cost = None
+        row: Any = {}
+        try:
+            from agent_si.runtime.devrun import records as _records
+            row = _records.ledger_add(
+                record, role=resolution["role"],
+                provider=provider, model=model,
+                part=part, attempt=attempt, usage=usage, cost=cost)
+        except Exception:
+            pass
+        _record_usage(app, record, project_id, run_id,
+                      provider, model, usage)
+        over = _over_cap(app, project_id, provider, model, usage)
+        return row, over
+
+    if lock is not None:
+        with lock:
+            row, over = _charge_locked()
+    else:
+        row, over = _charge_locked()
+    # FXPARALLEL END charge-lock.
+    return response, over, row
 
 
 def new_identity(prefix: str) -> str:

@@ -13,11 +13,19 @@ lists (extra SSE keys are never invented here).
 from __future__ import annotations
 
 import contextlib
+import contextvars
+import dataclasses
 import hashlib
 import json
 import os
+import queue
+import threading
 import uuid
+from datetime import UTC, datetime
 from typing import Any
+
+# FXPARALLEL: contextvars/dataclasses/queue/threading/datetime join
+# the imports for part threads, the result queue and turn stamps.
 
 
 class _Stopped(Exception):
@@ -34,6 +42,35 @@ class _BudgetOut(Exception):
 
 #: Extra worker attempts after the first, per F-VERDICT.
 _EXTRA_ATTEMPTS = 2
+
+# FXPARALLEL BEGIN limit: one limit, default 2, this one place.
+#: Max independent parts of one run executing at once. Tests pin it
+#: to 1 (today's order, the safety switch) or 2 via monkeypatch.
+_MAX_PART_WORKERS = 2
+# FXPARALLEL END limit.
+
+# FXPARALLEL BEGIN helpers: stamps plus abort kill pass.
+def _utcnow() -> str:
+    """Current UTC time for part-row start/finish stamps."""
+    return datetime.now(UTC).isoformat()
+
+
+def _kill_procs(procs: list, lock: Any) -> None:
+    """Terminate every live child at once; never waits, never raises."""
+    snap: list = []
+    if lock is not None:
+        with contextlib.suppress(Exception), lock:
+            snap = list(procs)
+    else:
+        with contextlib.suppress(Exception):
+            snap = list(procs)
+    for proc in snap:
+        if proc is None:
+            continue
+        with contextlib.suppress(Exception):
+            if proc.poll() is None:
+                proc.terminate()
+# FXPARALLEL END helpers.
 
 
 def wants_devrun(request: Any, bound_provider: Any, app: Any) -> bool:
@@ -174,35 +211,50 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
     attached: set[str] = set()
     known_parts: list[str] = []
     run_agents: dict[str, dict[str, Any]] = {}
+    # FXPARALLEL BEGIN run-state: one run lock plus the abort flag.
+    run_lock = threading.Lock()
+    abort = threading.Event()
+    # FXPARALLEL END run-state.
 
     def _publish() -> None:
-        try:
+        # FXPARALLEL BEGIN run-state: publish under the run lock.
+        with contextlib.suppress(Exception), run_lock:
             store = getattr(getattr(app, "state", None),
                             "devrun_runs", None)
             if store is None:
                 store = {}
                 app.state.devrun_runs = store
             store[str(project)] = record
-        except Exception:
-            pass
+        # FXPARALLEL END run-state.
 
     def _journal(kind: str, summary: str) -> None:
         _journal_event(project, kind, summary)
 
     def _stop_seen() -> bool:
+        # FXPARALLEL BEGIN stop-rule: any attached id gone from live
+        # (or the cancel flag) latches the run abort for good.
+        if abort.is_set():
+            return True
         try:
             if dict(state).get("cancelled"):
+                abort.set()
                 return True
         except Exception:
             pass
-        if attached:
+        with run_lock:
+            snap = set(attached)
+        if snap:
             try:
                 from agent_si.backend import stop_all as _stop_all
                 live = set(_stop_all.attached(str(project)))
-                return not (attached & live)
             except Exception:
                 return False
+            for ident in snap:
+                if ident not in live:
+                    abort.set()
+                    return True
         return False
+        # FXPARALLEL END stop-rule.
 
     def _check_stop() -> None:
         if _stop_seen():
@@ -245,17 +297,24 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                 "errors": [],
                 "waits": row_waits,
             })
+            # FXPARALLEL BEGIN live-lock: run_agents write under lock.
             if part is None:
-                run_agents[str(role)] = {
-                    "model": str(model), "tokens": row_tokens,
-                    "cost": cost, "waits": row_waits}
+                with run_lock:
+                    run_agents[str(role)] = {
+                        "model": str(model), "tokens": row_tokens,
+                        "cost": cost, "waits": row_waits}
+            # FXPARALLEL END live-lock.
         except Exception:
             pass
 
     def _reveal_plan(parts: list) -> None:
         """Re-scope plan-level agents onto the landed part set."""
-        known_parts.extend([str(part["part_id"]) for part in parts])
-        for saved_role, saved in run_agents.items():
+        # FXPARALLEL BEGIN live-lock: known parts write under lock.
+        with run_lock:
+            known_parts.extend([str(part["part_id"]) for part in parts])
+            saved_agents = dict(run_agents)
+        # FXPARALLEL END live-lock.
+        for saved_role, saved in saved_agents.items():
             _live(saved_role, saved["model"], None, 0, "plan", "",
                   saved["tokens"], saved["cost"], saved["waits"])
 
@@ -264,19 +323,20 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
               waits: list) -> Any:
         _check_stop()
         try:
-            response, over = _roles.invoke(
+            # FXPARALLEL BEGIN own-row: cost from the row this call
+            # wrote, never the ledger tail (A2).
+            response, over, own_row = _roles.invoke(
                 app, adapter, resolution, messages, record=record,
                 project_id=project, run_id=run_id, part=part,
-                attempt=attempt)
+                attempt=attempt, lock=run_lock)
+            # FXPARALLEL END own-row.
         except _roles._BudgetOut as exc:
             raise _BudgetOut(str(exc)) from None
         usage = getattr(response, "usage", {}) or {}
         tokens = dict(usage) if isinstance(usage, dict) else {}
-        ledger = (record.get("ledger", []) or [])[-1] if record.get(
-            "ledger") else {}
         _live(role, str(resolution["model"]), part, attempt,
               "invoke", "", tokens,
-              (ledger or {}).get("cost"), waits)
+              (own_row or {}).get("cost"), waits)
         if over:
             raise _BudgetOut(
                 "budget stop: call cost exceeds the remaining budget")
@@ -330,11 +390,14 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
             yield _run_event("done", turn, task_id, record["summary"],
                              {"run_id": run_id, "success": False})
             return
+        # FXPARALLEL BEGIN adapters: one auditor adapter per part is
+        # built inside the part thread (A4); only plan-phase adapters
+        # are built here.
         try:
             director_adapter = _roles.build_adapter(app, director)
             manager_adapter = _roles.build_adapter(app, manager)
-            auditor_adapter = _roles.build_adapter(app, auditor)
         except _roles.RoleUnbound as exc:
+        # FXPARALLEL END adapters.
             record["summary"] = "run failed: %s" % (exc,)
             record["success"] = False
             yield _run_event("delta", turn, task_id, record["summary"],
@@ -437,16 +500,20 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
             order = _manager_order(
                 record, manager, manager_adapter, parts, project,
                 run_id, _call)
+            # FXPARALLEL BEGIN parts-call: run lock plus abort travel
+            # into the parallel scheduler.
             turn = yield from _run_parts(
                 record=record, app=app, parts=parts, order=order,
                 director=director, manager=manager, worker=worker,
-                auditor=auditor, auditor_adapter=auditor_adapter,
+                auditor=auditor,
                 folder=folder, project=project, task_id=task_id,
                 run_id=run_id, turn=turn, turn_cap=turn_cap,
                 state=state, attached=attached, procs=procs,
                 message=message, contract_hash=record["contract_hash"],
                 publish=_publish, check_stop=_check_stop,
-                stop_seen=_stop_seen, live=_live, call=_call)
+                stop_seen=_stop_seen, live=_live, call=_call,
+                lock=run_lock, abort=abort)
+            # FXPARALLEL END parts-call.
         if "answer" not in parsed:
             record["success"] = all(
                 part.get("verdict") == "PASS"
@@ -492,6 +559,10 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         yield _run_event("budget_stop", turn, task_id, stop_text,
                          {"run_id": run_id})
     except GeneratorExit:
+        # FXPARALLEL BEGIN disconnect: latch abort so part threads see
+        # it; _run_parts joins them on its way out.
+        abort.set()
+        # FXPARALLEL END disconnect.
         for proc in procs:
             with contextlib.suppress(Exception):
                 _actions._kill(proc)
@@ -555,14 +626,25 @@ def _manager_order(record: Any, manager: dict, adapter: Any,
 
 def _run_parts(*, record: Any, app: Any, parts: list, order: list,
                director: dict, manager: dict, worker: dict,
-               auditor: dict, auditor_adapter: Any, folder: str,
+               auditor: dict, folder: str,
                project: str, task_id: str, run_id: str, turn: int,
                turn_cap: int, state: Any, attached: set, procs: list,
                message: str, contract_hash: str, publish: Any,
                check_stop: Any, stop_seen: Any, live: Any,
-               call: Any) -> Any:
-    """Dispatch every part; return the next turn number."""
+               call: Any, lock: Any, abort: Any) -> Any:
+    """Dispatch every part; return the next turn number.
+
+    FXPARALLEL: independent parts run on worker threads, at most
+    _MAX_PART_WORKERS at once. Each thread drives the existing
+    _run_part generator unchanged in meaning and posts its events on
+    one queue; this generator is the single consumer and the only
+    thing that yields. The consumer stamps every outgoing event with
+    one rising turn number. Role choice, prompts, audit logic,
+    verdict rules and attempt counts are unchanged; only timing
+    changes. Each thread runs in a copy of the caller's context.
+    """
     from agent_si.runtime.devrun import records as _records
+    from agent_si.runtime.devrun import roles as _roles
 
     by_id = {part["part_id"]: part for part in parts}
     rows = {part["part_id"]: _records.part_add(
@@ -579,85 +661,224 @@ def _run_parts(*, record: Any, app: Any, parts: list, order: list,
         rows[part_id]["verdict"] = "BLOCKED"
         rows[part_id]["reason"] = reason
 
+    # FXPARALLEL BEGIN dep-gate: a dependant starts or blocks only
+    # after its prerequisite's result was processed (settled), never
+    # on the row verdict alone, which the part thread sets just
+    # before it posts the result.
     def _ready(part_id: str) -> bool:
-        return all(rows[dep]["verdict"] == "PASS"
-                   for dep in by_id[part_id]["depends_on"])
+        for dep in by_id[part_id]["depends_on"]:
+            if dep not in settled:
+                return False
+            if rows[dep]["verdict"] != "PASS":
+                return False
+        return True
 
     def _failed_dep(part_id: str) -> str:
         for dep in by_id[part_id]["depends_on"]:
-            if rows[dep]["verdict"] in ("FAIL", "FAILED", "BLOCKED"):
+            if dep in settled and rows[dep]["verdict"] in (
+                    "FAIL", "FAILED", "BLOCKED"):
                 return dep
         return ""
+    # FXPARALLEL END dep-gate.
 
+    # FXPARALLEL BEGIN scheduler: threads plus one queue consumer.
+    limit = max(1, int(_MAX_PART_WORKERS))
+    box: Any = queue.Queue()
+    threads: dict[str, Any] = {}
+    running_files: dict[str, set] = {}
     settled: set[str] = set()
-    while len(settled) < len(pending):
-        progressed = False
-        for part_id in order:
-            if part_id in settled or part_id not in by_id:
-                continue
-            failed = _failed_dep(part_id)
-            if failed:
-                _blocked(part_id, "blocked: part %s %s" % (
-                    failed, rows[failed]["verdict"]))
-                settled.add(part_id)
-                publish()
-                _journal_event(
-                    project, "DEVRUN_PART",
-                    "part %s: BLOCKED (%s)" % (
-                        part_id, rows[part_id]["reason"]))
-                turn += 1
-                yield _run_event(
-                    "delta", turn, part_id,
-                    "Part %s: BLOCKED (%s failed)" % (part_id, failed),
-                    {"run_id": run_id, "part_id": part_id})
-                progressed = True
-                continue
-            if not _ready(part_id):
-                continue
-            turn += 1
-            yield _run_event("delta", turn, part_id,
-                             "Part %s: attempt 1" % (part_id,),
-                             {"run_id": run_id, "part_id": part_id,
-                              "attempt": 1})
-            _, turn = yield from _run_part(
-                record=record, app=app, spec=by_id[part_id],
-                row=rows[part_id], auditor_spec=auditor,
-                auditor_adapter=auditor_adapter, folder=folder,
-                project=project, task_id=task_id, run_id=run_id,
-                turn=turn, turn_cap=turn_cap, state=state,
-                attached=attached, procs=procs, message=message,
-                contract_hash=contract_hash, publish=publish,
-                check_stop=check_stop, stop_seen=stop_seen,
-                live=live, call=call)
-            settled.add(part_id)
+    stamp = [turn + 1]
+
+    def _stamp(event: Any) -> Any:
+        stamped = dataclasses.replace(event, turn=stamp[0])
+        stamp[0] += 1
+        return stamped
+
+    def _files_overlap(part_id: str) -> bool:
+        wanted = set(by_id[part_id]["files"])
+        for other, owned in running_files.items():
+            if other != part_id and (wanted & owned):
+                return True
+        return False
+
+    def _join_all(timeout: float) -> None:
+        for thread in list(threads.values()):
+            with contextlib.suppress(Exception):
+                thread.join(timeout=timeout)
+
+    def _drive(part_id: str, part_ctx: Any) -> None:
+        def _go() -> None:
+            # Tracebacks are stripped at the thread boundary: the
+            # queued error keeps its type plus message (the terminal
+            # text), while thread frames holding child handles release
+            # by refcount instead of waiting on cyclic collection.
+            try:
+                part_adapter = _roles.build_adapter(app, auditor)
+            except Exception as exc:
+                box.put(("error", part_id, exc.with_traceback(None)))
+                return
+            try:
+                gen = _run_part(
+                    record=record, app=app, spec=by_id[part_id],
+                    row=rows[part_id], auditor_spec=auditor,
+                    auditor_adapter=part_adapter, folder=folder,
+                    project=project, task_id=task_id, run_id=run_id,
+                    turn=0, turn_cap=turn_cap, state=state,
+                    attached=attached, procs=procs, message=message,
+                    contract_hash=contract_hash, publish=publish,
+                    check_stop=check_stop, stop_seen=stop_seen,
+                    live=live, call=call, lock=lock, abort=abort)
+                while True:
+                    try:
+                        event = next(gen)
+                    except StopIteration as done:
+                        value = done.value
+                        verdict = (value[0] if isinstance(value, tuple)
+                                   else value)
+                        box.put(("result", part_id, verdict))
+                        return
+                    box.put(("event", part_id, event))
+            except Exception as exc:
+                box.put(("error", part_id, exc.with_traceback(None)))
+        part_ctx.run(_go)
+
+    def _handle(item: Any) -> Any:
+        kind = item[0]
+        if kind == "event":
+            yield _stamp(item[2])
+            return
+        if kind == "result":
+            done_id = item[1]
+            exited = threads.pop(done_id, None)
+            if exited is not None:
+                with contextlib.suppress(Exception):
+                    exited.join(timeout=30.0)
+            running_files.pop(done_id, None)
+            rows[done_id]["finished_at"] = _utcnow()
+            settled.add(done_id)
             publish()
             _journal_event(
                 project, "DEVRUN_PART",
                 "part %s: %s (%s)" % (
-                    part_id, rows[part_id]["verdict"],
-                    rows[part_id].get("reason", "")))
-            progressed = True
-        if not progressed:
-            for part_id in pending:
-                if part_id not in settled:
-                    _blocked(part_id,
-                             "blocked: prerequisites never passed")
+                    done_id, rows[done_id]["verdict"],
+                    rows[done_id].get("reason", "")))
+            return
+        err_id, exc = item[1], item[2]
+        exited = threads.pop(err_id, None)
+        if exited is not None:
+            with contextlib.suppress(Exception):
+                exited.join(timeout=30.0)
+        running_files.pop(err_id, None)
+        rows[err_id]["finished_at"] = _utcnow()
+        abort.set()
+        _kill_procs(procs, lock)
+        _join_all(30.0)
+        raise exc
+
+    try:
+        while len(settled) < len(pending):
+            if stop_seen():
+                abort.set()
+                _kill_procs(procs, lock)
+                _join_all(30.0)
+                raise _Stopped()
+            while True:
+                try:
+                    queued = box.get_nowait()
+                except queue.Empty:
+                    break
+                yield from _handle(queued)
+            progressed = False
+            for part_id in order:
+                if part_id in settled or part_id not in by_id:
+                    continue
+                if part_id in threads:
+                    progressed = True
+                    continue
+                failed = _failed_dep(part_id)
+                if failed:
+                    _blocked(part_id, "blocked: part %s %s" % (
+                        failed, rows[failed]["verdict"]))
                     settled.add(part_id)
+                    publish()
                     _journal_event(
                         project, "DEVRUN_PART",
                         "part %s: BLOCKED (%s)" % (
                             part_id, rows[part_id]["reason"]))
-            publish()
-    for part_id in pending:
-        if part_id not in settled:
-            _blocked(part_id, "blocked: prerequisites never passed")
-            settled.add(part_id)
-            _journal_event(
-                project, "DEVRUN_PART",
-                "part %s: BLOCKED (%s)" % (
-                    part_id, rows[part_id]["reason"]))
-    publish()
-    return turn
+                    yield _stamp(_run_event(
+                        "delta", 0, part_id,
+                        "Part %s: BLOCKED (%s failed)" % (part_id, failed),
+                        {"run_id": run_id, "part_id": part_id}))
+                    progressed = True
+                    continue
+                if not _ready(part_id):
+                    continue
+                if abort.is_set() or stop_seen():
+                    continue
+                if len(threads) >= limit:
+                    progressed = True
+                    continue
+                if _files_overlap(part_id):
+                    progressed = True
+                    continue
+                rows[part_id]["started_at"] = _utcnow()
+                part_ctx = contextvars.copy_context()
+                thread = threading.Thread(
+                    target=_drive, args=(part_id, part_ctx),
+                    name="fxparallel-part-%s" % (part_id,))
+                threads[part_id] = thread
+                running_files[part_id] = set(by_id[part_id]["files"])
+                thread.start()
+                if stop_seen():
+                    abort.set()
+                    _kill_procs(procs, lock)
+                yield _stamp(_run_event(
+                    "delta", 0, part_id,
+                    "Part %s: attempt 1" % (part_id,),
+                    {"run_id": run_id, "part_id": part_id,
+                     "attempt": 1}))
+                progressed = True
+            try:
+                item = box.get(timeout=0.2)
+            except queue.Empty:
+                item = None
+            if item is None:
+                if not threads and not progressed:
+                    for part_id in pending:
+                        if part_id not in settled:
+                            _blocked(
+                                part_id,
+                                "blocked: prerequisites never passed")
+                            settled.add(part_id)
+                            _journal_event(
+                                project, "DEVRUN_PART",
+                                "part %s: BLOCKED (%s)" % (
+                                    part_id, rows[part_id]["reason"]))
+                    publish()
+                continue
+            yield from _handle(item)
+        for part_id in pending:
+            if part_id not in settled:
+                _blocked(part_id, "blocked: prerequisites never passed")
+                settled.add(part_id)
+                _journal_event(
+                    project, "DEVRUN_PART",
+                    "part %s: BLOCKED (%s)" % (
+                        part_id, rows[part_id]["reason"]))
+        publish()
+    finally:
+        abort.set()
+        _kill_procs(procs, lock)
+        _join_all(30.0)
+        # Drop anything still queued on the way out so no retained
+        # item outlives the run.
+        while True:
+            try:
+                box.get_nowait()
+            except queue.Empty:
+                break
+    # FXPARALLEL END scheduler.
+    return stamp[0]
 
 
 def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
@@ -666,7 +887,7 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
               turn_cap: int, state: Any, attached: set, procs: list,
               message: str, contract_hash: str, publish: Any,
               check_stop: Any, stop_seen: Any, live: Any,
-              call: Any) -> Any:
+              call: Any, lock: Any = None, abort: Any = None) -> Any:
     """Run one part through attempts; return (verdict, next turn)."""
     from agent_si.runtime.devrun import audit as _audit
     from agent_si.runtime.devrun import roles as _roles
@@ -691,7 +912,8 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
             turn=turn, turn_cap=turn_cap, state=state, procs=procs,
             failing=failing, reasons=reasons, message=message,
             publish=publish, check_stop=check_stop, live=live,
-            call=call, attached=attached, stop_seen=stop_seen)
+            call=call, attached=attached, stop_seen=stop_seen,
+            lock=lock)
         turn, attempt_ok = outcome
         if not attempt_ok:
             failing.append("agent loop failed")
@@ -700,7 +922,7 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
             project=project, run_id=run_id, part_id=part_id,
             attempt=attempt, turn=turn, state=state, attached=attached,
             procs=procs, publish=publish, check_stop=check_stop,
-            stop_seen=stop_seen)
+            stop_seen=stop_seen, lock=lock)
         turn, check_rows, checks_ok = checks
         for check in check_rows:
             command = " ".join(
@@ -722,6 +944,7 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
         entry = None
         if spec["check_commands"]:
             try:
+                # FXPARALLEL BEGIN judge-lock: auditor charges in-thread.
                 entry = _audit.judge(
                     app, _audit.fresh_coordinator(), auditor_adapter,
                     auditor_spec, record=record, project_id=project,
@@ -731,18 +954,34 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
                     goal=spec["goal"], files_diff=files_diff,
                     checks=check_rows,
                     artifact_refs=["%s/%s" % (part_id, path)
-                                   for path in spec["files"]])
+                                   for path in spec["files"]],
+                    lock=lock)
+                # FXPARALLEL END judge-lock.
             except _roles._BudgetOut as exc:
                 raise _BudgetOut(str(exc)) from None
-            record.setdefault("audits", []).append({
-                "producer_ref": entry["producer_ref"],
-                "audit_ref": entry["audit_id"],
-                "audit_session": entry["audit_session"],
-                "result": entry["result"],
-                "reasons": entry["reasons"],
-                "part_id": part_id,
-                "attempt": attempt,
-            })
+            # FXPARALLEL BEGIN audits-lock: audit rows append under lock.
+            if lock is not None:
+                with lock:
+                    record.setdefault("audits", []).append({
+                        "producer_ref": entry["producer_ref"],
+                        "audit_ref": entry["audit_id"],
+                        "audit_session": entry["audit_session"],
+                        "result": entry["result"],
+                        "reasons": entry["reasons"],
+                        "part_id": part_id,
+                        "attempt": attempt,
+                    })
+            else:
+                record.setdefault("audits", []).append({
+                    "producer_ref": entry["producer_ref"],
+                    "audit_ref": entry["audit_id"],
+                    "audit_session": entry["audit_session"],
+                    "result": entry["result"],
+                    "reasons": entry["reasons"],
+                    "part_id": part_id,
+                    "attempt": attempt,
+                })
+            # FXPARALLEL END audits-lock.
             first_reason = ((entry or {}).get("reasons", [])
                             or ["auditor gave no reason"])[0]
             turn += 1
@@ -839,7 +1078,7 @@ def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
                 state: Any, procs: list, failing: list, reasons: list,
                 message: str, publish: Any, check_stop: Any, live: Any,
                 call: Any, attached: Any = None,
-                stop_seen: Any = None) -> Any:
+                stop_seen: Any = None, lock: Any = None) -> Any:
     """Worker turn loop; return (next turn, attempt usable)."""
     from agent_si.runtime.devrun import protocol as _protocol
 
@@ -879,7 +1118,7 @@ def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
             actions=parsed["actions"],
             spec=spec, state=state, procs=procs, live=live,
             worker_spec=worker_spec, check_stop=check_stop,
-            attached=attached, stop_seen=stop_seen)
+            attached=attached, stop_seen=stop_seen, lock=lock)
         history.append({"role": "assistant",
                         "content": response.output_text or ""})
         history.append({"role": "user", "content": notes})
@@ -916,7 +1155,8 @@ def _apply_actions(*, record: Any, row: Any, folder: str, project: str,
                    run_id: str, part_id: str, attempt: int,
                    actions: list, spec: dict, state: Any, procs: list,
                    live: Any, worker_spec: dict, check_stop: Any,
-                   attached: Any = None, stop_seen: Any = None) -> str:
+                   attached: Any = None, stop_seen: Any = None,
+                   lock: Any = None) -> str:
     """Apply one worker turn; every refusal returns as text."""
     from agent_si.runtime.devrun import actions as _actions
 
@@ -942,7 +1182,13 @@ def _apply_actions(*, record: Any, row: Any, folder: str, project: str,
                     str(action.get("content", "")),
                     allowed=spec["files"], run_id=run_id,
                     part_id=part_id, attempt=attempt)
-                record.setdefault("artifacts", []).append(entry)
+                # FXPARALLEL BEGIN artifacts-lock.
+                if lock is not None:
+                    with lock:
+                        record.setdefault("artifacts", []).append(entry)
+                else:
+                    record.setdefault("artifacts", []).append(entry)
+                # FXPARALLEL END artifacts-lock.
                 live("worker", str(worker_spec.get("model", "")),
                      part_id, attempt, "write_file",
                      str(entry["path"]), {}, "UNKNOWN",
@@ -961,7 +1207,7 @@ def _apply_actions(*, record: Any, row: Any, folder: str, project: str,
                         run_id, part_id, attempt),
                     argv=[str(word) for word in argv], state=state,
                     procs=procs, attached=attached,
-                    stop_seen=stop_seen))
+                    stop_seen=stop_seen, lock=lock))
             else:
                 notes.append("%s: refused: unknown action" % (name,))
         except _actions.ActionRefused as exc:
@@ -981,7 +1227,7 @@ def _apply_actions(*, record: Any, row: Any, folder: str, project: str,
 def _run_agent_command(*, record: Any, folder: str, project: str,
                        run_id: str, argv: list, state: Any,
                        procs: list, attached: Any = None,
-                       stop_seen: Any = None) -> str:
+                       stop_seen: Any = None, lock: Any = None) -> str:
     """Run one worker command; refusals and failures return as text."""
     from agent_si.runtime.devrun import actions as _actions
 
@@ -993,16 +1239,41 @@ def _run_agent_command(*, record: Any, folder: str, project: str,
                            "%s.log" % (stamp,)).replace("\\", "/")
     log_path = os.path.join(str(folder), ".devrun", "agent",
                             "%s.log" % (stamp,))
+    # FXPARALLEL BEGIN spawn-lock: the run lock covers spawn_checked
+    # only (dispatcher keeps lock-guarded shared tables at
+    # worker_tools/dispatcher.py:111-114), never the wait below.
     try:
-        spawn = _actions.spawn_checked(
-            project, run_id, folder, argv, log_path, log_rel)
+        if lock is not None:
+            with lock:
+                spawn = _actions.spawn_checked(
+                    project, run_id, folder, argv, log_path, log_rel)
+        else:
+            spawn = _actions.spawn_checked(
+                project, run_id, folder, argv, log_path, log_rel)
     except (PermissionError, ValueError) as exc:
         return "run %s: %s" % (" ".join(argv), exc)
     proc = spawn.get("proc")
-    procs.append(proc)
-    if attached is not None:
+    if lock is not None:
+        with lock:
+            procs.append(proc)
+            if attached is not None:
+                with contextlib.suppress(Exception):
+                    attached.add(run_id)
+    else:
+        procs.append(proc)
+        if attached is not None:
+            with contextlib.suppress(Exception):
+                attached.add(run_id)
+    if lock is not None and stop_seen is not None:
+        # A3: the id lands only after its child was attached; a stop
+        # seen right after the spawn kills that child at once.
+        seen = False
         with contextlib.suppress(Exception):
-            attached.add(run_id)
+            seen = bool(stop_seen())
+        if seen:
+            _actions.ensure_dead(proc)
+            raise _Stopped()
+    # FXPARALLEL END spawn-lock.
 
     def _watcher() -> bool:
         try:
@@ -1035,7 +1306,7 @@ def _run_checks(*, record: Any, spec: dict, row: dict, folder: str,
                 project: str, run_id: str, part_id: str, attempt: int,
                 turn: int, state: Any, attached: set, procs: list,
                 publish: Any, check_stop: Any,
-                stop_seen: Any) -> Any:
+                stop_seen: Any, lock: Any = None) -> Any:
     """Run the part's check commands; return (turn, rows, all green)."""
     from agent_si.runtime.devrun import actions as _actions
 
@@ -1059,10 +1330,20 @@ def _run_checks(*, record: Any, spec: dict, row: dict, folder: str,
                                         "word list",
                          "pid": 0})
             continue
+        # FXPARALLEL BEGIN spawn-lock: lock around spawn_checked
+        # only (never around the wait below); id lands after attach.
         try:
-            spawn = _actions.spawn_checked(
-                project, check_id, folder, [str(word) for word in command],
-                log_path, log_rel)
+            if lock is not None:
+                with lock:
+                    spawn = _actions.spawn_checked(
+                        project, check_id, folder,
+                        [str(word) for word in command],
+                        log_path, log_rel)
+            else:
+                spawn = _actions.spawn_checked(
+                    project, check_id, folder,
+                    [str(word) for word in command],
+                    log_path, log_rel)
         except (PermissionError, ValueError) as exc:
             rows.append({"argv": [str(word) for word in command],
                          "exit_code": None, "output_file": log_rel,
@@ -1071,16 +1352,41 @@ def _run_checks(*, record: Any, spec: dict, row: dict, folder: str,
             continue
         proc = spawn.get("proc")
         pid = int(spawn.get("pid") or 0)
-        procs.append(proc)
-        attached.add(check_id)
+        if lock is not None:
+            with lock:
+                procs.append(proc)
+                attached.add(check_id)
+                record.setdefault("checks_started", []).append({
+                    "pid": pid,
+                    "argv": list(spawn.get("argv") or command),
+                    "check_run_id": check_id, "part_id": part_id,
+                    "attempt": attempt})
+        else:
+            procs.append(proc)
+            attached.add(check_id)
+            record.setdefault("checks_started", []).append({
+                "pid": pid, "argv": list(spawn.get("argv") or command),
+                "check_run_id": check_id, "part_id": part_id,
+                "attempt": attempt})
+        if lock is not None:
+            # A3: re-check right after the spawn and kill that child
+            # when a stop is already latched.
+            seen = False
+            with contextlib.suppress(Exception):
+                seen = bool(stop_seen())
+            if seen:
+                _actions.ensure_dead(proc)
+                tail = _actions.finalize_log(log_path)
+                rows.append({
+                    "argv": list(spawn.get("argv") or command),
+                    "exit_code": None, "output_file": log_rel,
+                    "output_tail": "stopped\n%s" % (tail,), "pid": pid})
+                raise _Stopped()
+        # FXPARALLEL END spawn-lock.
 
         def _watcher() -> bool:
             return bool(stop_seen())
 
-        record.setdefault("checks_started", []).append({
-            "pid": pid, "argv": list(spawn.get("argv") or command),
-            "check_run_id": check_id, "part_id": part_id,
-            "attempt": attempt})
         publish()
         kind = str(spawn.get("class") or "read-only")
         outcome = _actions.wait_proc(

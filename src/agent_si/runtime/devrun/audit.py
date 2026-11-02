@@ -106,16 +106,19 @@ def judge(
     files_diff: str,
     checks: list[dict[str, Any]],
     artifact_refs: list[str],
+    lock: Any = None,
 ) -> dict[str, Any]:
     """Run one audit: invoke, parse, store; return the stored row."""
     from agent_si.runtime.devrun import protocol as _protocol
     from agent_si.runtime.devrun import roles as _roles
 
     messages = auditor_messages(goal, files_diff, checks)
-    response, over = _roles.invoke(
+    # FXPARALLEL BEGIN charge-lock: auditor charges under the run lock.
+    response, over, _row = _roles.invoke(
         app, adapter, resolution, messages, record=record,
         project_id=project_id, run_id=run_id, part=part_id,
-        attempt=attempt)
+        attempt=attempt, lock=lock)
+    # FXPARALLEL END charge-lock.
     entry: dict[str, Any] = {
         "part_id": str(part_id), "attempt": int(attempt),
         "producer_ref": str(producer_ref),

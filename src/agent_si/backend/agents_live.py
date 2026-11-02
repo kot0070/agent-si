@@ -10,10 +10,16 @@ is an alias of the same payload.
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Mapping
 from typing import Any
 
 _LIVE_ROWS: dict[str, dict[str, Any]] = {}
+
+# FXPARALLEL BEGIN run-lock: concurrent part rows never overwrite.
+#: Guards the live-store upsert only; keys and log names unchanged.
+_LIVE_LOCK = threading.Lock()
+# FXPARALLEL END run-lock.
 
 #: Append-only FXPANEL live fields (the frozen four stay first, untouched).
 LIVE_EXTRA_FIELDS = ("role", "model", "step", "file", "cost",
@@ -84,7 +90,10 @@ def record_live_row(key: str, row: Mapping[str, Any]) -> dict[str, Any]:
         "errors": _live_strings(row.get("errors")),
         "waits": _live_strings(row.get("waits")),
     }
-    _LIVE_ROWS[str(key)] = stored
+    # FXPARALLEL BEGIN run-lock: upsert as one unit.
+    with _LIVE_LOCK:
+        _LIVE_ROWS[str(key)] = stored
+    # FXPARALLEL END run-lock.
     return dict(stored)
 
 
