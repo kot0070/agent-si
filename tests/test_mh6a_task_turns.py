@@ -53,9 +53,13 @@ def client():
 
 @pytest.fixture(autouse=True)
 def _clean_turns():
+    from agent_si.runtime import manager as _budget_mgr
+
+    prev_gate = _budget_mgr._BUDGET_GATE
     task_turns.clear_task_turns()
     yield
     task_turns.clear_task_turns()
+    _budget_mgr.set_budget_gate(prev_gate)
 
 
 def _create_project(client, name="mh6a-harbor", folder="mh6a-folder"):
@@ -76,6 +80,25 @@ def _create_task(client, project_id, title="mh6a task"):
     )
     assert resp.status_code == 200, resp.text
     return resp.json()["task"]
+
+
+def _configure_gate_project(project_id):
+    """FXLOC C5: fail-closed $ gate needs the project configured.
+
+    Generous limits on the current global gate; idempotent.
+    """
+    from agent_si.budget.gate import BudgetGate
+    from agent_si.runtime import manager as _budget_mgr
+
+    gate = _budget_mgr._BUDGET_GATE
+    if gate is None:
+        gate = BudgetGate()
+        _budget_mgr.set_budget_gate(gate)
+    try:
+        gate.get_state(project_id)
+    except (KeyError, LookupError):
+        gate.configure_project(
+            project_id, "USD", "1000000.00", "900000.00", "1000000.00")
 
 
 def _mock_adapter(canned=None):
@@ -131,6 +154,7 @@ def test_unknown_task_turns_is_404(client):
 def test_manager_run_records_one_triple_per_executed_turn(client):
     project = _create_project(client)
     task = _create_task(client, project["project_id"])
+    _configure_gate_project(project["project_id"])
     planner = TaskPlanner()
     _plan_ref, graph = planner.plan(
         "pkg-mh6a",

@@ -1020,8 +1020,30 @@ class ManagerSdkBridge:
             secret_refs=tuple(request.secret_refs),
             run_config=run_config,
         )
+        from agent_si.budget.gate import (
+            BudgetBlockedError as _BudgetBlocked,
+        )
         try:
             result = interface.run_turn(turn)
+        except _BudgetBlocked as err:
+            # FXLOC C5: a refused admission ends the stream as
+            # budget_stop with plain text (never a generic error, never
+            # a provider call past the cap). Mirrors the manager path
+            # terminal row (failed turn + failed task).
+            self._finish(stream_id)
+            reason = str(err) or "budget stop"
+            yield sse_bytes({
+                "type": "budget_stop",
+                "stream_id": stream_id,
+                "run_id": run_id,
+                "reason": reason,
+                "error": reason,
+                "text": reason,
+            })
+            _record_server_turn(
+                app, project, message, reason, "failed", run_id=run_id)
+            _mirror_run_tasks(app, project, task, message, "failed")
+            return
         except Exception as err:
             self._finish(stream_id)
             yield sse_bytes(_chat_error_event(stream_id, err))

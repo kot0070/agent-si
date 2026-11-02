@@ -75,11 +75,25 @@ class CatalogError(Exception):
         self.code = code
 
 
+def _frozen_root() -> str | None:
+    """Frozen bundle dir (sys._MEIPASS), or None outside a freeze."""
+    meipass = getattr(sys, "_MEIPASS", None)
+    if getattr(sys, "frozen", False) and meipass:
+        return str(meipass)
+    return None
+
+
 def _catalog_path() -> str:
+    root = _frozen_root()
+    if root is not None:
+        return os.path.join(root, "qa_catalog", "catalog_v2.json")
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "catalog_v2.json")
 
 
 def _runners_dir() -> str:
+    root = _frozen_root()
+    if root is not None:
+        return os.path.join(root, "qa_catalog", "runners")
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "runners")
 
 

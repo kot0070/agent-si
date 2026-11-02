@@ -15,7 +15,6 @@
 # are RC3 pre-check notes (built exe, clean env), not unit tests.
 import os
 import shutil
-import socket
 import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -180,34 +179,61 @@ def test_fxportable_p3_browser_fallback_on_webview_failure(monkeypatch):
     assert sidecar._WEBVIEW2_DOWNLOAD_URL.startswith("https://")
 
 
-def test_fxportable_p3_single_instance_reattaches(monkeypatch, tmp_path):
-    """Live port record: same URL opened, no second server started."""
-    opened = []
-    monkeypatch.setattr(
-        sidecar, "_open_in_browser", lambda url: opened.append(url) or True)
-    monkeypatch.setattr(
-        sidecar, "_sidecar_data_dir", lambda: str(tmp_path))
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.bind((sidecar.HOST, 0))
-    sock.listen(1)
-    port = int(sock.getsockname()[1])
+def test_fxportable_p3_single_instance_focuses(monkeypatch, tmp_path):
+    """Live pid + answering health: focus POST, no browser, no 2nd start."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    hits = []
+
+    class _Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            body = b'{"status":"ok"}'
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length") or 0)
+            if length:
+                self.rfile.read(length)
+            hits.append(1)
+            body = b'{"focused":true}'
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = HTTPServer((sidecar.HOST, 0), _Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
     try:
+        port = int(server.server_address[1])
+        opened = []
+        monkeypatch.setattr(
+            sidecar, "_open_in_browser",
+            lambda url: opened.append(url) or True)
+        monkeypatch.setattr(
+            sidecar, "_sidecar_data_dir", lambda: str(tmp_path))
         path = sidecar._port_file_path(str(tmp_path))
-        sidecar._write_port_file(path, port, "tok-1")
-        assert sidecar._reattach_running() is True
-        assert opened == ["http://" + sidecar.HOST + ":"
-                          + str(port) + "/?token=tok-1"]
+        sidecar._write_port_file(path, port, "tok-1", pid=os.getpid())
+        assert sidecar._single_instance_gate(str(tmp_path)) == "focused"
+        assert hits == [1]
+        assert opened == []
     finally:
-        sock.close()
-    assert sidecar._reattach_running() is False
-    assert not os.path.exists(path)
+        server.shutdown()
 
 
 def test_fxportable_p3_no_record_means_first_start(monkeypatch, tmp_path):
-    """No port record: first start proceeds (no reattach)."""
+    """No port record: first start proceeds (mutex held, released after)."""
     monkeypatch.setattr(
         sidecar, "_sidecar_data_dir", lambda: str(tmp_path))
-    assert sidecar._reattach_running() is False
+    assert sidecar._single_instance_gate(str(tmp_path)) == "proceed"
+    sidecar._release_startup_lock(sidecar._lock_file_path(str(tmp_path)))
 
 
 # --- P5-guard: honest BLOCKED without python -------------------------------

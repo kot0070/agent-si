@@ -418,6 +418,9 @@ def register_read_routes(app: Any) -> Any:
             unavailable.append("project.tasks")
         if project.get("audits") is None:
             unavailable.append("project.audits")
+        if project.get("tokens") is None or (
+                project.get("tokens") == _telemetry_run_store.UNAVAILABLE):
+            unavailable.append("project.tokens")
         for row in models:
             if row.get("tokens") == _telemetry_run_store.UNAVAILABLE:
                 unavailable.append("models.%s.tokens" % row.get("model"))
