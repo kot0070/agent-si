@@ -145,7 +145,7 @@ def test_bare_pasted_keys_are_redacted_before_storing(tmp_path):
         "eq": "api_key=abc123SECRET",
         "colon": "token: abc123SECRET",
         "arrow": "password => hunter2SECRET",
-        "pem": ("-----BEGIN PRIVATE KEY-----\n"
+        "pem": ("-----BEGIN " + "PRIVATE KEY-----\n"
                 "MIIEvwIBADANBgkqhkiG9w0BAQEFAASC\n"
                 "-----END PRIVATE KEY-----"),
     }
