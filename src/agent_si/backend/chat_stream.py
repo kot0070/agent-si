@@ -55,6 +55,35 @@ CHAT_ACTOR_MISSING = "CHAT_ACTOR_MISSING"
 CHAT_FORBIDDEN = "CHAT_FORBIDDEN"
 CHAT_RATE_LIMITED = "CHAT_RATE_LIMITED"
 
+#: The manager run emitted no terminal event: the stream still closes
+#: with exactly one `done`, now carrying this reason code so the UI
+#: can name it, and the server logs why (run id plus forwarded count).
+NO_TERMINAL_EVENT = "NO_TERMINAL_EVENT"
+
+
+def _log_stream_failure(run_id: str, stream_id: str,
+                        err: Exception) -> None:
+    """Log a terminal chat-stream failure with run id and traceback."""
+    try:
+        from agent_si import file_log as _file_log
+
+        _file_log.log_exception("chat-stream %s" % stream_id, run_id, err)
+    except Exception:
+        pass
+
+
+def _log_no_terminal(run_id: str, stream_id: str, forwarded: int) -> None:
+    """Log why a stream closed with no terminal event from the run."""
+    try:
+        import logging as _logging
+
+        _logging.getLogger("agent_si.chat").error(
+            "run %s stream %s closed with no terminal event "
+            "(%d events forwarded); answering synthesized done %s",
+            run_id, stream_id, int(forwarded), NO_TERMINAL_EVENT)
+    except Exception:
+        pass
+
 #: FXKBCHAT KB-context reason code (unknown kb_id on chat open).
 CHAT_KB_UNKNOWN = "CHAT_KB_UNKNOWN"
 
@@ -844,13 +873,6 @@ class ManagerSdkBridge:
                             error_code=str(payload.get("code") or ""))
                         _mirror_run_tasks(
                             app, project, task, message, task_status)
-            if not terminal_emitted:
-                yield sse_bytes({
-                    "type": "done",
-                    "stream_id": stream_id,
-                    "run_id": run_id,
-                })
-                _close("done")
         except Exception as err:
             self._finish(stream_id)
             if not terminal_emitted:
