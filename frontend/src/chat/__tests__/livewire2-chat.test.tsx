@@ -133,12 +133,33 @@ describe("chat cancel uses the server stream id", () => {
           headers: { "content-type": "application/json" },
         });
       }
-      return new Response(body, {
-        status: 200,
-        headers: {
-          "content-type": "text/event-stream",
-          "x-stream-id": "srv-9",
-        },
+      // FXCHATHIST (c7aeac3) loads served history on mount: the one-shot
+      // SSE stream belongs exclusively to /chat/stream, other reads get
+      // their shaped JSON so they cannot lock/consume it first.
+      if (target.includes("/api/v1/chat/stream")) {
+        return new Response(body, {
+          status: 200,
+          headers: {
+            "content-type": "text/event-stream",
+            "x-stream-id": "srv-9",
+          },
+        });
+      }
+      if (target.includes("/api/v1/chat/history")) {
+        return new Response(JSON.stringify({ turns: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (target.includes("/api/v1/chat/models")) {
+        return new Response(JSON.stringify({ models: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ code: "LIVEWIRE2_UNEXPECTED_API" }), {
+        status: 404,
+        headers: { "content-type": "application/json" },
       });
     });
     const client = new HttpApiClient();
