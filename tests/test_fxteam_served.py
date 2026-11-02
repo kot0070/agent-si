@@ -18,6 +18,8 @@ if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
 from agent_si.backend import agents_live  # noqa: E402
+from agent_si.backend import teammode_routes as _team  # noqa: E402
+from agent_si.backend import parallelparts_routes as _parallel  # noqa: E402
 from agent_si.backend.app import create_app  # noqa: E402
 from agent_si.backend.orchestration import steplimits as _steplimits  # noqa: E402
 from agent_si.providers.adapters.base import (  # noqa: E402
@@ -59,11 +61,15 @@ def _apply_limits(project_id):
 def setup_function(_func):
     agents_live.clear_live_rows()
     _steplimits._reset_state()
+    _team._reset_state()
+    _parallel._reset_state()
 
 
 def teardown_function(_func):
     agents_live.clear_live_rows()
     _steplimits._reset_state()
+    _team._reset_state()
+    _parallel._reset_state()
 
 
 def _parse_sse(text):
@@ -146,6 +152,8 @@ def _bound_mock():
 def _served_app(tmp_path, project, factory):
     agents_live.clear_live_rows()
     _steplimits._reset_state()
+    _team._reset_state()
+    _parallel._reset_state()
     _apply_limits(project)
     store = tmp_path / ("store-" + project)
     store.mkdir(parents=True, exist_ok=True)
