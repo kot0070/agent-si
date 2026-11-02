@@ -51,6 +51,22 @@ ACTOR = "tester-k02r4"
 CANNED = ("Mock engine reply one.", "Mock engine reply two.")
 
 
+# -- FXLOC C5: real budget gate (fail-closed product gate) --------------------
+@pytest.fixture(autouse=True)
+def _fxloc_real_budget_gate():
+    """Fail-closed gate needs a real gate: generous limits, restored after."""
+    from agent_si.budget.gate import BudgetGate
+    from agent_si.runtime import manager as _mgr
+
+    prev = _mgr._BUDGET_GATE
+    gate = BudgetGate()
+    gate.configure_project(
+        "proj-k02r4", "USD", "1000000.00", "900000.00", "1000000.00")
+    _mgr.set_budget_gate(gate)
+    yield
+    _mgr.set_budget_gate(prev)
+
+
 # K02R5-Sable: per-project step limits for the streamed mock test (R-349
 # honest refusal, NO product default; reset before/after for isolation).
 @pytest.fixture(autouse=True)

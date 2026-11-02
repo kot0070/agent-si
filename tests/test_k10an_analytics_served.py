@@ -108,7 +108,10 @@ def test_158_project_counts_served(tmp_path, monkeypatch):
     assert second.status_code == 200, second.text
     assert first.json() == second.json(), (first.json(), second.json())
     body = first.json()
-    assert body["project"] == {"tasks": 2, "audits": 1}, body
+    assert body["project"] == {"tasks": 2, "audits": 1, "tokens": 150}, body
+    per_model = sum(row["tokens"] for row in body["models"]
+                    if isinstance(row["tokens"], int))
+    assert body["project"]["tokens"] == per_model == 150, body
     assert body["source"] == "telemetry_store", body
     for key in ("metric_records", "telemetry_events", "totals", "tasks",
                 "models", "providers", "unavailable"):
@@ -116,7 +119,10 @@ def test_158_project_counts_served(tmp_path, monkeypatch):
     assert body["tasks"] == ["task-k10an-1", "task-k10an-2"], body
     missing = client.get("/api/v1/analytics/telemetry?project_id=k10an-absent")
     assert missing.status_code == 200, missing.text
-    assert missing.json()["project"] == {"tasks": None, "audits": None}, missing.json()
+    assert missing.json()["project"] == {
+        "tasks": None, "audits": None, "tokens": None}, missing.json()
+    assert missing.json()["project"]["tokens"] is None
+    assert "project.tokens" in missing.json()["unavailable"], missing.json()
     assert missing.json()["project"]["tasks"] is None
     assert missing.json()["project"]["audits"] is None
     assert "project.tasks" in missing.json()["unavailable"], missing.json()

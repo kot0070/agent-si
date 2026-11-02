@@ -172,6 +172,25 @@ def _configure_budget(project_id, task_max_steps=2):
         "reason": "FXTESTS2 run-end hook proof",
     })
     assert outcome.applied, outcome.reason
+    _configure_gate_project(project_id)
+
+
+def _configure_gate_project(project_id):
+    """FXLOC C5: fail-closed $ gate needs the project configured.
+
+    Generous limits on the current global gate (the app's real gate
+    once the client fixture built it); idempotent.
+    """
+    from agent_si.runtime import manager as _budget_mgr
+
+    gate = _budget_mgr._BUDGET_GATE
+    if gate is None:
+        return
+    try:
+        gate.get_state(project_id)
+    except (KeyError, LookupError):
+        gate.configure_project(
+            project_id, "USD", "1000000.00", "900000.00", "1000000.00")
 
 
 def _mock_adapter(canned):

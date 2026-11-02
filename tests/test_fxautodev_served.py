@@ -136,6 +136,10 @@ def _client(tmp_path, monkeypatch, adapter):
         "store_dir": str(tmp_path),
     })
     _pin_worker(app)
+    # FXLOC C5: fail-closed gate needs the project configured on the
+    # app's real gate (generous limits; mirrors the served chat route).
+    app.state.k04_ctx.budget_state.configure_project(
+        PROJECT, "USD", "1000000.00", "900000.00", "1000000.00")
     monkeypatch.setattr(
         _chat, "bind_routed_provider_adapter",
         lambda app, project_id=None: adapter)
