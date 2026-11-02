@@ -277,6 +277,20 @@ def _notices_ref() -> str:
     return "docs/third_party_notices/NOTICES.md"
 
 
+#: Mark-asset destination name inside the frozen bundle
+#: (packaging/sidecar spec ships src/agent_si/assets there).
+_ASSETS_DEST = "assets"
+
+
+def _asset_ref(name: str) -> str:
+    """Mark-asset ref: bundle-absolute when frozen, repo-relative otherwise."""
+    meipass = getattr(sys, "_MEIPASS", None)
+    if getattr(sys, "frozen", False) and meipass:
+        return os.path.join(str(meipass), _ASSETS_DEST, str(name))
+    return os.path.join(
+        _here_root(), "src", "agent_si", "assets", str(name))
+
+
 def _index_path(web_dir: str) -> str | None:
     """Return the tree index.html path, or None when it is absent."""
     candidate = os.path.join(web_dir, "index.html")
@@ -1223,34 +1237,196 @@ def run_qa_runner(runner_ref: str) -> int:
         return 0
 
 
-def _splash_html() -> str:
+#: Splash window + page background: the reference dark (#0d1117). The
+#: native window is created with this background_color so nothing white
+#: flashes before the splash paints, and the app's first paint
+#: (frontend/index.html inline style) uses the same colour.
+_SPLASH_BG = "#0d1117"
+
+#: Inline SI mark (mirrors src/agent_si/assets/mark.svg, 256 viewBox).
+#: No network, no file path: inlined so the splash paints instantly.
+_MARK_SVG = (
+    "<svg viewBox=\"0 0 256 256\" width=\"72\" height=\"72\" role=\"img\" "
+    "aria-label=\"Agent SI mark\">"
+    "<rect x=\"8\" y=\"8\" width=\"240\" height=\"240\" rx=\"54\" "
+    "fill=\"#161b22\" stroke=\"#30363d\" stroke-width=\"4\"/>"
+    "<rect x=\"46\" y=\"46\" width=\"164\" height=\"164\" rx=\"38\" "
+    "fill=\"#0d1117\"/>"
+    "<g fill=\"none\" stroke=\"#2f81f7\" stroke-width=\"24\" "
+    "stroke-linecap=\"round\">"
+    "<path d=\"M 148 62 C 120 62 98 76 98 102 C 98 130 148 120 "
+    "148 148 C 148 170 128 182 102 182 C 92 182 84 178 78 172\"/>"
+    "<path d=\"M 178 62 L 178 182\"/>"
+    "</g>"
+    "<rect x=\"104\" y=\"196\" width=\"48\" height=\"10\" rx=\"5\" "
+    "fill=\"#2f81f7\"/>"
+    "</svg>"
+)
+
+_SPLASH_CSS = (
+    "html,body{margin:0;padding:0;height:100%;"
+    "background:" + _SPLASH_BG + ";color:#e6edf3;"
+    "font-family:\"Segoe UI\",system-ui,sans-serif;"
+    "display:flex;align-items:center;justify-content:center;}"
+    ".card{text-align:center;}"
+    ".mark{width:72px;height:72px;margin:0 auto 16px;}"
+    "h1{font-size:22px;margin:0 0 8px;letter-spacing:2px;}"
+    "p{font-size:13px;color:#8b949e;margin:0 0 16px;}"
+    ".bar{width:220px;height:4px;margin:0 auto;border-radius:2px;"
+    "background:#21262d;overflow:hidden;}"
+    ".bar>div{height:100%;width:40%;border-radius:2px;"
+    "background:#2f81f7;animation:slide 1.2s infinite ease-in-out;}"
+    "@keyframes slide{0%{margin-left:-40%;}100%{margin-left:100%;}}"
+    "@media (prefers-reduced-motion:reduce){.bar>div{animation:none;}}"
+)
+
+_SPLASH_STRINGS = {
+    "en": {
+        "starting": "Starting&hellip;",
+        "first": "First start can take up to a minute.",
+    },
+    "uk": {
+        "starting": "Запуск&hellip;",
+        "first": "Перший запуск може тривати до хвилини.",
+    },
+}
+
+_FAILURE_STRINGS = {
+    "en": {
+        "title": "Agent SI did not start",
+        "reason": "Reason",
+        "logs": "Log files",
+        "no_logs": "No log folder resolved.",
+        "next": ("Next step: open the log folder above, keep the newest "
+                 "log, and start Agent SI again."),
+    },
+    "uk": {
+        "title": "Agent SI не запустився",
+        "reason": "Причина",
+        "logs": "Файли журналів",
+        "no_logs": "Теку журналів не знайдено.",
+        "next": ("Наступний крок: відкрийте теку журналів вище, збережіть "
+                 "найновіший журнал і запустіть Agent SI знову."),  # noqa: RUF001 -- legitimate Ukrainian text
+    },
+}
+
+
+def _resolve_splash_lang(data_root: str | None = None) -> str:
+    """UI language for the local pages: stored value else OS, en + uk.
+
+    The browser localStorage value (agentsi.locale) is not reachable
+    from this process before the backend serves, so the stored value is
+    read only when it is available without the backend: the
+    AGENT_SI_LOCALE override (exported by a launcher that remembers the
+    choice). Otherwise the OS language decides (uk when it starts with
+    "uk"), defaulting to en. Backend-free, no network, no secrets.
+    """
+    _ = data_root
+    try:
+        override = (os.environ.get("AGENT_SI_LOCALE") or "").strip().lower()
+    except Exception:
+        override = ""
+    if override in ("en", "uk"):
+        return override
+    try:
+        import locale as _locale
+
+        for probe in (_locale.getdefaultlocale()[0] or "",
+                      _locale.getlocale()[0] or ""):
+            tag = str(probe).strip().lower()
+            if tag.startswith("uk"):
+                return "uk"
+            if tag.startswith("en"):
+                return "en"
+    except Exception:
+        pass
+    return "en"
+
+
+def _is_first_start(data_root: str | None) -> bool:
+    """True when the data folder is new (absent or empty).
+
+    Read BEFORE the file log / install create the folder, so the splash
+    can carry the long-wait line only on a genuinely first start.
+    Failures resolve to False (normal start wording).
+    """
+    try:
+        if not data_root:
+            return False
+        path = os.path.abspath(str(data_root))
+        if not os.path.isdir(path):
+            return True
+        with os.scandir(path) as entries:
+            for _ in entries:
+                return False
+        return True
+    except Exception:
+        return False
+
+
+def _splash_html(first_start: bool = False,
+                 lang: str | None = None) -> str:
     """Local splash page: instant window while the backend starts.
 
-    Static HTML only (no network, no token, no secret): the window
-    appears at once and main() navigates it to the app once the
-    server is up.
+    Dark reference page with the inline SI mark, "Agent SI", one status
+    line and a CSS-only indeterminate bar (honours
+    prefers-reduced-motion). The long-wait line appears only when
+    first_start is true (data folder is new). Static HTML only (no
+    network, no token, no secret, no absolute path): the window appears
+    at once and main() navigates it to the app once the server is up.
     """
+    code = (lang or _resolve_splash_lang()).lower()
+    if code not in _SPLASH_STRINGS:
+        code = "en"
+    text = _SPLASH_STRINGS[code]
+    status = text["starting"]
+    if first_start:
+        status += "<br>" + text["first"]
     return (
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
-        "<title>Agent SI</title></head><body>"
-        "<h1>Starting Agent SI...</h1>"
-        "<p>First start can take up to a minute "
-        "(unpacking, data check, model lists).</p>"
-        "</body></html>"
+        "<!doctype html><html lang=\"" + code + "\">"
+        "<head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        "<title>Agent SI</title>"
+        "<style>" + _SPLASH_CSS + "</style></head>"
+        "<body><div class=\"card\">"
+        "<div class=\"mark\">" + _MARK_SVG + "</div>"
+        "<h1>Agent SI</h1>"
+        "<p>" + status + "</p>"
+        "<div class=\"bar\"><div></div></div>"
+        "</div></body></html>"
     )
 
 
-def _failure_html(reason: str, logs_dir: str | None) -> str:
-    """Local failure page: reason plus the log folder, no secrets."""
-    where = ("Log files: %s" % (logs_dir,)
-             if logs_dir else "No log folder resolved.")
+def _failure_html(reason: str, logs_dir: str | None,
+                  lang: str | None = None) -> str:
+    """Local failure page in the splash style: reason + log folder.
+
+    Keeps every field it has now (reason, log-folder line) plus one next
+    step; all interpolated values stay HTML-escaped, no secrets.
+    """
+    code = (lang or _resolve_splash_lang()).lower()
+    if code not in _FAILURE_STRINGS:
+        code = "en"
+    text = _FAILURE_STRINGS[code]
+    where = ("%s: %s" % (text["logs"], logs_dir)
+             if logs_dir else text["no_logs"])
     return (
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
-        "<title>Agent SI did not start</title></head><body>"
-        "<h1>Agent SI did not start</h1>"
-        "<p>Reason: %s</p>"
+        "<!doctype html><html lang=\"" + code + "\">"
+        "<head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        "<title>" + _escape_html(text["title"]) + "</title>"
+        "<style>" + _SPLASH_CSS + "</style></head>"
+        "<body><div class=\"card\">"
+        "<div class=\"mark\">" + _MARK_SVG + "</div>"
+        "<h1>" + _escape_html(text["title"]) + "</h1>"
+        "<p>%s: %s</p>"
         "<p>%s</p>"
-        "</body></html>" % (_escape_html(reason), _escape_html(where))
+        "<p>%s</p>"
+        "</div></body></html>" % (
+            _escape_html(text["reason"]),
+            _escape_html(reason),
+            _escape_html(where),
+            _escape_html(text["next"]))
     )
 
 
@@ -1299,6 +1475,10 @@ def main(argv: list[str] | None = None) -> int:
     app = build_app()
     token = getattr(app.state, "ui_session_token", "")
     data_root = _sidecar_data_dir()
+    # First-start wording is decided BEFORE the file log / install create
+    # the data folder, so a new folder still reads as new.
+    first_start = _is_first_start(data_root)
+    splash_lang = _resolve_splash_lang(data_root)
     try:
         from agent_si import file_log as _file_log
 
@@ -1310,18 +1490,24 @@ def main(argv: list[str] | None = None) -> int:
 
     # The window opens at once on a local splash page; the backend
     # starts behind it. No window (headless) keeps the old path:
-    # serve, then open the browser.
+    # serve, then open the browser. background_color matches the splash
+    # so no white flash paints before it.
     try:
         import webview as _webview
     except Exception:
         _webview = None
     window = None
+    # pywebview 6.2.1 create_window takes no icon: the exe resource
+    # (_ICON in the spec) owns the window + taskbar icon on Windows.
     if _webview is not None:
         width, height = resolve_window_size(data_root)
         try:
             window = _webview.create_window(
-                "Agent SI", None, html=_splash_html(),
-                width=width, height=height, text_select=True)
+                "Agent SI", None,
+                html=_splash_html(first_start=first_start,
+                                  lang=splash_lang),
+                width=width, height=height, text_select=True,
+                background_color=_SPLASH_BG)
         except Exception as exc:
             _log("agent-si-sidecar: window unavailable "
                  f"({exc}); continuing headless")
@@ -1347,7 +1533,8 @@ def main(argv: list[str] | None = None) -> int:
         if window is not None and _webview is not None:
             try:
                 window.load_url(_failure_html(
-                    reason, _logs_dir_for_failure(data_root)))
+                    reason, _logs_dir_for_failure(data_root),
+                    lang=splash_lang))
             except Exception:
                 pass
             try:

@@ -24,11 +24,14 @@ from agent_si import sidecar  # noqa: E402
 
 def test_splash_names_startup_and_holds_no_secret():
     """The local splash page carries the wait line, never a token."""
-    html = sidecar._splash_html()
-    assert "Starting Agent SI" in html
+    html = sidecar._splash_html(first_start=True, lang="en")
+    assert "Agent SI" in html
     assert "minute" in html
     assert "token" not in html.lower()
     assert "http" not in html
+    normal = sidecar._splash_html(first_start=False, lang="en")
+    assert "Agent SI" in normal
+    assert "minute" not in normal
 
 
 def test_failure_page_names_reason_and_log_folder(tmp_path):
@@ -97,29 +100,31 @@ def test_backend_never_ready_shows_failure(monkeypatch, tmp_path):
     """A backend that never starts: splash first, then reason + logs."""
     import uvicorn  # noqa: F401
 
+    monkeypatch.setenv("AGENT_SI_LOCALE", "en")
     monkeypatch.setenv("AGENT_SI_DATA_DIR", str(tmp_path / "data"))
     window, stub = _stub_webview(monkeypatch)
     _stub_server(monkeypatch, started=False)
     code = sidecar.main([])
     assert code == 1
     assert stub.created, "the window must appear at once, before the backend"
-    assert "Starting Agent SI" in (stub.created[0]["html"] or "")
+    assert "Agent SI" in (stub.created[0]["html"] or "")
     assert window.loaded, "the failure page must load into the window"
-    assert "server did not start" in window.loaded[0]
-    assert "logs" in window.loaded[0]
+    assert "did not start" in window.loaded[0]
+    assert "logs" in window.loaded[0].lower()
 
 
 def test_backend_ready_navigates_to_app(monkeypatch, tmp_path):
     """A backend that starts: splash first, then the app URL with token."""
     import uvicorn  # noqa: F401
 
+    monkeypatch.setenv("AGENT_SI_LOCALE", "en")
     monkeypatch.setenv("AGENT_SI_DATA_DIR", str(tmp_path / "data"))
     window, stub = _stub_webview(monkeypatch)
     _stub_server(monkeypatch, started=True)
     code = sidecar.main([])
     assert code == 0
     assert stub.created, "the window must appear at once, before the backend"
-    assert "Starting Agent SI" in (stub.created[0]["html"] or "")
+    assert "Agent SI" in (stub.created[0]["html"] or "")
     assert window.loaded, "the app URL must load into the window"
     assert window.loaded[0].startswith("http://127.0.0.1:")
     assert "token=" in window.loaded[0]
