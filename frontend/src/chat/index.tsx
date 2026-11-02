@@ -1258,6 +1258,9 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
   const [connected, setConnected] = useState<string[] | null>(null);
   const [directorModel, setDirectorModel] = useState<string | null>(null);
   const [draft, setDraft] = useState(props.initialDraft ?? "");
+  // FXCHATV (a): mirror for the batched no-provider restore below.
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
   const [blocking, setBlocking] = useState<BlockingError | null>(() =>
     consumeBlockingStash(key),
   );
@@ -1395,6 +1398,20 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
     const ui: SliceUI = {
       onBlocking: (error) => {
         setBlocking(error);
+        // FXCHATV (a): restore the task into the composer in the SAME
+        // commit as the blocking error, so the draft is already back
+        // when the error line lands. Same conditions as the effect
+        // below (never clobbers text typed after the send); the effect
+        // stays as the net for blocking restored at mount.
+        if (
+          error !== null &&
+          error.code === "NO_PROVIDER_BOUND" &&
+          error.task !== undefined &&
+          error.task.trim() !== "" &&
+          draftRef.current.trim() === ""
+        ) {
+          setDraft(error.task);
+        }
       },
       onAsk: (ask) => {
         pendingAskRef.current = ask;
@@ -1870,7 +1887,10 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
           the h1 stays in the DOM for the frozen heading contract but reads
           as plain conversation (visually hidden). */}
       <h1 className="fx-vh">{t("shell.sidebar.chat")}</h1>
-      <HierarchyRows projectId={props.projectId} />
+      <HierarchyRows
+        projectId={props.projectId}
+        onExpandedChange={setHierExpanded}
+      />
       <div
         data-testid="chat-layout"
         style={{ maxHeight: "calc(100vh - 200px)" }}
@@ -2106,9 +2126,16 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
             inside, the send as an icon button inside right; a small status
             line under it (model | route | working state). */}
         <div data-testid="chat-composer" className="fx-composer">
+          {/* FXCHATV (b): single Connect CTA for one state — the rows
+              above already offer it when expanded and empty. */}
           {boundModels !== null &&
           boundModels.length === 0 &&
-          blocking?.code !== "NO_PROVIDER_BOUND" ? (
+          blocking?.code !== "NO_PROVIDER_BOUND" &&
+          !(
+            connected !== null &&
+            connected.length === 0 &&
+            hierExpanded
+          ) ? (
             <div className="fx-composer-hint">
               <p data-testid="chat-no-model-hint" className="fx-quiet">{t("chat.composer.noModel")}</p>
               <a data-testid="chat-no-model-connect" href="/settings/models" className="fx-btn-quiet">
@@ -2159,7 +2186,11 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
             <span>{directorModel ?? t("chat.hierarchy.auto")}</span>
             <span>{statusRoute()}</span>
             <span>
-              {streaming ? (
+              {/* FXCHATV (c): with no provider bound the status names
+                  the blocked state, never Ready. */}
+              {blocking?.code === "NO_PROVIDER_BOUND" ? (
+                pt("chat.composer.statusBlocked", "Blocked")
+              ) : streaming ? (
                 <>
                   <span
                     data-testid="chat-spinner"
@@ -2210,7 +2241,6 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
               data-testid="chat-error-line"
               role="alert"
               className="fx-quiet"
-              title={blocking.code}
             >
               <p>
                 {chatErrorText(
@@ -2228,7 +2258,7 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
               </button>
             </div>
           ) : null}
-          {blocking === null && health === "degraded" ? (
+          {blocking === null && health === "degraded" && !streaming ? (
             <span data-testid="chat-health-degraded" role="status" className="fx-quiet">
               {t("errors.generic")}
             </span>
