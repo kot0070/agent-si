@@ -282,10 +282,9 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
   }
 
   // Done in step 2 (or Manage models) commits the ticked ids for the card,
-  // the chat picker, Auto and the role pickers. Tick persistence through a
-  // route waits on the backend naming one (no provider-models write route
-  // exists yet); until then the served `enabled` list, when the route names
-  // it, is the truth the dialog starts from.
+  // the chat picker, Auto and the role pickers. The dialog PUTs the ticks
+  // to the provider-models write route first, so the server's enabled
+  // list (the routing truth) already holds them; the card mirrors them.
   function handleModelsDone(presetId: string, modelIds: string[]): void {
     setStates((prev) => ({
       ...prev,
