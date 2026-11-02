@@ -619,6 +619,11 @@ def spawn_checked(
         _ask_decision = _ask_permissions.get_decision(
             tool_id=_ask_tool_id)
         if _ask_decision is None:
+            with contextlib.suppress(Exception):
+                _ask_permissions.record_install_request(
+                    tool_id=_ask_tool_id,
+                    argv=list(words),
+                    project_id=str(project_id))
             raise InstallAskNeeded(
                 _ask_tool_id,
                 f"refused: install-class command {words[0]!r} needs "
@@ -629,6 +634,20 @@ def spawn_checked(
                 f"refused: install-class command {words[0]!r} needs "
                 "install permission (ungranted runs continue without "
                 "the install)")
+        _ask_approved = _ask_permissions.get_install_argv(
+            tool_id=_ask_tool_id)
+        if _ask_approved is None:
+            with contextlib.suppress(Exception):
+                _ask_approved = _ask_permissions.pin_install_argv(
+                    tool_id=_ask_tool_id,
+                    argv=list(words),
+                    project_id=str(project_id))
+        if _ask_approved is not None and [
+                str(word) for word in _ask_approved] != words:
+            raise PermissionError(
+                "refused: install approval covers "
+                f"{[str(word) for word in _ask_approved]!r}, got {words!r} "
+                "(an approval runs these exact words only)")
     if kind == "inline":
         raise PermissionError(
             "refused: inline code needs approval first "
@@ -657,10 +676,15 @@ def spawn_checked(
     if kind == "install" and _ask_decision == "allow":
         # The user allowed this installer in the decision ledger: carry
         # that exact approval to the guard so the installer-name denial
-        # lifts for these exact words only. Shell-fragment, widening and
+        # lifts for these exact words only. The carried argv comes from
+        # the ledger pin (ask-time request, or the first allowed spawn),
+        # never rebuilt from the current words, so the guard exact-match
+        # stays live on this path too. Shell-fragment, widening and
         # path checks still run; nothing else changes.
+        _ask_carry = (_ask_approved if _ask_approved is not None
+                      else list(words))
         auth["install_approved"] = True
-        auth["install_argv"] = list(words)
+        auth["install_argv"] = [str(word) for word in _ask_carry]
     result = guarded_dispatch(
         words, "R0", auth,
         tool="devrun_exec",

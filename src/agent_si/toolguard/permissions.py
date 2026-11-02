@@ -307,7 +307,7 @@ def _decisions_path(store_dir: str) -> str:
     return os.path.join(store_dir, DECISIONS_FILENAME)
 
 
-def load_decisions(store_dir: Any) -> dict[str, dict[str, str]]:
+def load_decisions(store_dir: Any) -> dict[str, dict[str, Any]]:
     """Read the persisted decision ledger; unknown state reads empty."""
     if not store_dir:
         return {}
@@ -319,19 +319,22 @@ def load_decisions(store_dir: Any) -> dict[str, dict[str, str]]:
         return {}
     if not isinstance(data, dict):
         return {}
-    ledger: dict[str, dict[str, str]] = {}
+    ledger: dict[str, dict[str, Any]] = {}
     for key, value in data.items():
         if isinstance(key, str) and isinstance(value, dict):
-            ledger[key] = {
-                str(field): str(item)
-                for field, item in value.items()
-            }
+            row: dict[str, Any] = {}
+            for field, item in value.items():
+                if str(field) == "argv" and isinstance(item, list):
+                    row["argv"] = [str(word) for word in item]
+                else:
+                    row[str(field)] = str(item)
+            ledger[key] = row
     return ledger
 
 
 def save_decisions(
         store_dir: Any,
-        decisions: dict[str, dict[str, str]]) -> None:
+        decisions: dict[str, dict[str, Any]]) -> None:
     """Persist the decision ledger with a temp file plus os.replace."""
     if not store_dir:
         return
@@ -357,10 +360,10 @@ _BOUND_STORE_DIR: str | None = None
 
 #: In-process decision memory shared by the served decide route and the
 #: spawn path; the file stays the durable record.
-_BOUND_DECISIONS: dict[str, dict[str, str]] = {}
+_BOUND_DECISIONS: dict[str, dict[str, Any]] = {}
 
 
-def bind_decision_store(store_dir: Any) -> dict[str, dict[str, str]]:
+def bind_decision_store(store_dir: Any) -> dict[str, dict[str, Any]]:
     """Bind the ledger store dir; reseed shared memory from the file."""
     global _BOUND_STORE_DIR
     _BOUND_STORE_DIR = str(store_dir) if store_dir else None
@@ -399,32 +402,171 @@ def get_decision(store_dir: Any = None, memory: Any = None,
 def record_decision(store_dir: Any = None, memory: Any = None,
                     tool_id: str = "", decision: str = "",
                     project_id: str = "",
-                    decided_at: str | None = None) -> dict[str, str]:
+                    decided_at: str | None = None,
+                    argv: Any = None) -> dict[str, Any]:
     """Record one install decision; the file is the durable record.
 
     Raises PermissionCheckError (400) for a bad decision; unknown ids
-    stay unreadable as none until recorded.
+    stay unreadable as none until recorded. ``argv`` optionally pins
+    the exact approved words; when absent, an argv pinned by an earlier
+    install ask is preserved, so a later allow never widens it.
     """
     if decision not in DECISION_VALUES:
         raise PermissionCheckError(
             400, "DEMOF13W_DECISION_INVALID",
             "permissions decide needs decision allow or deny")
+    argv_words = _valid_decision_argv(argv)
     store_dir, memory = _resolve_ledger(store_dir, memory)
     key = str(tool_id)
-    record = {
-        "decision": str(decision),
-        "time": decided_at or _decision_now(),
-        "project": str(project_id),
-    }
     merged = load_decisions(store_dir)
     if isinstance(memory, dict):
         for known_key, known in memory.items():
             if isinstance(known, dict):
                 merged[known_key] = known
+    record: dict[str, Any] = {
+        "decision": str(decision),
+        "time": decided_at or _decision_now(),
+        "project": str(project_id),
+    }
+    if argv_words is not None:
+        record["argv"] = argv_words
+    else:
+        prior = merged.get(key)
+        if (isinstance(prior, dict)
+                and isinstance(prior.get("argv"), list)
+                and prior["argv"]):
+            record["argv"] = [str(word) for word in prior["argv"]]
+    if isinstance(memory, dict):
         memory[key] = record
     merged[key] = record
     save_decisions(store_dir, merged)
     return record
+
+
+def _valid_decision_argv(argv: Any) -> list[str] | None:
+    """Coerced install-decision argv words, or None when absent.
+
+    Raises PermissionCheckError (400) for a malformed argv; an empty
+    word list is malformed, never an approval.
+    """
+    if argv is None:
+        return None
+    if not isinstance(argv, (list, tuple)) or not argv:
+        raise PermissionCheckError(
+            400, "DEMOF13W_ARGV_INVALID",
+            "permissions decision argv must be a non-empty list of words")
+    words = [str(word) for word in argv]
+    if any(not word for word in words):
+        raise PermissionCheckError(
+            400, "DEMOF13W_ARGV_INVALID",
+            "permissions decision argv must be a non-empty list of words")
+    return words
+
+
+def get_install_argv(store_dir: Any = None, memory: Any = None,
+                     tool_id: str = "") -> list[str] | None:
+    """Exact argv pinned for one install tool id, else None.
+
+    The ledger is the only source: a recorded decision argv, or an argv
+    pinned by the install ask that led to it. No fallback to caller
+    words happens here; the spawn path decides what a missing pin means.
+    """
+    store_dir, memory = _resolve_ledger(store_dir, memory)
+    key = str(tool_id)
+    entry = None
+    if isinstance(memory, dict):
+        entry = memory.get(key)
+    if entry is None and store_dir:
+        entry = load_decisions(store_dir).get(key)
+    if isinstance(entry, dict):
+        pinned = entry.get("argv")
+        if (isinstance(pinned, list) and pinned
+                and all(isinstance(word, str) and word
+                        for word in pinned)):
+            return list(pinned)
+    return None
+
+
+def record_install_request(store_dir: Any = None, memory: Any = None,
+                           tool_id: str = "", argv: Any = None,
+                           project_id: str = "") -> dict[str, Any] | None:
+    """Pin the exact argv that triggered one install ask.
+
+    First ask wins: a recorded allow/deny is never touched and an
+    already pinned argv is never re-pinned, so the words the user is
+    asked about are the words a later allow covers. Entries carry no
+    decision, so they keep reading as none until decided.
+    """
+    argv_words = _valid_decision_argv(argv)
+    if argv_words is None:
+        return None
+    store_dir, memory = _resolve_ledger(store_dir, memory)
+    key = str(tool_id)
+    if not key:
+        return None
+    merged = load_decisions(store_dir)
+    if isinstance(memory, dict):
+        for known_key, known in memory.items():
+            if isinstance(known, dict):
+                merged[known_key] = known
+    prior = merged.get(key)
+    if isinstance(prior, dict):
+        if prior.get("decision") in DECISION_VALUES:
+            return dict(prior)
+        if (isinstance(prior.get("argv"), list)
+                and prior["argv"]):
+            return dict(prior)
+    record: dict[str, Any] = {
+        "time": _decision_now(),
+        "project": str(project_id),
+        "argv": argv_words,
+    }
+    if isinstance(memory, dict):
+        memory[key] = record
+    merged[key] = record
+    save_decisions(store_dir, merged)
+    return dict(record)
+
+
+def pin_install_argv(store_dir: Any = None, memory: Any = None,
+                     tool_id: str = "", argv: Any = None,
+                     project_id: str = "") -> list[str] | None:
+    """Pin the first allowed spawn for an allow that carries no argv.
+
+    Only fills a missing pin under an existing allow (route-decided
+    before any ask); first pin wins, the decision and time are kept.
+    Returns the pinned words, or None when there is nothing to pin.
+    """
+    argv_words = _valid_decision_argv(argv)
+    if argv_words is None:
+        return None
+    store_dir, memory = _resolve_ledger(store_dir, memory)
+    key = str(tool_id)
+    if not key:
+        return None
+    merged = load_decisions(store_dir)
+    if isinstance(memory, dict):
+        for known_key, known in memory.items():
+            if isinstance(known, dict):
+                merged[known_key] = known
+    prior = merged.get(key)
+    if not isinstance(prior, dict):
+        return None
+    if prior.get("decision") != DECISION_ALLOW:
+        return None
+    if (isinstance(prior.get("argv"), list)
+            and prior["argv"]
+            and all(isinstance(word, str) and word
+                    for word in prior["argv"])):
+        return [str(word) for word in prior["argv"]]
+    record = dict(prior)
+    record["argv"] = argv_words
+    record.setdefault("project", str(project_id))
+    if isinstance(memory, dict):
+        memory[key] = record
+    merged[key] = record
+    save_decisions(store_dir, merged)
+    return list(argv_words)
 
 
 def list_decisions(store_dir: Any = None, memory: Any = None,
