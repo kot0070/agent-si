@@ -307,9 +307,23 @@ def _gate_fail_reason(*, spec: Any, goal: Any, files_diff: str,
     if install_ok:
         return None
     if not declared:
-        # Verify-only part (no declared files): the outer PASS branch
-        # still requires green checks that ran plus the auditor PASS.
-        return None
+        # Verify-only part (no declared files): PASS needs a green
+        # check that ran or an install record — never auditor words
+        # alone with nothing executed.
+        try:
+            green = [
+                check for check in (check_rows or [])
+                if not check.get("could_not_start")
+                and not check.get("refused")
+                and isinstance(check.get("exit_code"), int)
+                and not isinstance(check.get("exit_code"), bool)
+                and check.get("exit_code") == 0]
+        except Exception:
+            green = []
+        if green:
+            return None
+        return ("verify-only part ran no green check and no installer ran: "
+                "name a check that exercises the goal")
     try:
         runnable = [
             check for check in (check_rows or [])
