@@ -11,6 +11,7 @@ the error-code table are defined once here and reused by sibling import.
 from __future__ import annotations
 
 import hashlib
+import re
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -102,6 +103,35 @@ _SEQ = 0
 _NONCE = 0
 
 
+#: FXLOC C4 short test-key shape (e.g. sk-abc123): redacted alongside
+#: SCAN_PATTERNS matches so named short keys never persist. The word
+#: boundary keeps ordinary hyphenated words intact.
+_SHORT_KEY_RE = re.compile(r"\bsk-[A-Za-z0-9]{3,}")
+
+
+def _redact_scan_matches(text: object) -> str:
+    """Redact secret-shaped text; never raises, never returns raw text.
+
+    Substitutes every SCAN_PATTERNS match plus short sk- test keys
+    with [redacted]. Any internal failure stores the failure marker
+    instead of the raw text.
+    """
+    try:
+        from agent_si.backend import secretscan as _secretscan
+
+        grouped = _secretscan.SCAN_PATTERNS
+    except Exception:
+        grouped = ()
+    try:
+        out = text if isinstance(text, str) else ""
+        for _code, _patterns in grouped:
+            for _rx in _patterns:
+                out = _rx.sub("[redacted]", out)
+        return _SHORT_KEY_RE.sub("[redacted]", out)
+    except Exception:
+        return "[redacted]"
+
+
 def reset_state() -> None:
     """Clear stored rows and restart entry ids."""
     global _SEQ
@@ -116,6 +146,12 @@ def append_event(project_id: str, source: str, kind: str,
         raise WatcherError(
             "JOURNAL_KIND_UNKNOWN", "unknown journal kind %r" % (kind,)
         )
+    # FXLOC C4: redact before digest + store so no secret shape persists.
+    summary = _redact_scan_matches(summary)
+    refs = tuple(
+        _redact_scan_matches(ref) if isinstance(ref, str) else ref
+        for ref in refs
+    )
     # FXPARALLEL BEGIN run-lock: sequence plus append as one unit.
     global _SEQ, _NONCE
     with _JOURNAL_LOCK:
