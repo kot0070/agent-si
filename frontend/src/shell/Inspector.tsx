@@ -1162,6 +1162,9 @@ export function Inspector(props: InspectorProps): ReactElement {
                   >
                     <span
                       className="fx-legend-dot"
+                      role="img"
+                      aria-label={slice.label}
+                      title={slice.label}
                       style={{
                         backgroundColor:
                           LEGEND_COLORS[index % LEGEND_COLORS.length] ??
@@ -1231,6 +1234,9 @@ export function Inspector(props: InspectorProps): ReactElement {
                     >
                       <span
                         className="fx-legend-dot"
+                        role="img"
+                        aria-label={slice.model}
+                        title={slice.model}
                         style={{
                           backgroundColor:
                             LEGEND_COLORS[index % LEGEND_COLORS.length] ??

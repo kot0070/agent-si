@@ -187,6 +187,14 @@ input[type="checkbox"] {
   accent-color: var(--fx-accent);
 }
 
+/* J12: placeholder text clears 4.5:1 on the input surface in both
+   themes (full opacity: the UA default fade would sink it). */
+input::placeholder,
+textarea::placeholder {
+  color: var(--fx-placeholder);
+  opacity: 1;
+}
+
 ul {
   margin: 8px 0;
   padding-left: 24px;
