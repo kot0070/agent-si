@@ -14,7 +14,21 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "src"))
 
 from agent_si.backend import local_connect  # noqa: E402
 
+import pytest  # noqa: E402
+
 _TOKEN = "fxloc-c3-token"
+
+
+@pytest.fixture(autouse=True)
+def _isolated_lane_state():
+    """Snapshot process-global lane state, start clean, restore afterwards."""
+    saved_paired = local_connect._PAIRED_SESSION_TOKEN
+    saved_attached = local_connect._ATTACHED_RUNTIME
+    local_connect._PAIRED_SESSION_TOKEN = None
+    local_connect._ATTACHED_RUNTIME = None
+    yield
+    local_connect._PAIRED_SESSION_TOKEN = saved_paired
+    local_connect._ATTACHED_RUNTIME = saved_attached
 
 
 def _resolve(target: str):
