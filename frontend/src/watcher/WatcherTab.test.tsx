@@ -83,7 +83,14 @@ describe("WatcherTab (fetch-level fake only)", () => {
     );
     render(<WatcherTab projectId="proj-w" />);
     expect(await screen.findByTestId("watcher-error")).toBeTruthy();
-    expect(screen.getByTestId("watcher-error").textContent).toContain("500");
+    // FXCLASS CD-7: the 500 maps through apiErrorLocaleKey and keeps the
+    // ApiError code; no raw "request failed: 500" reaches the screen.
+    expect(
+      screen.getByTestId("watcher-error").textContent,
+    ).toContain("CONTEXT_WRONG_CONTRACT_VERSION");
+    expect(
+      screen.getByTestId("watcher-error").textContent,
+    ).not.toContain("request failed");
   });
 
   it("defaults to the local model with cloud fallback OFF", async () => {

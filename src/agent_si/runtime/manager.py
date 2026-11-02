@@ -534,6 +534,50 @@ def _telemetry_report_terminated(
         pass
 
 
+def _close_owner_gone(
+    shape: dict[str, Any],
+    run_id: str,
+    subtask_id: str,
+    agent: str,
+    model: str = "",
+) -> None:
+    """Close an orphaned stream: terminal BLOCKED row + one log line.
+
+    FXCLASS CB-10: the app stays alive but the stream owner is truly
+    gone (tab switch, network drop). Never kill a run for navigation;
+    when the owner of the stream is gone, the live row reaches a
+    terminal state so the page shows it instead of RUNNING forever.
+    """
+    try:
+        record_live_row(
+            f"{run_id}/{subtask_id or shape.get('task_id') or 'run'}",
+            {"agent": agent or "manager",
+             "scope": f"{shape.get('task_id') or 'task'}/{subtask_id or 'run'}",
+             "deliverable": f"artifact://run/{run_id}/output",
+             "status": "BLOCKED",
+             "role": "manager",
+             "model": str(model or ""),
+             "step": 0,
+             "file": "",
+             "cost": COST_UNAVAILABLE,
+             "tokens": {"input": None, "output": None},
+             "context": f"artifact:run/{run_id}/input",
+             "errors": ["owner-gone"],
+             "waits": []},
+        )
+    except Exception:
+        pass
+    try:
+        from agent_si.watcher import journal as _journal
+
+        _journal.append_event(
+            str(shape.get("project_id") or "run"), "manager",
+            "RUN_OWNER_GONE", "owner-gone: stream closed for run %s" % (run_id,),
+            (run_id,))
+    except Exception:
+        pass
+
+
 def run_task_streamed(
     request: Any = None,
     *,
@@ -685,6 +729,8 @@ def run_task_streamed(
         ))
     except GeneratorExit:
         _finish("cancelled")
+        _close_owner_gone(shape, active_run_id, validated.subtask_id,
+                           str(manager_id))
         raise
     client_config = SdkClientConfig(max_retries=0)
     captured: dict[str, Any] = {}
@@ -760,6 +806,8 @@ def run_task_streamed(
             ))
         except GeneratorExit:
             _finish("cancelled")
+            _close_owner_gone(shape, active_run_id, validated.subtask_id,
+                               str(manager_id))
             raise
         binding = RoutingDecisionBinding(
             decision_id=decision.decision_id,
@@ -874,6 +922,8 @@ def run_task_streamed(
             ))
         except GeneratorExit:
             _finish("cancelled")
+            _close_owner_gone(shape, active_run_id, validated.subtask_id,
+                               str(manager_id))
             raise
         if str(captured.get("finish_reason", "")) == "stop":
             _finish("done")

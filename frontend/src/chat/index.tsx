@@ -1604,8 +1604,11 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
     pump.cancelled = true;
     pump.runner.cancel().then(
       () => undefined,
-      () => {
-        showToast(t("errors.generic"));
+      (err: unknown) => {
+        // FXCLASS CD-8: the toast names the cause (code), never a bare
+        // generic line that vanishes without a cause.
+        const code = err instanceof ApiError ? err.code : "CONTEXT_MISSING";
+        showToast(`${t(apiErrorLocaleKey(code))} (${code})`);
       },
     );
   };

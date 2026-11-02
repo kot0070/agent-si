@@ -17,12 +17,8 @@ import { formatNumber, t, useLocale } from "../locale/index";
 import { EmptyState } from "../ui/EmptyState";
 import { ErrorPanel } from "../ui/ErrorPanel";
 import { LoadingState } from "../ui/LoadingState";
-import {
-  placementKey,
-  placementForRow,
-  resolveStatusHuman,
-} from "../agents/agentsApi";
-import { humanRunRef, buildRunRecords } from "./viewsApi";
+import { placementKey, resolveStatusHuman } from "../agents/agentsApi";
+import { humanRunRef, buildRunRecords, dedupeLiveRows } from "./viewsApi";
 import {
   formatRunMoment,
   humanDuration,
@@ -31,6 +27,7 @@ import {
   runWallS,
 } from "./viewsApi";
 import type { DevrunRun } from "./viewsApi";
+import { RunId } from "./RunId";
 import "./projectview.css";
 
 export interface RunHistoryProps {
@@ -133,9 +130,19 @@ export function RunHistory(props: RunHistoryProps): ReactElement {
       ) : (
         <div>
           {runs.map((run) => {
-            const short = humanRunRef(run.run_id);
             const wall = runWallS(run);
             const duration = humanDuration(wall);
+            // FXTABS T6: the header names what failed: the served duration
+            // when known, else the run summary or the first part reason,
+            // never a bare "not known" next to "failed".
+            const firstReason = run.parts
+              .map((part) => part.reason)
+              .find(
+                (reason) => reason !== undefined && reason !== "",
+              );
+            const outcome =
+              duration ??
+              (run.summary !== "" ? run.summary : (firstReason ?? null));
             return (
               <div
                 key={run.run_id}
@@ -144,15 +151,18 @@ export function RunHistory(props: RunHistoryProps): ReactElement {
               >
                 <div>
                   {runStatusText(run)} · {formatRunMoment(run.start, locale)} ·{" "}
-                  {duration ?? "not known"}
+                  {outcome ?? t("shell.common.unknown")}
                 </div>
                 <div>
                   {run.parts.length === 0
-                    ? "not known"
+                    ? t("shell.common.unknown")
                     : run.parts
-                        .map(
-                          (part) =>
-                            `${part.part_id}: ${part.verdict ?? "not known"}`,
+                        .map((part) =>
+                          part.verdict === undefined || part.verdict === null
+                            ? (part.attempts ?? 0) > 0
+                              ? `${part.part_id}: ${t("shell.common.unknown")}`
+                              : `${part.part_id}: ${t("projectView.runs.notRun")}`
+                            : `${part.part_id}: ${part.verdict}`,
                         )
                         .join(", ")}
                 </div>
@@ -173,8 +183,8 @@ export function RunHistory(props: RunHistoryProps): ReactElement {
                     ))}
                   </ul>
                 )}
-                <div className="fxpv-quiet" title={short.title}>
-                  {short.text}
+                <div className="fxpv-quiet">
+                  <RunId id={run.run_id} />
                 </div>
               </div>
             );
@@ -200,26 +210,76 @@ export function RunHistory(props: RunHistoryProps): ReactElement {
           })}
           <div>
             <p>Team</p>
-            {parts.map((part) => {
-              const short = humanRunRef(part.agent);
-              return (
-                <div
-                  key={part.agent}
-                  data-testid={`runhistory-part-${part.agent}`}
-                  className="fxpv-row"
-                >
-                  <span title={short.title}>{short.text}</span>
-                  <span>
-                    {resolveStatusHuman(
-                      readStatusHuman(part),
-                      part.status,
-                      locale,
-                    )}
-                  </span>
-                  <span>{t(placementKey(placementForRow(part)))}</span>
-                </div>
-              );
-            })}
+            {(() => {
+              // FXTABS T6: one row per agent with its last status (the fold
+              // lives in dedupeLiveRows); when the latest run ended, a stale
+              // served RUNNING reads as the run's end state, never Running.
+              const latest =
+                runs.length === 0 ? null : runs[runs.length - 1] ?? null;
+              const latestEnded =
+                latest !== null && runWallS(latest) !== null;
+              return dedupeLiveRows(parts).map((row) => {
+                const source =
+                  parts.find(
+                    (candidate) =>
+                      candidate.agent === row.agent &&
+                      candidate.status === row.status &&
+                      readStatusHuman(candidate) !== undefined,
+                  ) ??
+                  parts.find(
+                    (candidate) =>
+                      candidate.agent === row.agent &&
+                      candidate.status === row.status,
+                  ) ??
+                  parts.find((candidate) => candidate.agent === row.agent);
+                const stale =
+                  latestEnded && row.status === "RUNNING" && latest !== null;
+                // FXTABS U5c: the team row names the served role (or the
+                // role the agent id carries), never a bare agent id; the
+                // agent id rides the title. Repeats are folded with a count.
+                const roleMatch = /^([A-Za-z]+)-/.exec(row.agent);
+                const roleKey =
+                  row.role !== undefined
+                    ? row.role.toLowerCase()
+                    : (roleMatch?.[1]?.toLowerCase() ?? null);
+                const roleName =
+                  roleKey === "director" ||
+                  roleKey === "manager" ||
+                  roleKey === "worker" ||
+                  roleKey === "auditor" ||
+                  roleKey === "watcher"
+                    ? t(`providers.role.${roleKey}`)
+                    : null;
+                return (
+                  <div
+                    key={row.agent}
+                    data-testid={`runhistory-part-${row.agent}`}
+                    className="fxpv-row"
+                  >
+                    <span title={roleName === null ? undefined : row.agent}>
+                      {roleName ?? row.agent}
+                    </span>
+                    {row.attempts > 1 ? (
+                      <span>
+                        {t("projectView.attempts", { count: row.attempts })}
+                      </span>
+                    ) : null}
+                    <span>
+                      {stale
+                        ? runStatusText(latest)
+                        : resolveStatusHuman(
+                            source === undefined
+                              ? undefined
+                              : readStatusHuman(source),
+                            row.status,
+                            locale,
+                          )}
+                    </span>
+                    <span>{t(placementKey(row.placement))}</span>
+                  </div>
+                );
+              });
+            })()}
           </div>
           <div>
             {buildRunRecords({ ledger, live: parts }).map((record) => {

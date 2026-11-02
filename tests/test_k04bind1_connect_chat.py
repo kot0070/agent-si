@@ -175,6 +175,8 @@ def test_transport_failure_error_and_no_provider(tmp_path, monkeypatch):
                        headers=HEADERS)
     assert chat.status_code == 200, chat.text
     assert "NO_PROVIDER_BOUND" in chat.text, chat.text
+    # FXCLASS CA-1/CA-3/CA-4: one plain line, same words on chat + Tasks.
+    assert "Connect a provider first" in chat.text, chat.text
     assert "simulated failure K04BIND1" not in chat.text
     assert BAIT2 not in chat.text
 

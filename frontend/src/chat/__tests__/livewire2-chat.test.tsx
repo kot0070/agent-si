@@ -114,11 +114,6 @@ describe("chat cancel uses the server stream id", () => {
     const cancelled: unknown[] = [];
     const encoder = new TextEncoder();
     let controller!: ReadableStreamDefaultController<Uint8Array>;
-    const body = new ReadableStream<Uint8Array>({
-      start(entry) {
-        controller = entry;
-      },
-    });
     vi.stubGlobal("fetch", async (url: unknown, init?: RequestInit) => {
       const target = String(url);
       if (target.includes("/api/v1/chat/cancel")) {
@@ -133,11 +128,16 @@ describe("chat cancel uses the server stream id", () => {
           headers: { "content-type": "application/json" },
         });
       }
-      // FXCHATHIST (c7aeac3) loads served history on mount: the one-shot
-      // SSE stream belongs exclusively to /chat/stream, other reads get
-      // their shaped JSON so they cannot lock/consume it first.
+      // BOTH behaviours kept: FXTURN 5da7197 fresh stream per chat open
+      // (no locked share) + FXRED route-aware JSON for incidental reads
+      // (history/models must not consume the chat stream).
       if (target.includes("/api/v1/chat/stream")) {
-        return new Response(body, {
+        const streamBody = new ReadableStream<Uint8Array>({
+          start(entry) {
+            controller = entry;
+          },
+        });
+        return new Response(streamBody, {
           status: 200,
           headers: {
             "content-type": "text/event-stream",
@@ -157,10 +157,16 @@ describe("chat cancel uses the server stream id", () => {
           headers: { "content-type": "application/json" },
         });
       }
-      return new Response(JSON.stringify({ code: "LIVEWIRE2_UNEXPECTED_API" }), {
-        status: 404,
-        headers: { "content-type": "application/json" },
-      });
+      // Incidental reads (hierarchy and anything else) answer on their
+      // own body: sharing one stream across responses locks it and the
+      // stream reader throws, which this cancel test never covers.
+      return new Response(
+        JSON.stringify({ code: "FXCHAT_UNEXPECTED_API" }),
+        {
+          status: 404,
+          headers: { "content-type": "application/json" },
+        },
+      );
     });
     const client = new HttpApiClient();
     render(
