@@ -324,6 +324,12 @@ def _clear_port_file(path: str) -> None:
         return
 
 
+#: In-process startup-mutex holders (abspath set): threads of one
+#: process share a pid, so the file owner check cannot serialize them.
+_LOCAL_LOCKS: set[str] = set()
+_LOCAL_LOCKS_GUARD = threading.Lock()
+
+
 def _lock_file_path(root: str) -> str:
     """Startup-mutex path under the product data dir."""
     return os.path.join(os.path.abspath(str(root)), _LOCK_FILE_NAME)
@@ -384,46 +390,58 @@ def _take_startup_lock(path: str) -> bool:
 
     O_CREAT|O_EXCL creation runs BEFORE the port pick and the window,
     so concurrent launches serialize here. A mutex held by a dead
-    owner is stolen; one held by a live owner is left alone.
+    owner is stolen; one held by a live owner is left alone. An
+    in-process set additionally serializes threads of one process
+    (they share a pid, so the file owner check cannot tell them
+    apart); entries leave with _release_startup_lock.
     """
-    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
-    try:
-        fd = os.open(path, flags, 0o644)
-    except FileExistsError:
-        owner = _read_lock_pid(path)
-        if (owner is not None and owner != os.getpid()
-                and _pid_is_alive(owner)):
+    key = os.path.abspath(str(path))
+    with _LOCAL_LOCKS_GUARD:
+        if key in _LOCAL_LOCKS:
             return False
-        try:
-            os.unlink(path)
-        except OSError:
-            return False
+        flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
         try:
             fd = os.open(path, flags, 0o644)
+        except FileExistsError:
+            owner = _read_lock_pid(path)
+            if (owner is not None and owner != os.getpid()
+                    and _pid_is_alive(owner)):
+                return False
+            try:
+                os.unlink(path)
+            except OSError:
+                return False
+            try:
+                fd = os.open(path, flags, 0o644)
+            except OSError:
+                return False
         except OSError:
             return False
-    except OSError:
-        return False
-    try:
-        os.write(fd, ("%d\n" % os.getpid()).encode("utf-8"))
-    except OSError:
-        pass
-    finally:
         try:
-            os.close(fd)
+            os.write(fd, ("%d\n" % os.getpid()).encode("utf-8"))
         except OSError:
             pass
+        finally:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        _LOCAL_LOCKS.add(key)
     return True
 
 
 def _release_startup_lock(path: str) -> None:
     """Release the mutex taken by this process; failures are silent."""
+    key = os.path.abspath(str(path))
     try:
         if _read_lock_pid(path) != os.getpid():
             return
         os.unlink(path)
     except OSError:
         return
+    finally:
+        with _LOCAL_LOCKS_GUARD:
+            _LOCAL_LOCKS.discard(key)
 
 
 def _health_answers(port: int, timeout: float = 1.0) -> bool:

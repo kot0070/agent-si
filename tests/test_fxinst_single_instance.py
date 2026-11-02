@@ -240,28 +240,21 @@ class _CountWebview:
         self._gate.wait(120)
 
 
-class _CountUvicorn:
-    """Real uvicorn server behind a counting Config."""
+def _shim_uvicorn(monkeypatch, counter):
+    """Count backend builds by wrapping sidecar._make_config.
 
-    builds = 0
-    _lock = threading.Lock()
-
-    @staticmethod
-    def Config(app, host=None, port=None, log_config=None):
-        import uvicorn as _real
-
-        with _CountUvicorn._lock:
-            _CountUvicorn.builds += 1
-        return _real.Config(app, host=host, port=port, log_config=log_config)
-
-    Server = None
-
-
-def _real_uvicorn_server():
+    The real uvicorn module stays intact (its loop/policy submodule
+    imports keep working); only the config build is counted.
+    """
     import uvicorn as _real
 
-    _CountUvicorn.Server = _real.Server
-    return _CountUvicorn
+    def _counting_config(app, port, host=None, log_config=None):
+        counter["builds"] += 1
+        return _real.Config(
+            app, host=host or sidecar.HOST, port=port,
+            log_config=log_config)
+
+    monkeypatch.setattr(sidecar, "_make_config", _counting_config)
 
 
 def test_fxinst_five_concurrent_starts_one_backend_one_window(
@@ -276,8 +269,12 @@ def test_fxinst_five_concurrent_starts_one_backend_one_window(
     gate = threading.Event()
     fake_webview = _CountWebview(gate)
     monkeypatch.setitem(sys.modules, "webview", fake_webview)
-    monkeypatch.setitem(sys.modules, "uvicorn", _real_uvicorn_server())
-    _CountUvicorn.builds = 0
+    counter = {"builds": 0}
+    _shim_uvicorn(monkeypatch, counter)
+    # Warm the product app build once: module imports dominate the
+    # first build (~10 s); the raced builds must fit main's 20 s
+    # server-start wait.
+    sidecar.build_app()
     results = [None] * 5
 
     def _run(index):
@@ -301,7 +298,7 @@ def test_fxinst_five_concurrent_starts_one_backend_one_window(
     for thread in threads:
         thread.join(timeout=60)
     assert results == [0, 0, 0, 0, 0], results
-    assert _CountUvicorn.builds == 1, _CountUvicorn.builds
+    assert counter["builds"] == 1, counter
     assert fake_webview.windows_created == 1, fake_webview.windows_created
 
 
@@ -316,8 +313,11 @@ def test_fxinst_second_run_focuses_first(monkeypatch, tmp_path):
     gate = threading.Event()
     fake_webview = _CountWebview(gate)
     monkeypatch.setitem(sys.modules, "webview", fake_webview)
-    monkeypatch.setitem(sys.modules, "uvicorn", _real_uvicorn_server())
-    _CountUvicorn.builds = 0
+    counter = {"builds": 0}
+    _shim_uvicorn(monkeypatch, counter)
+    # Warm the product app build once so the background first run
+    # reaches healthy fast.
+    sidecar.build_app()
     first = threading.Thread(
         target=lambda: sidecar.main([]), daemon=True)
     first.start()
@@ -333,7 +333,7 @@ def test_fxinst_second_run_focuses_first(monkeypatch, tmp_path):
             time.sleep(0.1)
         assert healthy, "first run never became healthy"
         assert sidecar.main([]) == 0
-        assert _CountUvicorn.builds == 1, _CountUvicorn.builds
+        assert counter["builds"] == 1, counter
         assert fake_webview.windows_created == 1, (
             fake_webview.windows_created)
     finally:
