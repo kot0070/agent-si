@@ -988,6 +988,16 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                 scope = "fxdevrun:%s:%s:%s" % (project, part, role)
                 key = "%s/%s/%s/%s" % (run_id, part, role, attempt)
                 label = str(part)
+            # A progress heartbeat (cost None/UNKNOWN) never erases a
+            # settled price on the same row: keep the cached cost so a
+            # later write_file/run note cannot turn a priced row UNKNOWN.
+            try:
+                _kept = (live_cache.get(key) or {}).get("cost")
+            except Exception:
+                _kept = None
+            if (cost is None or cost == "UNKNOWN") and _kept not in (
+                    None, "UNKNOWN", ""):
+                cost = _kept
             placement = _placement_for_provider(app, provider)
             row_input = row_tokens.get("input")
             row_context: Any = (row_input if isinstance(row_input, int)
