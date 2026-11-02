@@ -8,6 +8,7 @@ outside this file, no mocks of product code, loopback TestClient only.
 """
 import os
 import sys
+import urllib.request as _urlreq
 
 _WS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _WS not in sys.path:
@@ -24,6 +25,37 @@ from agent_si.watcher import journal as _journal  # noqa: E402
 
 TOKEN = "fxleftover2-served-token"
 FAKE_VALUE = "fxleftover2-fake-key-value"
+
+
+class _FakeResp:
+    def __init__(self, payload):
+        self._raw = payload
+
+    def read(self):
+        return self._raw
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def _stub_live(monkeypatch, usage_body):
+    """Save preflight sees a models list; the evidence probe sees usage."""
+
+    def _fake(request, timeout=None):
+        from urllib.parse import urlparse as _parse
+
+        try:
+            path = _parse(getattr(request, "full_url", "")).path
+        except Exception:
+            path = ""
+        if path.rstrip("/").endswith("/models"):
+            return _FakeResp(b'{"data": [{"id": "m-fxleftover2"}]}')
+        return _FakeResp(usage_body)
+
+    monkeypatch.setattr(_urlreq, "urlopen", _fake)
 
 
 def _headers():
@@ -63,6 +95,7 @@ def test_fxleftover2_saved_key_listed_then_deleted_over_http(
     """Row 1: a key saved through the keys route lists on leftover-keys
     (names plus dates only, never the value) then deletes."""
     monkeypatch.setenv("AGENT_SI_SECRET_STORE", "memory")
+    _stub_live(monkeypatch, b'{"usage": {}}')
     client = _client(tmp_path)
     _save_key(client, "openai")
     listed, names = _listed_names(client, "openai")
@@ -87,6 +120,9 @@ def test_fxleftover2_connected_key_delete_refused_over_http(
     """Row 2: deleting a key bound to a connected provider refuses
     with 409 LIVE_LINKED and the entry stays listed."""
     monkeypatch.setenv("AGENT_SI_SECRET_STORE", "memory")
+    _stub_live(monkeypatch, b'{"choices": [{"message": {"content": "ok"}}],'
+                            b'"usage": {"input_tokens": 1, '
+                            b'"output_tokens": 1}}')
     client = _client(tmp_path)
     key_ref = _save_key(client, "ollama")
     connected = client.post(

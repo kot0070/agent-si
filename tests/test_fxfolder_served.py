@@ -122,3 +122,14 @@ def test_pick_folder_dialog_error_answers_409(picked_app, monkeypatch):
     resp = client.post(PICK_PATH, headers=_auth(app))
     assert resp.status_code == 409
     assert resp.json()["code"] == PICK_CODE
+
+
+def test_pick_folder_absent_on_plain_backend_app():
+    """The plain backend (no sidecar) fails plainly: 404, no route."""
+    from agent_si.backend.app import create_app
+
+    plain = create_app({"testing": True})
+    assert not any(getattr(route, "path", None) == PICK_PATH
+                   for route in getattr(plain, "routes", []))
+    resp = TestClient(plain).post(PICK_PATH)
+    assert resp.status_code == 404, resp.text

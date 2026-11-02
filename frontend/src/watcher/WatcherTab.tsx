@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { t } from "../locale/index";
+import { ApiError, apiErrorLocaleKey, parseErrorBody } from "../api/errors";
 import { ErrorPanel } from "../ui/ErrorPanel";
 import {
   RULE_CARDS,
@@ -50,7 +51,7 @@ export async function fetchWatcherStatus(
     `${WATCHER_STATUS_ROUTE}?project_id=${encodeURIComponent(projectId)}`,
   );
   if (!response.ok) {
-    throw new Error(`watcher status request failed: ${response.status}`);
+    throw parseErrorBody({}, response.status);
   }
   const body = await response.json();
   return {
@@ -145,7 +146,7 @@ export async function fetchWatcherJournal(
     `${WATCHER_JOURNAL_ROUTE}?project_id=${encodeURIComponent(projectId)}`,
   );
   if (!response.ok) {
-    throw new Error(`watcher journal request failed: ${response.status}`);
+    throw parseErrorBody({}, response.status);
   }
   const body = await response.json();
   const rows: unknown[] = Array.isArray(body) ? body : [];
@@ -190,7 +191,10 @@ export function watcherModelName(model: WatcherSettings["model"]): string {
 export function WatcherTab({ projectId }: { projectId: string }) {
   const [status, setStatus] = useState<WatcherStatusData | null>(null);
   const [journal, setJournal] = useState<WatcherJournalEntry[] | null>(null);
-  const [error, setError] = useState<{ code: string } | null>(null);
+  const [error, setError] = useState<{
+    errorKey: string;
+    code: string;
+  } | null>(null);
   const [nonce, setNonce] = useState(0);
   const [settings, setSettings] = useState<WatcherSettings>(() =>
     loadWatcherSettings(),
@@ -203,7 +207,9 @@ export function WatcherTab({ projectId }: { projectId: string }) {
     let live = true;
     const timer = window.setTimeout(() => {
       if (live) {
-        setError({ code: "watcher request timed out" });
+        // FXCLASS CD-7: the hang guard maps to a locale key, never a raw
+        // English sentence as the error code.
+        setError({ errorKey: "errors.generic", code: "CONTEXT_MISSING" });
       }
     }, WATCHER_TIMEOUT_MS);
     async function load(): Promise<void> {
@@ -219,9 +225,11 @@ export function WatcherTab({ projectId }: { projectId: string }) {
         }
       } catch (err: unknown) {
         if (live) {
-          setError({
-            code: err instanceof Error ? err.message : "request failed",
-          });
+          // FXCLASS CD-7: keep the ApiError, map through apiErrorLocaleKey,
+          // never a raw "request failed: 500".
+          const code =
+            err instanceof ApiError ? err.code : "CONTEXT_WRONG_CONTRACT_VERSION";
+          setError({ errorKey: apiErrorLocaleKey(code), code });
         }
       } finally {
         window.clearTimeout(timer);
@@ -240,7 +248,7 @@ export function WatcherTab({ projectId }: { projectId: string }) {
         <h2>{t("watcher.tab.subtitle")}</h2>
         <div data-testid="watcher-error">
           <ErrorPanel
-            errorKey="errors.generic"
+            errorKey={error.errorKey}
             code={error.code}
             onRetry={() => {
               setNonce((value) => value + 1);
