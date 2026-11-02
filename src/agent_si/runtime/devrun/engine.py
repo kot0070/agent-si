@@ -1776,6 +1776,32 @@ def _director_history_block(app: Any, project: str, folder: str,
     except Exception:
         pass
     try:
+        import shutil as _shutil
+
+        _bits: list[str] = []
+        for _tool in ("python", "node", "npm", "git", "pytest"):
+            try:
+                _bits.append("%s: %s" % (
+                    _tool, "found" if _shutil.which(_tool) else "missing"))
+            except Exception:
+                _bits.append("%s: missing" % (_tool,))
+        try:
+            _venv = any(os.path.isfile(os.path.join(base, cand))
+                        for cand in (".venv/Scripts/python.exe",
+                                     ".venv/bin/python",
+                                     ".venv/Scripts/python",
+                                     "venv/bin/python",
+                                     "venv/Scripts/python.exe"))
+        except Exception:
+            _venv = False
+        _bits.append("venv: %s (never auto-installed)"
+                     % ("present" if _venv else "absent"))
+        tools_line = ", ".join(_bits)
+    except Exception:
+        tools_line = ("python: missing, node: missing, npm: missing, "
+                      "git: missing, pytest: missing, venv: absent "
+                      "(never auto-installed)")
+    try:
         for record in full:
             try:
                 user_text = str(record.get("message")
@@ -1814,6 +1840,7 @@ def _director_history_block(app: Any, project: str, folder: str,
         if goal_line:
             out.append(str(goal_line)[:500])
         out.extend(facts)
+        out.append("Tools on this machine: %s" % (tools_line,))
         out.append("workspace files: %s" % (
             ", ".join(listing) if listing else "(empty: this is a new project)"))
         return out
