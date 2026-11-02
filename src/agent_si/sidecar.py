@@ -40,6 +40,7 @@ import os
 import posixpath
 import signal
 import socket
+import subprocess
 import sys
 import threading
 
@@ -66,6 +67,11 @@ _UNSTAGED_TEXT = (
 #: folder dialog (headless or browser context). The answer body keeps
 #: the repo {code, message} refusal shape.
 _PICK_FOLDER_UNAVAILABLE_CODE = "NATIVE_DIALOG_UNAVAILABLE"
+
+#: Machine-readable code carried by the 409 answer of POST
+#: /api/v1/sidecar/open-folder when no native open runs on this
+#: machine. The answer body keeps the repo {code, message} refusal shape.
+_OPEN_FOLDER_UNAVAILABLE_CODE = "NATIVE_OPEN_UNAVAILABLE"
 
 
 #: Default native window size (F3): pywebview opens 800x600 without
@@ -450,6 +456,18 @@ def webview_storage_dir() -> str:
     return path
 
 
+def _open_native_folder(path: str) -> None:
+    """Open a directory in the platform file manager; raises OSError
+    when no native open runs on this machine."""
+    if sys.platform == "win32":
+        os.startfile(path)  # noqa: S606 - local folder path only
+        return
+    if sys.platform == "darwin":
+        subprocess.run(["open", path], check=True)
+        return
+    subprocess.run(["xdg-open", path], check=True)
+
+
 def build_app():
     """Create the product app and attach the sidecar web endpoints."""
     from fastapi.responses import (
@@ -557,9 +575,66 @@ def build_app():
             return {"path": None}
         return {"path": path}
 
+    async def sidecar_open_folder(request: Request):
+        """Open an existing directory in the platform file manager.
+
+        Guarded exactly like the pick-folder write route: 401 without
+        an x-actor header, 403 with a bad x-ui-session-token. A missing
+        body path or a non-directory answers 400/404; a machine with no
+        native open answers 409 carrying the
+        ``_OPEN_FOLDER_UNAVAILABLE_CODE`` machine code. Answers
+        ``{"ok": true, "path": ...}`` when the open runs.
+        """
+        actor = (request.headers.get("x-actor") or "").strip()
+        if not actor:
+            raise HTTPException(
+                status_code=401, detail="missing x-actor header")
+        token = request.headers.get("x-ui-session-token")
+        check = getattr(app.state, "auth_hook", None)
+        allowed = False
+        if callable(check):
+            try:
+                allowed = bool(check(token, actor, "USER_WRITE"))
+            except Exception:
+                allowed = False
+        else:
+            expected = getattr(app.state, "ui_session_token", None)
+            allowed = expected is not None and token == expected
+        if not allowed:
+            raise HTTPException(status_code=403, detail="forbidden")
+        body = None
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
+        path = body.get("path") if isinstance(body, dict) else None
+        if not isinstance(path, str) or not path:
+            raise HTTPException(
+                status_code=400, detail="open-folder needs a path")
+        if not os.path.isdir(path):
+            raise HTTPException(
+                status_code=404, detail="no such folder: %r" % (path,))
+        try:
+            _open_native_folder(path)
+        except Exception:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "code": _OPEN_FOLDER_UNAVAILABLE_CODE,
+                    "message": (
+                        "native folder open is unavailable: "
+                        "no native open"
+                    ),
+                },
+            )
+        return {"ok": True, "path": path}
+
     app.get("/api/v1/sidecar/about", include_in_schema=False)(sidecar_about)
     app.post("/api/v1/sidecar/pick-folder", include_in_schema=False)(
         sidecar_pick_folder
+    )
+    app.post("/api/v1/sidecar/open-folder", include_in_schema=False)(
+        sidecar_open_folder
     )
     app.get("/", include_in_schema=False)(sidecar_index)
     app.get("/{full_path:path}", include_in_schema=False)(sidecar_page)

@@ -244,6 +244,7 @@ def to_runs_row(record: dict[str, Any]) -> dict[str, Any]:
         "run_id": record.get("run_id"),
         "project": record.get("project"),
         "task": record.get("task"),
+        "folder": record.get("folder") or "",
         "start": record.get("started_at") or UNKNOWN,
         "end": record.get("ended_at") or UNKNOWN,
         "interrupted": bool(record.get("interrupted", False)),
