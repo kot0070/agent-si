@@ -151,8 +151,8 @@ def test_row_r362_locale_coverage_served(served):
     assert status == 200, payload
     assert payload == {
         "row": "R-362",
-        "en_leaves": 193,
-        "uk_leaves": 193,
+        "en_leaves": 590,
+        "uk_leaves": 590,
         "parity": True,
         "missing_in_uk": [],
         "missing_in_en": [],
