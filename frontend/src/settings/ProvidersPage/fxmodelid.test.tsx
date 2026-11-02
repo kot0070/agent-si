@@ -117,6 +117,9 @@ describe("fxmodelid catalog carries real ids, connect sends them", () => {
       fireEvent.change(within(dialog).getByLabelText("API key"), {
         target: { value: FX_KEY },
       });
+      // FXR2E two-step (416ddaa, merged 0661228): Check before Save.
+      fireEvent.click(within(dialog).getByText("Check"));
+      expect(await within(dialog).findByText("Key checked. Save to connect.")).toBeTruthy();
       fireEvent.click(within(dialog).getByText("Save"));
       // Step 2 opens in the same dialog; Done closes it before the next card.
       expect(await within(dialog).findByText(/Reference saved/)).toBeTruthy();

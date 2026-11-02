@@ -14,8 +14,11 @@ import pytest
 _WS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _WS not in sys.path:
     sys.path.insert(0, _WS)
+_SRC = os.path.join(_WS, "src")
+if _SRC not in sys.path:
+    sys.path.insert(0, _SRC)
 
-import src.agent_si.kb.retriever as _realization
+import agent_si.kb.retriever as _realization
 # REALIZATION_MAP (K04 frozen-interface pattern, HD verdict B): the
 # iface_kb.py file on disk stays the frozen stub; its names resolve at
 # runtime to the single owning implementation module below, so behaviour
@@ -38,10 +41,10 @@ REALIZATION_MAP = {
     "savings_report": _realization.savings_report,
     "set_role_kb_enabled": _realization.set_role_kb_enabled,
 }
-sys.modules["src.agent_si.kb.iface_kb"] = _realization
-sys.modules["src.agent_si.kb"].iface_kb = _realization
-import src.agent_si.kb.iface_kb as iface_kb
-from src.agent_si.kb.iface_kb import (
+sys.modules["agent_si.kb.iface_kb"] = _realization
+sys.modules["agent_si.kb"].iface_kb = _realization
+import agent_si.kb.iface_kb as iface_kb
+from agent_si.kb.iface_kb import (
     InstructionBlockedError,
     KnowledgeSource,
     ManifestRequiredError,
@@ -262,9 +265,9 @@ def test_savings_report_reads_stored_records(tmp_path, monkeypatch):
 
 
 _ROUTE_MODULES = (
-    "src.agent_si.backend.kb_routes",
-    "src.agent_si.kb.routes",
-    "src.agent_si.backend.app",
+    "agent_si.backend.kb_routes",
+    "agent_si.kb.routes",
+    "agent_si.backend.app",
 )
 
 
