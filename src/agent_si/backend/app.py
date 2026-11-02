@@ -879,6 +879,8 @@ def create_app(settings: Any = None,
     _fxtests2_executor.bind_data_root(app.state.k02r3_store_dir)
     _k02r3_read.register_read_routes(app)
     _k02r3_write.register_console_projects_write_routes(app)
+    from agent_si.backend import chat_history as _fxchathist
+    _fxchathist.register_chat_history_routes(app)
 
     # R349A project step limits (additions-only): GET+PUT surface plus
     # steplimits.json persistence owned by steplimit_routes; the K02 seam
