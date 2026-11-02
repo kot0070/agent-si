@@ -752,6 +752,114 @@ def _k04n4_dir_key(ctx):
     return "default"
 
 
+def _k04n4_real_store_names(store, app_prefix):
+    """Real credential-store entry names under app_prefix, names only.
+
+    The OS store lists via ``_list_native``; the memory store used when
+    AGENT_SI_SECRET_STORE=memory has no native listing, so plain
+    iteration covers it. Values are never read here.
+    """
+    if store is None:
+        return []
+    names = None
+    lister = getattr(store, "_list_native", None)
+    if callable(lister):
+        try:
+            names = list(lister())
+        except Exception:
+            names = None
+    if names is None:
+        try:
+            names = list(store)
+        except Exception:
+            return []
+    return [entry for entry in names or []
+            if isinstance(entry, str) and entry.startswith(app_prefix)]
+
+
+def _k04n4_linked_secret_ids(facade):
+    """Secret ids referenced by provider connections (facade _providers)."""
+    linked = set()
+    try:
+        providers = getattr(facade, "_providers", None)
+    except Exception:
+        providers = None
+    if not isinstance(providers, dict):
+        return linked
+    for record in providers.values():
+        ref = None
+        if isinstance(record, Mapping):
+            ref = record.get("secret_ref")
+        else:
+            try:
+                ref = getattr(record, "secret_ref", None)
+            except Exception:
+                ref = None
+        sid = None
+        if isinstance(ref, Mapping):
+            sid = ref.get("secret_id")
+        else:
+            try:
+                sid = getattr(ref, "secret_id", None)
+            except Exception:
+                sid = None
+        if isinstance(sid, str) and sid:
+            linked.add(sid)
+    return linked
+
+
+def _k04n4_store_key(store, name):
+    """Map a leftover entry name to a real-store key, or None."""
+    if store is None or not isinstance(name, str) or not name:
+        return None
+    try:
+        if name in store:
+            return name
+    except Exception:
+        pass
+    namespace = getattr(store, "_namespace", "")
+    if isinstance(namespace, str) and namespace \
+            and name.startswith(namespace):
+        candidate = name[len(namespace):]
+        suffix = getattr(store, "_suffix", "")
+        if isinstance(suffix, str) and suffix \
+                and candidate.endswith(":" + suffix):
+            candidate = candidate[:-(len(suffix) + 1)]
+        if candidate:
+            try:
+                if candidate in store:
+                    return candidate
+            except Exception:
+                pass
+    return None
+
+
+class _K04N4DeleteStore:
+    """Deletable leftover view: seeded bucket plus the real store.
+
+    Membership and removal span both: the seeded bucket first, then the
+    real credential store (memory-store remove, or the OS store delete
+    which reaches ``_delete_native``). Only entry names travel here,
+    never values.
+    """
+
+    def __init__(self, bucket_entries, real_store):
+        self._bucket = bucket_entries
+        self._store = real_store
+
+    def __contains__(self, name):
+        if isinstance(self._bucket, dict) and name in self._bucket:
+            return True
+        return _k04n4_store_key(self._store, name) is not None
+
+    def __delitem__(self, name):
+        if isinstance(self._bucket, dict) and name in self._bucket:
+            del self._bucket[name]
+        target = _k04n4_store_key(self._store, name)
+        if target is not None:
+            del self._store[target]
+
+
 def k04n4_trial_cap(ctx, query, body):
     """M-P2-63: billed spend per trial vs monthly cap; warn plus block.
 
@@ -972,6 +1080,10 @@ def k04n4_leftover_keys(ctx, query, body):
     key = _k04n4_dir_key(ctx)
     bucket = _K04N4_LEFTOVER.get(key, {"entries": {}, "live": set()})
     store_view = dict(bucket.get("entries", {}))
+    for entry in _k04n4_real_store_names(
+            getattr(ctx, "credential_store", None), app_prefix):
+        if entry not in store_view:
+            store_view[entry] = {"name": entry, "last_used_at": ""}
     try:
         return 200, _real_list(store_view, app_prefix)
     except ValueError as exc:
@@ -1024,7 +1136,8 @@ def k04n4_leftover_delete(ctx, query, body):
     if bucket is None:
         bucket = {"entries": {}, "live": set()}
         _K04N4_LEFTOVER[key] = bucket
-    store = bucket["entries"]
+    store = _K04N4DeleteStore(
+        bucket["entries"], getattr(ctx, "credential_store", None))
     audit_sink = getattr(ctx, "audit_sink", None)
     if audit_sink is None:
         try:
@@ -1046,6 +1159,10 @@ def k04n4_leftover_delete(ctx, query, body):
                     live.add(pid)
                     if app_prefix:
                         live.add("%s%s" % (app_prefix, pid))
+            for sid in _k04n4_linked_secret_ids(facade):
+                live.add(sid)
+                if app_prefix:
+                    live.add(app_prefix + sid)
     except Exception:
         pass
     reason = params.get("reason")
