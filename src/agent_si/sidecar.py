@@ -110,6 +110,15 @@ _WINDOW_SIZE_FILE_NAME = "sidecar.window.json"
 _WEBVIEW2_DOWNLOAD_URL = (
     "https://developer.microsoft.com/microsoft-edge/webview2/")
 
+#: EdgeUpdate client key of the WebView2 runtime. The "missing"
+#: notice fires only when NONE of these keys carries a real pv
+#: version (empty or 0.0.0.0 counts as absent).
+_WEBVIEW2_CLIENT_GUID = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+_WEBVIEW2_SUBKEY = ("SOFTWARE\\Microsoft\\EdgeUpdate\\Clients\\"
+                    + _WEBVIEW2_CLIENT_GUID)
+_WEBVIEW2_SUBKEY_WOW64 = ("SOFTWARE\\WOW6432Node\\Microsoft\\EdgeUpdate\\"
+                          "Clients\\" + _WEBVIEW2_CLIENT_GUID)
+
 #: Single-instance port record under the product data dir. The first
 #: start writes ``<port>\n<pid>\n<token>`` after the server is up and
 #: removes it on exit; a second start with a live record POSTs the
@@ -371,6 +380,86 @@ def _note_webview_missing(url: str) -> bool:
         "Install it from " + _WEBVIEW2_DOWNLOAD_URL + " "
         "and start Agent SI again. "
         "The app was also opened in your default browser: " + plain
+    )
+    shown = False
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            shown = bool(ctypes.windll.user32.MessageBoxW(
+                None, message, "Agent SI", 0x40))
+        except Exception:
+            shown = False
+    if not shown:
+        _log("agent-si-sidecar: " + message)
+    return shown
+
+
+def _read_webview2_pvs() -> list:
+    """Read the EdgeUpdate pv values; [] when unreadable.
+
+    Registry boundary: probes fake this (or the winreg module) and
+    run the real caller. Order is HKLM WOW6432Node, HKLM, HKCU.
+    """
+    try:
+        import winreg as _winreg
+    except Exception:
+        return []
+    roots = [
+        (_winreg.HKEY_LOCAL_MACHINE, _WEBVIEW2_SUBKEY_WOW64),
+        (_winreg.HKEY_LOCAL_MACHINE, _WEBVIEW2_SUBKEY),
+        (_winreg.HKEY_CURRENT_USER, _WEBVIEW2_SUBKEY),
+    ]
+    found = []
+    for hive, subkey in roots:
+        try:
+            with _winreg.OpenKey(hive, subkey) as key:
+                value, _kind = _winreg.QueryValueEx(key, "pv")
+        except OSError:
+            continue
+        found.append(value)
+    return found
+
+
+def _webview2_runtime_installed() -> bool:
+    """True when a client key carries a real pv version.
+
+    A pv that is empty or 0.0.0.0 counts as absent. Off Windows the
+    answer is always False (no WebView2 platform there).
+    """
+    if os.name != "nt":
+        return False
+    for value in _read_webview2_pvs():
+        text = str(value).strip() if value is not None else ""
+        if text and text != "0.0.0.0":
+            return True
+    return False
+
+
+def _note_window_open_failed(url: str, reason: str,
+                             log_file: str | None) -> bool:
+    """Tell the operator the window could not open (runtime IS present).
+
+    Windowed native message box on Windows (plain words only, no
+    download link, no "missing"); stderr log elsewhere or when the
+    box cannot show. Returns True when a box was shown. The dialog
+    carries the plain loopback address only, never the per-launch
+    session token (the token stays in the browser URL opened by the
+    fallback launch path).
+    """
+    plain = str(url).split("?", 1)[0]
+    short = " ".join(str(reason).split())
+    if len(short) > 240:
+        short = short[:237] + "..."
+    if log_file:
+        tail = "Details are in the log: " + str(log_file)
+    else:
+        tail = "Details are in the application log."
+    message = (
+        "Agent SI is running but its window could not open. "
+        "The app was opened in your default browser: " + plain + " "
+        "Reason: " + short + " "
+        + tail
     )
     shown = False
     if os.name == "nt":
@@ -1521,6 +1610,16 @@ def _logs_dir_for_failure(data_root: str | None) -> str | None:
         return None
 
 
+def _log_file_for_failure(data_root: str | None) -> str | None:
+    """Log file path for failure notices; None when unresolvable."""
+    try:
+        from agent_si import file_log as _failure_log
+
+        return _failure_log.log_file_for(data_root)
+    except Exception:
+        return None
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the sidecar: serve on loopback, open the native window."""
     args = list(sys.argv[1:] if argv is None else argv)
@@ -1667,7 +1766,12 @@ def main(argv: list[str] | None = None) -> int:
             f"({exc}); opened in default browser, serving until stopped"
         )
         _open_in_browser(url)
-        _note_webview_missing(url)
+        if _webview2_runtime_installed():
+            _note_window_open_failed(
+                url, str(exc) or "unknown error",
+                _log_file_for_failure(data_root))
+        else:
+            _note_webview_missing(url)
         stop.wait()
     finally:
         server.should_exit = True
