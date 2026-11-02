@@ -333,7 +333,14 @@ class ProviderAPI:
         return None
 
     def get_provider(self, provider_id: str) -> ProviderContracts | None:
-        record = self._providers.get(provider_id)
+        stored_id = provider_id
+        if isinstance(provider_id, str):
+            want = provider_id.strip().lower()
+            for key in self._providers:
+                if isinstance(key, str) and key.strip().lower() == want:
+                    stored_id = key
+                    break
+        record = self._providers.get(stored_id)
         if record is None:
             return None
         instances = record["models"]
@@ -341,7 +348,7 @@ class ProviderAPI:
             instance = "default"
         else:
             instance = sorted(instances)[0]
-        return self._view(provider_id, instance)
+        return self._view(stored_id, instance)
 
     def list_providers(
         self, only_evidenced: bool = False

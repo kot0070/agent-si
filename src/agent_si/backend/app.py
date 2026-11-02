@@ -328,6 +328,142 @@ def runner_contract_verdict(*, project_dir: Any,
     }
 
 
+def _reconcile_running_to_interrupted(app: Any) -> dict[str, Any]:
+    """Startup reconcile: rows left running become interrupted, never resumed.
+
+    A task row or devrun run record still marked running when the app
+    starts is a crash/restart leftover, not live work. Task rows with
+    status "running" move to "interrupted" through the repo's own
+    compare_and_set (then persisted); run records with no end stamp gain
+    ended_at = the reconcile stamp plus interrupted/interrupted_at
+    markers (the end is the reconcile time, marked — never a faked
+    normal end). Each affected project gets one SERVICE_STATE journal
+    line naming the interrupted rows. Served through the same routes
+    the tabs read: task_view carries the status, the runs rows carry
+    "interrupted": true. Returns per-kind counts. Never raises: a
+    reconcile failure must not break startup.
+    """
+    from datetime import UTC, datetime
+
+    stamp = datetime.now(UTC).isoformat()
+    result: dict[str, Any] = {
+        "tasks": 0, "runs": 0, "projects": []}
+    touched: dict[str, dict[str, list]] = {}
+    try:
+        from agent_si.backend.read_routes import (
+            persist_k02r3_store,
+            repos_for,
+        )
+
+        _, tasks = repos_for(app)
+        try:
+            rows = list(tasks.list_by({}))
+        except Exception:
+            rows = []
+        for row in rows:
+            try:
+                if not isinstance(row, dict):
+                    continue
+                if str(row.get("status") or "") != "running":
+                    continue
+                key = row.get("record_id") or row.get("task_id")
+                if not key:
+                    continue
+                updated = dict(row)
+                updated["status"] = "interrupted"
+                try:
+                    tasks.compare_and_set(
+                        key, row.get("version"), updated)
+                except Exception:
+                    continue
+                result["tasks"] += 1
+                project = str(row.get("project_id") or "")
+                entry = touched.setdefault(
+                    project, {"tasks": [], "runs": []})
+                entry["tasks"].append(str(row.get("task_id") or key))
+            except Exception:
+                continue
+        try:
+            persist_k02r3_store(app)
+        except Exception:
+            pass
+    except Exception:
+        pass
+    try:
+        from agent_si.runtime.devrun import records as _records
+
+        try:
+            store = getattr(getattr(app, "state", None),
+                            "devrun_runs", None)
+            if store is None:
+                store = {}
+                app.state.devrun_runs = store
+        except Exception:
+            store = {}
+        try:
+            merged = _records.load_devrun_runs(app)
+        except Exception:
+            merged = {}
+        try:
+            for key, record in list(store.items()):
+                if isinstance(record, dict):
+                    merged[str(key)] = record
+        except Exception:
+            pass
+        for key, record in list(merged.items()):
+            try:
+                if not isinstance(record, dict):
+                    continue
+                if record.get("ended_at"):
+                    continue
+                record["ended_at"] = stamp
+                record["interrupted"] = True
+                record["interrupted_at"] = stamp
+                try:
+                    store[str(key)] = record
+                except Exception:
+                    pass
+                result["runs"] += 1
+                project = str(record.get("project") or "")
+                entry = touched.setdefault(
+                    project, {"tasks": [], "runs": []})
+                entry["runs"].append(
+                    str(record.get("run_id") or key))
+            except Exception:
+                continue
+        try:
+            _records.persist_devrun_runs(app)
+        except Exception:
+            pass
+    except Exception:
+        pass
+    try:
+        from agent_si.watcher import journal as _journal
+
+        for project, entry in touched.items():
+            if not project:
+                continue
+            if not entry["tasks"] and not entry["runs"]:
+                continue
+            bits = []
+            if entry["tasks"]:
+                bits.append("tasks %s" % (", ".join(entry["tasks"]),))
+            if entry["runs"]:
+                bits.append("runs %s" % (", ".join(entry["runs"]),))
+            refs = tuple(entry["tasks"] + entry["runs"])
+            try:
+                _journal.append_event(
+                    project, "startup", "SERVICE_STATE",
+                    "restart reconcile: %s marked interrupted"
+                    % (" + ".join(bits),), refs)
+                result["projects"].append(project)
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return result
+
+
 def create_app(settings: Any = None,
                auth_hook: AuthHook | None = None,
                rate_hook: RateHook | None = None,
@@ -4072,6 +4208,11 @@ def create_app(settings: Any = None,
     @_fxwatchloop_cm
     async def _fxwatchloop_lifespan(inner):
         prior = _fxwatchloop_prior
+        try:
+            _reconcile_running_to_interrupted(inner)
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "startup reconcile failed; startup continues")
         if prior is None:
             async with _fxwatchloop_loop.lifespan(
                     inner, interval_s=_fxwatchloop_interval):

@@ -18,6 +18,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import time
 from typing import Any
 
@@ -176,8 +177,16 @@ def write_file(
     parent = os.path.dirname(target)
     if parent:
         os.makedirs(parent, exist_ok=True)
-    with open(target, "w", encoding="utf-8", newline="") as handle:
-        handle.write(content)
+    fd, tmp_path = tempfile.mkstemp(
+        dir=parent or ".", prefix=".write-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
+            handle.write(content)
+        os.replace(tmp_path, target)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_path)
+        raise
     digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
     return {
         "path": rel,
@@ -379,6 +388,19 @@ class _ExecTool:
             if denied:
                 raise PermissionError("toolguard refused: %s" % (denied,))
             resolved = resolve_argv(words)
+            if str(resolved[0]).lower().endswith((".cmd", ".bat")):
+                # A resolved script carrier re-parses its arguments
+                # through cmd.exe: only known installer heads may run
+                # that way, and no cmd metacharacter may ride along.
+                if _bare_head(words[0]) not in _INSTALL_PROGRAMS:
+                    raise PermissionError(
+                        "refused: script carriers never run through cmd "
+                        "(got %r)" % (words[0],))
+                for item in words:
+                    if any(fragment in item for fragment in (">", "<", "^", "%")):
+                        raise PermissionError(
+                            "refused: cmd metacharacters in installer argv "
+                            "element: %r" % (item,))
             log_path = str(job.get("log_path") or "")
             env = scrub_env()
             flags = 0
@@ -489,11 +511,20 @@ def spawn_checked(
         pass
     from agent_si.worker_tools.dispatcher import guarded_dispatch
 
+    auth: dict[str, Any] = {
+        "subject": str(project_id),
+        "task": "devrun:%s" % (str(run_id),),
+        "scopes": ["tools:exec"],
+    }
+    if kind == "install" and _ask_decision == "allow":
+        # The user allowed this installer in the decision ledger: carry
+        # that exact approval to the guard so the installer-name denial
+        # lifts for these exact words only. Shell-fragment, widening and
+        # path checks still run; nothing else changes.
+        auth["install_approved"] = True
+        auth["install_argv"] = list(words)
     result = guarded_dispatch(
-        words, "R0",
-        {"subject": str(project_id),
-         "task": "devrun:%s" % (str(run_id),),
-         "scopes": ["tools:exec"]},
+        words, "R0", auth,
         tool="devrun_exec",
         registry=exec_registry(str(folder), job),
     )

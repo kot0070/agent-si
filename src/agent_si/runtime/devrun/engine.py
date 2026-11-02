@@ -724,8 +724,14 @@ def _platform_guidance() -> str:
 
     States sys.platform so planned check commands match this machine.
     On Windows only executables present here are allowed (python -m
-    pytest with a test file, findstr for text search); POSIX shell
+    pytest with a test file, findstr for text search; findstr takes its
+    own flags like /C: /I /N, never a shell string); POSIX shell
     utilities are unavailable, and inline code stays refused.
+    Installing is a tool call, never text: to install packages the
+    worker runs the installer argv (for example ["npm", "install"]),
+    which is the permission ask the app shows the user; the worker
+    never asks for installs in prose and never writes stub
+    lock files or dependency folders to look installed.
     """
     plat = str(sys.platform)
     if plat.startswith("win"):
@@ -751,7 +757,10 @@ def _director_prompt(message: str) -> str:
         "\"check_commands\": [[\"python\", \"-m\", \"pytest\", ...]], "
         "\"depends_on\": []}]}. Paths stay inside the project folder, "
         "file sets are disjoint, argv lists are word lists, depends_on "
-        "names part ids without cycles.%s" % (
+        "names part ids without cycles. When the task needs packages "
+        "installed, plan an install part whose check reads the real "
+        "result (for example a check that runs the installed tool or "
+        "reads the real lock file), never a stub.%s" % (
             message or "(no task text)", _platform_guidance()))
 
 
@@ -937,7 +946,7 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
         for check in check_rows:
             command = " ".join(
                 str(word) for word in (check.get("argv") or []))
-            if check.get("could_not_start"):
+            if check.get("could_not_start") or check.get("refused"):
                 line = "Check %s $ %s: %s" % (
                     part_id, command, check.get("output_tail"))
             else:
@@ -1017,7 +1026,8 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
             return row["verdict"], turn
         auditor_ok = entry is not None and entry["result"] == "PASS"
         started = [check for check in check_rows
-                   if not check.get("could_not_start")]
+                   if not check.get("could_not_start")
+                   and not check.get("refused")]
         if spec["check_commands"] and not started:
             # No check could start (missing executable): not a red
             # check, no attempt burn; the auditor alone decides now.
@@ -1182,6 +1192,11 @@ def _worker_prompt(spec: dict, message: str, attempt: int,
             "write_file {path, content}, run {argv}. Writes outside "
             "your files are refused. Inspect first, then create "
             "deliverables with write_file. Relative paths only. "
+            "To install packages, run the installer argv (for example "
+            "[\"npm\", \"install\"]): the run action IS the permission "
+            "ask the app shows the user, so never ask for installs in "
+            "text and never write stub lock files or dependency folders "
+            "to look installed. "
             "Return ONLY {\"actions\": [...], \"done\": bool}: done "
             "true only when the part is complete." % (
                 spec["part_id"], attempt, spec["goal"],
@@ -1365,7 +1380,8 @@ def _run_checks(*, record: Any, spec: dict, row: dict, folder: str,
             rows.append({"argv": [str(word) for word in command],
                          "exit_code": None, "output_file": log_rel,
                          "output_tail": "refused: %s" % (exc,),
-                         "pid": 0})
+                         "pid": 0, "refused": True,
+                         "refusal": str(exc)})
             continue
         proc = spawn.get("proc")
         pid = int(spawn.get("pid") or 0)
@@ -1409,6 +1425,9 @@ def _run_checks(*, record: Any, spec: dict, row: dict, folder: str,
             rows[-1]["output_tail"] = "timeout after %ss\n%s" % (
                 _actions.class_timeout(kind), tail)
     row.setdefault("checks", []).extend(rows)
-    green = bool(rows) and all(
-        check.get("exit_code") == 0 for check in rows)
+    runnable = [
+        check for check in rows
+        if not check.get("could_not_start") and not check.get("refused")]
+    green = bool(runnable) and all(
+        check.get("exit_code") == 0 for check in runnable)
     return turn, rows, green
