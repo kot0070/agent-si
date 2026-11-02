@@ -348,60 +348,74 @@ def admit_budget_call(gate: Any, project_id: str, provider_id: str,
                       admission_id: str) -> None:
     """Block one billable call before it runs when the gate refuses.
 
-    A zero-amount admission reserve runs before any provider call: a
+    Fail-closed (FXLOC C5): a missing gate, an unconfigured project, a
     provider cap or hard limit of 0, or spent/reserved already at or
-    over the cap/hard, raises the gate's own BudgetBlockedError
-    (existing refusal text, existing incident row) before the call.
-    A held admission is released before returning, so racing calls
-    serialize on the gate lock (reserve, then settle) instead of
-    passing the limit. A missing gate, project or provider id allows
-    the call (the post-call charge still reports UNAVAILABLE); any
-    other gate failure also allows it, never breaking the run.
+    over the cap/hard raises the gate's own BudgetBlockedError (existing
+    refusal text, existing incident row) before the call. A held
+    admission is released before returning, so racing calls serialize
+    on the gate lock (reserve, then settle) instead of passing the
+    limit. Any other gate failure propagates to the caller (never
+    silently allowed); the post-call charge still reports UNAVAILABLE.
+    An empty task label defaults to "run" exactly like the project id
+    (the gate facade requires a non-empty label; enforcement never
+    reads it).
+    A release failure of our own admission hold never blocks the
+    admitted call (cleanup only, after admission succeeded).
     """
     from agent_si.budget.gate import BudgetBlockedError as _Blocked
 
-    if gate is None:
-        return None
     pid = str(project_id or "run")
+    tid = str(task_id or "run")
+    if gate is None:
+        raise _Blocked(
+            "no budget gate bound: new billable cloud work is refused "
+            "until a gate is configured: project %s task %s run %s "
+            "[BUDGET_GATE_MISSING]"
+            % (pid, tid,
+               str(run_id or "")))
     prov = str(provider_id or "")
     if not prov:
         return None
+    # FXLOC2: the gate facade requires a non-empty task label on the
+    # admission reservation; task-less callers (watcher model calls)
+    # pass "": default it exactly like the project id. Enforcement
+    # (caps, hard limit, reserve) never depends on the label.
+
     try:
         state = gate.get_state(pid)
-    except Exception:
-        return None
-    try:
-        from decimal import Decimal as _Dec
+    except (KeyError, LookupError) as exc:
+        raise _Blocked(
+            "unknown budget project %s: new billable cloud work is "
+            "refused until the project is configured: task %s run %s "
+            "[BUDGET_PROJECT_UNKNOWN]"
+            % (pid, tid, str(run_id or ""))) from exc
+    from decimal import Decimal as _Dec
 
-        hard = _Dec(str(getattr(state, "hard_limit", "0") or "0"))
-        if hard <= 0:
-            raise _Blocked(
-                "hard budget limit blocks new billable cloud work: "
-                "project %s task %s run %s requested 0 %s would exceed "
-                "hard %s %s (spent %s, reserved %s) [BUDGET_HARD_BLOCKED]"
-                % (pid, str(task_id or ""), str(run_id or ""),
-                   str(getattr(state, "currency", "") or ""),
-                   getattr(state, "hard_limit", "0"),
-                   str(getattr(state, "currency", "") or ""),
-                   getattr(state, "spent", "0"),
-                   getattr(state, "reserved", "0")))
-        caps = getattr(state, "provider_spend_caps", None) or {}
-        cap = caps.get(prov)
-        if cap is not None and _Dec(str(cap)) <= 0:
-            raise _Blocked(
-                "provider budget spend cap blocks new billable cloud work"
-                ": project %s provider %s requested 0 %s would exceed "
-                "cap %s %s [PROVIDER_SPEND_CAP_BLOCKED]"
-                % (pid, prov,
-                   str(getattr(state, "currency", "") or ""), cap,
-                   str(getattr(state, "currency", "") or "")))
-    except _Blocked:
-        raise
-    except Exception:
-        return None
+    hard = _Dec(str(getattr(state, "hard_limit", "0") or "0"))
+    if hard <= 0:
+        raise _Blocked(
+            "hard budget limit blocks new billable cloud work: "
+            "project %s task %s run %s requested 0 %s would exceed "
+            "hard %s %s (spent %s, reserved %s) [BUDGET_HARD_BLOCKED]"
+            % (pid, tid, str(run_id or ""),
+               str(getattr(state, "currency", "") or ""),
+               getattr(state, "hard_limit", "0"),
+               str(getattr(state, "currency", "") or ""),
+               getattr(state, "spent", "0"),
+               getattr(state, "reserved", "0")))
+    caps = getattr(state, "provider_spend_caps", None) or {}
+    cap = caps.get(prov)
+    if cap is not None and _Dec(str(cap)) <= 0:
+        raise _Blocked(
+            "provider budget spend cap blocks new billable cloud work"
+            ": project %s provider %s requested 0 %s would exceed "
+            "cap %s %s [PROVIDER_SPEND_CAP_BLOCKED]"
+            % (pid, prov,
+               str(getattr(state, "currency", "") or ""), cap,
+               str(getattr(state, "currency", "") or "")))
     try:
         gate.compare_and_reserve({
-            "project_id": pid, "task_id": str(task_id or ""),
+            "project_id": pid, "task_id": tid,
             "run_id": str(run_id or ""),
             "reservation_id": str(admission_id),
             "estimated_amount": "0",
@@ -411,8 +425,6 @@ def admit_budget_call(gate: Any, project_id: str, provider_id: str,
         })
     except _Blocked:
         raise
-    except Exception:
-        return None
     try:
         gate.release(str(admission_id), "admission ok")
     except Exception:
@@ -781,7 +793,7 @@ def run_task_streamed(
             _admit_provider = str(
                 getattr(getattr(provider, "config", None),
                         "provider_id", "") or "")
-            if _admit_provider and _BUDGET_GATE is not None:
+            if _admit_provider:
                 admit_budget_call(
                     _BUDGET_GATE, str(shape["project_id"] or "run"),
                     _admit_provider,

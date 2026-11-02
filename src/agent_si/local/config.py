@@ -21,6 +21,10 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
+import json
+import os
+import tempfile
+
 #: M2 settings codes (one per TASK row; frozen: rename only via HD request).
 LOCAL_AI_PROJECT_SCOPE_VIOLATION = "LOCAL_AI_PROJECT_SCOPE_VIOLATION"
 LOCAL_AI_INVALID_ENDPOINT = "LOCAL_AI_INVALID_ENDPOINT"
@@ -123,6 +127,126 @@ def _default_config(project_key: str) -> LocalAIConfig:
 #: In-memory store, seeded with the proj-a default (B0B-181).
 _STORE: Dict[str, LocalAIConfig] = {"proj-a": _default_config("proj-a")}
 
+#: FXLOC C1: JSON snapshot name under the product data dir.
+_CONFIG_FILE_NAME = "local_ai_config.json"
+
+#: FXLOC C1: True once the snapshot has been loaded into _STORE.
+_LOADED = False
+
+
+def _data_dir() -> Optional[str]:
+    """Product data dir, or None when this process names none.
+
+    Resolves through the single k10_start call-site; any failure
+    (unset, blank, unimportable) means memory-only, never a raise.
+    """
+    try:
+        from agent_si.k10_start import resolve_env_data_dir
+    except Exception:
+        return None
+    try:
+        return resolve_env_data_dir()
+    except Exception:
+        return None
+
+
+def _config_path() -> Optional[str]:
+    """Snapshot path, or None when persistence is unavailable."""
+    directory = _data_dir()
+    if not directory:
+        return None
+    return os.path.join(directory, _CONFIG_FILE_NAME)
+
+
+def _config_to_row(config: LocalAIConfig) -> Dict[str, Any]:
+    """One JSON-able snapshot row for a stored config."""
+    return {
+        "endpoint_url": config.endpoint_url,
+        "model_id": config.model_id,
+        "permission_scope": config.permission_scope,
+        "local_only_mode": bool(config.local_only_mode),
+        "capability_evidence": config.capability_evidence,
+    }
+
+
+def _row_to_config(project_key: str, row: Any) -> Optional[LocalAIConfig]:
+    """One stored config from a snapshot row; None when invalid."""
+    if not isinstance(row, dict):
+        return None
+    try:
+        config = LocalAIConfig(
+            project_key=project_key,
+            endpoint_url=row.get("endpoint_url", ""),
+            model_id=row.get("model_id", ""),
+            permission_scope=row.get("permission_scope", ""),
+            local_only_mode=row.get("local_only_mode", False) is True,
+            capability_evidence=row.get("capability_evidence", "UNKNOWN"),
+        )
+    except Exception:
+        return None
+    try:
+        validate_config(config)
+    except Exception:
+        return None
+    return config
+
+
+def _ensure_loaded() -> None:
+    """Load the snapshot into _STORE once; never raises.
+
+    The seeded default is kept: only valid snapshot rows override it.
+    A missing/unreadable/invalid snapshot leaves the memory store
+    untouched.
+    """
+    global _LOADED
+    if _LOADED:
+        return
+    _LOADED = True
+    path = _config_path()
+    if not path:
+        return
+    try:
+        with open(path, encoding="utf-8") as handle:
+            doc = json.load(handle)
+    except (OSError, ValueError):
+        return
+    if not isinstance(doc, dict):
+        return
+    for project_key, row in doc.items():
+        if not isinstance(project_key, str) or not project_key:
+            continue
+        config = _row_to_config(project_key, row)
+        if config is not None:
+            _STORE[project_key] = config
+
+
+def _persist_store() -> None:
+    """Snapshot _STORE atomically; never raises (memory-only otherwise)."""
+    path = _config_path()
+    if not path:
+        return
+    try:
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        payload = {key: _config_to_row(value)
+                   for key, value in _STORE.items()}
+        fd, tmp_path = tempfile.mkstemp(
+            dir=parent or ".", prefix=".local-ai-config-", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, sort_keys=True)
+                handle.write("\n")
+            os.replace(tmp_path, path)
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+    except Exception:
+        pass
+
 
 def validate_endpoint(endpoint_url: str) -> None:
     """Reject a bad endpoint with LOCAL_AI_INVALID_ENDPOINT."""
@@ -186,6 +310,7 @@ def load_config(project_key: str, reader_project_key: str) -> LocalAIConfig:
             "reader %r must not read project %r"
             % (reader_project_key, project_key),
         )
+    _ensure_loaded()
     try:
         return _STORE[project_key]
     except KeyError:
@@ -211,6 +336,7 @@ def save_config(config: LocalAIConfig,
         )
     validate_config(config)
     _STORE[config.project_key] = config
+    _persist_store()
     return config
 
 
