@@ -1815,7 +1815,7 @@ def _director_history_block(app: Any, project: str, folder: str,
             out.append(str(goal_line)[:500])
         out.extend(facts)
         out.append("workspace files: %s" % (
-            ", ".join(listing) if listing else "(empty or unreadable)"))
+            ", ".join(listing) if listing else "(empty: this is a new project)"))
         return out
     lines = _history_lines(entries)
     lines.append("continue, fix that, try again refer to the previous run; "
@@ -1844,9 +1844,7 @@ def _director_prompt(message: str, history: str = "") -> str:
     empty keeps the brief byte-identical to the history-free shape.
     """
     base = (
-
         "You are the Director. Project task: %s\n\n"
-        "Project folder right now:\n%s\n\n"
         "Return ONLY one JSON object, no prose: either "
         "{\"answer\": \"...\"} for a plain question, or "
         "{\"parts\": [{\"part_id\": \"p1\", \"goal\": \"...\", "
