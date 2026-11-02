@@ -125,6 +125,27 @@ def _scrub_bare(text: str) -> str:
     return out
 
 
+#: FXLOC C4 short test-key shape (e.g. sk-abc123): redacted alongside
+#: SCAN_PATTERNS matches so named short keys never persist. The word
+#: boundary keeps ordinary hyphenated words intact.
+_SHORT_KEY_RE = re.compile(r"\bsk-[A-Za-z0-9]{3,}")
+
+
+def _scrub_scan(text: str) -> str:
+    """Substitute SCAN_PATTERNS matches plus short sk- test keys."""
+    try:
+        from agent_si.backend import secretscan as _secretscan
+
+        grouped = _secretscan.SCAN_PATTERNS
+    except Exception:
+        grouped = ()
+    out = text
+    for _code, _patterns in grouped:
+        for _rx in _patterns:
+            out = _rx.sub("[redacted]", out)
+    return _SHORT_KEY_RE.sub("[redacted]", out)
+
+
 def _scrub(text: Any) -> str:
     """Scrub secret-shaped text; never raises, never returns raw text.
 
@@ -143,7 +164,7 @@ def _scrub(text: Any) -> str:
         if _redact is not None:
             with contextlib.suppress(Exception):
                 raw = str(_redact(raw))
-        return _scrub_bare(raw)
+        return _scrub_scan(_scrub_bare(raw))
     except Exception:
         return _SCRUB_FAILED
 

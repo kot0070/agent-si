@@ -42,6 +42,15 @@ def make_client(tmp_path):
     settings = {"testing": True, "ui_session_token": TEST_TOKEN,
                 "store_dir": str(tmp_path)}
     app = create_app(settings)
+    # FXLOC C5: fail-closed gate needs the projects configured on the
+    # app's real gate ("run" is the default project id when the body
+    # names none); generous limits, idempotent.
+    for project_id in ("fxp-proj", "run"):
+        try:
+            app.state.k04_ctx.budget_state.get_state(project_id)
+        except (KeyError, LookupError):
+            app.state.k04_ctx.budget_state.configure_project(
+                project_id, "USD", "1000000.00", "900000.00", "1000000.00")
     headers = {"x-actor": "fxp-tester", "x-ui-session-token": TEST_TOKEN}
     return app, TestClient(app), headers
 
