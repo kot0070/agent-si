@@ -88,11 +88,15 @@ export interface LocaleProviderProps {
 
 export function LocaleProvider(props: LocaleProviderProps): ReactElement {
   const locale = props.initialLocale ?? readStoredLocale() ?? DEFAULT_LOCALE;
-  // FXSAVED item 4: apply the stored locale during the first render,
-  // before children render (not in an effect), so t() already reads it
-  // on first paint even when no TopBar is mounted yet.
+  // FXSAVED item 4: storage-sourced mode only (no explicit
+  // initialLocale) applies the stored locale to the module during the
+  // first render, before children render, so t() already reads it on
+  // first paint (the production main.tsx outer provider; no TopBar
+  // mounted yet). An explicit initialLocale is scoped mode: context
+  // plus persistence only, never disturbs module t (laneB.step2
+  // contract: provider with a prop must not switch the module locale).
   const appliedRef = useRef<SupportedLocale | null>(null);
-  if (appliedRef.current !== locale) {
+  if (props.initialLocale === undefined && appliedRef.current !== locale) {
     appliedRef.current = locale;
     setLocale(locale);
   }
