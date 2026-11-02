@@ -171,6 +171,12 @@ def reset_state() -> None:
         "cloud_connected": False,
         "cloud_fallback": False,
     })
+    try:
+        from agent_si.watcher import stats as _stats_home
+
+        _stats_home.reset_state()
+    except Exception:
+        pass
 
 
 #: Configured watcher model: the ONE transport the abnormal path may
@@ -405,6 +411,13 @@ def evaluate(project_id: str, rule_id: str) -> WatchDecision:
     else:
         script, _params, _usage, note, answered = _metered_model_call(
             key, decision_id, model_name, str(rule_id), allowed)
+        if answered:
+            try:
+                from agent_si.watcher import stats as _stats_home
+
+                _stats_home.record_model_call(key, _usage)
+            except Exception:
+                pass
         if not note:
             summary = "%s %s model=%s action=%s" % (
                 str(rule_id), verdict.value, model_name, script)
