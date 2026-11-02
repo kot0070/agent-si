@@ -830,6 +830,7 @@ class ManagerSdkBridge:
                 getattr(err, "code", None) or type(err).__name__))
             return
         terminal_emitted = False
+        forwarded = 0
         try:
             for event in run_events:
                 if state["cancelled"]:
@@ -850,6 +851,7 @@ class ManagerSdkBridge:
                 if isinstance(text, str) and text:
                     texts.append(text)
                 yield sse_bytes(payload)
+                forwarded += 1
                 if payload.get("type") in self._TERMINAL_TYPES:
                     terminal_emitted = True
                     kind = str(payload.get("type"))
@@ -873,6 +875,17 @@ class ManagerSdkBridge:
                             error_code=str(payload.get("code") or ""))
                         _mirror_run_tasks(
                             app, project, task, message, task_status)
+            if not terminal_emitted:
+                _log_no_terminal(run_id, stream_id, forwarded)
+                yield sse_bytes({
+                    "type": "done",
+                    "stream_id": stream_id,
+                    "run_id": run_id,
+                    "code": NO_TERMINAL_EVENT,
+                })
+                _close("done", error_code=NO_TERMINAL_EVENT)
+            elif not closed:
+                _close("cancelled", error_code="STOPPED")
         except Exception as err:
             self._finish(stream_id)
             if not terminal_emitted:
