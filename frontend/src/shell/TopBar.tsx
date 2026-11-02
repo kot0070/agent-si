@@ -391,8 +391,8 @@ export function TopBar(props: TopBarProps): ReactElement {
               changeLocale(event.target.value === "uk" ? "uk" : "en");
             }}
           >
-            <option value="en">en</option>
-            <option value="uk">uk</option>
+            <option value="en">{t("shell.topbar.langEn")}</option>
+            <option value="uk">{t("shell.topbar.langUk")}</option>
           </select>
         </label>
         <ThemeToggle />

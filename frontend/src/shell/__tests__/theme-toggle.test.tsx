@@ -69,4 +69,20 @@ describe("ThemeToggle", () => {
     expect(ukButton.textContent).toContain(t("settings.appearance.title"));
     expect(ukButton.textContent).not.toContain("Appearance");
   });
+
+  it("names the theme in words, never a raw token", () => {
+    setLocale("en");
+    const view = render(<ThemeToggle />);
+    expect(screen.getByTestId("theme-toggle").textContent).toContain(
+      t("settings.appearance.dark"),
+    );
+    view.unmount();
+    cleanup();
+    setLocale("uk");
+    render(<ThemeToggle />);
+    const ukButton = screen.getByTestId("theme-toggle");
+    expect(ukButton.textContent).toContain("темна");
+    expect(ukButton.textContent).not.toContain(": dark");
+    expect(ukButton.textContent).not.toContain(": light");
+  });
 });
