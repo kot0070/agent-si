@@ -32,6 +32,8 @@ nav[data-testid="sidebar"] {
   min-width: 0;
   max-height: none;
   overflow-y: auto;
+  /* U11: a long uk row never overlaps the centre column. */
+  overflow-x: hidden;
   border-right: 1px solid var(--fx-card-border);
   padding-right: 16px;
 }
@@ -579,6 +581,14 @@ nav[data-testid="sidebar"] a.fx-nav-active {
 .fx-rail-row {
   display: block;
   margin: 2px 0;
+  /* U11: the row constrains its flex children so a long label wraps
+     inside the rail instead of overlapping the next line. */
+  min-width: 0;
+}
+
+/* U11: the rail label wraps inside the flex row (never overflows it). */
+nav[data-testid="sidebar"] a > span {
+  min-width: 0;
 }
 
 .fx-rail-purpose {
@@ -586,6 +596,18 @@ nav[data-testid="sidebar"] a.fx-nav-active {
   padding: 0 10px 0 36px;
   opacity: 0.65;
   font-size: 12px;
+  /* U11: a long uk purpose wraps, never overlaps the rows below. */
+  overflow-wrap: break-word;
+  min-width: 0;
+}
+
+/* U11: the no-project results hint wraps like a purpose line. */
+span[data-testid="menu-results-hint"] {
+  display: block;
+  overflow-wrap: break-word;
+  min-width: 0;
+  font-size: 12px;
+  opacity: 0.8;
 }
 
 .fx-rail-purpose[hidden] {
@@ -1156,6 +1178,45 @@ div[data-testid="app-shell"]:has(> nav[data-testid="sidebar"]) {
   aside[data-testid="inspector"] section[data-testid^="inspector-card-"] > *:not(:first-child) {
     display: none;
   }
+}
+
+/* CRAWL-3 + J10: provider model rows wrap safely at narrow widths.
+   The long model id truncates with a tooltip instead of overflowing
+   into the next row; labels and prices wrap normally; checkboxes keep
+   a 24px hit target. */
+li[data-testid="model-row"],
+li[data-testid="connect-model-row"] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
+li[data-testid="model-row"] > small,
+li[data-testid="connect-model-row"] > small {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+li[data-testid="model-row"] > span,
+li[data-testid="connect-model-row"] > span {
+  min-width: 0;
+}
+
+li[data-testid="model-row"] > span[data-testid^="model-price-"],
+li[data-testid="connect-model-row"] > span[data-testid^="connect-model-price-"] {
+  flex: none;
+}
+
+li[data-testid="model-row"] input[type="checkbox"],
+li[data-testid="connect-model-row"] input[type="checkbox"] {
+  flex: none;
+  min-width: 24px;
+  min-height: 24px;
 }
 
 /* FXDESIGN7 item 20: uk strings never clip — wrap or ellipsis with the

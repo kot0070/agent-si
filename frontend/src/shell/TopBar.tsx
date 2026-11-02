@@ -133,6 +133,12 @@ export function TopBar(props: TopBarProps): ReactElement {
 
   const effective = props.projectId ?? current.projectId;
   const options = projects ?? [];
+  // U11: the truncated project value keeps its full name as a tooltip.
+  const effectiveName =
+    effective === null
+      ? t("shell.topbar.projectPlaceholder")
+      : (options.find((project) => project.project_id === effective)?.name ??
+        t("shell.topbar.projectPlaceholder"));
   // FXRC1FIX P4: the mount list predates a first-message project, so the
   // select would show "Select a project" for the new id. Refetch once per
   // unknown id; the fresh options then show the project name.
@@ -306,6 +312,7 @@ export function TopBar(props: TopBarProps): ReactElement {
           /* FXDESIGN5 S3/S7: explicit accessible name on the project
              dropdown (the visible label text stays unchanged). */
           aria-label={t("shell.topbar.project")}
+          title={effectiveName}
           value={effective ?? ""}
           onChange={(event) => {
             // FXCHATHIST Part 2 (H3): switching projects opens that
@@ -386,6 +393,7 @@ export function TopBar(props: TopBarProps): ReactElement {
             data-testid="topbar-language"
             className="fx-topbar-control"
             aria-label={t("shell.topbar.language")}
+            title={locale}
             value={locale}
             onChange={(event) => {
               changeLocale(event.target.value === "uk" ? "uk" : "en");
