@@ -7,9 +7,10 @@
 // whenever the picked model id maps to a warnings entry, so the warning stays
 // visible without scrolling past the model name.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PROVIDER_CATALOG } from "./catalog";
 import { ChatSelector, withConnectedSeed } from "./ChatSelector";
+import { readChatModel } from "./modelsApi";
 import { t } from "../../locale/index";
 import type { ProviderPreset, ProviderState } from "./types";
 
@@ -71,6 +72,20 @@ export function ChatModelSelector({ project_id = "local", states = {}, catalog, 
   // falls back to the static KB catalog.
   const resolvedCatalog = effectiveCatalog;
   const [value, setValue] = useState("");
+  // FXSAVED item 1: on mount read the saved model and show it. The load
+  // never fires onChange and never PUTs: it only sets local state, and
+  // only while still mounted (cancelled flag).
+  useEffect(() => {
+    let cancelled = false;
+    void readChatModel(project_id).then((saved) => {
+      if (!cancelled && saved !== null && saved !== "") {
+        setValue(saved);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [project_id]);
   function handleChange(modelId: string): void {
     setValue(modelId);
     if (onChange) {
