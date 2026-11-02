@@ -539,6 +539,7 @@ def run_task_streamed(
     secret_refs: Any = None,
     run_id: str | None = None,
     data_root: str | None = None,
+    run_end_hook: bool = True,
 ) -> Iterator[RunEvent]:
     """Stream a Manager run as RunEvents; a terminal event is always last.
 
@@ -546,7 +547,10 @@ def run_task_streamed(
     terminal dispatch_rejected event with ZERO provider/runner calls.
     Raises ProviderUnboundError before yielding when no provider
     adapter is bound; raises AssuranceRefusedError (fail-closed) when
-    the assurance hook refuses a tool call.
+    the assurance hook refuses a tool call. run_end_hook=False skips
+    the local-tests stage for sub-runs (hierarchy parts): the hook
+    belongs to user-facing turns, and a part run must cost exactly its
+    own provider calls.
     """
     shape = _resolve_run_shape(request, {
         "project_id": project_id,
@@ -595,7 +599,7 @@ def run_task_streamed(
             return
         _term_state["done"] = True
         _telemetry_report_terminated(shape, active_run_id, reason)
-        if reason != "cancelled":
+        if reason != "cancelled" and run_end_hook:
             # FXTESTS2 run-end hook (F3): the local-tests switch decides.
             # Switch on runs one test stage with the run's data root plus
             # the run's gateway; switch off records a skip. A hook
