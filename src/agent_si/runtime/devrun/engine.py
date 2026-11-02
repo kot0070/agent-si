@@ -841,12 +841,13 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         # A rerun after installs: the Director brief carries the full
         # real install record (do not install again, verify instead).
         # The worker brief carries the same record as installer NAMES
-        # only: the "$ ... -> exit N" evidence shape would read as a
-        # runnable check to a literal follower, so it never rides the
-        # worker prompt. The auditor reads it through judge().
+        # only, comma-joined: even a space-joined name ("npm install")
+        # would read as a runnable check to a literal follower, so the
+        # words never ride the worker prompt adjacently. The auditor
+        # reads it through judge().
         try:
             _names = "; ".join(
-                " ".join(str(word) for word in (row.get("argv") or []))
+                ", ".join(str(word) for word in (row.get("argv") or []))
                 for row in prior_installs)
         except Exception:
             _names = ""
