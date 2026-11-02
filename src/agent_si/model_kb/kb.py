@@ -288,13 +288,16 @@ def _seed_row(provider_id, model_id):
 
 SEED_CATALOG = make_catalog(
     [_seed_row("openai", "gpt-4o"),
-     _seed_row("openai", "gpt-4o-mini")],
+     _seed_row("openai", "gpt-4o-mini"),
+     _seed_row("meta", "muse-spark-1.3-contributor"),
+     _seed_row("anthropic", "claude-haiku-4-5")],
     kb_version=1,
     updated_at="2026-10-26",
     change_log=[{"version": 1, "at": "2026-10-26",
                  "summary": "shipped seed; spec fields UNKNOWN until a "
                             "sourced in-app update enriches them",
-                 "source": "shipped-seed", "providers": ["openai"],
+                 "source": "shipped-seed",
+                 "providers": ["openai", "meta", "anthropic"],
                  "changes": [], "cost_state": "UNAVAILABLE"}],
     sources=[],
 )
@@ -367,9 +370,31 @@ def persist_bound():
 
 
 def load_persisted():
-    """Bind the persisted catalog when present; None when absent/invalid."""
+    """Bind the persisted catalog when present; None when absent/invalid.
+
+    Seed backfill: a persisted catalog that lacks a shipped seed row
+    gains it (UNKNOWN fields) at load; rows already present are never
+    overwritten, and the backfilled catalog is saved back.
+    """
     path = persist_path()
     if not path:
         return None
     catalog = load_catalog(path)
-    return bind_catalog(catalog)
+    known = {(row.get("provider_id"), row.get("model_id"))
+             for row in catalog.get("models", [])
+             if isinstance(row, dict)}
+    missing = [copy.deepcopy(row)
+               for row in SEED_CATALOG.get("models", [])
+               if (row.get("provider_id"), row.get("model_id")) not in known]
+    if not missing:
+        return bind_catalog(catalog)
+    catalog["models"].extend(missing)
+    errors = validate_catalog(catalog)
+    if errors:
+        raise ValueError("invalid catalog at %r: %s" % (path, errors))
+    bound = bind_catalog(catalog)
+    try:
+        persist_bound()
+    except Exception:
+        pass
+    return bound
