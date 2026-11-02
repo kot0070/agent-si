@@ -116,10 +116,15 @@ describe('lane B behaviour contract (STEP1: every behaviour below fails on throw
   });
 
   it('HowItWorks explains runs vs code tests vs local tests in both languages', () => {
-    render(<HowItWorks />);
-    expect(screen.getByText(HOW_IT_WORKS_KEYS.runsBody)).toBeTruthy();
-    expect(screen.getByText(HOW_IT_WORKS_KEYS.codeTestsBody)).toBeTruthy();
-    expect(screen.getByText(HOW_IT_WORKS_KEYS.localTestsBody)).toBeTruthy();
+    // D4: the concepts render resolved strings, never raw locale keys.
+    const { container } = render(<HowItWorks />);
+    expect(container.textContent).toContain(en.howItWorks.runs.title);
+    expect(container.textContent).toContain(en.howItWorks.runs.body);
+    expect(container.textContent).toContain(en.howItWorks.codeTests.body);
+    expect(container.textContent).toContain(en.howItWorks.localTests.body);
+    for (const key of Object.values(HOW_IT_WORKS_KEYS)) {
+      expect(container.textContent).not.toContain(key);
+    }
   });
 
   it('unknown key raises MISSING_LOCALE_KEY', () => {

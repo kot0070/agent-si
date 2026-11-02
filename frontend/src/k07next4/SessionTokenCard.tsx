@@ -1,7 +1,7 @@
 // K07NEXT4 LIVE0-08: the session token card.
 // FXCLASS CD-6: an error state replaces the endless spinner. A 401/403/500
 // surfaces an ErrorPanel with Retry, never an infinite spinner with zero
-// cause. Reads the real page with a fake only at the network boundary.
+// cause. Reads the real page; only the network edge is substituted in tests.
 import { useEffect, useState } from "react";
 import type { ReactElement } from "react";
 import { ApiError, apiErrorLocaleKey } from "../api/errors";

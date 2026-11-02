@@ -63,11 +63,31 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 // their locale label, never the bare token.
 /** FXDESIGN7 item 15: served snake_case facts render human
  * ("kb_version" -> "Version", "updated_at" -> "Updated"); values stay
- * served, ISO timestamps render as locale dates. */
+ * served, ISO timestamps render as locale dates. B1: the served
+ * kb/status + proposal + update-result keys all map (overall stays
+ * lowercase: fxdesign2 S2 pins "overall" in the kb-status card). */
 const HUMAN_FIELD_ALIASES: Record<string, string> = {
+  overall: "overall",
+  per_provider: "Per provider",
   kb_version: "Version",
   updated_at: "Updated",
-  per_provider: "Per provider",
+  total_changes: "Total changes",
+  last_source: "Last source",
+  models: "Models",
+  last_change_at: "Last change",
+  proposals: "Proposals",
+  proposal_id: "Proposal",
+  applied: "Applied",
+  version: "Version",
+  cost_state: "Cost",
+  metric: "Metric",
+  refresh: "Refresh",
+  apply: "Apply",
+  changes: "Changes",
+  source: "Source",
+  providers: "Providers",
+  reason: "Reason",
+  field: "Field",
 };
 
 export function humanFieldName(name: string): string {

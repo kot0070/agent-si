@@ -150,9 +150,9 @@ export function HowItWorks(props: HowItWorksProps): ReactElement {
         {entries.map((entry) => (
           <article key={entry.titleKey}>
             <h2>{text(entry.titleKey, props.locale)}</h2>
+            {/* D4: concepts render resolved strings only; raw locale
+                keys never reach the screen, so the code lines are gone. */}
             <p>{text(entry.bodyKey, props.locale)}</p>
-            <code>{entry.titleKey}</code>
-            <code>{entry.bodyKey}</code>
           </article>
         ))}
       </section>

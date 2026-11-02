@@ -142,14 +142,14 @@ describe('migration', () => {
 });
 
 describe('G6 explainer probe', () => {
-  it('explains runs vs code tests vs local tests in both languages with key ids visible', () => {
+  it('explains runs vs code tests vs local tests in both languages with resolved strings', () => {
     const english = render(<HowItWorks locale="en" />);
     expect(english.container.textContent).toContain(en.howItWorks.runs.title);
     expect(english.container.textContent).toContain(en.howItWorks.runs.body);
     expect(english.container.textContent).toContain(en.howItWorks.codeTests.body);
     expect(english.container.textContent).toContain(en.howItWorks.localTests.body);
     for (const key of Object.values(HOW_IT_WORKS_KEYS)) {
-      expect(screen.getByText(key)).toBeTruthy();
+      expect(english.container.textContent).not.toContain(key);
     }
     cleanup();
     const ukrainian = render(<HowItWorks locale="uk" />);
@@ -158,7 +158,7 @@ describe('G6 explainer probe', () => {
     expect(ukrainian.container.textContent).toContain(uk.howItWorks.codeTests.body);
     expect(ukrainian.container.textContent).toContain(uk.howItWorks.localTests.body);
     for (const key of Object.values(HOW_IT_WORKS_KEYS)) {
-      expect(screen.getByText(key)).toBeTruthy();
+      expect(ukrainian.container.textContent).not.toContain(key);
     }
   });
 });
