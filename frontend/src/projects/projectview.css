@@ -1,0 +1,68 @@
+/* FXVIEWS project tab styles: one compact scrollable tab row with a
+   selected state, and real fact rows with a gap between label and value.
+   Layout only; every string stays in the locale tables. */
+
+.fxpv-tabs {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: 0.25rem;
+  overflow-x: auto;
+  padding: 0.25rem 0;
+}
+
+.fxpv-tab {
+  flex: 0 0 auto;
+  padding: 0.375rem 0.75rem;
+  border: 1px solid transparent;
+  border-radius: 0.375rem;
+  background: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.fxpv-tab-selected {
+  border-color: currentColor;
+  font-weight: 600;
+}
+
+.fxpv-fact {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.25rem 0;
+}
+
+.fxpv-fact-label {
+  min-width: 10rem;
+}
+
+.fxpv-fact-value {
+  font-variant-numeric: tabular-nums;
+}
+
+.fxpv-row {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.25rem 0;
+}
+
+.fxpv-note {
+  opacity: 0.85;
+}
+
+/* FXVIEWS-10: task rows stack title, status chip and date on their own
+   lines with spacing; never concatenated. */
+.fxpv-task-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.5rem 0;
+}
+
+.fxpv-task-chip {
+  align-self: flex-start;
+}
