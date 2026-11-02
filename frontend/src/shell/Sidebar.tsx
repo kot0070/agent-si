@@ -4,10 +4,16 @@
 // when no project is selected), Settings opens the settings index.
 
 import type { ReactElement } from "react";
-import { Link } from "react-router-dom";
+import { NavLink } from "react-router-dom";
 import type { SidebarProps } from "../app/iface";
 import { useCurrentProject } from "../app/ApiClientProvider";
 import { t } from "../locale/index";
+
+// FXDESIGN3 S5: the rail exposes the active entry through NavLink's
+// aria-current="page" plus the fx-nav-active token style in shell.css.
+function railClass({ isActive }: { isActive: boolean }): string | undefined {
+  return isActive ? "fx-nav-active" : undefined;
+}
 
 export function Sidebar(props: SidebarProps): ReactElement {
   const current = useCurrentProject();
@@ -17,21 +23,31 @@ export function Sidebar(props: SidebarProps): ReactElement {
 
   return (
     <nav data-testid="sidebar" aria-label={t("shell.sidebar.projects")}>
-      <Link data-testid="menu-new-task" to="/">
+      <NavLink data-testid="menu-new-task" to="/" end className={railClass}>
         {t("tasks.creator.title")}
-      </Link>
+      </NavLink>
       <span data-testid="menu-new-task-purpose">
         {t("tasks.creator.subtitle")}
       </span>
-      <Link data-testid="menu-projects" to="/projects">
+      <NavLink
+        data-testid="menu-projects"
+        to="/projects"
+        end
+        className={railClass}
+      >
         {t("shell.sidebar.projects")}
-      </Link>
+      </NavLink>
       <span data-testid="menu-projects-purpose">
         {t("projects.list.subtitle")}
       </span>
-      <Link data-testid="menu-results" to={resultsTo}>
+      <NavLink
+        data-testid="menu-results"
+        to={resultsTo}
+        end
+        className={railClass}
+      >
         {t("projects.reports.title")}
-      </Link>
+      </NavLink>
       <span data-testid="menu-results-purpose">
         {t("projects.reports.subtitle")}
       </span>
@@ -40,9 +56,13 @@ export function Sidebar(props: SidebarProps): ReactElement {
           {t("shell.sidebar.resultsHint")}
         </span>
       ) : null}
-      <Link data-testid="menu-settings" to="/settings">
+      <NavLink
+        data-testid="menu-settings"
+        to="/settings"
+        className={railClass}
+      >
         {t("shell.sidebar.settings")}
-      </Link>
+      </NavLink>
       <span data-testid="menu-settings-purpose">
         {t("settings.index.subtitle")}
       </span>

@@ -261,6 +261,7 @@ export function ProjectsPage(): ReactElement {
               <button
                 type="button"
                 data-testid="project-folder-choose"
+                className="fx-btn-quiet"
                 onClick={() => {
                   void chooseFolder();
                 }}

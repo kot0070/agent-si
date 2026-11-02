@@ -155,6 +155,8 @@ li {
 
 pre {
   overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--fx-input-border) transparent;
 }
 
 details {

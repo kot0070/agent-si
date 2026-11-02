@@ -6,6 +6,7 @@
 import { useEffect, useState } from "react";
 import type { ReactElement } from "react";
 import { t } from "../locale/index";
+import { EVIDENCE_LOCALE_KEYS } from "../settings/LocalBenchTypes";
 import { requestResponse } from "../api/errors";
 import { readKbProposalDoc } from "./k07next2Api";
 import type { KbProposalDoc } from "./k07next2Api";
@@ -57,8 +58,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 // FXDESIGN2: served KB facts render as readable table rows, never raw
 // JSON. Nested records flatten to "name: value" pairs joined with "; ",
 // so no braces or quotes from JSON.stringify ever reach the card.
+// FXDESIGN3 S6: served evidence-enum tokens (UNKNOWN/PROXY/MEASURED) render
+// their locale label, never the bare token.
 function renderFactValue(value: unknown): string {
   if (typeof value === "string") {
+    const tier = value.toUpperCase() as keyof typeof EVIDENCE_LOCALE_KEYS;
+    const labelKey = EVIDENCE_LOCALE_KEYS[tier];
+    if (labelKey !== undefined) {
+      return t(labelKey);
+    }
     return value;
   }
   if (typeof value === "number" || typeof value === "boolean") {

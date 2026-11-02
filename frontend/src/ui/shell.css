@@ -297,3 +297,79 @@ div[data-testid="chat-composer"] input {
 div[data-testid="chat-composer"] > button {
   flex: none;
 }
+
+/* FXDESIGN3 S1: the shell fills the viewport height at 1280x800; each rail
+   scrolls only on real overflow; scrollbars use tokens, never bright native
+   defaults. Lengths only, no colours. */
+div[data-testid="app-shell"]:has(> nav[data-testid="sidebar"]) {
+  min-height: 100vh;
+}
+
+nav[data-testid="sidebar"],
+main[data-testid="app-main"],
+aside[data-testid="inspector"],
+div[data-testid="chat-messages"] {
+  scrollbar-width: thin;
+  scrollbar-color: var(--fx-input-border) transparent;
+}
+
+nav[data-testid="sidebar"]::-webkit-scrollbar,
+main[data-testid="app-main"]::-webkit-scrollbar,
+aside[data-testid="inspector"]::-webkit-scrollbar,
+div[data-testid="chat-messages"]::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+nav[data-testid="sidebar"]::-webkit-scrollbar-thumb,
+main[data-testid="app-main"]::-webkit-scrollbar-thumb,
+aside[data-testid="inspector"]::-webkit-scrollbar-thumb,
+div[data-testid="chat-messages"]::-webkit-scrollbar-thumb {
+  background-color: var(--fx-input-border);
+}
+
+nav[data-testid="sidebar"]::-webkit-scrollbar-track,
+main[data-testid="app-main"]::-webkit-scrollbar-track,
+aside[data-testid="inspector"]::-webkit-scrollbar-track,
+div[data-testid="chat-messages"]::-webkit-scrollbar-track {
+  background-color: transparent;
+}
+
+/* FXDESIGN3 S2: the chat area fills the centre column; the message list
+   takes the free height and the composer docks at the bottom. The 44rem
+   centre width stays on main (FXDESIGN1 S5) for every centre page. */
+section[data-testid="chat-area"] {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 160px);
+  max-width: 100%;
+}
+
+div[data-testid="chat-layout"] {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+div[data-testid="chat-messages"] {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+div[data-testid="chat-composer"] {
+  position: sticky;
+  bottom: 0;
+  background-color: var(--fx-surface);
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+/* FXDESIGN3 S5: the active rail entry is visible in both themes. */
+nav[data-testid="sidebar"] a.fx-nav-active {
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  color: var(--fx-accent);
+}
