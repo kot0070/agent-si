@@ -435,7 +435,14 @@ _PROXY_ENV = frozenset({
 
 
 def scrub_env() -> dict[str, str]:
-    """Scrubbed child env: secrets dropped, proxies emptied."""
+    """Scrubbed child env: secrets dropped, proxies emptied.
+
+    The child never inherits host user-site configuration: PYTHONPATH
+    and PYTHONHOME are dropped and PYTHONNOUSERSITE=1 is forced, so a
+    project run cannot pick up the owner's user site. A project .venv
+    keeps working: its own interpreter and paths ride the argv and the
+    environment it carries, not these variables.
+    """
     env: dict[str, str] = {}
     for key, value in os.environ.items():
         if _SECRET_ENV_HINT.search(key):
@@ -444,6 +451,9 @@ def scrub_env() -> dict[str, str]:
             env[key] = ""
             continue
         env[key] = value
+    env.pop("PYTHONPATH", None)
+    env.pop("PYTHONHOME", None)
+    env["PYTHONNOUSERSITE"] = "1"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     return env
 
