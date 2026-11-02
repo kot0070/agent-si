@@ -153,7 +153,11 @@ export function TopBar(props: TopBarProps): ReactElement {
       </button>
       <span data-testid="k07open10-shell" aria-hidden="true" />
       <div data-testid="pairing-strip">
-        <span data-testid="pairing-label">{t("shell.topbar.watcher")}</span>{" "}
+        <span data-testid="pairing-label">
+          <Link data-testid="topbar-watcher" to="/watcher">
+            {t("shell.topbar.watcher")}
+          </Link>
+        </span>{" "}
         <span data-testid="pairing-badge">
           {effective === null
             ? t("agents.badge.cloud")
@@ -189,9 +193,6 @@ export function TopBar(props: TopBarProps): ReactElement {
           ) : null}
         </select>
       </label>
-      <Link data-testid="topbar-watcher" to="/watcher">
-        {t("shell.topbar.watcher")}
-      </Link>
       <button
         type="button"
         data-testid="topbar-stop-all"
