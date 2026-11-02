@@ -315,6 +315,7 @@ export type LocaleKey =
   | 'providers.rolepool.strategyHelpFallbackOrder'
   | 'providers.rolepool.strategyHelpSplitParallel'
   | 'providers.rolepool.strategySplitParallel'
+  | 'providers.rolepool.emptyPoolHint'
   | 'providers.setup.autoOption'
   | 'providers.setup.finish'
   | 'providers.setup.hint'

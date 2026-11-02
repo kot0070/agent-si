@@ -3,7 +3,7 @@
 // A key resolves to (provider, model) through the default in-memory map
 // built from the internally resolved enabled choices.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PROVIDER_CATALOG } from "./catalog";
 import { enabledChatChoices } from "./ChatSelector";
 import type { ChatChoice } from "./ChatSelector";
@@ -118,16 +118,112 @@ type RolePoolPickerProps = {
 
 const DEFAULT_VALUE: RolePoolValue = { mode: "AUTO", pinnedKey: "", poolKeys: [], strategy: "AUTO" };
 
+type SavedPoolProfile = {
+  mode?: unknown;
+  provider?: unknown;
+  model?: unknown;
+  pool?: Array<{ provider_id?: unknown; model?: unknown }>;
+  strategy?: unknown;
+};
+
+function savedStrategy(value: unknown): PoolStrategy {
+  return value === "DIRECTOR_PER_TASK" ||
+    value === "FALLBACK_ORDER" ||
+    value === "SPLIT_PARALLEL" ||
+    value === "AUTO"
+    ? value
+    : "AUTO";
+}
+
+// FXUIB-B3: the served profile back onto option keys (labels stay
+// label-only). Null when the saved pick no longer resolves (unknown
+// mode, unknown models): the caller keeps the default then.
+export function savedPoolToValue(
+  saved: SavedPoolProfile,
+  options: PoolOption[],
+): RolePoolValue | null {
+  if (saved.mode !== "PINNED" && saved.mode !== "pool" && saved.mode !== "AUTO") {
+    return null;
+  }
+  const strategy = savedStrategy(saved.strategy);
+  if (saved.mode === "AUTO") {
+    return { mode: "AUTO", pinnedKey: "", poolKeys: [], strategy };
+  }
+  if (saved.mode === "PINNED") {
+    const hit = options.find(
+      (option) =>
+        option.providerId === saved.provider && option.modelId === saved.model,
+    );
+    return hit === undefined
+      ? null
+      : { mode: "PINNED", pinnedKey: hit.key, poolKeys: [], strategy };
+  }
+  const keys: string[] = [];
+  for (const member of saved.pool ?? []) {
+    const hit = options.find(
+      (option) =>
+        option.providerId === member?.provider_id &&
+        option.modelId === member?.model,
+    );
+    if (hit !== undefined && !keys.includes(hit.key)) {
+      keys.push(hit.key);
+    }
+  }
+  return keys.length === 0
+    ? null
+    : { mode: "pool", pinnedKey: "", poolKeys: keys, strategy };
+}
+
 export function RolePoolPicker({ role, project_id = "local", options, onChange }: RolePoolPickerProps) {
   const project = project_id;
   const poolOptions = options ?? choicesToPoolOptions(enabledChatChoices(PROVIDER_CATALOG, {}));
   const resolve = defaultPoolResolver(poolOptions);
   const [current, setInner] = useState<RolePoolValue>(DEFAULT_VALUE);
+  // FXUIB-B3: the saved profile shows after mount (read-only GET at the
+  // network boundary only, applied once per project+role; user edits
+  // after that are never clobbered by late option loads).
+  const appliedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const scope = `${project_id}\n${role}`;
+    if (appliedRef.current === scope) {
+      return;
+    }
+    let alive = true;
+    void (async () => {
+      try {
+        const response = await fetch(
+          `/api/v1/roles/pools/profile?project_id=${encodeURIComponent(project_id)}&role=${encodeURIComponent(role)}`,
+        );
+        if (!alive || !response.ok) {
+          return;
+        }
+        const next = savedPoolToValue(
+          (await response.json()) as SavedPoolProfile,
+          poolOptions,
+        );
+        if (alive && next !== null) {
+          appliedRef.current = scope;
+          setInner(next);
+        }
+      } catch {
+        return;
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [project_id, role, poolOptions]);
   const label = roleLabel(role);
   const group = `role-pool-${project}-${role}-mode`;
 
   function emit(next: RolePoolValue): void {
     setInner(next);
+    // FXUIB-B6: an empty pool never saves (the PUT would 400 with no
+    // binding stored): the hint below covers it until at least one
+    // model is picked. Leaving pool mode always saves.
+    if (next.mode === "pool" && next.poolKeys.length === 0) {
+      return;
+    }
     onChange?.(next);
   }
 
@@ -161,6 +257,11 @@ export function RolePoolPicker({ role, project_id = "local", options, onChange }
         </label>
       ))}
       <p>{modeHelp(current.mode)}</p>
+      {current.mode === "pool" && current.poolKeys.length === 0 ? (
+        <p data-testid="pool-empty-hint" role="note">
+          {t("providers.rolepool.emptyPoolHint")}
+        </p>
+      ) : null}
       {current.mode === "PINNED" ? (
         <label>
           {t("providers.rolepool.pinnedAria", { role: label })}

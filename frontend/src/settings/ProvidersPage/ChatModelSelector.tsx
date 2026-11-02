@@ -7,7 +7,7 @@
 // whenever the picked model id maps to a warnings entry, so the warning stays
 // visible without scrolling past the model name.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PROVIDER_CATALOG } from "./catalog";
 import { ChatSelector, withConnectedSeed } from "./ChatSelector";
 import { t } from "../../locale/index";
@@ -71,6 +71,34 @@ export function ChatModelSelector({ project_id = "local", states = {}, catalog, 
   // falls back to the static KB catalog.
   const resolvedCatalog = effectiveCatalog;
   const [value, setValue] = useState("");
+  // FXUIB-B3: the saved pick shows after mount (read-only GET at the
+  // network boundary only; a missing record keeps the default).
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const response = await fetch(
+          `/api/v1/roles/chat-model?project_id=${encodeURIComponent(project_id)}`,
+        );
+        if (!alive || !response.ok) {
+          return;
+        }
+        const data = (await response.json()) as { model_id?: unknown };
+        if (
+          alive &&
+          typeof data.model_id === "string" &&
+          data.model_id !== ""
+        ) {
+          setValue(data.model_id);
+        }
+      } catch {
+        return;
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [project_id]);
   function handleChange(modelId: string): void {
     setValue(modelId);
     if (onChange) {

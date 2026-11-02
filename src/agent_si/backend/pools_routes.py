@@ -778,6 +778,61 @@ def put_chat_model(ctx: RoutingCtx, query, body) -> Tuple[int, Dict]:
                  "model_id": model_id}
 
 
+def get_chat_model(ctx: RoutingCtx, query, body) -> Tuple[int, Dict]:
+    """Read one project's saved chat model (GET /api/v1/roles/chat-model).
+
+    Reads are open (no session token needed). Unknown projects (no chat
+    record at all) answer 404, never a default model id.
+    """
+    _ = body
+    project_id = _q(query, "project_id", None)
+    if not isinstance(project_id, str) or not project_id:
+        return 400, {"error": "project_id required"}
+    record = get_chat_record(ctx, project_id)
+    if record is None:
+        return 404, {"error": "no saved chat model for project %r"
+                              % (project_id,)}
+    return 200, record
+
+
+def get_role_pool_profile(ctx: RoutingCtx, query, body) -> Tuple[int, Dict]:
+    """Read one role's saved pool profile (GET /api/v1/roles/pools/profile).
+
+    Reads are open. Returns the picker's live shape (mode, provider,
+    model, pool members, strategy); a role with no stored profile
+    answers 404, never a default pick.
+    """
+    _ = body
+    project_id = _q(query, "project_id", None)
+    if not isinstance(project_id, str) or not project_id:
+        return 400, {"error": "project_id required"}
+    role = _q(query, "role", None)
+    if role not in T.ROLES:
+        return 400, {"error": "unknown role %r" % (role,)}
+    profile = ctx.role_table.get_profile(project_id, role)
+    if profile is None:
+        return 404, {"error": "no saved pool profile for role %r "
+                              "in project %r" % (role, project_id)}
+    binding = ctx.store.get_pool(project_id, role) if ctx.store else None
+    members: List[Dict[str, Any]] = []
+    strategy = None
+    if binding is not None:
+        view = P.binding_view(binding)
+        for member in view.get("members", []):
+            provider = member.get("provider", member.get("provider_id"))
+            model = member.get("model", member.get("model_id"))
+            members.append({
+                "provider_id": provider, "model": model,
+                "use_mode": member.get("use_mode", "primary"),
+                "provider_type": member.get("provider_type", "cloud"),
+            })
+        strategy = view.get("strategy")
+    return 200, {"role": role, "project_id": project_id,
+                 "mode": profile.mode, "provider": profile.provider,
+                 "model": profile.model, "pool": members,
+                 "strategy": strategy}
+
+
 def _plain(value):
     """Convert dataclass records (or nested mixes) to plain JSON data."""
     if _is_dc(value) and not isinstance(value, type):
@@ -1244,6 +1299,9 @@ ROUTES: Tuple[Tuple[str, str, str, Callable], ...] = (
     ("post", "/api/v1/routing/l3-audit", "post_l3_audit", post_l3_audit),
     ("get", "/api/v1/roles/pools", "list_role_pools", list_role_pools),
     ("put", "/api/v1/roles/pools", "put_role_pools", put_role_pools),
+    ("get", "/api/v1/roles/pools/profile", "get_role_pool_profile",
+     get_role_pool_profile),
+    ("get", "/api/v1/roles/chat-model", "get_chat_model", get_chat_model),
     ("get", "/api/v1/routing/decision/{id}/why", "get_decision_why",
      get_decision_why),
 )
