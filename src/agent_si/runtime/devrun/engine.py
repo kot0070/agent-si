@@ -369,35 +369,19 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         # FXPARALLEL END run-state.
 
     def _set_task(status: str) -> None:
-        """Mirror the run state onto the task repo row (best effort).
+        """Mirror the run state onto its task rows (best effort).
 
-        Absent task id: no-op, never a crash, never an invented row.
-        A row naming another project is left untouched. Persisted
-        through the repo's own store file.
+        The named run task plus every same-project row titled with the
+        run's message (the first-chat auto task, whose id never matches
+        the run's task) move together through the shared write path.
+        Absent rows: no-op, never a crash, never an invented row.
         """
         try:
-            tasks = getattr(getattr(app, "state", None),
-                            "k02r3_tasks", None)
-            if tasks is None:
-                return
-            stored = tasks.load(task_id)
-            if stored is None:
-                return
-            if str(stored.get("project_id") or "") != str(project):
-                return
-            updated = dict(stored)
-            updated["status"] = str(status)
-            try:
-                tasks.compare_and_set(
-                    task_id, stored.get("version"), updated)
-            except Exception:
-                return
-            try:
-                from agent_si.backend.read_routes import (
-                    persist_k02r3_store as _persist_tasks)
-                _persist_tasks(app)
-            except Exception:
-                pass
+            from agent_si.backend import (
+                console_projects_write as _task_write,
+            )
+            _task_write.mirror_run_task_status(
+                app, str(project), task_id, message, str(status))
         except Exception:
             pass
 

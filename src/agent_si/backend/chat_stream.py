@@ -175,6 +175,71 @@ def _chat_error_event(stream_id: str, err: Exception) -> dict[str, Any]:
     }
 
 
+#: Terminal SSE type -> task repo status (FXR4B D1: every run's task,
+#: including the first-chat auto task, closes with the run).
+_TASK_STATUS_BY_TERMINAL = {
+    "done": "done",
+    "approval": "held",
+    "cancelled": "stopped",
+    "error": "failed",
+    "budget_stop": "failed",
+    "dispatch_rejected": "failed",
+}
+
+#: Terminal SSE type -> chat-history turn status (FXR4B D2: the server
+#: records the final text + status at the end of every engine turn).
+_TURN_STATUS_BY_TERMINAL = {
+    "done": "ok",
+    "approval": "ok",
+    "cancelled": "stopped",
+    "error": "failed",
+    "budget_stop": "failed",
+    "dispatch_rejected": "failed",
+}
+
+
+def _record_server_turn(app: Any, project: str, user_text: str,
+                        assistant_text: str, status: str,
+                        run_id: str = "", error_code: str = "") -> None:
+    """Store one server-side chat turn; never raises, never breaks flow.
+
+    The stream start stores the user message (no run id: every stream
+    opens its own row); the terminal write carries the run id. Client
+    writes keep their own run ids, so their running/terminal pair
+    still upserts to one row.
+    """
+    try:
+        if app is None:
+            return
+        name = (project or "").strip()
+        if not name:
+            return
+        from agent_si.backend import chat_history as _chathist
+
+        _chathist.record_turn(
+            app, name, user_text or "", assistant_text or "",
+            status=status, run_id=run_id or "",
+            error_code=error_code or "")
+    except Exception:
+        pass
+
+
+def _mirror_run_tasks(app: Any, project: str, task: str,
+                      message: str, status: str) -> None:
+    """Mirror one stream's state onto its task rows; never raises."""
+    try:
+        if app is None:
+            return
+        from agent_si.backend import (
+            console_projects_write as _task_write,
+        )
+
+        _task_write.mirror_run_task_status(
+            app, project or "", task or "", message or "", status)
+    except Exception:
+        pass
+
+
 def _load_manager_run_task_streamed() -> Any | None:
     """Lazy M-MANAGER entry; None when the manager module is absent."""
     try:
@@ -681,10 +746,39 @@ class ManagerSdkBridge:
         terminal event closes it: the manager's terminal event when
         it emits one, a synthesized `done` only when it emits none,
         or a single `error` when the run fails first.
+
+        FXR4B: the server records its own history turn (user message
+        at start, final text + status at the end, on the devrun path
+        too) and mirrors the run state onto its task rows, so a
+        closed window loses no turn and every task closes.
         """
+        app = getattr(self, "_app", None)
+        project = str(getattr(request, "project", "") or "")
+        task = str(getattr(request, "task", "") or "")
+        message = str(getattr(request, "message", "") or "")
+        texts: list[str] = []
+        closed = False
+
+        def _close(kind: str, error_code: str = "") -> None:
+            """Store the terminal turn + mirror tasks once (idempotent)."""
+            nonlocal closed
+            if closed:
+                return
+            closed = True
+            history_status = _TURN_STATUS_BY_TERMINAL.get(kind, "failed")
+            task_status = _TASK_STATUS_BY_TERMINAL.get(kind, "failed")
+            final = "\n".join(text for text in texts if text)
+            _record_server_turn(
+                app, project, message, final, history_status,
+                run_id=run_id, error_code=error_code)
+            _mirror_run_tasks(app, project, task, message, task_status)
+
         yield sse_bytes(self._start_event(stream_id, run_id, request))
+        _record_server_turn(app, project, message, "", "running")
+        _mirror_run_tasks(app, project, task, message, "running")
         if state["cancelled"]:
             yield sse_bytes({"type": "cancelled", "stream_id": stream_id})
+            _close("cancelled", error_code="STOPPED")
             return
         routed = self._provider_adapter
         if routed is not None:
@@ -696,6 +790,8 @@ class ManagerSdkBridge:
         except Exception as err:
             self._finish(stream_id)
             yield sse_bytes(_chat_error_event(stream_id, err))
+            _close("error", error_code=str(
+                getattr(err, "code", None) or type(err).__name__))
             return
         terminal_emitted = False
         try:
@@ -703,6 +799,7 @@ class ManagerSdkBridge:
                 if state["cancelled"]:
                     yield sse_bytes(
                         {"type": "cancelled", "stream_id": stream_id})
+                    _close("cancelled", error_code="STOPPED")
                     return
                 payload = _manager_event_payload(
                     stream_id, run_id, event)
@@ -713,22 +810,51 @@ class ManagerSdkBridge:
                         and not state.get("kb_cited")):
                     payload["text"] = payload["text"] + kb_note
                     state["kb_cited"] = True
+                text = payload.get("text")
+                if isinstance(text, str) and text:
+                    texts.append(text)
                 yield sse_bytes(payload)
                 if payload.get("type") in self._TERMINAL_TYPES:
                     terminal_emitted = True
+                    kind = str(payload.get("type"))
+                    if kind == "done" and payload.get(
+                            "approval_requested") is True:
+                        task_kind = "approval"
+                    else:
+                        task_kind = kind
+                    history_status = _TURN_STATUS_BY_TERMINAL.get(
+                        kind, "failed")
+                    task_status = _TASK_STATUS_BY_TERMINAL.get(
+                        task_kind, "failed")
+                    final = "\n".join(
+                        text for text in texts if text)
+                    if not closed:
+                        closed = True
+                        _record_server_turn(
+                            app, project, message, final,
+                            history_status, run_id=str(
+                                payload.get("run_id") or run_id),
+                            error_code=str(payload.get("code") or ""))
+                        _mirror_run_tasks(
+                            app, project, task, message, task_status)
+            if not terminal_emitted:
+                yield sse_bytes({
+                    "type": "done",
+                    "stream_id": stream_id,
+                    "run_id": run_id,
+                })
+                _close("done")
         except Exception as err:
             self._finish(stream_id)
             if not terminal_emitted:
                 yield sse_bytes(_chat_error_event(stream_id, err))
+            _close("error", error_code=str(
+                getattr(err, "code", None) or type(err).__name__))
             return
         finally:
             self._finish(stream_id)
-        if not terminal_emitted:
-            yield sse_bytes({
-                "type": "done",
-                "stream_id": stream_id,
-                "run_id": run_id,
-            })
+            if not closed:
+                _close("cancelled", error_code="STOPPED")
 
     def _orchestration_events(
         self,
@@ -750,11 +876,21 @@ class ManagerSdkBridge:
         )
 
         provider = self._provider_adapter
+        app = getattr(self, "_app", None)
+        project = str(getattr(request, "project", "") or "")
+        task = str(getattr(request, "task", "") or "")
+        message = str(getattr(request, "message", "") or "")
         yield sse_bytes(self._start_event(stream_id, run_id, request))
+        _record_server_turn(app, project, message, "", "running")
+        _mirror_run_tasks(app, project, task, message, "running")
         if state["cancelled"] or provider is None:
             if not state["cancelled"]:
                 self._finish(stream_id)
             yield sse_bytes({"type": "cancelled", "stream_id": stream_id})
+            _record_server_turn(
+                app, project, message, "", "stopped", run_id=run_id,
+                error_code="STOPPED")
+            _mirror_run_tasks(app, project, task, message, "stopped")
             return
         captured: dict[str, Any] = {}
         meter_role = str(request.role or "chat")
@@ -835,10 +971,20 @@ class ManagerSdkBridge:
         except Exception as err:
             self._finish(stream_id)
             yield sse_bytes(_chat_error_event(stream_id, err))
+            _record_server_turn(
+                app, project, message, "", "failed", run_id=run_id,
+                error_code=str(
+                    getattr(err, "code", None) or type(err).__name__))
+            _mirror_run_tasks(app, project, task, message, "failed")
             return
         if state["cancelled"]:
             self._finish(stream_id)
             yield sse_bytes({"type": "cancelled", "stream_id": stream_id})
+            _record_server_turn(
+                app, project, message,
+                str(captured.get("text", "")), "stopped", run_id=run_id,
+                error_code="STOPPED")
+            _mirror_run_tasks(app, project, task, message, "stopped")
             return
         if not result.executed:
             self._finish(stream_id)
@@ -856,6 +1002,10 @@ class ManagerSdkBridge:
             if result.tool_id:
                 approval_event["tool_id"] = result.tool_id
             yield sse_bytes(approval_event)
+            _record_server_turn(
+                app, project, message, str(result.reason or ""), "ok",
+                run_id=run_id)
+            _mirror_run_tasks(app, project, task, message, "held")
             return
         yield sse_bytes({
             "type": "delta",
@@ -866,6 +1016,11 @@ class ManagerSdkBridge:
         if state["cancelled"]:
             self._finish(stream_id)
             yield sse_bytes({"type": "cancelled", "stream_id": stream_id})
+            _record_server_turn(
+                app, project, message,
+                str(captured.get("text", "")), "stopped", run_id=run_id,
+                error_code="STOPPED")
+            _mirror_run_tasks(app, project, task, message, "stopped")
             return
         self._finish(stream_id)
         yield sse_bytes({
@@ -878,6 +1033,10 @@ class ManagerSdkBridge:
             "mock": bool(captured.get("mock", False)),
             "finish_reason": str(captured.get("finish_reason", "")),
         })
+        _record_server_turn(
+            app, project, message, str(captured.get("text", "")), "ok",
+            run_id=run_id)
+        _mirror_run_tasks(app, project, task, message, "done")
 
 
 def _manager_event_payload(
