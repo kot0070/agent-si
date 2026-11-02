@@ -20,6 +20,7 @@ import json
 import os
 import queue
 import re
+import shlex
 import sys
 import threading
 import uuid
@@ -219,6 +220,72 @@ def _wants_runnable_hint(check_rows: Any) -> str:
     return "plan a runnable check"
 
 
+#: Trivial `python -c` bodies that verify nothing (no I/O, no reads).
+_EMPTY_PYTHON_BODIES = frozenset(
+    ["", "pass", "...", "0", "1", "0.0", "True", "False", "None"])
+
+#: Shell metacharacters: with any of these an echo/printf line may have
+#: an effect beyond printing, so it is NOT treated as empty (fail open).
+_EMPTY_ECHO_META_RE = re.compile(r"[><|&;`$]")
+
+
+def _check_command_is_empty(command: Any) -> bool:
+    """True when a check command verifies nothing (argv list or string).
+
+    `exit [n]`, bare `true`/`:` , any `cd`, `echo`/`printf` text with
+    no redirection/pipe/substitution, and `python -c <trivial>` never
+    touch the goal's files, so a green exit from them is not evidence.
+    Anything ambiguous is NOT empty (fail open: the old green counts).
+    """
+    try:
+        if isinstance(command, str):
+            words = shlex.split(command, posix=True)
+        elif isinstance(command, (list, tuple)):
+            words = [str(word) for word in command]
+        else:
+            return False
+    except Exception:
+        return False
+    if not words or any(not word for word in words):
+        return False
+    head = os.path.basename(words[0]).lower()
+    if head == "exit":
+        return True
+    if head in ("true", ":"):
+        return True
+    if head == "cd":
+        return True
+    if head in ("echo", "printf"):
+        tail = " ".join(words[1:])
+        if _EMPTY_ECHO_META_RE.search(tail):
+            return False
+        return True
+    if head in ("python", "python2", "python3", "py"):
+        try:
+            flag_at = [str(word) for word in words[1:]].index("-c") + 1
+            body = words[flag_at + 1] if flag_at + 1 < len(words) else ""
+        except ValueError:
+            return False
+        return str(body).strip().strip("\"'").strip() in _EMPTY_PYTHON_BODIES
+    return False
+
+
+def _check_row_is_empty(check: Any) -> bool:
+    """True when a green check row ran an empty no-op command."""
+    try:
+        if not isinstance(check, dict):
+            return False
+        argv = check.get("argv")
+        if isinstance(argv, (list, tuple)) and argv:
+            return _check_command_is_empty(list(argv))
+        command = check.get("command")
+        if isinstance(command, str) and command.strip():
+            return _check_command_is_empty(command)
+    except Exception:
+        return False
+    return False
+
+
 def _gate_fail_reason(*, spec: Any, goal: Any, files_diff: str,
                       check_rows: Any, entry_ok: bool,
                       install_ok: bool, record: Any, folder: Any,
@@ -320,7 +387,8 @@ def _gate_fail_reason(*, spec: Any, goal: Any, files_diff: str,
                 and not check.get("refused")
                 and isinstance(check.get("exit_code"), int)
                 and not isinstance(check.get("exit_code"), bool)
-                and check.get("exit_code") == 0]
+                and check.get("exit_code") == 0
+                and not _check_row_is_empty(check)]
         except Exception:
             green = []
         if green:
