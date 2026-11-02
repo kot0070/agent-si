@@ -126,7 +126,8 @@
       "strategyHelpDirectorPerTask": "The Director chooses a pool member per task.",
       "strategyHelpAuto": "Pool members are chosen automatically on task fit, price and quality.",
       "strategyHelpFallbackOrder": "Pool members are tried in listed order; on failure the next member takes over.",
-      "strategyHelpSplitParallel": "A local draft is verified in the cloud."
+      "strategyHelpSplitParallel": "A local draft is verified in the cloud.",
+      "emptyPoolHint": "Pick at least one model: an empty pool never saves."
     },
     "leftover": {
       "listFailed": "Could not list entries.",

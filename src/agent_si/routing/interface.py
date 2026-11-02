@@ -672,6 +672,8 @@ HTTP_ROUTES = (
     ("GET", "/api/v1/chat/models"),
     ("GET", "/api/v1/roles/pools"),
     ("PUT", "/api/v1/roles/pools"),
+    ("GET", "/api/v1/roles/pools/profile"),
+    ("GET", "/api/v1/roles/chat-model"),
     ("GET", "/api/v1/routing/decision/{id}/why"),
     ("GET", "/api/v1/budget"),
     ("GET", "/api/v1/kb/status"),

@@ -250,6 +250,12 @@ export function RolePoolPicker({ role, project_id = "local", options, onChange }
   function emit(next: RolePoolValue): void {
     touchedRef.current = true;
     setInner(next);
+    // FXUIB-B6: an empty pool never saves (the PUT would 400 with no
+    // binding stored): the hint below covers it until at least one
+    // model is picked. Leaving pool mode always saves.
+    if (next.mode === "pool" && next.poolKeys.length === 0) {
+      return;
+    }
     onChange?.(next);
   }
 
@@ -283,6 +289,11 @@ export function RolePoolPicker({ role, project_id = "local", options, onChange }
         </label>
       ))}
       <p>{modeHelp(current.mode)}</p>
+      {current.mode === "pool" && current.poolKeys.length === 0 ? (
+        <p data-testid="pool-empty-hint" role="note">
+          {t("providers.rolepool.emptyPoolHint")}
+        </p>
+      ) : null}
       {current.mode === "PINNED" ? (
         <label>
           {t("providers.rolepool.pinnedAria", { role: label })}

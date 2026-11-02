@@ -101,8 +101,14 @@ export function LocaleProvider(props: LocaleProviderProps): ReactElement {
     setLocale(locale);
   }
   useEffect(() => {
-    persistLocale(locale);
-  }, [locale]);
+    if (props.initialLocale === undefined) {
+      setLocale(locale);
+    } else {
+      // Scoped mode: the prop persists (remounts restore it) but never
+      // switches the module t (laneB.step2 contract).
+      persistLocale(locale);
+    }
+  }, [locale, props.initialLocale]);
   return createElement(LocaleContext.Provider, { value: { locale } }, props.children);
 }
 
