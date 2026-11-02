@@ -1,8 +1,10 @@
 """FXPANEL live rows: served RED/GREEN proof for R1/R4/R5.
 
 GET /api/v1/agents/live rows carry the frozen four fields
-(agent/scope/deliverable/status) plus the append-only FXPANEL fields
-(role/model/step/file/cost/tokens/context/errors/waits). The
+(agent/scope/deliverable/status) plus the append-only fields
+(role/model/step/file/cost/tokens/context/errors/waits and the
+FXDESIGN4 truth fields provider/placement/last_action/window,
+unevidenced as ""/None). The
 control-plane route stays a static dict. The empty-store negative
 still serves an empty agents list.
 """
@@ -77,6 +79,10 @@ FULL_ROW = {
     "context": "artifact:run/fxp-run/input",
     "errors": [],
     "waits": ["approval"],
+    "provider": "",
+    "placement": "",
+    "last_action": "",
+    "window": None,
 }
 
 
@@ -118,7 +124,8 @@ def test_live_rows_carry_append_only_fields():
     assert stored["deliverable"] == "artifact://run/fxp-run/output"
     assert stored["status"] == "RUNNING"
     for name in ("role", "model", "step", "file", "cost",
-                 "tokens", "context", "errors", "waits"):
+                 "tokens", "context", "errors", "waits",
+                 "provider", "placement", "last_action", "window"):
         assert name in stored, f"append-only field {name!r} missing"
     assert stored["role"] == "manager"
     assert stored["model"] == "mock-canned"
@@ -182,7 +189,8 @@ def test_streamed_manager_run_records_full_live_row():
     row = next(iter(rows.values()))
     for name in ("agent", "scope", "deliverable", "status",
                  "role", "model", "step", "file", "cost",
-                 "tokens", "context", "errors", "waits"):
+                 "tokens", "context", "errors", "waits",
+                 "provider", "placement", "last_action", "window"):
         assert name in row, f"live field {name!r} missing"
     assert row["role"] == "manager"
     assert row["model"] == "mock-canned"
