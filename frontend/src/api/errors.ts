@@ -62,6 +62,8 @@ const ERROR_CODES: ReadonlyArray<ApiErrorCode> = [
   "KB_PROPOSAL_NOT_APPROVED",
   "KEY_SAVE_TIMEOUT",
   "CREDENTIAL_ENTRY_MISSING",
+  "PROJECT_FOLDER_IN_USE",
+  "PROJECT_FOLDER_MISSING",
   "NO_PROVIDER_BOUND",
 ];
 
@@ -379,6 +381,10 @@ export function apiErrorLocaleKey(code: string): string {
       return "api.error.key_save_timeout";
     case "CREDENTIAL_ENTRY_MISSING":
       return "api.error.credential_entry_missing";
+    case "PROJECT_FOLDER_IN_USE":
+      return "api.error.project_folder_in_use";
+    case "PROJECT_FOLDER_MISSING":
+      return "api.error.project_folder_missing";
     case "NO_PROVIDER_BOUND":
       return "firstrun.steps.connectProvider";
     default:

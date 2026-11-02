@@ -238,24 +238,29 @@ def record_decomposition(
     if size_units < 0:
         raise ValueError("size_units must be >= 0")
     facts = [FACT_PART_SIZE_VS_MODEL]
+    # SG-02: the gated reason stays compact English, but the id rides
+    # the part_id field verbatim: ASCII ids keep the exact wording,
+    # any other id falls back to a bare "part" (never a crash).
+    label = ("part %s" % part_id
+             if is_compact_english("part %s" % part_id) else "part")
     if needs_long_context or size_units > LONG_CONTEXT_THRESHOLD:
         facts.append(FACT_LONG_CONTEXT_ROUTING)
         route = "long-context"
         reason = ensure_compact_english(
-            f"part {part_id} routes to long-context model "
+            f"{label} routes to long-context model "
             f"using facts {FACT_PART_SIZE_VS_MODEL} and {FACT_LONG_CONTEXT_ROUTING}"
         )
     elif size_units <= SMALL_PART_THRESHOLD:
         facts.append(FACT_CHEAP_SMALL_PARTS)
         route = "cheap-small-part"
         reason = ensure_compact_english(
-            f"part {part_id} runs on a cheap model "
+            f"{label} runs on a cheap model "
             f"using facts {FACT_PART_SIZE_VS_MODEL} and {FACT_CHEAP_SMALL_PARTS}"
         )
     else:
         route = "standard"
         reason = ensure_compact_english(
-            f"part {part_id} keeps the standard model using fact {FACT_PART_SIZE_VS_MODEL}"  # noqa: E501  # frozen-cite K02
+            f"{label} keeps the standard model using fact {FACT_PART_SIZE_VS_MODEL}"  # noqa: E501  # frozen-cite K02
         )
     for fact in facts:
         if fact not in KNOWN_FACTS:

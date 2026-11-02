@@ -51,6 +51,8 @@ export const ProjectRecordSchema: z.ZodType<ProjectRecord> = z.object({
   project_id: z.string().min(1),
   name: z.string().min(1),
   created_at: z.string().min(1),
+  folder_ok: z.boolean().optional(),
+  folder_path: z.string().optional(),
 });
 
 export const ProjectCreateSchema: z.ZodType<ProjectCreate> = z.object({

@@ -13,6 +13,7 @@
 
 import { Component, useEffect, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
 import type {
   BudgetState,
   LedgerRow,
@@ -23,7 +24,7 @@ import type {
 } from "../api/iface";
 import { ApiError, apiErrorLocaleKey } from "../api/errors";
 import { backoffForFailures, isHiddenTick, onVisible } from "../api/polling";
-import { useApiClient } from "../app/ApiClientProvider";
+import { useApiClient, useCurrentProject } from "../app/ApiClientProvider";
 import { formatDate, formatNumber, t, useLocale } from "../locale/index";
 import type { SupportedLocale } from "../locale/index";
 import { EmptyState } from "../ui/EmptyState";
@@ -450,6 +451,15 @@ const RUNS_VIEWS: ReadonlySet<string> = new Set([
 export function ProjectView(props: ProjectViewProps): ReactElement {
   const client = useApiClient();
   const { locale } = useLocale();
+  const current = useCurrentProject();
+  // SH-04: without a router (unit probes) there is no list route to
+  // reach: still clear the ghost id, show the banner link instead.
+  let navigate: ((path: string) => void) | null = null;
+  try {
+    navigate = useNavigate();
+  } catch {
+    navigate = null;
+  }
   // L0C-01: one state per served read. No shared Promise.all and no shared
   // failure flag: each panel below renders from its own state and shows its
   // own ErrorPanel, so a single failing read never unmounts the others.
@@ -501,6 +511,17 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
         if (alive) {
           setProject(null);
           setProjectError(toPanelError(error));
+        }
+        // SH-04: the selected project is archived or gone (read 404):
+        // drop the ghost id and go to the list, no stuck error panels.
+        if (
+          error instanceof ApiError &&
+          (error.status === 404 || error.code === "CONTEXT_MISSING")
+        ) {
+          current.clear();
+          if (navigate !== null) {
+            navigate("/projects");
+          }
         }
       });
     return () => {
@@ -798,6 +819,15 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
               <LoadingState loadingKey="ui.loading.more" />
             ) : (
               <>
+                {/* SH-05: the working folder is gone: one plain banner,
+                never green facts over a missing dir. */}
+                {project.folder_ok === false ? (
+                  <p data-testid="project-folder-banner" role="alert">
+                    {t("projects.folder.missing", {
+                      path: project.folder_path ?? "",
+                    })}
+                  </p>
+                ) : null}
                 <Fact
                   testId="overview-name"
                   labelKey="shell.topbar.project"

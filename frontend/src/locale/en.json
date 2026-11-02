@@ -560,7 +560,8 @@
       "title": "New task",
       "subtitle": "Start here: one message creates the first project and task.",
       "create": "Create task",
-      "titleRequired": "Title is required."
+      "titleRequired": "Title is required.",
+      "cancel": "Cancel"
     },
     "status": {
       "queued": "Queued",
@@ -625,7 +626,7 @@
     "tests": {
       "title": "Tests",
       "explainer": "A run is one agent working on one task; code tests are the project's own suite; local tests are catalog checks this machine runs before spend. This tab shows the latest run: served counters and one row per test. It never changes settings.",
-      "emptyHow": "No test run has started for this project yet. A run starts with POST /api/v1/teststage/runs/start for the latest plan, then this tab shows counters and one row per test.",
+      "emptyHow": "No test run has started for this project yet. Start a run for the latest plan, then this tab shows counters and one row per test.",
       "counter": {
         "active": "active",
         "passed": "passed",
@@ -662,7 +663,8 @@
       "submit": "Attach KB"
     },
     "folder": {
-      "choose": "Choose folder"
+      "choose": "Choose folder",
+      "missing": "Project folder not found: {path}. Choose another folder in Projects."
     }
   },
   "agents": {
@@ -727,7 +729,9 @@
       "kb_validation_failed": "Knowledge base validation failed.",
       "kb_proposal_not_approved": "The knowledge base proposal was not approved.",
       "key_save_timeout": "Saving the key timed out.",
-      "credential_entry_missing": "The credential entry is missing."
+      "credential_entry_missing": "The credential entry is missing.",
+      "project_folder_in_use": "This folder is already used by another project.",
+      "project_folder_missing": "The project folder is missing. Pick another folder in Projects, then send again."
     }
   },
   "projectForm": {

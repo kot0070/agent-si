@@ -357,7 +357,9 @@ def test_s1a_stored_absolute_folder_used(tmp_path):
     deltas = _delta_texts(events)
     assert deltas, events[:2]
     assert deltas[0].startswith("Working folder: "), deltas[0]
-    assert str(folder) in deltas[0], deltas[0]
+    # FXOPEN O4: chat names the folder, never the host absolute path.
+    assert deltas[0] == "Working folder: %s\n" % (os.path.basename(str(folder)),), deltas[0]
+    assert str(folder) not in _all_text(events), deltas[0]
     assert factory.spy, "engine ran against the stored folder"
     record = _run_record(app, pid)
     assert record is not None
@@ -381,7 +383,9 @@ def test_s1b_absolute_missing_folder_honest(tmp_path):
     assert missing.lower() in text, text
     assert "choose in projects" in text, text
     assert factory.spy == [], "engine never ran for a missing folder"
-    assert _types(events)[-1] == "done", events[-2:]
+    # FXOPEN O6 (SH-05): the send refuses with the reason, never green.
+    assert _types(events)[-1] == "error", events[-2:]
+    assert events[-1].get("code") == "PROJECT_FOLDER_MISSING", events[-1]
 
 
 # -- S1c: non-absolute folder_ref uses the managed folder ---------------
@@ -400,7 +404,9 @@ def test_s1c_relative_folder_uses_managed(tmp_path):
     assert deltas[0].startswith("Working folder: "), deltas[0]
     managed = os.path.join(str(app.state.data_dir), "workspaces", pid)
     assert os.path.isdir(managed), managed
-    assert managed in deltas[0], deltas[0]
+    # FXOPEN O4: chat names the managed folder, never the host path.
+    assert deltas[0] == "Working folder: %s\n" % (pid,), deltas[0]
+    assert managed not in _all_text(events), deltas[0]
     assert factory.spy, "engine ran inside the managed folder"
     record = _run_record(app, pid)
     assert record is not None

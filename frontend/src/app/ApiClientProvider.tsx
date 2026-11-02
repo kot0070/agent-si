@@ -37,6 +37,7 @@ const ApiClientContext = createContext<ApiClient | null>(null);
 interface CurrentProjectState {
   projectId: string | null;
   select: (projectId: string) => void;
+  clear: () => void;
 }
 
 const CurrentProjectContext = createContext<CurrentProjectState | null>(null);
@@ -52,6 +53,9 @@ export function ApiClientProvider(props: ApiClientProviderProps): ReactElement {
       select: (next: string) => {
         writeStoredProjectId(next);
         setProjectId(next);
+      },
+      clear: () => {
+        setProjectId(null);
       },
     }),
     [projectId],
@@ -78,5 +82,9 @@ export function useCurrentProject(): CurrentProject {
   if (selection === null) {
     throw new Error("ApiClientProvider is missing above useCurrentProject");
   }
-  return { projectId: selection.projectId, select: selection.select };
+  return {
+    projectId: selection.projectId,
+    select: selection.select,
+    clear: selection.clear,
+  };
 }

@@ -151,8 +151,7 @@ describe("task composer submit timeout and cancel", () => {
     expect(createButton().disabled).toBe(false);
   });
 
-  it("cancel aborts a pending submit to idle with no result", async () => {
-    const { release } = stubGatedTaskFetch({
+  it("cancel aborts a pending submit to idle with no result", async () => {    const { release } = stubGatedTaskFetch({
       task_id: "t-9",
       project_id: "p-1",
       title: "cancelled task",
@@ -177,5 +176,16 @@ describe("task composer submit timeout and cancel", () => {
     expect(screen.queryByTestId("composer-result")).toBeNull();
     expect(screen.queryByTestId("kit-error-panel")).toBeNull();
     expect(createButton().disabled).toBe(false);
+  });
+
+  it("FXOPEN V6: cancel reads Cancel, never Stop", async () => {
+    const client = new HttpApiClient();
+    render(
+      <ApiClientProvider client={client}>
+        <TaskComposer projectId="p-1" />
+      </ApiClientProvider>,
+    );
+    expect(cancelButton().textContent).toBe("Cancel");
+    expect(cancelButton().textContent).not.toBe("Stop");
   });
 });

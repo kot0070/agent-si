@@ -153,9 +153,15 @@ def jail_abs(folder: str, raw: str) -> str:
     candidate = os.path.abspath(os.path.join(base, *text.split("/")))
     try:
         real = os.path.realpath(candidate)
+        real_base = os.path.realpath(base)
     except Exception:
         raise ActionRefused("refused: unreadable path") from None
-    if real != base and not real.startswith(base + os.sep):
+    # Compare realpath + normcase on both sides: an 8.3 short form
+    # (PCIA~1), a junction alias or a case variant of the folder is
+    # the same jail once resolved; escapes still refuse below.
+    want = os.path.normcase(real_base)
+    got = os.path.normcase(real)
+    if got != want and not got.startswith(want + os.sep):
         raise ActionRefused("refused: path escapes the project folder")
     return candidate
 
@@ -787,6 +793,11 @@ def scrub_env() -> dict[str, str]:
     env["PYTHON_MANAGER_AUTOMATIC_INSTALL"] = "false"
     env["PYLAUNCHER_ALLOW_INSTALL"] = "0"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    # SG-01: Python children always speak UTF-8, whatever console code
+    # page the juror's box uses (cp866/cp1251/cp1252 otherwise mojibake
+    # or crash a Ukrainian print). Non-Python tools ignore these.
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
     return env
 
 

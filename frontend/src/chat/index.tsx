@@ -503,6 +503,26 @@ function disconnectClosedText(): string {
   );
 }
 
+/** FXOPEN J6: visible composer rows for a draft, about six lines max.
+Newlines always count (pasted tasks grow at once); the measured pixel
+height covers wrapped lines in a real browser. jsdom reports no
+layout, so the text count alone drives the rows there. */
+export const COMPOSER_MAX_ROWS = 6;
+
+export function composerRowsFor(
+  text: string,
+  lineHeightPx: number,
+  scrollHeightPx: number,
+): number {
+  const line = lineHeightPx > 0 ? lineHeightPx : 20;
+  const fromText = text.split("\n").length;
+  const fromMeasure = Math.ceil(Math.max(0, scrollHeightPx) / line);
+  return Math.min(
+    COMPOSER_MAX_ROWS,
+    Math.max(1, fromText, fromMeasure),
+  );
+}
+
 /** FXCHATV V1: a run-log-looking text renders as one plain verdict line
 plus a collapsed Details disclosure, never twice. Markers are the
 engine's own vocabulary (Working folder, Team, Director, Part, Check,
@@ -518,10 +538,13 @@ export function looksLikeEngineLog(text: string): boolean {
 /** FXCHATV (d): check lines name the program only, never a full
 machine path (C:\Windows\..., C:\tool\...); a user profile segment
 (C:\Users\<name>) never reaches the screen. The working-folder line
-itself is untouched: it lives only inside Details. */
+itself is untouched: it lives only inside Details.
+FXOPEN O4: any other absolute Windows path token shows its file name
+only (no drive, no user name) — the backstop for history rows stored
+before the server started sending relative paths. */
 export function shortProgramLine(line: string): string {
   const redacted = line.replace(/C:\\Users\\[^\\\s"']+/gi, "~");
-  return redacted.replace(
+  const shortCmd = redacted.replace(
     /(\$\s+)([A-Za-z]:[\\/][^\s"']+)/g,
     (_match, head: string, token: string) => {
       const base = token.split(/[\\/]/).pop() ?? token;
@@ -529,6 +552,10 @@ export function shortProgramLine(line: string): string {
       return `${head}${name}`;
     },
   );
+  return shortCmd.replace(/[A-Za-z]:[\\/][^\s"']*/g, (token: string) => {
+    const base = token.split(/[\\/]/).pop() ?? token;
+    return base !== "" ? base : token;
+  });
 }
 
 /** FXCHATV V4: one live step line while a run works — the current
@@ -582,6 +609,39 @@ export interface EngineSummary {
   passed: number;
   files: string[];
   lines: string[];
+  /** FXOPEN O4: one plain line when the text announces a second plan
+  ("Director: plan of 2 parts" then "of 3 parts"); null otherwise. */
+  planChanged: string | null;
+}
+
+const PLAN_OF_RE = /Director:\s*plan of (\d+)\s*parts?/i;
+
+/** FXOPEN O4: a re-planned run says so in one plain line, never by
+silently growing "of 2 parts" into "of 3 parts". The reason names the
+old and the new part count; null when the text holds at most one
+plan announcement. */
+export function planChangedLine(text: string): string | null {
+  const counts: number[] = [];
+  for (const line of text.split("\n")) {
+    const found = PLAN_OF_RE.exec(line);
+    if (found?.[1] === undefined) {
+      continue;
+    }
+    const count = Number(found[1]);
+    if (!counts.includes(count)) {
+      counts.push(count);
+    }
+  }
+  if (counts.length < 2) {
+    return null;
+  }
+  const first = counts[0] ?? 0;
+  const last = counts[counts.length - 1] ?? 0;
+  const word = (n: number): string => (n === 1 ? "part" : "parts");
+  return (
+    `Plan changed: the director announced a new plan ` +
+    `(was ${first} ${word(first)}, now ${last} ${word(last)})`
+  );
 }
 
 export function summarizeEngineTurn(
@@ -627,6 +687,7 @@ export function summarizeEngineTurn(
     passed,
     files,
     lines,
+    planChanged: planChangedLine(text),
   };
 }
 
@@ -669,6 +730,11 @@ export function EngineTurnView(props: {
       <p data-testid="run-verdict" style={{ whiteSpace: "pre-wrap" }}>
         {shortProgramLine(engineVerdictLine(summary, costNote))}
       </p>
+      {summary.planChanged !== null ? (
+        <p data-testid="plan-changed" style={{ whiteSpace: "pre-wrap" }}>
+          {summary.planChanged}
+        </p>
+      ) : null}
       <button
         type="button"
         data-testid="run-steps-toggle"
@@ -697,16 +763,32 @@ export function EngineTurnView(props: {
 // interrupted with its stored text plus a resend — or the named
 // disconnect line when the server record says the window closed;
 // failed and stopped turns restore the error card.
+// FXOPEN O4: one entry per interrupted task — after a restart the same
+// task can stand twice (10:11 + 10:14, each with Resend); running
+// turns sharing one user text collapse to the latest, everything else
+// keeps its row.
 function buildHistoryBatch(
   key: string,
   page: ChatHistoryPage,
 ): { batch: NewChatMessage[]; sawTerminal: boolean } {
+  const lastInterruptedByTask = new Map<string, number>();
+  page.turns.forEach((turn, index) => {
+    if (turn.status === "running" && turn.user_text.trim() !== "") {
+      lastInterruptedByTask.set(turn.user_text.trim(), index);
+    }
+  });
+  const turns = page.turns.filter((turn, index) => {
+    if (turn.status !== "running" || turn.user_text.trim() === "") {
+      return true;
+    }
+    return lastInterruptedByTask.get(turn.user_text.trim()) === index;
+  });
   const known = new Set(
     getChatState(key).messages.map((message) => message.id),
   );
   const batch: NewChatMessage[] = [];
   let sawTerminal = false;
-  for (const turn of page.turns) {
+  for (const turn of turns) {
     const tid =
       turn.id !== "" ? turn.id : `${turn.time}::${turn.user_text}`;
     const userId = `hist-user-${tid}`;
@@ -1325,6 +1407,31 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
   }, [blocking, draft]);
   const [toast, setToast] = useState<string | null>(null);
   const [flooded, setFlooded] = useState(false);
+  // FXOPEN J6: the composer grows with the draft, about six lines.
+  // The ref read stays inside the change handler and this effect, so
+  // the rows follow restored drafts too (never a stuck one-liner).
+  const promptRef = useRef<HTMLTextAreaElement | null>(null);
+  function growComposer(): void {
+    const area = promptRef.current;
+    if (area === null) {
+      return;
+    }
+    let line = 20;
+    try {
+      const parsed = parseFloat(
+        window.getComputedStyle(area).lineHeight,
+      );
+      if (Number.isFinite(parsed) && parsed > 0) {
+        line = parsed;
+      }
+    } catch {
+      line = 20;
+    }
+    area.rows = composerRowsFor(draft, line, area.scrollHeight);
+  }
+  useEffect(() => {
+    growComposer();
+  });
   const offlineRef = useRef(!readOnline());
   const oneShotSentRef = useRef(false);
   const [pendingAsk, setPendingAsk] = useState<InstallPermissionAsk | null>(
@@ -2196,6 +2303,7 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
               <span className="fx-vh">{t("chat.composer.prompt")}</span>
               <textarea
                 data-testid="chat-prompt"
+                ref={promptRef}
                 id="chat-prompt"
                 rows={1}
                 placeholder={t("chat.composer.prompt")}
@@ -2203,6 +2311,7 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
                 value={draft}
                 onChange={(event) => {
                   updateDraft(event.target.value);
+                  growComposer();
                 }}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey) {

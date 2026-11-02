@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -27,7 +28,7 @@ from fastapi import HTTPException, Request
 
 from agent_si.backend.read_routes import (
     persist_k02r3_store,
-    project_view,
+    project_view_with_health,
     repos_for,
     task_view,
 )
@@ -41,6 +42,18 @@ USER_WRITE = "USER_WRITE"
 
 def _utcnow() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _folder_key(folder_ref: str) -> str:
+    """Normalized folder identity for the SH-01 duplicate scan.
+
+    Absolute refs compare by real location (case-insensitive);
+    managed refs compare verbatim so two spellings never collide.
+    """
+    text = str(folder_ref or "").strip()
+    if os.path.isabs(text):
+        return os.path.normcase(os.path.abspath(text))
+    return os.path.normcase(text)
 
 
 def _enforce_user_write(request: Request) -> None:
@@ -257,6 +270,31 @@ def register_console_projects_write_routes(app: Any) -> Any:
                 status_code=400,
                 detail="project needs a non-empty folder_ref")
         projects, _tasks = repos_for(request.app)
+        folder = folder_ref.strip()
+        # SH-01: two live projects must never share one working dir
+        # (their runs would interleave in it): refuse 409 with the
+        # plain line instead of appending a second row.
+        wanted = _folder_key(folder)
+        for row in projects.list_by({}):
+            try:
+                if row.get("archived"):
+                    continue
+                other = row.get("folder_ref")
+                if not isinstance(other, str) or not other.strip():
+                    continue
+                if _folder_key(other) == wanted:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": "PROJECT_FOLDER_IN_USE",
+                            "detail": (
+                                "project folder is already used by "
+                                "project %r" % (row.get("name") or "?")),
+                        })
+            except HTTPException:
+                raise
+            except Exception:
+                continue
         project_id = _new_id()
         record = {
             "record_id": project_id,
@@ -271,7 +309,7 @@ def register_console_projects_write_routes(app: Any) -> Any:
         from agent_si.backend import project_defaults as _project_defaults
 
         _project_defaults.ensure_project_defaults(request.app, project_id)
-        return {"project": project_view(stored)}
+        return {"project": project_view_with_health(request.app, stored)}
 
     @app.put("/api/v1/projects/{project_id}")
     async def update_project(project_id: str, request: Request) -> dict:
@@ -302,7 +340,7 @@ def register_console_projects_write_routes(app: Any) -> Any:
                 status_code=409, detail="project changed; re-read"
             ) from None
         persist_k02r3_store(request.app)
-        return {"project": project_view(saved)}
+        return {"project": project_view_with_health(request.app, saved)}
 
     @app.delete("/api/v1/projects/{project_id}")
     async def delete_project(project_id: str, request: Request) -> dict:

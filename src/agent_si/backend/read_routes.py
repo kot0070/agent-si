@@ -144,6 +144,18 @@ def project_view(record: Any) -> dict:
     }
 
 
+def project_view_with_health(app: Any, record: Any) -> dict:
+    """project_view plus the SH-05 working-folder health (SH-01 shape
+    parity: create/list/read/refresh carry the identical fields;
+    folder_path is "" when no path resolves)."""
+    view = project_view(record)
+    folder_ok, folder_path = _folder_health(
+        app, record.get("project_id"), record.get("folder_ref"))
+    view["folder_ok"] = folder_ok
+    view["folder_path"] = folder_path
+    return view
+
+
 def task_view(record: Any) -> dict:
     """UI-parsable task shape (matches TaskRecord zod schema)."""
     return {
@@ -153,6 +165,25 @@ def task_view(record: Any) -> dict:
         "status": record["status"],
         "created_at": record["created_at"],
     }
+
+
+def _folder_health(app: Any, project_id: str,
+                    folder_ref: Any) -> tuple[bool, str]:
+    """Working-folder health for the project read (SH-05).
+
+    Absolute refs must exist on disk; managed (non-absolute) refs
+    resolve under the data dir and self-heal on send, so they read
+    healthy here. A read never creates directories. Returns
+    (healthy, resolved path or "").
+    """
+    candidate = str(folder_ref or "").strip()
+    if os.path.isabs(candidate):
+        return os.path.isdir(candidate), candidate
+    data_dir = getattr(getattr(app, "state", None), "data_dir", None)
+    if not data_dir:
+        return True, ""
+    managed = os.path.join(str(data_dir), "workspaces", str(project_id))
+    return True, managed
 
 
 def _visible_project(projects: Any, project_id: str) -> Any | None:
@@ -169,7 +200,7 @@ def register_read_routes(app: Any) -> Any:
     def list_projects() -> dict:
         projects, _tasks = repos_for(app)
         rows = [
-            project_view(record)
+            project_view_with_health(app, record)
             for record in projects.list_by({})
             if not record.get("archived")
         ]
@@ -184,7 +215,8 @@ def register_read_routes(app: Any) -> Any:
                 status_code=404,
                 detail=f"unknown project {project_id!r}",
             )
-        return {"project": project_view(stored)}
+        view = project_view_with_health(app, stored)
+        return {"project": view}
 
     @app.get("/api/v1/tasks")
     def list_tasks(request: Request) -> dict:
