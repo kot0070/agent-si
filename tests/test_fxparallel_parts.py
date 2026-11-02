@@ -1092,9 +1092,15 @@ def test_a2_live_rows_carry_own_cost(tmp_path, monkeypatch):
 
         def _worker(n_calls, messages):
             # Single worker call per part: the two charges interleave
-            # on the barrier, then each part PASSes on its why.
+            # on the barrier, then each part writes its declared file
+            # (the deterministic PASS gate needs the file on disk).
             barrier.wait(timeout=15)
-            return json.dumps({"actions": [], "done": True})
+            text = json.dumps(messages)
+            n = 2 if "part p2" in text else 1
+            return json.dumps({"actions": [{
+                "action": "write_file", "path": "a2p%d.txt" % (n,),
+                "content": "fxparallel a2 probe p%d\n" % (n,)}],
+                "done": True})
 
         def _usage(role, messages):
             if role == "worker":

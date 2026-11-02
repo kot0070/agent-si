@@ -16,11 +16,11 @@
 
 .fxpv-tab {
   flex: 0 0 auto;
-  padding: 0.375rem 0.25rem;
-  border: none;
-  border-radius: 0;
-  background: transparent;
-  color: var(--fx-ink);
+  padding: 0.375rem 0.75rem;
+  border: 1px solid transparent;
+  border-radius: 0.375rem;
+  background-color: transparent;
+  color: var(--fx-ink, var(--agent-si-ink));
   cursor: pointer;
   white-space: normal;
 }
@@ -33,13 +33,33 @@
   text-underline-offset: 3px;
 }
 
-.fxpv-tab-selected {
-  border: none;
+/* FXTABS T1: hover, keyboard focus and the active press never hide the
+   label and never drop contrast: the ink stays the theme ink on the
+   card background (>=4.5:1 both themes); only an accent underline plus
+   an accent border mark the state. Specificity beats the global
+   button:hover fill so no theme can paint a solid block over the text. */
+.fxpv-tabs .fxpv-tab:hover:not(:disabled),
+.fxpv-tabs .fxpv-tab:focus-visible,
+.fxpv-tabs .fxpv-tab:active {
+  background-color: var(--fx-card-bg, transparent);
+  color: var(--fx-ink, var(--agent-si-ink));
+  border-color: var(--fx-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* FXTABS T2: the active tab is unmistakable without colour alone:
+   card fill plus bold plus an accent underline; same ink, same ratio. */
+.fxpv-tabs .fxpv-tab-selected {
+  background-color: var(--fx-card-bg, transparent);
+  color: var(--fx-ink, var(--agent-si-ink));
+  border-color: var(--fx-accent);
   font-weight: 700;
   text-decoration: underline;
   text-underline-offset: 3px;
-  color: var(--fx-ink);
 }
+
+/* FXTABS T3: short cells never break inside a word. Long refs scroll
 
 .fxpv-fact {
   display: flex;
@@ -95,10 +115,42 @@
   padding-left: 1.25rem;
 }
 
+/* FXTABS T3: short cells never break inside a word. Long refs scroll
+   inside their own row (never the page); the only wrapping allowed is
+   between words. */
+.fxpv-row,
+.fxpv-fact,
+.fxpv-task-row,
+.fxpv-run {
+  overflow-wrap: normal;
+  word-break: normal;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
 .fxpv-quiet {
   opacity: 0.65;
   font-size: 0.85em;
-  word-break: break-all;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+/* FXTABS T3: the copy affordance for shortened ids; quiet, keyboard
+   reachable, never a second primary. */
+.fxpv-copy {
+  background: none;
+  border: 1px solid transparent;
+  padding: 0 0.25rem;
+  margin-left: 0.25rem;
+  cursor: pointer;
+  font-size: 0.85em;
+  line-height: 1;
+}
+
+.fxpv-tabs .fxpv-copy:hover:not(:disabled),
+.fxpv-copy:focus-visible {
+  background: none;
+  border-color: var(--fx-accent);
 }
 
 /* FXVIEWS-10: task rows stack title, status chip and date on their own

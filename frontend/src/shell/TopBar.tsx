@@ -147,6 +147,11 @@ export function TopBar(props: TopBarProps): ReactElement {
     return undefined;
   }, [effective, effectiveMissing, refreshProjects]);
 
+  // FXTABS T10: quiet style while nothing runs, red only with a live
+  // run; the button always stays clickable (never disabled).
+  const hasLiveRun =
+    (liveRows ?? []).some((row) => row.status === "RUNNING") ||
+    liveRows === null;
   // Top placement badge truth: the placement of the current live rows;
   // with none running, the default route of the connected providers;
   // hidden when neither is sourced. Never a guess. Memoised: the shared
@@ -334,7 +339,7 @@ export function TopBar(props: TopBarProps): ReactElement {
         <button
           type="button"
           data-testid="topbar-stop-all"
-          className="fx-stop-danger"
+          className={hasLiveRun ? "fx-stop-danger" : "fx-btn-quiet"}
           onClick={() => {
             void stopAll();
           }}
@@ -369,8 +374,8 @@ export function TopBar(props: TopBarProps): ReactElement {
               changeLocale(event.target.value === "uk" ? "uk" : "en");
             }}
           >
-            <option value="en">en</option>
-            <option value="uk">uk</option>
+            <option value="en">{t("shell.topbar.langEn")}</option>
+            <option value="uk">{t("shell.topbar.langUk")}</option>
           </select>
         </label>
         <ThemeToggle />

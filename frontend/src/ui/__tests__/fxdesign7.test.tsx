@@ -110,11 +110,37 @@ afterEach(() => {
 });
 
 describe("fxdesign7 top bar", () => {
-  it("stop-all keeps its scope label and danger wiring", async () => {
+  it("stop-all is quiet when nothing runs and stays clickable", async () => {
     renderAppAt("/");
     const stop = await screen.findByTestId("topbar-stop-all");
     expect(stop.textContent).toBe(t("shell.topbar.stop_all"));
-    expect(stop.className).toContain("fx-stop-danger");
+    expect(stop.className).toContain("fx-btn-quiet");
+    expect((stop as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("stop-all turns red with a live run", async () => {
+    vi.unstubAllGlobals();
+    vi.stubGlobal("fetch", async (input: unknown) => {
+      const url = String(input);
+      if (url === "/api/v1/agents/live") {
+        return jsonBody({
+          agents: [
+            {
+              agent: "a-1",
+              scope: "s-1",
+              deliverable: "d-1",
+              status: "RUNNING",
+            },
+          ],
+        });
+      }
+      return jsonBody({ code: "FXDESIGN7_UNEXPECTED_API" }, 404);
+    });
+    renderAppAt("/");
+    const stop = await screen.findByTestId("topbar-stop-all");
+    await waitFor(() => {
+      expect(stop.className).toContain("fx-stop-danger");
+    });
   });
 
   it("project and language selects stay labelled", async () => {
@@ -392,11 +418,14 @@ describe("fxdesign7 inspector deferred", () => {
     const { router } = renderInspectorAt();
     await openProject(router);
     const model = await screen.findByTestId("watcher-model");
-    expect(model.textContent).toContain(t("watcher.tab.modelLocal"));
-    expect(model.textContent).not.toContain("local");
-    expect(model.textContent).not.toContain("Configured model");
+    // FXTABS T9: settings say local but no local model is served, so the
+    // rail names what is really used (API/cloud fallback doing the work).
+    expect(model.textContent).toContain(t("watcher.tab.modelApi"));
+    expect(model.textContent).not.toContain(t("watcher.tab.modelLocal"));
     const action = await screen.findByTestId("watcher-action");
-    expect(action.textContent).toContain("e-1");
+    expect(action.getAttribute("title")).toBe("e-1");
+    expect(action.textContent).toContain(t("shell.cards.watcher.lastCheck"));
+    expect(action.textContent).not.toContain("e-1");
     expect(action.textContent).toContain("2026");
     expect(action.textContent).not.toContain("T06:42:44Z");
   });

@@ -1350,7 +1350,12 @@ def _gateway_transport(base_url: str, credential_store: Any,
             method="POST",
         )
         try:
-            with _urlrequest.urlopen(http_request, timeout=60) as response:
+            # Aligned with the devrun per-call model bound (300 s):
+            # a shorter provider read timeout fired first with an
+            # "internal"-looking timeout error while the model call was
+            # still inside its bound. Slow-but-healthy calls now run to
+            # the same bound; dead connections still fail fast.
+            with _urlrequest.urlopen(http_request, timeout=300) as response:
                 try:
                     raw = response.read().decode("utf-8")
                 except (ValueError, _httpclient.HTTPException):

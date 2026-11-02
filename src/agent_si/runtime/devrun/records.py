@@ -41,6 +41,163 @@ def _utcnow_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _install_key(row: Any) -> tuple | None:
+    """Dedupe key for one install record row, or None when malformed."""
+    try:
+        if not isinstance(row, dict):
+            return None
+        argv = tuple(str(word) for word in (row.get("argv") or []))
+        if not argv:
+            return None
+        return (argv, int(row.get("exit", -1)))
+    except Exception:
+        return None
+
+
+def record_install_run(record: Any, argv: Any, exit_code: Any) -> None:
+    """Record one real installer run (exit 0 only) on the run record.
+
+    Only genuinely executed installer-class calls land here, never
+    model text and never refusals: the engine calls this after a real
+    exit 0. Failed installs leave no record (their honest FAIL comes
+    from the red checks). Never raises.
+    """
+    try:
+        if not isinstance(record, dict):
+            return
+        if int(exit_code) != 0:
+            return
+        words = [str(word) for word in list(argv or [])]
+        if not words:
+            return
+        rows = record.setdefault("install_runs", [])
+        if not isinstance(rows, list):
+            return
+        row = {"argv": words, "exit": 0}
+        if _install_key(row) not in {_install_key(item) for item in rows}:
+            rows.append(row)
+    except Exception:
+        pass
+
+
+def run_install_runs(record: Any) -> list[dict[str, Any]]:
+    """Install rows recorded on this run (missing reads empty)."""
+    try:
+        if isinstance(record, dict):
+            rows = record.get("install_runs", []) or []
+            return [dict(row) for row in rows if isinstance(row, dict)]
+    except Exception:
+        pass
+    return []
+
+
+def prior_install_runs(app: Any, project_id: str) -> list[dict[str, Any]]:
+    """Install rows from earlier runs of this project (deduped).
+
+    Memory first, then the persisted run file: a rerun after an Allow
+    sees what the app really installed, so its brief can say "do not
+    install again, verify instead". Never raises.
+    """
+    seen: list[dict[str, Any]] = []
+    keys: set = set()
+
+    def _take(candidate: Any) -> None:
+        try:
+            if not isinstance(candidate, dict):
+                return
+            if str(candidate.get("project") or "") != str(project_id):
+                return
+            for rows in (candidate.get("install_runs", []) or [],
+                         candidate.get("install_runs_prior", []) or []):
+                for row in rows:
+                    key = _install_key(row)
+                    if key is None or key in keys:
+                        continue
+                    keys.add(key)
+                    seen.append({"argv": list(key[0]), "exit": key[1]})
+        except Exception:
+            pass
+
+    try:
+        store = getattr(getattr(app, "state", None), "devrun_runs", None)
+        for item in (store or {}).values():
+            _take(item)
+    except Exception:
+        pass
+    try:
+        for item in load_devrun_runs(app).values():
+            _take(item)
+    except Exception:
+        pass
+    return seen
+
+
+def prior_snapshot(record: Any) -> list[dict[str, Any]]:
+    """The prior-run installs stashed on this run's record (deduped).
+
+    A rerun snapshots its priors at run start, before its first
+    publish overwrites the per-project persisted slot: later lookups
+    in this run still see what earlier runs installed. Never raises.
+    """
+    try:
+        if not isinstance(record, dict):
+            return []
+        out: list[dict[str, Any]] = []
+        keys: set = set()
+        for row in record.get("install_runs_prior", []) or []:
+            key = _install_key(row)
+            if key is None or key in keys:
+                continue
+            keys.add(key)
+            out.append({"argv": list(key[0]), "exit": key[1]})
+    except Exception:
+        return []
+    return out
+
+
+def combined_evidence(record: Any) -> list[dict[str, Any]]:
+    """This run's installs plus its stashed prior installs (deduped)."""
+    merged: list[dict[str, Any]] = []
+    keys: set = set()
+    for row in run_install_runs(record) + prior_snapshot(record):
+        key = _install_key(row)
+        if key is None or key in keys:
+            continue
+        keys.add(key)
+        merged.append({"argv": list(key[0]), "exit": key[1]})
+    return merged
+
+
+def install_evidence(app: Any, project_id: str,
+                     record: Any) -> list[dict[str, Any]]:
+    """This run's install rows plus earlier runs' rows (deduped)."""
+    merged: list[dict[str, Any]] = []
+    keys: set = set()
+    for row in run_install_runs(record) + prior_install_runs(
+            app, project_id):
+        key = _install_key(row)
+        if key is None or key in keys:
+            continue
+        keys.add(key)
+        merged.append({"argv": list(key[0]), "exit": key[1]})
+    return merged
+
+
+def format_install_runs(rows: Any) -> list[str]:
+    """One chat/audit line per install row: `$ argv -> exit N`."""
+    lines: list[str] = []
+    try:
+        for row in rows or []:
+            key = _install_key(row)
+            if key is None:
+                continue
+            lines.append("$ %s -> exit %s" % (
+                " ".join(key[0]), key[1]))
+    except Exception:
+        pass
+    return lines
+
+
 def new_run_record(
     run_id: str, project: str, task: str, folder: str,
     title: str = "", message: str = "",

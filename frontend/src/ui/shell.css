@@ -357,6 +357,13 @@ div[data-testid^="agent-row-"],
   margin-right: 4px;
 }
 
+/* FXTABS J7: the rail stacks its cards in a column so cards with data
+   (order 0) render before empty ones (order 1). */
+div[data-testid="inspector-scroll"] {
+  display: flex;
+  flex-direction: column;
+}
+
 /* FXDESIGN1 S5: comfortable centre column with vertical rhythm; the
    composer lines up with Send next to the input. */
 main[data-testid="app-main"] {
