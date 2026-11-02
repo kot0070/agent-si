@@ -140,32 +140,33 @@ afterEach(() => {
   window.sessionStorage.clear();
 });
 
-describe("fxviewsv7 single scrollable tab row", () => {
-  it("keeps all tabs in one nowrap scroll row with the selected tab marked", async () => {
+describe("fxviewsv7 quiet wrapping tab row", () => {
+  it("wraps tabs to more lines with the selected tab marked in ink", async () => {
     renderAppAt("/projects/p9/overview");
     const nav = await screen.findByRole("navigation", {
       name: "Project sections",
     });
     expect(nav.classList.contains("fxpv-tabs")).toBe(true);
-    // ONE row: the stylesheet keeps tabs on a single scrolling line, never
-    // wrapped. (jsdom applies no stylesheet here — SHEETS 0 probed — so the
-    // rule text itself is the guard, same readFileSync precedent as
-    // fxrc1fix/fxfirstrun2; the DOM half below proves every tab lives in
-    // that one row with the selected state intact.)
+    // U1: quiet text tabs wrap to more lines — no boxed scroll row, no
+    // thick scrollbar, no solid repaint. (jsdom applies no stylesheet
+    // here — SHEETS 0 probed — so the rule text itself is the guard,
+    // same readFileSync precedent as fxrc1fix/fxfirstrun2; the DOM half
+    // below proves every tab lives in that row with the ink selected
+    // state intact.)
     // Tests run from frontend/, so this is src/projects/projectview.css.
     const tabsCss = readFileSync("src/projects/projectview.css", "utf8");
     const tabsBlock = /\.fxpv-tabs\s*\{([^}]*)\}/.exec(tabsCss)?.[1] ?? "";
-    expect(tabsBlock).toMatch(/flex-wrap\s*:\s*nowrap/);
-    expect(tabsBlock).toMatch(/overflow-x\s*:\s*auto/);
-    expect(tabsBlock).not.toMatch(/flex-wrap\s*:\s*wrap/);
-    // Every tab (chat + all project views) lives in that single row.
+    expect(tabsBlock).toMatch(/flex-wrap\s*:\s*wrap/);
+    expect(tabsBlock).toMatch(/overflow-x\s*:\s*visible/);
+    expect(tabsBlock).not.toMatch(/flex-wrap\s*:\s*nowrap/);
+    // Every tab (chat + all project views) lives in that row.
     expect(nav.querySelector('[data-testid="project-chat-tab"]')).not.toBeNull();
     for (const view of PROJECT_VIEWS) {
       expect(
         nav.querySelector(`[data-testid="${projectMenuTestId(view)}"]`),
       ).not.toBeNull();
     }
-    // Selected state survives the single-row rework.
+    // Selected state survives the wrap rework.
     const selected = await screen.findByTestId("project-menu-overview");
     expect(selected.getAttribute("aria-current")).toBe("true");
     expect(selected.className).toContain("fxpv-tab-selected");

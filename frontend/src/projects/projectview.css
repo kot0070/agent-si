@@ -1,32 +1,44 @@
-/* FXVIEWS project tab styles: one compact scrollable tab row with a
-   selected state, and real fact rows with a gap between label and value.
-   Layout only; every string stays in the locale tables. */
+/* FXVIEWS project tab styles: quiet text tabs that wrap to more lines
+   (U1: no boxed scroll row, no thick scrollbar, no solid repaint on
+   hover/selected). Selected is bold + underline in ink, readable in
+   both themes. Every string stays in the locale tables. */
 
-/* FXVIEWS3 rework + V7: the tab row never wraps (wrap made 3 rows in the
-   narrow main column); it stays ONE horizontal line and scrolls, so tabs
-   never slide under the inspector rail. */
+/* U1: the tab row wraps; hover underlines without repainting the
+   button (base button:hover would paint solid accent under ink text). */
 .fxpv-tabs {
   display: flex;
   flex-direction: row;
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  gap: 0.25rem;
+  flex-wrap: wrap;
+  overflow-x: visible;
+  gap: 0.25rem 0.75rem;
   padding: 0.25rem 0;
 }
 
 .fxpv-tab {
   flex: 0 0 auto;
-  padding: 0.375rem 0.75rem;
-  border: 1px solid transparent;
-  border-radius: 0.375rem;
+  padding: 0.375rem 0.25rem;
+  border: none;
+  border-radius: 0;
   background: transparent;
+  color: var(--fx-ink);
   cursor: pointer;
-  white-space: nowrap;
+  white-space: normal;
+}
+
+.fxpv-tabs .fxpv-tab:hover:not(:disabled) {
+  background: transparent;
+  border-color: transparent;
+  color: var(--fx-ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .fxpv-tab-selected {
-  border-color: currentColor;
-  font-weight: 600;
+  border: none;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  color: var(--fx-ink);
 }
 
 .fxpv-fact {
