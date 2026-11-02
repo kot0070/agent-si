@@ -844,7 +844,7 @@ export function Inspector(props: InspectorProps): ReactElement {
   const reportsHref =
     projectId === null ? "/projects" : `/projects/${projectId}/reports`;
 
-  const watcherSettings = loadWatcherSettings();
+  const watcherSettings = loadWatcherSettings(projectId);
   const watcherModel = watcherSettings.model;
   // FXTABS T9: the rail names what is really used. A "local" setting with
   // no local model served means the cloud fallback does the work.

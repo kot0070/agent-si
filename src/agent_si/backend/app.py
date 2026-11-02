@@ -804,10 +804,13 @@ def create_app(settings: Any = None,
         return isinstance(token, str) and bool(token) and token == app_token
 
     if _k08_auth is not None:
-        _k08_automation_routes.configure(_k08_auth, _k08_rate, _k08_factory)
+        _k08_automation_routes.configure(
+            _k08_auth, _k08_rate, _k08_factory,
+            budget_hook=_k08_automation_routes.real_budget_check)
     else:
         _k08_automation_routes.configure(
-            lambda token: token == app_token, _k08_rate, _k08_factory
+            lambda token: token == app_token, _k08_rate, _k08_factory,
+            budget_hook=_k08_automation_routes.real_budget_check
         )
 
     def _k08_drop_token(fn):
