@@ -567,6 +567,44 @@ def build_app():
 #: before any window, port pick or server start.
 _QA_RUNNER_FLAG = "--qa-runner"
 
+#: Informational flags: print and exit 0 with no server and no window.
+#: Handled before everything else in main(), including --qa-runner.
+_VERSION_FLAG = "--version"
+_HELP_FLAG = "--help"
+
+#: Short usage printed for --help (stdout; tolerant of sys.stdout=None
+#: in the windowed exe, like every other print here).
+_USAGE_TEXT = (
+    "agent-si {version}\n"
+    "Usage: agent-si [--version] [--help] [--qa-runner <ref>]\n"
+    "\n"
+    "  --version            print the sidecar version and exit 0\n"
+    "  --help               print this help and exit 0\n"
+    "  --qa-runner <ref>    run one QA runner module, then exit\n"
+    "\n"
+    "With no flags the sidecar serves on loopback and opens the UI."
+)
+
+
+def _print_text(text: str) -> None:
+    """Write one block to stdout, tolerating a missing stream."""
+    try:
+        stream = sys.stdout
+        if stream is None:
+            return
+        stream.write(text)
+        if not text.endswith("\n"):
+            stream.write("\n")
+        with contextlib.suppress(Exception):
+            stream.flush()
+    except Exception:
+        return
+
+
+def version_text() -> str:
+    """The --version line (single source for the flag and the UI)."""
+    return "agent-si %s" % (VERSION,)
+
 
 def _qa_runner_ref(argv: list[str] | None) -> str | None:
     """Return the runner ref after --qa-runner, or None when absent."""
@@ -657,6 +695,13 @@ def run_qa_runner(runner_ref: str) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     """Run the sidecar: serve on loopback, open the native window."""
+    args = list(sys.argv[1:] if argv is None else argv)
+    if _VERSION_FLAG in args:
+        _print_text(version_text())
+        return 0
+    if _HELP_FLAG in args:
+        _print_text(_USAGE_TEXT.format(version=VERSION))
+        return 0
     qa_ref = _qa_runner_ref(argv)
     if qa_ref is not None:
         return run_qa_runner(qa_ref)

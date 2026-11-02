@@ -29,8 +29,9 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 from . import facades as _default_facade
+from . import provider_model_lists as _model_lists
+from .contracts import SECRET_REF_FIELDS, TRANSPORT_LOCAL
 from .presets import get_preset
-from .contracts import SECRET_REF_FIELDS
 from .provider_api import (
     CONFIRM_REQUIRED,
     CREDENTIAL_ENTRY_MISSING,
@@ -70,7 +71,10 @@ class ProviderCtx:
     def __init__(self, facade: Any = None, models: Any = None,
                  app_prefix: Any = None, store_view: Any = None,
                  store: Any = None, audit_sink: Any = None,
-                 live_provider_ids: Any = None) -> None:
+                 live_provider_ids: Any = None,
+                 credential_store: Any = None,
+                 model_state_dir: Any = None, http_get: Any = None,
+                 kb_rows: Any = None) -> None:
         self.facade = facade if facade is not None else _default_facade
         self.models: Dict[str, list] = dict(models or {})
         self.app_prefix = app_prefix
@@ -78,6 +82,15 @@ class ProviderCtx:
         self.store = store
         self.audit_sink = audit_sink
         self.live_provider_ids = live_provider_ids
+        # FXPROVBE ports (all optional; unbound keeps the legacy read):
+        # credential_store resolves the stored key at refresh time,
+        # model_state_dir persists merged lists + ticks beside
+        # provider_connections.json, http_get is the FAKE network seam,
+        # kb_rows carries catalog rows with price fields for the merge.
+        self.credential_store = credential_store
+        self.model_state_dir = model_state_dir
+        self.http_get = http_get
+        self.kb_rows = kb_rows
 
 
 def _is_id_only_ref(value: Any) -> bool:
@@ -195,6 +208,7 @@ def connect_provider(ctx: ProviderCtx, query, body) -> Tuple[int, Dict]:
         view = ctx.facade.register_provider(descriptor, key_ref)
     except ValueError as exc:
         return 400, {"error": str(exc)}
+    _refresh_best_effort(ctx, preset["provider_id"], view, model)
     return 200, {"provider": view.describe()}
 
 
@@ -214,11 +228,96 @@ def disconnect_provider(ctx: ProviderCtx, query, body) -> Tuple[int, Dict]:
         if CREDENTIAL_ENTRY_MISSING in message:
             return 409, {"error": message}
         return 400, {"error": message}
+    _model_lists.drop_state(
+        getattr(ctx, "model_state_dir", None), provider_id)
     return 200, {"removed": True, "provider_id": provider_id}
 
 
+def _kb_rows_for(ctx: ProviderCtx, provider_id: str) -> list:
+    """Catalog rows with price fields for one provider, best effort."""
+    rows = getattr(ctx, "kb_rows", None)
+    if isinstance(rows, list) and rows:
+        return [r for r in rows
+                if isinstance(r, Mapping)
+                and str(r.get("provider_id", "") or "") == provider_id]
+    out = []
+    for model, kb in _model_entries(ctx.models.get(provider_id)):
+        fields: Any = None
+        if isinstance(kb, Mapping):
+            fields = kb.get("fields")
+        out.append({"provider_id": provider_id,
+                    "model_id": model,
+                    "fields": fields if isinstance(fields, Mapping) else {}})
+    return out
+
+
+def _merged_for(ctx: ProviderCtx, provider_id: str) -> Tuple[list, Any, Any]:
+    """Merged display rows plus stored state and KB rows for one provider."""
+    kb_rows = _kb_rows_for(ctx, provider_id)
+    state = _model_lists.load_state(
+        getattr(ctx, "model_state_dir", None), provider_id)
+    if state is not None and isinstance(state.get("models"), list):
+        return ([dict(m) for m in state["models"]
+                 if isinstance(m, Mapping)], state, kb_rows)
+    return (_model_lists.merge_model_rows(provider_id, [], kb_rows),
+            None, kb_rows)
+
+
+def _preset_transport(provider_id: str) -> Any:
+    try:
+        return get_preset(provider_id).get("transport")
+    except KeyError:
+        return None
+
+
+def _is_local_provider(provider_id: str, view: Any = None) -> bool:
+    """Local runtimes keep their existing list: never a cloud fetch."""
+    if _preset_transport(provider_id) == TRANSPORT_LOCAL:
+        return True
+    base = ""
+    try:
+        base = getattr(view, "base_url", "") or ""
+    except Exception:
+        base = ""
+    return isinstance(base, str) and base.startswith("http://localhost")
+
+
+def _refresh_best_effort(ctx: ProviderCtx, provider_id: str,
+                         view: Any, default_model: Any) -> None:
+    """Refresh after a good connect; failure never breaks the connect."""
+    if getattr(ctx, "model_state_dir", None) is None:
+        return
+    if _is_local_provider(provider_id, view):
+        return
+    try:
+        secret_id = getattr(getattr(view, "secret_ref", None),
+                            "secret_id", "")
+        key_value = _model_lists.read_secret_value(
+            getattr(ctx, "credential_store", None), secret_id)
+        try:
+            base_url = getattr(view, "base_url", "")
+        except Exception:
+            base_url = ""
+        _model_lists.refresh_with_join(
+            provider_id, base_url, key_value,
+            _kb_rows_for(ctx, provider_id),
+            transport=_preset_transport(provider_id),
+            http_get=getattr(ctx, "http_get", None),
+            store_dir=getattr(ctx, "model_state_dir", None),
+            default_model=default_model)
+    except Exception:
+        pass
+
+
 def provider_models(ctx: ProviderCtx, query, body) -> Tuple[int, Dict]:
-    """Model rows for one provider, with checkbox state and search filter."""
+    """Model rows for one provider: merged live + KB list with ticks.
+
+    ``{provider_id, models: [{id, name, price, kb_known, ...}],
+    source, enabled}``. Legacy row keys stay (``model`` is the id,
+    ``enabled`` is ticked, ``in_base`` is kb_known, ``kb`` the fields).
+    GET never performs network I/O: it reads the last stored list, or
+    the catalog rows when nothing was ever stored.
+    """
     query = query or {}
     provider_id = query.get("id")
     if not provider_id:
@@ -229,31 +328,183 @@ def provider_models(ctx: ProviderCtx, query, body) -> Tuple[int, Dict]:
         return 400, {"error": str(exc)}
     if view is None:
         return 404, {"error": "unknown provider %r" % (provider_id,)}
+    merged, state, _kb_rows = _merged_for(ctx, provider_id)
+    verbatim: Dict[str, str] = {}
+    for row in _kb_rows:
+        if isinstance(row, Mapping):
+            mid = row.get("model_id", "")
+            if isinstance(mid, str) and mid:
+                verbatim.setdefault(
+                    _model_lists.canonical_model_id(provider_id, mid), mid)
+    for model, _kb in _model_entries(ctx.models.get(provider_id)):
+        verbatim.setdefault(
+            _model_lists.canonical_model_id(provider_id, model), model)
+    if state is not None and isinstance(state.get("enabled"), list):
+        enabled = [str(i) for i in state["enabled"]
+                   if isinstance(i, str) and i]
+        source = str(state.get("source", "provider") or "provider")
+    else:
+        enabled = []
+        source = "catalog"
     wanted = query.get("query")
     rows = []
-    for model, kb in _model_entries(ctx.models.get(provider_id)):
-        if wanted and wanted not in model:
+    for item in merged:
+        ident = str(item.get("id", "") or "")
+        if wanted and wanted not in ident:
             continue
+        ticked = ident in enabled
+        fields = None
+        if item.get("kb_known"):
+            hit = _model_lists.resolve_kb_row(_kb_rows, provider_id, ident)
+            if isinstance(hit, Mapping) and isinstance(
+                    hit.get("fields"), Mapping):
+                fields = dict(hit["fields"])
         rows.append({
-            "model": model,
-            "enabled": bool(view.evidenced),
-            "in_base": True,
-            "kb": kb,
+            "model": verbatim.get(ident, ident),
+            "enabled": ticked,
+            "in_base": bool(item.get("kb_known", False)),
+            "kb": fields,
+            "id": ident,
+            "name": str(item.get("name", "") or ""),
+            "wire_id": _model_lists.wire_model_id(ident),
+            "price": item.get("price"),
+            "kb_known": bool(item.get("kb_known", False)),
+            "listed": bool(item.get("listed", False)),
         })
-    return 200, {"provider_id": provider_id, "models": rows}
+    return 200, {"provider_id": provider_id, "models": rows,
+                 "source": source, "enabled": enabled}
+
+
+def refresh_provider_models(ctx: ProviderCtx, query,
+                            body) -> Tuple[int, Dict]:
+    """POST refresh: fetch the live list, merge, store, return it."""
+    query = query or {}
+    provider_id = query.get("id")
+    if not provider_id:
+        return 400, {"error": "provider id is required"}
+    try:
+        view = ctx.facade.get_provider(provider_id)
+    except ValueError as exc:
+        return 400, {"error": str(exc)}
+    if view is None:
+        return 404, {"error": "unknown provider %r" % (provider_id,)}
+    if _is_local_provider(provider_id, view):
+        merged, state, _kb_rows = _merged_for(ctx, provider_id)
+        enabled = []
+        if state is not None and isinstance(state.get("enabled"), list):
+            enabled = [str(i) for i in state["enabled"]
+                       if isinstance(i, str) and i]
+        return 200, {"provider_id": provider_id, "models": [
+            {"id": str(m.get("id", "") or ""),
+             "name": str(m.get("name", "") or ""),
+             "price": m.get("price"),
+             "kb_known": bool(m.get("kb_known", False))}
+            for m in merged], "source": "catalog", "enabled": enabled}
+    try:
+        secret_id = getattr(getattr(view, "secret_ref", None),
+                            "secret_id", "")
+        key_value = _model_lists.read_secret_value(
+            getattr(ctx, "credential_store", None), secret_id)
+    except _model_lists.LiveModelsError as exc:
+        return 409, {"error": str(exc)}
+    try:
+        base_url = getattr(view, "base_url", "")
+    except Exception:
+        base_url = ""
+    try:
+        state = _model_lists.refresh_with_join(
+            provider_id, base_url, key_value,
+            _kb_rows_for(ctx, provider_id),
+            transport=_preset_transport(provider_id),
+            http_get=getattr(ctx, "http_get", None),
+            store_dir=getattr(ctx, "model_state_dir", None))
+    except _model_lists.LiveModelsError as exc:
+        return 502, {"error": str(exc)}
+    return 200, {"provider_id": provider_id, "models": [
+        {"id": str(m.get("id", "") or ""),
+         "name": str(m.get("name", "") or ""),
+         "price": m.get("price"),
+         "kb_known": bool(m.get("kb_known", False))}
+        for m in state["models"]],
+        "source": state.get("source", "provider"),
+        "enabled": state.get("enabled", [])}
+
+
+def put_provider_models(ctx: ProviderCtx, query, body) -> Tuple[int, Dict]:
+    """PUT ticks: persist the enabled subset; ids must be known merged."""
+    query = query or {}
+    provider_id = query.get("id")
+    if not provider_id:
+        return 400, {"error": "provider id is required"}
+    try:
+        view = ctx.facade.get_provider(provider_id)
+    except ValueError as exc:
+        return 400, {"error": str(exc)}
+    if view is None:
+        return 404, {"error": "unknown provider %r" % (provider_id,)}
+    if not isinstance(body, Mapping):
+        return 400, {"error": "models save needs a JSON object body"}
+    hit = _find_raw_secret(body)
+    if hit:
+        return 400, {"error": "raw secret material refused at %s "
+                              "(pass model ids, never raw)" % hit}
+    ids = body.get("ids")
+    if not isinstance(ids, list):
+        return 400, {"error": "models save needs an ids list"}
+    merged, state, _kb_rows = _merged_for(ctx, provider_id)
+    known = {str(m.get("id", "") or "") for m in merged}
+    enabled = []
+    for ident in ids:
+        if not isinstance(ident, str) or not ident.strip():
+            return 400, {"error": "model ids must be non-empty strings"}
+        canonical = _model_lists.canonical_model_id(
+            provider_id, ident.strip())
+        if canonical not in known:
+            return 400, {"error": "unknown model %r for provider %r "
+                                  "(ticks must be known to the merged "
+                                  "list)" % (ident, provider_id)}
+        if canonical not in enabled:
+            enabled.append(canonical)
+    previous = dict(state) if isinstance(state, Mapping) else {
+        "provider_id": provider_id, "models": merged,
+        "source": "catalog",
+        "updated_at": _model_lists._utcnow()}
+    previous["enabled"] = enabled
+    if getattr(ctx, "model_state_dir", None) is not None:
+        _model_lists.save_state(
+            getattr(ctx, "model_state_dir", None), provider_id, previous)
+    return 200, {"ok": True, "provider_id": provider_id,
+                 "enabled": enabled}
 
 
 def chat_models(ctx: ProviderCtx, query, body) -> Tuple[int, Dict]:
-    """Enabled models only: evidenced providers' base-list models."""
+    """Enabled models only: the server's tick list is the routing truth.
+
+    Providers with a stored tick list contribute only ticked models
+    (canonical compare, so ``meta/x`` and ``x`` are one model);
+    providers without one keep the legacy read (every KB row).
+    """
     query = query or {}
     try:
         views = ctx.facade.list_providers(True)
     except ValueError as exc:
         return 400, {"error": str(exc)}
+    ticks = _model_lists.enabled_map(
+        getattr(ctx, "model_state_dir", None),
+        [getattr(v, "provider_id", "") for v in views])
     rows = []
     for view in views:
-        for model, _kb in _model_entries(ctx.models.get(view.provider_id)):
-            rows.append({"provider_id": view.provider_id, "model": model})
+        pid = getattr(view, "provider_id", "")
+        allowed = ticks.get(pid) if isinstance(pid, str) else None
+        wanted = None
+        if allowed is not None:
+            wanted = {_model_lists.canonical_model_id(pid, i)
+                      for i in allowed}
+        for model, _kb in _model_entries(ctx.models.get(pid)):
+            if wanted is not None and \
+                    _model_lists.canonical_model_id(pid, model) not in wanted:
+                continue
+            rows.append({"provider_id": pid, "model": model})
     return 200, {"project_id": query.get("project_id", "p1"),
                  "models": rows}
 
@@ -453,6 +704,8 @@ __all__ = [
     "connect_provider",
     "disconnect_provider",
     "provider_models",
+    "refresh_provider_models",
+    "put_provider_models",
     "chat_models",
     "leftover_keys",
     "match",

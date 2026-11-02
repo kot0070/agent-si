@@ -1,76 +1,97 @@
-# Agent SI — one task in, honest result out
-Agent SI is a desktop app (AgentSI.exe): you write one task, a Director plans it, Managers split the work, agents write files, the app runs the checks, and a fresh auditor gives an honest result — built on Meta Muse models through Fireworks, with optional OpenAI, Anthropic and local models.
-Run: download the portable zip, verify the SHA256 file, unpack, start AgentSI.exe. No install.
-Connect a provider: Settings -> Models -> Connect. The key is stored locally and sent only to that provider.
-Evidence: every claim links to its run evidence — open the project Tests tab and the release evidence index shipped with the bundle (see Tests).
-Demo: the 3-minute cut (opens with the F04 full chain, closes with the F14 clean smoke) run against the frozen exe — script SUBMISSION/K12/demo-script.md (no video file ships).
-Status: 0.1.0 portable build (unsigned — Windows SmartScreen will warn); hashes verified per the Portable build section below.
-Licence: MIT (Copyright (c) 2026 Ivan Soprun; licence texts in LICENSE and the third-party notices file).
-Start: jury quick start below — verify hashes, double-click AgentSI.exe on an empty profile, connect a provider, open /firstrun, create a project, run the first task.
-This README: Architecture (one diagram) · Screens · Tests (Runs vs code tests vs local tests) · Development · Limits and honest gaps.
+# Agent SI
 
-## Jury quick start
+Agent SI is a desktop app that takes one task in plain words and returns a checked result with evidence.
+You describe the goal, the app plans the work, runs the checks, and a fresh audit gives the final verdict.
+It uses connected model providers for the work and keeps every run, decision, and audit record with the project.
 
-1. Verify the hashes in the Portable build section below.
-2. Double-click AgentSI.exe on an empty profile.
-3. Connect a provider: Settings -> Models -> Connect (or the Setup wizard), then optionally pin role pools and the chat model.
-4. Open /firstrun and finish connect-provider, one-click team, project+folder, first task.
-5. Create a project and run the first task; open the Tests tab for its evidence.
+<<SHOT: main chat screen>>
 
-## Architecture
+## Requirements
 
-task -> Director -> Managers -> agents -> checks -> fresh auditor -> honest result
+- Windows 10 or 11, 64-bit.
+- WebView2 runtime. If it is missing, the app shows a message with the download link and also opens the app in the default browser.
+- No Python install needed. No administrator rights needed. The portable build runs from its own folder.
+- The bundle carries the licence text and the third-party notices; both are also shown on the About screen.
 
-You write one task; a Director plans it; Managers split the work; agents write files; the app runs the checks; a fresh auditor gives an honest result.
+## Download and verify
 
-## Tour (what you see)
+1. Download the portable zip and the `SHA256SUMS.txt` file published with the release.
+2. Check the hashes in PowerShell:
 
-- Left nav (`frontend/src/shell/Sidebar.tsx:20-36`): New task, Projects, Results, Settings.
-- Right cards (`frontend/src/shell/Inspector.tsx:1-6`): Team now, Context, Results, Background work, Watcher.
-- Chat: hierarchy rows (Director, Manager, Agents) above the composer (`frontend/src/chat/HierarchyRows.tsx`, wired in `frontend/src/chat/index.tsx:404`).
-- Tests tab per project at `/projects/:projectId/tests` (`frontend/src/app/App.tsx:88`), served by the tests-view board (`frontend/src/k07next3/TestsViewBoard.tsx`, `GET /api/v1/teststage/tests-view`).
-- First run at `/firstrun`: 4 steps (`frontend/src/app/firstrun/FirstRunFlow.tsx:22-24`).
-- How-it-works diagram (`frontend/src/app/HowItWorks.tsx`): one task in, honest result out.
+```powershell
+Get-FileHash -Algorithm SHA256 AgentSI-portable-0.1.0.zip
+Get-FileHash -Algorithm SHA256 AgentSI.exe
+```
+
+3. Compare both values with `SHA256SUMS.txt`. Do not run the app if they differ.
+4. Unpack the zip into an empty folder and start `AgentSI.exe` by double-click.
+
+<<FINAL: release hashes and file names are stamped at release time; re-verify against SHA256SUMS.txt in the bundle>>
+
+The build is unsigned, so Windows SmartScreen will warn on first start. This is expected for this release.
+
+## First run, step by step
+
+The app opens a first-run guide with four steps. The guide reads its state from the server, never from local guesses. A step counts as done only when the server confirms it.
+
+1. Connect a provider. The guide shows the provider rows and a Connect button for each. The Next button stays disabled until the server reports at least one connected provider. A Skip control is also shown.
+2. One-click team. Enter a team name and save. The app creates or reuses a project and saves the default team setup for every role.
+3. Project and folder. Enter a folder value, optionally use Choose folder to pick it with the system dialog, then Create. The app creates the project through the real project service.
+4. First task. Enter a task title and Create. The app creates the task through the real task service and shows the created task. The Continue control finishes the guide and opens the chat with the task title ready.
+
+The last step also shows an optional quiet list: local AI, watcher preset, automations, and knowledge bases. Each can be skipped.
+
+To open the guide again, go to `/firstrun`.
+
+<<SHOT: first-run guide>>
 
 ## Connect a provider
 
-Settings -> Models -> Setup wizard (or Connect {label}), then optionally pin role pools and the chat model; the key is stored locally and sent only to that provider (`frontend/src/settings/ProvidersPage/ProvidersPage.tsx`, labels in `frontend/src/locale/en.json` providers.page).
+Go to Settings -> Models, or use the Setup wizard on the first-run screen.
 
-## Evidence
+1. Pick a provider row and choose Connect.
+2. Enter the key in the password field and save.
+3. The row shows the connected state. Disconnect removes the connection.
 
-Every claim links to its run evidence — open the project Tests tab (`/projects/:projectId/tests`) and the release evidence index shipped with the bundle.
+Search filters the list by provider or model name. Model checkboxes are enabled only when the provider is connected. An optional setup wizard, role pools, and a chat-model picker are on the same page.
 
-## Runtime components
+Supported providers include a hosted Meta option, OpenAI, Anthropic, and local servers for local models.
 
-Pinned manifest components: fastapi 0.162.0, openai-agents 0.20.0, react 19.3.1, react-router-dom 7.18.4, zod 4.6.7; plus the 5 frozen sidecar components pywebview 6.2.1, pythonnet 3.2.1, clr_loader 0.3.1, bottle 0.13.4, proxy_tools 0.1.0. Full texts in [docs/third_party_notices/NOTICES.md](docs/third_party_notices/NOTICES.md) and `docs/third_party_notices/licenses/`.
+<<SHOT: providers page>>
 
-## Portable build
+## Keys: Windows credential store only
 
-Windows portable build `AgentSI.exe` 0.1.0 ([dist/AgentSI-portable-0.1.0.zip](dist/AgentSI-portable-0.1.0.zip)): UNSIGNED — no certificate in this build, so Windows SmartScreen will warn. Unpack, verify the two SHA256 below against the SHA256SUMS file shipped in the bundle, then run AgentSI.exe.
+Provider keys are stored only in the Windows Credential Manager under the app namespace. The app never writes a key to a plain file, never shows it again, and never logs it. The settings and the browser storage hold only references, never key material. Disconnect deletes the stored entry.
 
-Hashes below are for the frozen build from 6c01765 (`packaging/installer_manifest/HASH.json` built_from_commit); they are re-stamped on every release — never trust hashes older than int HEAD a8b5a57.
+## Where data lives
 
-- `AgentSI.exe`: `f77114bd78e1ffe62286a5574e2e03eec5013d85fa4b258344098caa1a75de44`
-- `packaging/installer_manifest` MANIFEST/HASH: `530b4b6190e1e6a7c5b70e49b6334d343738a28ce257039586c1066f350de028`
+- Project data (projects, tasks, runs, decisions, audits, watcher journal, knowledge-base links) lives in the app data folder. The portable default is the `data` folder next to `AgentSI.exe`. If that folder is not writable, the app uses the per-user app data folder. Setting the `AGENT_SI_DATA_DIR` folder path overrides both. An empty value fails loudly instead of silently falling back.
+- On first start the app copies previous settings and keys into the new data folder and keeps the originals untouched. A file that already exists at the destination is never overwritten.
+- Interface preferences (first-run done flag, language, watcher display options) live in the browser local storage. Tab-only mirrors (role profiles, accepted risk) live in the session storage. Key material never lives there.
+- Secret references live only in memory while the app runs.
 
-Verify and re-verify with [packaging/installer_manifest/gen_smoke.py](packaging/installer_manifest/gen_smoke.py) (`--root .`). See [packaging/README.md](packaging/README.md) for what the zip holds.
+## First task and Stop
 
-## Tests
+1. Create or open a project.
+2. Type the task in the chat box and send. With no project, sending creates a project named from the first words and then creates the task.
+3. Watch progress in the chat, the team panel, and the Tests tab.
+4. The result appears in the chat with its checks and the audit verdict. Reports and the evidence index stay with the project.
 
-- Runs: a run is one agent working on one task.
-- Code tests: the project's own test suite.
-- Local tests: catalog checks this machine runs before spend.
+Stop: the top bar has Stop all. Stopping is a two-step control and also answers to the Escape key. It stops the active runs at once and keeps partial outputs and records.
 
-The Tests tab shows the latest run: served counters and one row per test. It never changes settings.
+<<SHOT: project view with tests tab>>
 
-## Development
+## Known limits
 
-Build and test from the checkout: backend with the product virtual environment (`python -m pytest`), frontend with the checked-in `frontend/package-lock.json` (`vitest run`); installs run offline from the checked-in lockfiles, never from a registry. `tools/start.py --smoke` checks the start path on a clean profile. Fixture runs use `pytest -p no:cacheprovider` (see [docs/start-accept-notes.md](docs/start-accept-notes.md)). Per-package build reports: [docs/reports/README.md](docs/reports/README.md).
+- Unsigned build: SmartScreen warns. Verify hashes first.
+- WebView2 is required for the desktop window. Without it the app shows the download notice and falls back to the browser.
+- The folder picker needs a native window. Where no native dialog exists, the Choose control hides itself instead of failing.
+- Local models need a running local server on the loopback address. If none answers, local checks report not configured.
+- Budget has a default currency and default soft and hard limits. When the budget is exhausted, new work is blocked with a plain message.
+- Some screens show empty or unknown states until the server has records. The app never invents numbers.
 
-## Limits and honest gaps
-
-Nothing unmeasured ships as proven: non-LIVE rows in [docs/release/RELEASE_CHECKLIST.md](docs/release/RELEASE_CHECKLIST.md) stay PENDING-REDRIVE, and the release notes carry the same limitation lines; no claim ships as proven without its DEFECTS line. Stale claims are marked PENDING-REDRIVE, never shipped as proven.
+<<FINAL: exact default budget numbers and local server addresses are verified against the release bundle at final pass>>
 
 ## Licence
 
-Agent SI ships under the MIT licence; see [LICENSE](LICENSE) (MIT, Copyright (c) 2026 Ivan Soprun).
+Agent SI ships under the MIT licence. Copyright (c) 2026 Ivan Soprun. See `LICENSE` at the checkout root. Third-party titles and licences are listed in `docs/third_party_notices/NOTICES.md` and shown on the About screen.

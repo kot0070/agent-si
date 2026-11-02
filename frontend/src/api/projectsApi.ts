@@ -230,6 +230,33 @@ const LedgerResponseSchema = z.object({
   rows: z.array(LedgerRowSchema),
 });
 
+// FXDESIGN8: devrun run records ride the same ledger route as the
+// package rows (additions-only: the key is absent on older bodies).
+// Served cells only: run id, start/end stamps, success, summary,
+// tokens total (or "UNKNOWN"), cost, files.
+export const RunLedgerRowSchema = z.object({
+  run_id: z.string().min(1),
+  project: z.string().optional(),
+  task: z.string().optional(),
+  start: z.union([z.string(), z.number()]).optional(),
+  end: z.union([z.string(), z.number()]).optional(),
+  success: z.boolean().optional(),
+  stopped: z.boolean().optional(),
+  summary: z.string().optional(),
+  parts: z.array(z.object({}).passthrough()).optional(),
+  verdicts: z.record(z.string(), z.unknown()).optional(),
+  tokens: z.union([z.number(), z.string()]).optional(),
+  cost: z.union([z.number(), z.string()]).optional(),
+  files: z.array(z.string()).optional(),
+});
+
+export type RunLedgerRow = z.infer<typeof RunLedgerRowSchema>;
+
+const RunsLedgerResponseSchema = z.object({
+  rows: z.array(LedgerRowSchema),
+  runs: z.array(RunLedgerRowSchema).optional(),
+});
+
 export const BudgetResponseSchema = z.object({
   project_id: z.string().min(1),
   budget: BudgetStateSchema,
@@ -343,6 +370,19 @@ export async function readLedgerRows(
       { method: "GET", kind: "read" },
       LedgerResponseSchema,
     ).then((body) => body.rows),
+  );
+}
+
+/** One ledger-route round trip serving both package rows and run rows. */
+export async function readLedgerWithRuns(
+  projectId: string,
+): Promise<{ rows: LedgerRow[]; runs: RunLedgerRow[] }> {
+  return readWithSharedRetry(`ledger:with-runs:${projectId}`, () =>
+    requestJson(
+      withProject(ENDPOINTS.ledger, projectId),
+      { method: "GET", kind: "read" },
+      RunsLedgerResponseSchema,
+    ).then((body) => ({ rows: body.rows, runs: body.runs ?? [] })),
   );
 }
 

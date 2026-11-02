@@ -1,8 +1,8 @@
 # Задум Agent SI
 
 Scope (production note, not visitor text): owned file `SUBMISSION/K12/idea-text.md`.
-Frozen refs: `DIRECTOR/FUNCTIONS_CHECKLIST.md` lines 6-19 (F01-F14); KIT =
-`kit/BUILD_PLAN.md:1117-1135`. No evidence-index entry exists in this workspace,
+Status: claim evidence is tracked in `SUBMISSION/ANSWERS_DRAFT.md`. No evidence-index
+entry exists in this workspace,
 so every claim below cites PENDING-DRIVE. Number-scan rule: only the text between
 VISITOR-START/END is scanned; the single allowed approximate phrase is the line
 containing `80%+`.

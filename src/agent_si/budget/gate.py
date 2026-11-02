@@ -979,6 +979,26 @@ class BudgetGate:
                         raise BudgetBlockedError(
                             incident.description
                             + " [PROVIDER_SPEND_CAP_BLOCKED]")
+            if provider_usage_evidence_ref is not None \
+                    and actual_amount is not None:
+                committed_after = (
+                    _dec(state.spent) + _dec(actual_amount)
+                    + _dec(state.reserved)
+                    - _dec(reservation.estimated_amount))
+                if committed_after > _dec(state.hard_limit):
+                    incident = self._record_incident_locked(
+                        state, reservation.task_id, reservation.run_id,
+                        settled_at,
+                        "%s: project %s task %s run %s settled %s %s "
+                        "would exceed hard %s %s (spent %s, reserved %s)"
+                        % (BUDGET_BREACH_WORDS, reservation.project_id,
+                           reservation.task_id, reservation.run_id,
+                           actual_amount, state.currency, state.hard_limit,
+                           state.currency, state.spent, state.reserved),
+                        root_cause="hard-limit charge refused",
+                    )
+                    raise BudgetBlockedError(
+                        incident.description + " [BUDGET_HARD_BLOCKED]")
             self._settlement_seq += 1
             settlement_id = "stl-%s-%d" % (reservation_id, self._settlement_seq)
             if provider_usage_evidence_ref is None:

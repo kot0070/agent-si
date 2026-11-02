@@ -1,4 +1,4 @@
-"""K03 assurance lane STEP1 shapes: per-turn audit coordination.
+"""Per-turn audit coordination.
 
 Frozen sources: RECORDS/day0/K13_MANIFEST.md §16 (audit_correction_max,
 audit_correction_count per scope id; defaults audit_correction_max=2),
@@ -13,7 +13,7 @@ predicate; HIGH/CRITICAL unresolved blocks PASS; PASS forbidden unless
 context-integrity PASS), §49A (gate dispositions; only 0F PASS starts
 product code); RECORDS/day1/K02_INTERFACE.md sec 6
 (AUDIT_INDEPENDENCE_REJECTED refusal vocabulary);
-DIRECTOR/TASK_PACKAGES/K03/TASK.md ROWS 7 (assurance on every served
+the frozen requirement rows (assurance on every served
 turn; empty work fails), 9-13 (fresh auditor instance per audit and
 re-audit), 13 (pair reuse needs a recorded decision plus user
 visibility), R-304 (real files judged), R-355 (every PASS audited by a

@@ -1,7 +1,7 @@
-"""FXDESIGN7 shots: real dev build served, API faked at the network
+"""Interface screenshots: real dev build served, API faked at the network
 boundary only. Walks first-run, chat empty/live, projects, overview tabs,
 reports, settings, providers + connect modal, agents, watcher at
-1280x800 dark-en + light-en + dark-uk. Saves to DIRECTOR/AUDIT/D6SHOTS.
+1280x800 dark-en + light-en + dark-uk. Saves to the local audit shots folder.
 """
 import json
 import os

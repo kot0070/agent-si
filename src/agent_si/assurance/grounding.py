@@ -1,10 +1,10 @@
-"""K03 assurance lane STEP1 shapes: the single shared grounding module.
+"""The single shared grounding module.
 
 Frozen sources: RECORDS/day0/K13_MANIFEST.md §40 (ARTIFACT_REF beats
 repeated inline content; bulk context travels by ref plus hash) and §41
 (authoritative record set); RECORDS/day0/0C_ARCHITECTURE.md sec 1.3
 (verification/checker.py and audit/runner.py share one grounding module);
-DIRECTOR/TASK_PACKAGES/K03/TASK.md ROW R-304 (the auditor judges the real
+the frozen auditor-judges-real-files row (the auditor judges the real
 files read and written, never chat output). Both verification and audit
 resolve artifacts through the entry below; no second copy of this logic
 exists anywhere else.

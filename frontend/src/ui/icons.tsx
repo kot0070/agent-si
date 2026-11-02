@@ -1,7 +1,5 @@
-// FXDESIGN6 icons: inline SVGs transcribed from Material Icons
-// (Apache License 2.0, Google). Read-only reference:
-// D:\AI_PROJECTS\AGENT_SI_KIT\10_DESIGN_SYSTEMS_ASSETS\DESIGN_MATERIAL_ICONS_REFERENCE.zip
-// (never copied into the repo). Provenance: docs/DESIGN_PROVENANCE.md.
+// Interface glyphs: inline SVGs transcribed from Material Icons
+// (Apache License 2.0, Google). Provenance: docs/DESIGN_PROVENANCE.md.
 // Twelve glyphs only; no new npm dependency. Paths copied verbatim from
 // the reference archive (material-design-icons-master/src/<area>/<name>/
 // materialicons/24px.svg): content/add, file/folder, action/settings,

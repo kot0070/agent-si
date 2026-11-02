@@ -1,4 +1,4 @@
-# KB builder guide (K09-B)
+# KB builder guide
 
 How to build a KB directory that passes validation. The full shape contract
 is in [FORMAT.md](FORMAT.md); start from the templates in
@@ -13,16 +13,16 @@ is in [FORMAT.md](FORMAT.md); start from the templates in
    (or place `<id>.md` directly at the top level for the flat-md layout).
 3. Declare the purpose: keep the `purpose` string in `manifest.json`,
    and/or add `<your-kb>/purpose.txt`.
-4. Validate with the CLI (repo-relative commands, run from the repo root):
+4. Validate with the CLI (run from the repo root):
 
 ```text
-D:\MUSE_TOOLS\venv_agent_si\Scripts\python.exe tools\kb_validator\validate_kb.py <your-kb>
+python tools/kb_validator/validate_kb.py <your-kb>
 ```
 
 or equivalently:
 
 ```text
-D:\MUSE_TOOLS\venv_agent_si\Scripts\python.exe -m tools.kb_validator.validate_kb <your-kb>
+python -m tools.kb_validator.validate_kb <your-kb>
 ```
 
 Exit `0` prints `<your-kb> OK`; exit `1` prints `<your-kb> <error-code>`
@@ -31,10 +31,10 @@ with one of the codes in [FORMAT.md](FORMAT.md).
 ## Worked example
 
 ```text
-D:\MUSE_TOOLS\venv_agent_si\Scripts\python.exe tools\kb_validator\validate_kb.py tests\fixtures\k09b\good
+python tools/kb_validator/validate_kb.py tests/fixtures/k09b/good
 ```
 
-prints `tests\fixtures\k09b\good OK` and exits `0`.
+prints `tests/fixtures/k09b/good OK` and exits `0`.
 Replacing `good` with `no-manifest`, `no-sections`, or `no-purpose` exits
 `1` and prints that dir with `KB_MANIFEST_MISSING`, `KB_SECTIONS_MISSING`,
 or `KB_PURPOSE_MISSING` respectively.

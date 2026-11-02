@@ -19,6 +19,7 @@ import hashlib
 import json
 import os
 import queue
+import re
 import sys
 import threading
 import uuid
@@ -539,6 +540,15 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
               messages: list, part: Any, attempt: int,
               waits: list) -> Any:
         _check_stop()
+
+        def _waiting(elapsed: float) -> None:
+            with contextlib.suppress(Exception):
+                _live(str(role), str(resolution.get("model", "")),
+                      part, attempt,
+                      _roles.waiting_line(str(role), elapsed), "",
+                      {}, None, list(waits or []),
+                      str(resolution.get("provider", "")))
+
         try:
             # FXPARALLEL BEGIN own-row: cost from the row this call
             # wrote, never the ledger tail (A2). Per-call ids are int's
@@ -547,8 +557,11 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
             response, over, own_row = _roles.invoke_owned(
                 app, adapter, resolution, messages, record=record,
                 project_id=project, run_id=run_id, part=part,
-                attempt=attempt, lock=run_lock)
+                attempt=attempt, lock=run_lock, stop_seen=_stop_seen,
+                on_waiting=_waiting)
             # FXPARALLEL END own-row.
+        except _roles.ModelStopped:
+            raise _Stopped()
         except _roles._BudgetOut as exc:
             raise _BudgetOut(str(exc)) from None
         usage = getattr(response, "usage", {}) or {}
@@ -638,26 +651,72 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                              {"run_id": run_id, "part_id": None})
             turn += 1
         _check_stop()
-        director_text = _call(
-            "director", director, director_adapter,
-            [{"role": "user", "content": _director_prompt(message)}],
-            None, 0, waits=["plan"])
+        try:
+            director_text = _call(
+                "director", director, director_adapter,
+                [{"role": "user", "content": _director_prompt(message)}],
+                None, 0, waits=["plan"])
+        except _roles.ModelTimeout as exc:
+            _journal("SERVICE_STATE",
+                     "model call timed out (director, one retry left): "
+                     "%s" % (exc,))
+            yield _run_event(
+                "delta", turn, task_id,
+                "Director timed out (%s); retrying once" % (exc,),
+                {"run_id": run_id})
+            turn += 1
+            try:
+                director_text = _call(
+                    "director", director, director_adapter,
+                    [{"role": "user",
+                      "content": _director_prompt(message)},
+                     {"role": "assistant", "content": ""},
+                     {"role": "user",
+                      "content": ("Your previous reply never arrived: "
+                                  "the model call timed out (%s). Return "
+                                  "ONLY the corrected JSON object, "
+                                  "no prose.") % (exc,)}],
+                    None, 0, waits=["plan repair"])
+            except _roles.ModelTimeout as exc2:
+                record["summary"] = (
+                    "run failed: director timed out twice: %s" % (exc2,))
+                record["success"] = False
+                _finish_task()
+                yield _run_event("delta", turn, task_id, record["summary"],
+                                 {"run_id": run_id, "success": False})
+                turn += 1
+                yield _run_event("done", turn, task_id, record["summary"],
+                                 {"run_id": run_id, "success": False})
+                return
         try:
             parsed = _protocol.parse_director_reply(
                 director_text.output_text or "")
         except _protocol.PlanError as exc:
             _check_stop()
-            repair = _call(
-                "director", director, director_adapter,
-                [{"role": "user",
-                  "content": _director_prompt(message)},
-                 {"role": "assistant",
-                  "content": director_text.output_text or ""},
-                 {"role": "user",
-                  "content": ("Your previous reply was not valid: %s "
-                              "Return ONLY the corrected JSON object, "
-                              "no prose.") % (exc,)}],
-                None, 0, waits=["plan repair"])
+            try:
+                repair = _call(
+                    "director", director, director_adapter,
+                    [{"role": "user",
+                      "content": _director_prompt(message)},
+                     {"role": "assistant",
+                      "content": director_text.output_text or ""},
+                     {"role": "user",
+                      "content": ("Your previous reply was not valid: %s "
+                                  "Return ONLY the corrected JSON object, "
+                                  "no prose.") % (exc,)}],
+                    None, 0, waits=["plan repair"])
+            except _roles.ModelTimeout as exc_timeout:
+                record["summary"] = (
+                    "run failed: director timed out on repair: %s"
+                    % (exc_timeout,))
+                record["success"] = False
+                _finish_task()
+                yield _run_event("delta", turn, task_id, record["summary"],
+                                 {"run_id": run_id, "success": False})
+                turn += 1
+                yield _run_event("done", turn, task_id, record["summary"],
+                                 {"run_id": run_id, "success": False})
+                return
             try:
                 parsed = _protocol.parse_director_reply(
                     repair.output_text or "")
@@ -837,8 +896,14 @@ def _platform_guidance() -> str:
 
     States sys.platform so planned check commands match this machine.
     On Windows only executables present here are allowed (python -m
-    pytest with a test file, findstr for text search); POSIX shell
+    pytest with a test file, findstr for text search; findstr takes its
+    own flags like /C: /I /N, never a shell string); POSIX shell
     utilities are unavailable, and inline code stays refused.
+    Installing is a tool call, never text: to install packages the
+    worker runs the installer argv (for example ["npm", "install"]),
+    which is the permission ask the app shows the user; the worker
+    never asks for installs in prose and never writes stub
+    lock files or dependency folders to look installed.
     """
     plat = str(sys.platform)
     if plat.startswith("win"):
@@ -864,7 +929,10 @@ def _director_prompt(message: str) -> str:
         "\"check_commands\": [[\"python\", \"-m\", \"pytest\", ...]], "
         "\"depends_on\": []}]}. Paths stay inside the project folder, "
         "file sets are disjoint, argv lists are word lists, depends_on "
-        "names part ids without cycles.%s" % (
+        "names part ids without cycles. When the task needs packages "
+        "installed, plan an install part whose check reads the real "
+        "result (for example a check that runs the installed tool or "
+        "reads the real lock file), never a stub.%s" % (
             message or "(no task text)", _platform_guidance()))
 
 
@@ -1198,7 +1266,13 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
             publish=publish, check_stop=check_stop, live=live,
             call=call, attached=attached, stop_seen=stop_seen,
             lock=lock)
-        turn, attempt_ok = outcome
+        turn, attempt_ok, stop_note = outcome
+        if stop_note is not None:
+            turn += 1
+            yield _run_event(
+                "delta", turn, part_id,
+                "Part %s: %s" % (part_id, stop_note),
+                {"run_id": run_id, "part_id": part_id})
         if not attempt_ok:
             failing.append("agent loop failed")
         checks = _run_checks(
@@ -1211,7 +1285,7 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
         for check in check_rows:
             command = " ".join(
                 str(word) for word in (check.get("argv") or []))
-            if check.get("could_not_start"):
+            if check.get("could_not_start") or check.get("refused"):
                 line = "Check %s $ %s: %s" % (
                     part_id, command, check.get("output_tail"))
             else:
@@ -1243,10 +1317,29 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
                     checks=check_rows,
                     artifact_refs=["%s/%s" % (part_id, path)
                                    for path in spec["files"]],
-                    lock=lock)
+                    lock=lock, stop_seen=stop_seen,
+                    on_waiting=lambda elapsed: _live(
+                        "auditor", str(auditor_spec.get("model", "")),
+                        part_id, attempt,
+                        _roles.waiting_line("auditor", elapsed), "",
+                        {}, None, ["audit:%s" % (part_id,)],
+                        str(auditor_spec.get("provider", ""))))
                 # FXPARALLEL END judge-lock.
             except _roles._BudgetOut as exc:
                 raise _BudgetOut(str(exc)) from None
+            except _roles.ModelTimeout as exc:
+                entry = {
+                    "producer_ref": str(producer_ref),
+                    "audit_ref": str(auditor_ref),
+                    "audit_session": "",
+                    "result": "FAIL",
+                    "reasons": ["auditor timed out: %s" % (exc,)],
+                    "over_cap": False,
+                }
+                _journal_event(
+                    project, "DEVRUN_AUDIT",
+                    "audit %s attempt %d: FAIL (auditor timed out) [%s]"
+                    % (part_id, attempt, auditor_ref))
             # FXPARALLEL BEGIN audits-lock: audit rows append under lock.
             if lock is not None:
                 with lock:
@@ -1308,7 +1401,8 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
             return row["verdict"], turn
         auditor_ok = entry is not None and entry["result"] == "PASS"
         started = [check for check in check_rows
-                   if not check.get("could_not_start")]
+                   if not check.get("could_not_start")
+                   and not check.get("refused")]
         if spec["check_commands"] and not started:
             # No check could start (missing executable): not a red
             # check, no attempt burn; the auditor alone decides now.
@@ -1414,18 +1508,39 @@ def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
                 message: str, publish: Any, check_stop: Any, live: Any,
                 call: Any, attached: Any = None,
                 stop_seen: Any = None, lock: Any = None) -> Any:
-    """Worker turn loop; return (next turn, attempt usable)."""
+    """Worker turn loop; return (next turn, attempt usable, stop line).
+
+    The stop line is set only when one identical failing run call hit
+    three times: the attempt ends with that honest line. A second
+    identical failure tells the worker to change approach in the reply;
+    different (or read-only) calls never count. A timed-out model call
+    feeds a timeout note back to the worker and continues within the
+    turn budget; the attempt is never lost to a stall.
+    """
     from agent_si.runtime.devrun import protocol as _protocol
+    from agent_si.runtime.devrun import roles as _call_roles
 
     worker_spec = _resolve_worker(app, project)
     history: list[dict[str, str]] = [
         {"role": "user", "content": _worker_prompt(
             spec, message, attempt, failing, reasons)}]
+    repeat_counts: dict[str, int] = {}
+
+    def _timed_out_note(exc: BaseException) -> dict[str, str]:
+        return {"role": "user", "content": (
+            "The model call timed out (%s) with no response; continue "
+            "with a smaller next step, restating what you still need."
+            % (exc,))}
+
     for _ in range(max(1, int(turn_cap))):
         check_stop()
-        response = call("worker", worker_spec, adapter, history,
-                        part_id, attempt,
-                        waits=["agent:%s" % (part_id,)])
+        try:
+            response = call("worker", worker_spec, adapter, history,
+                            part_id, attempt,
+                            waits=["agent:%s" % (part_id,)])
+        except _call_roles.ModelTimeout as exc:
+            history.append(_timed_out_note(exc))
+            continue
         try:
             parsed = _protocol.parse_agent_reply(
                 response.output_text or "")
@@ -1437,31 +1552,39 @@ def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
                 "Return ONLY {\"actions\": [...], \"done\": bool}, "
                 "no prose.") % (exc,)})
             check_stop()
-            response = call("worker", worker_spec, adapter, history,
-                            part_id, attempt,
-                            waits=["agent:%s" % (part_id,)])
+            try:
+                response = call("worker", worker_spec, adapter, history,
+                                part_id, attempt,
+                                waits=["agent:%s" % (part_id,)])
+            except _call_roles.ModelTimeout as exc:
+                history.append(_timed_out_note(exc))
+                continue
             try:
                 parsed = _protocol.parse_agent_reply(
                     response.output_text or "")
             except _protocol.AgentError as exc2:
                 row["reason"] = "agent output malformed twice: %s" % (
                     exc2,)
-                return turn, False
-        notes = _apply_actions(
+                return turn, False, None
+        notes, stop_note = _apply_actions(
             record=record, row=row, folder=folder, project=project,
             run_id=run_id, part_id=part_id, attempt=attempt,
             actions=parsed["actions"],
             spec=spec, state=state, procs=procs, live=live,
             worker_spec=worker_spec, check_stop=check_stop,
-            attached=attached, stop_seen=stop_seen, lock=lock)
+            attached=attached, stop_seen=stop_seen,
+            repeat_counts=repeat_counts, lock=lock)
         history.append({"role": "assistant",
                         "content": response.output_text or ""})
         history.append({"role": "user", "content": notes})
+        if stop_note is not None:
+            row["reason"] = stop_note
+            return turn, False, stop_note
         if parsed["done"]:
-            return turn, True
+            return turn, True, None
     row["reason"] = "turn budget reached after %d turns" % (
         max(1, int(turn_cap)))
-    return turn, False
+    return turn, False, None
 
 
 def _worker_prompt(spec: dict, message: str, attempt: int,
@@ -1473,6 +1596,11 @@ def _worker_prompt(spec: dict, message: str, attempt: int,
             "write_file {path, content}, run {argv}. Writes outside "
             "your files are refused. Inspect first, then create "
             "deliverables with write_file. Relative paths only. "
+            "To install packages, run the installer argv (for example "
+            "[\"npm\", \"install\"]): the run action IS the permission "
+            "ask the app shows the user, so never ask for installs in "
+            "text and never write stub lock files or dependency folders "
+            "to look installed. "
             "Return ONLY {\"actions\": [...], \"done\": bool}: done "
             "true only when the part is complete." % (
                 spec["part_id"], attempt, spec["goal"],
@@ -1492,12 +1620,21 @@ def _apply_actions(*, record: Any, row: Any, folder: str, project: str,
                    actions: list, spec: dict, state: Any, procs: list,
                    live: Any, worker_spec: dict, check_stop: Any,
                    attached: Any = None, stop_seen: Any = None,
-                   lock: Any = None) -> str:
-    """Apply one worker turn; every refusal returns as text."""
+                   repeat_counts: dict | None = None,
+                   lock: Any = None) -> Any:
+    """Apply one worker turn; every refusal returns as text.
+
+    Returns (notes, stop_note): notes feed the worker's next turn;
+    stop_note carries the honest line when one identical failing run
+    call hit three times, ending the attempt. Only run actions count
+    (read-only calls stay free); different args never collide.
+    """
     from agent_si.runtime.devrun import actions as _actions
 
     notes: list[str] = []
     refusals: list[str] = []
+    counts = repeat_counts if isinstance(repeat_counts, dict) else {}
+    stop_note: str | None = None
     for action in actions:
         check_stop()
         name = action.get("action")
@@ -1538,13 +1675,30 @@ def _apply_actions(*, record: Any, row: Any, folder: str, project: str,
                         not isinstance(word, str) for word in argv):
                     notes.append("run: refused: argv must be a word list")
                     continue
-                notes.append(_run_agent_command(
+                note = _run_agent_command(
                     record=record, folder=folder, project=project,
                     run_id="%s-%s-a%d-agent" % (
                         run_id, part_id, attempt),
                     argv=[str(word) for word in argv], state=state,
                     procs=procs, attached=attached,
-                    stop_seen=stop_seen, lock=lock))
+                    stop_seen=stop_seen, lock=lock)
+                notes.append(note)
+                if re.search(r": exit 0(\n|$)", note) is None:
+                    key = json.dumps([str(word) for word in argv],
+                                     sort_keys=True)
+                    seen = int(counts.get(key, 0)) + 1
+                    counts[key] = seen
+                    if seen == 2:
+                        notes.append(
+                            "Note: this exact run call failed twice with "
+                            "the same result (%s); change the approach "
+                            "instead of repeating it verbatim."
+                            % (" ".join(str(word) for word in argv),))
+                    elif seen >= 3 and stop_note is None:
+                        stop_note = (
+                            "same failing call 3 times, ending attempt: "
+                            "run %s" % (" ".join(
+                                str(word) for word in argv),))
             else:
                 notes.append("%s: refused: unknown action" % (name,))
         except _actions.ActionRefused as exc:
@@ -1558,7 +1712,8 @@ def _apply_actions(*, record: Any, row: Any, folder: str, project: str,
             refusals.append("%s: %s" % (name, exc))
     if refusals:
         row.setdefault("refusals", []).extend(refusals)
-    return "\n".join(notes) if notes else "(no actions)"
+    text = "\n".join(notes) if notes else "(no actions)"
+    return text, stop_note
 
 
 def _run_agent_command(*, record: Any, folder: str, project: str,
@@ -1698,7 +1853,8 @@ def _run_checks(*, record: Any, spec: dict, row: dict, folder: str,
             rows.append({"argv": [str(word) for word in command],
                          "exit_code": None, "output_file": log_rel,
                          "output_tail": "refused: %s" % (exc,),
-                         "pid": 0})
+                         "pid": 0, "refused": True,
+                         "refusal": str(exc)})
             continue
         proc = spawn.get("proc")
         pid = int(spawn.get("pid") or 0)
@@ -1767,6 +1923,9 @@ def _run_checks(*, record: Any, spec: dict, row: dict, folder: str,
             rows[-1]["output_tail"] = "timeout after %ss\n%s" % (
                 _actions.class_timeout(kind), tail)
     row.setdefault("checks", []).extend(rows)
-    green = bool(rows) and all(
-        check.get("exit_code") == 0 for check in rows)
+    runnable = [
+        check for check in rows
+        if not check.get("could_not_start") and not check.get("refused")]
+    green = bool(runnable) and all(
+        check.get("exit_code") == 0 for check in runnable)
     return turn, rows, green

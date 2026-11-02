@@ -83,6 +83,36 @@ export async function readTelemetryDoc(): Promise<TelemetryDoc> {
   );
 }
 
+// FXDESIGN8: the project-scoped telemetry doc (?project_id=) carries the
+// same legacy totals plus per-model and per-provider aggregates from the
+// store readers. Tokens/cost read "UNAVAILABLE" when unevidenced.
+const TelemetryUsageRowSchema = z.object({
+  calls: z.number().int(),
+  tokens: z.union([z.number(), z.string()]),
+  cost: z.union([z.number(), z.string()]),
+});
+
+const ProjectTelemetrySchema = TelemetryDocSchema.extend({
+  models: z
+    .array(TelemetryUsageRowSchema.extend({ model: z.string() }))
+    .optional(),
+  providers: z
+    .array(TelemetryUsageRowSchema.extend({ provider: z.string() }))
+    .optional(),
+});
+
+export type ProjectTelemetry = z.infer<typeof ProjectTelemetrySchema>;
+
+export async function readProjectTelemetry(
+  projectId: string,
+): Promise<ProjectTelemetry> {
+  return requestJson(
+    `/api/v1/analytics/telemetry?project_id=${encodeURIComponent(projectId)}`,
+    { method: "GET", kind: "read" },
+    ProjectTelemetrySchema,
+  );
+}
+
 // M-R-UX-9: the knowledge base refresh proposal over the served
 // kb refresh route (src/agent_si/backend/app.py:1579).
 export const KbProposalDocSchema = z.object({

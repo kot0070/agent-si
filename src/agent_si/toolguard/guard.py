@@ -131,6 +131,12 @@ _WIDENING_FLAG_PREFIXES = (
 
 _SHELL_FRAGMENTS = (";", "|", "&", "`", "$", "\n", "\r", "\0")
 
+#: Extra metacharacters refused on installer-bound argv only (cmd.exe
+#: re-parses ``%*`` inside a ``.cmd`` shim, so ``> < ^ %`` must never
+#: reach an installer even with approval). Plain data words keep the
+#: classic set: markup like ``<b>`` round-trips inert elsewhere.
+_CMD_FRAGMENTS = (">", "<", "^", "%")
+
 _INTERNAL_NAMES = frozenset(
     {
         "localhost",
@@ -210,6 +216,16 @@ def _has_shell_fragment(value: str) -> bool:
     return any(fragment in value for fragment in _SHELL_FRAGMENTS)
 
 
+def _has_cmd_fragment(value: str) -> bool:
+    """True when a word carries a cmd.exe metacharacter.
+
+    A child that is (or resolves to) a Windows ``.cmd`` shim re-parses
+    its ``%*`` arguments through cmd.exe, so ``> < ^ %`` must never
+    reach an installer-bound argv, approval or not.
+    """
+    return any(fragment in value for fragment in _CMD_FRAGMENTS)
+
+
 def _url_host(value: str) -> str | None:
     """Extract the host from a URL value; None when it has none."""
     try:
@@ -279,6 +295,49 @@ def _is_internal_host(host: str) -> bool:
         or address.is_private
         or address.is_unspecified
     )
+
+
+#: findstr read-only search flags: bare display/search-mode words
+#: plus the /C: literal (a search string, never a path). /S (recursive)
+#: stays out, so a search can never widen past the jailed operands.
+_FINDSTR_BARE_FLAGS = frozenset({
+    "/i", "/n", "/b", "/e", "/l", "/r", "/v", "/x", "/o", "/p",
+})
+
+
+def _is_findstr_search_flag(value: str) -> bool:
+    """True for a findstr-owned read-only flag (never a path operand).
+
+    ``/C:<text>`` carries the literal search string (the ``C:`` head is
+    what the path scan misreads as a drive-absolute path); the bare
+    flags only tune matching or display. Anything else (``/S``, ``/G:``,
+    ``/F:``, ``/D:``, ``/A:``, ``/OFFLINE``) keeps the normal path
+    treatment. Matching is case-insensitive, like findstr itself.
+    """
+    text = value.strip()
+    if text[:3].upper() == "/C:":
+        return True
+    return text.lower() in _FINDSTR_BARE_FLAGS
+
+
+def _install_approved(auth: Any, words: list[str]) -> bool:
+    """True when the caller carries an explicit install approval.
+
+    The approval rides the dispatch auth as ``install_approved`` plus
+    the exact ``install_argv`` it was granted for (set by the spawn
+    path only after the user allowed that installer in the decision
+    ledger). Name, shell-fragment, widening-flag and path checks above
+    still apply; only the installer-name denial below is lifted, for
+    these exact words only.
+    """
+    if not isinstance(auth, dict):
+        return False
+    if auth.get("install_approved") is not True:
+        return False
+    approved = auth.get("install_argv")
+    if not isinstance(approved, list):
+        return False
+    return [str(word) for word in approved] == [str(word) for word in words]
 
 
 def _deny(reason: str, action_class: Any, tool_label: str) -> dict[str, Any]:
@@ -381,6 +440,8 @@ def evaluate(
         for value in values:
             if "://" in value or value.startswith("-") or not _looks_like_path(value):
                 continue
+            if name == "findstr" and _is_findstr_search_flag(value):
+                continue
             if not _under_root(_canon(value), root):
                 return _deny(
                     "refused: path outside the workspace root: %s" % (value,),
@@ -388,12 +449,21 @@ def evaluate(
                     tool,
                 )
     if name in _INSTALLER_COMMANDS:
-        return _deny(
-            "refused: installer and fetch commands are disabled "
-            "(auto-install off), unknown tool %r" % (tool,),
-            action_class,
-            tool,
-        )
+        for item in words:
+            if _has_cmd_fragment(item):
+                return _deny(
+                    "refused: cmd metacharacters in installer argv "
+                    "element: %r" % (item,),
+                    action_class,
+                    words[0],
+                )
+        if not _install_approved(auth, words):
+            return _deny(
+                "refused: installer and fetch commands are disabled "
+                "(auto-install off), unknown tool %r" % (tool,),
+                action_class,
+                tool,
+            )
     generated = bool(auth.get("generated", False)) if isinstance(auth, dict) else False
     check_permission = _sibling("permissions").check_permission
     verdict = check_permission(action_class, auth, generated)

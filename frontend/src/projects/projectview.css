@@ -2,12 +2,14 @@
    selected state, and real fact rows with a gap between label and value.
    Layout only; every string stays in the locale tables. */
 
-/* FXVIEWS3: the tab row wraps inside the main column (the D6 shell gives
-   it less room); tabs never slide under the inspector rail. */
+/* FXVIEWS3 rework + V7: the tab row never wraps (wrap made 3 rows in the
+   narrow main column); it stays ONE horizontal line and scrolls, so tabs
+   never slide under the inspector rail. */
 .fxpv-tabs {
   display: flex;
   flex-direction: row;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
   gap: 0.25rem;
   padding: 0.25rem 0;
 }
