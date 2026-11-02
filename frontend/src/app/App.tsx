@@ -56,6 +56,11 @@ import { Inspector } from "../shell/Inspector";
 import { ClosingGuard } from "../shell/ClosingGuard";
 import { useLivePumpActive } from "../chat/index";
 import type { ProjectViewName } from "../projects/ProjectView";
+import {
+  PROJECT_VIEWS,
+  projectMenuTestId,
+  projectViewTitleKey,
+} from "../projects/projectsApi";
 import { LocaleCoverage } from "../k07next/LocaleCoverage";
 import { TelemetryThemes } from "../k07next/TelemetryThemes";
 import { BenchGatewayCheck } from "../k07next2/BenchGatewayCheck";
@@ -490,10 +495,16 @@ function LocalAiRoute(props: { projectId: string }): ReactElement {
 // FXCHATHIST Part 2: the project Chat tab. Renders the same ChatArea as
 // the root chat route, bound to the URL project; selects it into the
 // current project so the shell (TopBar, Sidebar, Inspector) follows.
+// FXC2 (P6-F9): the chat landing is a project page, so it renders the
+// same project tabs nav as ProjectView (chat first, then PROJECT_VIEWS
+// which already ends with `tests`). Without it the real App page after
+// openProject has no `project-menu-tests` and F01 cannot reach TestsTab.
 function ChatTabRoute(): ReactElement {
   const params = useParams();
   const current = useCurrentProject();
   const projectId = params.projectId;
+  // Unconditional: hooks never run behind the project guard below.
+  const onSelect = useProjectSelect(projectId ?? "");
   useEffect(() => {
     if (projectId !== undefined && projectId !== current.projectId) {
       current.select(projectId);
@@ -502,7 +513,48 @@ function ChatTabRoute(): ReactElement {
   if (projectId === undefined) {
     return <ProjectsPageView />;
   }
-  return <ChatAreaView projectId={projectId} />;
+  return (
+    <div>
+      <nav aria-label={t("projectView.tabsLabel")} className="fxpv-tabs">
+        <button
+          type="button"
+          data-testid="project-chat-tab"
+          className="fxpv-tab fxpv-tab-selected"
+          aria-selected="true"
+          onClick={() => {
+            onSelect("chat" as ProjectViewName);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              onSelect("chat" as ProjectViewName);
+            }
+          }}
+        >
+          {t("shell.sidebar.chat")}
+        </button>
+        {PROJECT_VIEWS.map((name) => (
+          <button
+            key={name}
+            type="button"
+            data-testid={projectMenuTestId(name)}
+            aria-selected="false"
+            className="fxpv-tab"
+            onClick={() => {
+              onSelect(name);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                onSelect(name);
+              }
+            }}
+          >
+            {t(projectViewTitleKey(name))}
+          </button>
+        ))}
+      </nav>
+      <ChatAreaView projectId={projectId} />
+    </div>
+  );
 }
 
 function ProjectSubview(props: { view: ProjectViewName }): ReactElement {
