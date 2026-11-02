@@ -274,11 +274,14 @@ def resolve_model(provider_id: str, model: str) -> ModelContracts:
     """
     if not isinstance(model, str) or not model:
         raise ValueError("model must be a non-empty string")
+    if not isinstance(provider_id, str) or not provider_id.strip():
+        raise ValueError("provider_id must be a non-empty string")
+    canonical = provider_id.strip().lower()
     try:
-        descriptor = _legs.leg_descriptor(provider_id)
+        descriptor = _legs.leg_descriptor(canonical)
     except AdapterConfigError as exc:
         raise ValueError(str(exc)) from None
-    binding = _bound_view(provider_id)
+    binding = _bound_view(canonical)
     fields: dict[str, Any] = {
         "capabilities": dict(descriptor["capabilities"]),
         "chat_path": descriptor["chat_path"],
@@ -289,10 +292,10 @@ def resolve_model(provider_id: str, model: str) -> ModelContracts:
         "secret_id": binding["secret_id"],
         "instance_id": binding["instance_id"],
         "evidence_ref": binding["evidence_ref"],
-        "source": "server-binding:%s" % (provider_id,),
+        "source": "server-binding:%s" % (canonical,),
         "retrieved_at": _utcnow_iso(),
     }
-    return {"provider_id": provider_id, "model_id": model, "fields": fields}
+    return {"provider_id": canonical, "model_id": model, "fields": fields}
 
 
 def check_provider_health(provider_id, model, streaming=False) -> dict:

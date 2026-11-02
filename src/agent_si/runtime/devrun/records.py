@@ -231,6 +231,7 @@ def to_runs_row(record: dict[str, Any]) -> dict[str, Any]:
         "task": record.get("task"),
         "start": record.get("started_at") or UNKNOWN,
         "end": record.get("ended_at") or UNKNOWN,
+        "interrupted": bool(record.get("interrupted", False)),
         "success": bool(record.get("success")),
         "stopped": bool(record.get("stopped")),
         "summary": record.get("summary") or "",

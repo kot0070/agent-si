@@ -7,6 +7,8 @@ an SdkTurnOutcome. Refs only cross this boundary, never inline secrets.
 
 from __future__ import annotations
 
+import random
+import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
@@ -48,6 +50,95 @@ def _output_text(outcome: Mapping[str, Any]) -> str:
     return raw if isinstance(raw, str) else str(raw)
 
 
+#: Hard cap on total attempts per turn (429 must never burn the budget
+#: at once: backoff plus jitter separates the tries).
+MAX_ATTEMPTS = 3
+
+#: Retry-After is honoured up to this many seconds (never longer).
+MAX_RETRY_AFTER_S = 30.0
+
+#: Base backoff between attempts (doubled per attempt, plus jitter).
+BACKOFF_BASE_S = 0.5
+
+
+def _retry_after_s(outcome: Mapping[str, Any]) -> float | None:
+    """Served Retry-After delay in seconds, or None when absent/unusable."""
+    for key in ("retry_after", "retry_after_s", "retry-after"):
+        try:
+            raw = outcome.get(key)
+        except Exception:
+            continue
+        if raw is None:
+            continue
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if value >= 0:
+            return value
+    return None
+
+
+def _backoff_delay(attempt: int, retry_after: float | None,
+                   jitter: Callable[[int], float] | None) -> float:
+    """Delay before the next attempt: served Retry-After wins (capped).
+
+    Otherwise exponential backoff off the attempt number plus jitter,
+    capped at MAX_RETRY_AFTER_S. Jitter defaults to a uniform draw up
+    to the backoff value; tests inject their own jitter (or zero).
+    """
+    if retry_after is not None:
+        return min(MAX_RETRY_AFTER_S, max(0.0, retry_after))
+    backoff = min(MAX_RETRY_AFTER_S,
+                  BACKOFF_BASE_S * (2.0 ** max(0, int(attempt) - 1)))
+    if jitter is not None:
+        try:
+            extra = float(jitter(int(attempt)))
+        except Exception:
+            extra = 0.0
+    else:
+        extra = random.uniform(0.0, backoff)
+    return min(MAX_RETRY_AFTER_S, backoff + max(0.0, extra))
+
+
+def _wait(delay: float, stop_event: Any,
+          sleep: Callable[[float], None] | None) -> bool:
+    """Wait out one backoff delay; return True when a stop was seen.
+
+    A stop event waits on the event itself (Stop all never waits out
+    a sleep); otherwise the injected sleep runs (tests), else
+    time.sleep. Non-positive delays never sleep.
+    """
+    if delay <= 0:
+        if stop_event is not None:
+            try:
+                return bool(stop_event.is_set())
+            except Exception:
+                return False
+        return False
+    if stop_event is not None:
+        wait = getattr(stop_event, "wait", None)
+        if callable(wait):
+            try:
+                wait(float(delay))
+            except Exception:
+                pass
+            try:
+                return bool(stop_event.is_set())
+            except Exception:
+                return False
+    if sleep is not None:
+        sleep(float(delay))
+    else:
+        time.sleep(float(delay))
+    if stop_event is not None:
+        try:
+            return bool(stop_event.is_set())
+        except Exception:
+            return False
+    return False
+
+
 # Keyword-only entry; mirrors the adapter run entry kept signature-identical (sdk_adapter.py:267).
 def run_sdk_turn(
     *,
@@ -58,6 +149,10 @@ def run_sdk_turn(
     turn_budget: int,
     events: Optional[List[Dict[str, Any]]] = None,
     sdk_call: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
+    stop_event: Any = None,
+    sleep: Callable[[float], None] | None = None,
+    jitter: Callable[[int], float] | None = None,
+    max_attempts: int = MAX_ATTEMPTS,
 ) -> SdkTurnOutcome:
     """Run one SDK turn; return the outcome with the attempts made.
 
@@ -65,7 +160,12 @@ def run_sdk_turn(
     this function never rebuilds SDK client configuration. Each attempt
     calls sdk_call with one mapping; a provided events list gains one
     record per attempt. A truthy ok outcome stops the loop; attempts past
-    turn_budget stop it as failed; no other stop condition exists.
+    the bound stop it as failed; no other stop condition exists. Failed
+    attempts back off (served Retry-After up to 30 s, else exponential
+    backoff plus jitter, at most 3 attempts total); a stop seen between
+    attempts ends the turn as failed without another call. Refs only
+    cross this boundary; guard logic stays outside this module
+    (0C_ARCHITECTURE.md:92).
     """
     # Structural read off run_config; the client config stays pinned at max_retries 0 and is never rebuilt (sdk_adapter.py:118).
     provider = run_config.selected_provider
@@ -127,8 +227,29 @@ def run_sdk_turn(
                 error="",
                 attempts_made=attempt,
             )
-        # Only two exits: truthy ok above, or attempts past the budget here; client retries stay refused (sdk_adapter.py:240).
-        if attempt > turn_budget:
+        # Attempts past the bound stop as failed; client retries stay
+        # refused (sdk_adapter.py:240). The bound is the routing retry
+        # budget capped at MAX_ATTEMPTS: a 429 never burns every try
+        # at once, and the same provider+model rides every attempt.
+        try:
+            bound = int(turn_budget) + 1
+        except (TypeError, ValueError):
+            bound = 1
+        try:
+            cap = int(max_attempts)
+        except (TypeError, ValueError):
+            cap = MAX_ATTEMPTS
+        bound = max(1, min(bound, max(1, cap), MAX_ATTEMPTS))
+        if attempt >= bound:
             return SdkTurnOutcome(
                 ok=False, output_text="", error=_error_text(outcome), attempts_made=attempt
+            )
+        # Back off before the next attempt: served Retry-After (capped
+        # at 30 s) wins, else exponential backoff plus jitter. A stop
+        # seen across the wait ends the turn without another call.
+        delay = _backoff_delay(attempt, _retry_after_s(outcome), jitter)
+        if _wait(delay, stop_event, sleep):
+            return SdkTurnOutcome(
+                ok=False, output_text="", error="stopped",
+                attempts_made=attempt,
             )
