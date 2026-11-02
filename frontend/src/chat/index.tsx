@@ -42,12 +42,14 @@ import {
   enqueueChatPrompt,
   getChatState,
   patchChatMessage,
+  prependChatMessages,
   setChatHealth,
   setChatOnline,
   setChatRunner,
   subscribeChat,
 } from "./chatStore";
 import type { ProjectChatState } from "./chatStore";
+import type { NewChatMessage } from "./chatStore";
 import {
   CHAT_FLOOD_WINDOW_MS,
   compactPrompt,
@@ -127,7 +129,8 @@ function useSliceState(key: string): ProjectChatState {
 const mountedSlices = new Set<string>();
 
 // Served history load runs once per slice; the served route is the only
-// durability across sessions (no browser persistent storage in chat files).
+// turn durability across sessions. The pending permission card mirrors in
+// sessionStorage for the live session only (never turn storage).
 const historyLoading = new Set<string>();
 const historyLoaded = new Set<string>();
 
@@ -158,6 +161,9 @@ const lastSentBySlice = new Map<string, string>();
 // Send timestamps per slice (flood window survives remount).
 const sendTimesBySlice = new Map<string, number[]>();
 
+// Opening run id per slice (permission Allow replays the same run).
+const runIdBySlice = new Map<string, string>();
+
 // Single blocking error delivery: a mounted ChatArea registers its
 // setters; a completion while unmounted stashes the error for the next
 // mount, so the single error card (S5) is never lost nor doubled.
@@ -169,6 +175,73 @@ interface SliceUI {
 const sliceUI = new Map<string, SliceUI>();
 const blockingStash = new Map<string, BlockingError>();
 const askStash = new Map<string, InstallPermissionAsk>();
+
+// FXHARD1: the pending card may mirror in sessionStorage for the live
+// session only (the served store is the server: the origin port changes
+// per launch, so localStorage is never a store here). Leaving the page
+// restores from the stash or the mirror; a restart shows the served
+// running turn as interrupted with a resend instead.
+function askMirrorKey(key: string): string {
+  return `fxchat.ask.${key}`;
+}
+
+function readAskMirror(key: string): InstallPermissionAsk | null {
+  try {
+    const raw = window.sessionStorage.getItem(askMirrorKey(key));
+    if (raw === null) {
+      return null;
+    }
+    const parsed = JSON.parse(raw) as {
+      toolName?: unknown;
+      messageId?: unknown;
+    };
+    if (
+      typeof parsed.toolName === "string" &&
+      parsed.toolName !== "" &&
+      typeof parsed.messageId === "string" &&
+      parsed.messageId !== ""
+    ) {
+      return { toolName: parsed.toolName, messageId: parsed.messageId };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function writeAskMirror(key: string, ask: InstallPermissionAsk | null): void {
+  try {
+    if (ask === null) {
+      window.sessionStorage.removeItem(askMirrorKey(key));
+      return;
+    }
+    window.sessionStorage.setItem(
+      askMirrorKey(key),
+      JSON.stringify({ toolName: ask.toolName, messageId: ask.messageId }),
+    );
+  } catch {
+    return;
+  }
+}
+
+function stashAsk(key: string, ask: InstallPermissionAsk): void {
+  askStash.set(key, ask);
+  writeAskMirror(key, ask);
+}
+
+function consumeAskStash(key: string): InstallPermissionAsk | null {
+  const stashed = askStash.get(key);
+  if (stashed !== undefined) {
+    askStash.delete(key);
+    return stashed;
+  }
+  return readAskMirror(key);
+}
+
+function clearAskStash(key: string): void {
+  askStash.delete(key);
+  writeAskMirror(key, null);
+}
 
 function consumeBlockingStash(key: string): BlockingError | null {
   const stashed = blockingStash.get(key);
@@ -199,7 +272,7 @@ function emitAsk(key: string, ask: InstallPermissionAsk): void {
     ui.onAsk(ask);
     return;
   }
-  askStash.set(key, ask);
+  stashAsk(key, ask);
 }
 
 // H4 quiet dot: slices whose run finished while no ChatArea showed them.
@@ -266,53 +339,154 @@ const ChatHistoryTurnSchema = z.object({
   user_text: z.string(),
   assistant_text: z.string(),
   time: z.string(),
+  id: z.string().optional().default(""),
+  status: z.string().optional().default("ok"),
+  run_id: z.string().optional().default(""),
+  error_code: z.string().optional().default(""),
 });
 
 const ChatHistoryResponseSchema = z.object({
   turns: z.array(ChatHistoryTurnSchema),
+  next_before: z.string().nullable().optional(),
+  total: z.number().optional(),
 });
 
-async function loadHistoryOnce(key: string, projectId: string): Promise<void> {
-  if (historyLoaded.has(key) || historyLoading.has(key)) {
-    return;
-  }
-  historyLoading.add(key);
-  try {
-    const body = await requestJson(
-      historyPath(projectId),
-      { method: "GET", kind: "read" },
-      ChatHistoryResponseSchema,
-    );
-    // Merge, never duplicate: skip turns whose user text the slice holds.
-    const known = new Set(
-      getChatState(key)
-        .messages.filter((message) => message.role === "user")
-        .map((message) => message.text),
-    );
-    for (const turn of body.turns) {
-      if (known.has(turn.user_text)) {
-        continue;
-      }
-      known.add(turn.user_text);
-      const parsed = Date.parse(turn.time);
-      const at = Number.isNaN(parsed) ? Date.now() : parsed;
-      appendChatMessage(key, {
+type ChatHistoryPage = z.infer<typeof ChatHistoryResponseSchema>;
+
+// Earlier-page cursor per slice (None after the oldest page loads).
+const historyCursors = new Map<string, string | null>();
+
+async function fetchHistoryPage(
+  projectId: string,
+  before?: string,
+): Promise<ChatHistoryPage> {
+  const path =
+    before !== undefined && before !== ""
+      ? `${historyPath(projectId)}&before=${encodeURIComponent(before)}`
+      : historyPath(projectId);
+  return requestJson(path, { method: "GET", kind: "read" },
+    ChatHistoryResponseSchema);
+}
+
+/** FXHARD1: interrupted-restart line (never Working: runner stays idle). */
+function interruptedText(stored: string): string {
+  const note = pt(
+    "chat.stream.interrupted",
+    "Interrupted when the app closed",
+  );
+  return stored !== "" ? `${stored}\n${note}` : note;
+}
+
+// Merge one served page into the slice, oldest first. Merge key is the
+// server turn id only: identical user texts ("hello" twice) never drop
+// nor duplicate. A running turn whose stream is gone renders as
+// interrupted with its stored text plus a resend; failed and stopped
+// turns restore the error card.
+function buildHistoryBatch(
+  key: string,
+  page: ChatHistoryPage,
+): { batch: NewChatMessage[]; sawTerminal: boolean } {
+  const known = new Set(
+    getChatState(key).messages.map((message) => message.id),
+  );
+  const batch: NewChatMessage[] = [];
+  let sawTerminal = false;
+  for (const turn of page.turns) {
+    const tid =
+      turn.id !== "" ? turn.id : `${turn.time}::${turn.user_text}`;
+    const userId = `hist-user-${tid}`;
+    const assistantId = `hist-asst-${tid}`;
+    if (known.has(userId) || known.has(assistantId)) {
+      continue;
+    }
+    known.add(userId);
+    known.add(assistantId);
+    const parsed = Date.parse(turn.time);
+    const at = Number.isNaN(parsed) ? Date.now() : parsed;
+    if (turn.status === "running") {
+      batch.push({
+        id: userId,
         role: "user",
         text: turn.user_text,
         at,
         final: true,
       });
-      if (turn.assistant_text !== "") {
-        appendChatMessage(key, {
-          role: "assistant",
-          text: turn.assistant_text,
-          at,
-          final: true,
-        });
-      }
+      batch.push({
+        id: assistantId,
+        role: "assistant",
+        text: interruptedText(turn.assistant_text),
+        at,
+        final: true,
+        resendPrompt: turn.user_text,
+      });
+      continue;
     }
+    batch.push({
+      id: userId,
+      role: "user",
+      text: turn.user_text,
+      at,
+      final: true,
+    });
+    if (turn.assistant_text !== "") {
+      batch.push({
+        id: assistantId,
+        role: "assistant",
+        text: turn.assistant_text,
+        at,
+        final: true,
+      });
+    }
+    if (turn.status === "failed" || turn.status === "stopped") {
+      sawTerminal = true;
+      emitBlocking(key, {
+        errorKey: apiErrorLocaleKey(turn.error_code || "UNKNOWN"),
+        code: turn.error_code !== "" ? turn.error_code : "UNKNOWN",
+      });
+    }
+  }
+  return { batch, sawTerminal };
+}
+
+function applyHistoryBatch(
+  key: string,
+  page: ChatHistoryPage,
+  mode: "append" | "prepend",
+): void {
+  const { batch, sawTerminal } = buildHistoryBatch(key, page);
+  if (mode === "prepend") {
+    prependChatMessages(key, batch);
+  } else {
+    for (const message of batch) {
+      appendChatMessage(key, message);
+    }
+  }
+  if (sawTerminal) {
+    setChatHealth(key, "degraded");
+  }
+  if (page.next_before !== undefined && page.next_before !== null) {
+    historyCursors.set(key, page.next_before);
+  } else {
+    historyCursors.delete(key);
+  }
+}
+
+function mergeHistoryPage(key: string, page: ChatHistoryPage): void {
+  applyHistoryBatch(key, page, "append");
+}
+
+async function loadHistoryOnce(key: string, projectId: string): Promise<string | null> {
+  if (historyLoaded.has(key) || historyLoading.has(key)) {
+    return historyCursors.get(key) ?? null;
+  }
+  historyLoading.add(key);
+  try {
+    const page = await fetchHistoryPage(projectId);
+    mergeHistoryPage(key, page);
+    return historyCursors.get(key) ?? null;
   } catch {
     // History is best effort: a failed load never breaks the composer.
+    return null;
   } finally {
     historyLoading.delete(key);
     historyLoaded.add(key);
@@ -320,10 +494,13 @@ async function loadHistoryOnce(key: string, projectId: string): Promise<void> {
 }
 
 // Best-effort turn persist (USER write). A failed POST never surfaces.
+// The running write opens the run (upsert key: run id); the terminal
+// write (ok / failed / stopped) closes the same turn server-side.
 async function recordTurnBestEffort(
   projectId: string,
   userText: string,
   assistantText: string,
+  extra?: { status?: string; run_id?: string; error_code?: string },
 ): Promise<void> {
   try {
     await requestResponse(CHAT_HISTORY_ROUTE, {
@@ -333,6 +510,9 @@ async function recordTurnBestEffort(
         project_id: projectId,
         user_text: userText,
         assistant_text: assistantText,
+        status: extra?.status ?? "ok",
+        run_id: extra?.run_id ?? "",
+        error_code: extra?.error_code ?? "",
       },
     });
   } catch {
@@ -407,10 +587,15 @@ async function readBoundModels(projectId: string): Promise<unknown[] | null> {
   }
 }
 
+function runErrorCode(error: unknown): string {
+  return error instanceof ApiError ? error.code : "UNKNOWN";
+}
+
 function handleRunError(
   key: string,
   assistantId: string,
   error: unknown,
+  record?: { projectId: string; prompt: string; runId: string },
 ): void {
   if (isInstallPermissionAsk(error)) {
     // FXASK2: the run is held for install permission (served
@@ -444,6 +629,16 @@ function handleRunError(
   const current = getChatState(key).messages.find(
     (message) => message.id === assistantId,
   );
+  if (record !== undefined) {
+    // Failed runs are stored too (holds are not terminal: Allow replays
+    // the same run id, so the held running turn upserts into one turn).
+    const partial = current?.text ?? "";
+    void recordTurnBestEffort(record.projectId, record.prompt, partial, {
+      status: "failed",
+      run_id: record.runId,
+      error_code: runErrorCode(error),
+    });
+  }
   if (current !== undefined && current.text === "") {
     // Failed before any token: prune the empty placeholder (render
     // filters pruned ids, the store stays append/patch only).
@@ -466,11 +661,20 @@ function handleRunError(
  * Module pump: starts one streamChat driver per slice and folds every
  * chunk plus the terminal verdict into the store. Survives unmount (H1);
  * a second call while the slice streams is a no-op (double-mount guard).
+ * FXHARD1: the run start stores a running turn (user text + run id);
+ * every terminal event closes it (ok / failed / stopped), so the UI
+ * always leaves Working and restarts show interrupt, never Working.
+ * Replays (permission Allow/Deny) reuse the opening run id and skip
+ * the user copy: one visible user turn per prompt.
  */
 function startChatRun(
   client: ApiClient,
   projectId: string,
   prompt: string,
+  opts?: {
+    skipUserAppend?: boolean;
+    runId?: string;
+  },
 ): void {
   const key = sliceKeyFor(client, projectId);
   const text = prompt.trim();
@@ -483,14 +687,29 @@ function startChatRun(
   clearSliceBlocking(key);
   lastSentBySlice.set(key, text);
   const at = Date.now();
-  appendChatMessage(key, { role: "user", text, at, final: true });
-  const assistant = appendChatMessage(key, {
+  // Replays (permission Allow/Deny) keep the opening run id so the
+  // terminal write upserts the held running turn: one stored turn per run.
+  const runId = opts?.runId ?? nextStreamId();
+  runIdBySlice.set(key, runId);
+  if (opts?.skipUserAppend !== true) {
+    appendChatMessage(key, { role: "user", text, at, final: true });
+  }
+  // Replays stream the answer into a fresh bubble; the held message
+  // keeps only the permission receipt (no user + assistant copies, one
+  // visible user turn per prompt).
+  const assistantId = appendChatMessage(key, {
     role: "assistant",
     text: "",
     at,
     final: false,
+  }).id;
+  // The running turn opens the run; the terminal write below upserts
+  // the same run id, so each run leaves exactly one stored turn.
+  void recordTurnBestEffort(projectId, text, "", {
+    status: "running",
+    run_id: runId,
   });
-  const streamId = nextStreamId();
+  const streamId = runId;
   setChatRunner(key, { streamId, streaming: true });
   let runner: ChatRunner;
   try {
@@ -500,10 +719,10 @@ function startChatRun(
       {
         onChunkText: (delta) => {
           const current = getChatState(key).messages.find(
-            (message) => message.id === assistant.id,
+            (message) => message.id === assistantId,
           );
           if (current !== undefined) {
-            patchChatMessage(key, assistant.id, {
+            patchChatMessage(key, assistantId, {
               text: current.text + delta,
             });
           }
@@ -513,7 +732,11 @@ function startChatRun(
     );
   } catch (error) {
     setChatRunner(key, { streamId: null, streaming: false });
-    handleRunError(key, assistant.id, error);
+    handleRunError(key, assistantId, error, {
+      projectId,
+      prompt: text,
+      runId,
+    });
     if (!mountedSlices.has(key)) {
       flagChatUnseen(key);
     }
@@ -523,25 +746,47 @@ function startChatRun(
     cancelled: false,
     runner,
     prompt: text,
-    assistantId: assistant.id,
+    assistantId,
   });
   runner.done.then(
     ({ aborted, executed }) => {
       pumps.delete(key);
       setChatRunner(key, { streamId: null, streaming: false });
-      if (!aborted) {
-        setChatHealth(key, "ok");
-      }
-      patchChatMessage(key, assistant.id, { final: !aborted });
-      if (executed === true) {
-        engineRunMessages.add(assistant.id);
-      }
       const answer =
         getChatState(key).messages.find(
-          (message) => message.id === assistant.id,
+          (message) => message.id === assistantId,
         )?.text ?? "";
-      if (!aborted && answer !== "") {
-        void recordTurnBestEffort(projectId, text, answer);
+      if (aborted) {
+        // Stop closes the run as stopped: stored, never Working.
+        patchChatMessage(key, assistantId, { final: false });
+        void recordTurnBestEffort(projectId, text, answer, {
+          status: "stopped",
+          run_id: runId,
+          error_code: "STOPPED",
+        });
+      } else if (answer === "") {
+        // Dropped stream (no terminal text): a clear failed line.
+        patchChatMessage(key, assistantId, { final: false });
+        setChatHealth(key, "degraded");
+        void recordTurnBestEffort(projectId, text, answer, {
+          status: "failed",
+          run_id: runId,
+          error_code: "EMPTY_RESPONSE",
+        });
+        emitBlocking(key, {
+          errorKey: apiErrorLocaleKey("UNKNOWN"),
+          code: "UNKNOWN",
+        });
+      } else {
+        setChatHealth(key, "ok");
+        patchChatMessage(key, assistantId, { final: true });
+        if (executed === true) {
+          engineRunMessages.add(assistantId);
+        }
+        void recordTurnBestEffort(projectId, text, answer, {
+          status: "ok",
+          run_id: runId,
+        });
       }
       if (!mountedSlices.has(key)) {
         flagChatUnseen(key);
@@ -550,7 +795,11 @@ function startChatRun(
     (error: unknown) => {
       pumps.delete(key);
       setChatRunner(key, { streamId: null, streaming: false });
-      handleRunError(key, assistant.id, error);
+      handleRunError(key, assistantId, error, {
+        projectId,
+        prompt: text,
+        runId,
+      });
       if (!mountedSlices.has(key)) {
         flagChatUnseen(key);
       }
@@ -585,6 +834,10 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
   const [pendingAsk, setPendingAsk] = useState<InstallPermissionAsk | null>(
     null,
   );
+  // FXHARD1: earlier-page cursor from the served history page (null at
+  // the oldest turn) plus the load-earlier busy flag.
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [earlierBusy, setEarlierBusy] = useState(false);
   const pendingAskRef = useRef<InstallPermissionAsk | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   // FXRC1FIX P3: the message list owns the scroll inside the chat card;
@@ -626,9 +879,8 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
     }
     setPendingAsk(null);
     pendingAskRef.current = null;
-    const stashedAsk = askStash.get(key);
-    if (stashedAsk !== undefined) {
-      askStash.delete(key);
+    const stashedAsk = consumeAskStash(key);
+    if (stashedAsk !== null) {
       pendingAskRef.current = stashedAsk;
       setPendingAsk(stashedAsk);
     }
@@ -643,9 +895,16 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
     };
     sliceUI.set(key, ui);
     setChatOnline(key, readOnline());
-    void loadHistoryOnce(key, props.projectId);
+    void loadHistoryOnce(key, props.projectId).then((next) => {
+      setCursor(next);
+    });
     return () => {
       mountedSlices.delete(key);
+      // Leaving the page keeps the pending card: stash (plus the
+      // live-session mirror) so the return restores the same dialog.
+      if (pendingAskRef.current !== null) {
+        stashAsk(key, pendingAskRef.current);
+      }
       if (sliceUI.get(key) === ui) {
         sliceUI.delete(key);
       }
@@ -832,8 +1091,24 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
     handleSendPrompt(prompt);
   };
 
-  const handleCompactResend = (): void => {
-    const prompt = lastSentBySlice.get(key) ?? null;
+  // FXHARD1: earlier history page (prepends, never disturbs the pump).
+  async function handleLoadEarlier(): Promise<void> {
+    if (cursor === null || earlierBusy) {
+      return;
+    }
+    setEarlierBusy(true);
+    try {
+      const page = await fetchHistoryPage(props.projectId, cursor);
+      applyHistoryBatch(key, page, "prepend");
+      setCursor(historyCursors.get(key) ?? null);
+    } catch {
+      return;
+    } finally {
+      setEarlierBusy(false);
+    }
+  }
+
+  const handleCompactResend = (): void => {    const prompt = lastSentBySlice.get(key) ?? null;
     if (prompt === null || streaming) {
       return;
     }
@@ -857,6 +1132,7 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
     }
     pendingAskRef.current = null;
     setPendingAsk(null);
+    clearAskStash(key);
     if (isInstallHoldTool(ask.toolName)) {
       // FXASKB B2: record the decision with the session token, then
       // resend the same prompt automatically; the stored answer lets
@@ -894,8 +1170,16 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
             });
           }
           const prompt = lastSentBySlice.get(key) ?? null;
+          // Replay once, one visible user turn: the decision is recorded,
+          // then the same prompt resends without the user copy (the held
+          // message keeps only the receipt; the terminal write upserts
+          // the opening run id into one stored turn).
           if (prompt !== null) {
-            startChatRun(client, props.projectId, prompt);
+            const replayRunId = runIdBySlice.get(key);
+            startChatRun(client, props.projectId, prompt, {
+              skipUserAppend: true,
+              ...(replayRunId === undefined ? {} : { runId: replayRunId }),
+            });
           }
         },
         () => {
@@ -1000,6 +1284,19 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
           onScroll={handleMessagesScroll}
           className="fx-chat-column"
         >
+          {cursor !== null ? (
+            <button
+              type="button"
+              data-testid="chat-load-earlier"
+              className="fx-btn-quiet"
+              disabled={earlierBusy}
+              onClick={() => {
+                void handleLoadEarlier();
+              }}
+            >
+              {pt("chat.stream.loadEarlier", "Load earlier")}
+            </button>
+          ) : null}
           {messages.map((message) => (
             <div
               key={message.id}
@@ -1021,6 +1318,22 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
               >
                 {formatDate(new Date(message.at))}
               </time>
+              {message.resendPrompt !== undefined ? (
+                <button
+                  type="button"
+                  data-testid="chat-resend"
+                  className="fx-btn-quiet"
+                  onClick={() => {
+                    startChatRun(
+                      client,
+                      props.projectId,
+                      message.resendPrompt ?? "",
+                    );
+                  }}
+                >
+                  {pt("chat.stream.resend", "Resend")}
+                </button>
+              ) : null}
               {message.role === "assistant" &&
               message.final &&
               message.text !== "" &&
@@ -1141,8 +1454,7 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
               <span className="fx-vh">{t("chat.composer.send")}</span>
             </button>
           </div>
-          <p data-testid="chat-statusline" className="fx-statusline">
-            {/* FXDESIGN6: one span per value; the "|" dividers are CSS
+          <p data-testid="chat-statusline" className="fx-statusline">            {/* FXDESIGN6: one span per value; the "|" dividers are CSS
                 (no separator text nodes, so the locale-only contract
                 sees exactly the three locale values). */}
             <span>{directorModel ?? t("chat.hierarchy.auto")}</span>
@@ -1153,6 +1465,14 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
                 : t("chat.composer.statusReady")}
             </span>
           </p>
+          {streaming && draft.trim() !== "" ? (
+            <span data-testid="chat-wait-line" role="status" className="fx-quiet">
+              {pt(
+                "chat.stream.wait",
+                "Wait for this to finish or press Stop",
+              )}
+            </span>
+          ) : null}
           {streaming ? (
             <span data-testid="chat-spinner" role="status" className="fx-quiet">
               {t("chat.stream.spinner")}
