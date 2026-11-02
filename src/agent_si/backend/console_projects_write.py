@@ -129,15 +129,16 @@ def append_task_record(app: Any, project_id: str, title: str,
 
 def ensure_first_chat_task(app: Any, project_id: str, message: str,
                            chat_task: str = "") -> dict | None:
-    """Create the first task row for a chat conversation (FXCHATTASK).
+    """Store one task row per accepted chat message (FXBATCH5-B2).
 
-    A conversation with no task yet plus a visible project stores one
-    row through the shared task path above: the stripped message text
-    is the title (the task path caps nothing beyond non-empty, so no
-    further truncation applies) with an empty scope. A named chat task
-    that already exists, or a project that already holds any task row,
-    means a later message: nothing is stored. No project, an unknown
-    or archived project, or an empty message stores nothing.
+    Every accepted chat message stores ONE row through the shared
+    append_task_record path: the stripped message text is the title
+    (the task path caps nothing beyond non-empty, so no further
+    truncation applies) with an empty scope. Nothing is stored when
+    the project already holds a task with the same stripped title,
+    or when the named chat task already exists. Skip (None) only:
+    an empty project id, an unknown or archived project, or an
+    empty stripped message.
 
     Never raises: every skip and every write failure yields None so
     the chat stream continues whole; write failures are logged. No
@@ -162,10 +163,10 @@ def ensure_first_chat_task(app: Any, project_id: str, message: str,
         name = (chat_task or "").strip()
         if name and tasks.load(name) is not None:
             return None
-        if tasks.list_by({"project_id": project}):
-            return None
-        stored = tasks.append(_new_task_record(project, text, []))
-        persist_k02r3_store(app)
+        for row in tasks.list_by({"project_id": project}):
+            if str(row.get("title", "")).strip() == text:
+                return None
+        stored = append_task_record(app, project, text, [])
     except Exception:
         logger.exception(
             "fxchattask: first-chat task write failed for project %r; "
