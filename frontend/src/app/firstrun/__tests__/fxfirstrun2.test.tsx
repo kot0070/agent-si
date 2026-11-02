@@ -57,6 +57,10 @@ function installFetch(): { seen: SeenCall[]; connected: Set<string> } {
           { status: 201, headers: { 'content-type': 'application/json' } },
         );
       }
+      // FXR2E two-step check (416ddaa, merged 0661228): read-only preflight.
+      if (url === '/api/v1/providers/keys/check' && method === 'POST') {
+        return ok({});
+      }
       if (url === '/api/v1/providers/connect' && method === 'POST') {
         connected.add((body as { preset_id: string }).preset_id);
         return ok({ provider: { provider_id: (body as { preset_id: string }).preset_id } });
@@ -170,6 +174,9 @@ describe('FXFIRSTRUN2 focused first-run page', () => {
     fireEvent.change(within(dialog).getByLabelText(en.providers.connect.apiKey), {
       target: { value: FX_KEY },
     });
+    // FXR2E two-step (416ddaa, merged 0661228): Check before Save.
+    fireEvent.click(within(dialog).getByRole('button', { name: en.providers.connect.check }));
+    await within(dialog).findByText(en.providers.connect.checked);
     fireEvent.click(within(dialog).getByRole('button', { name: en.providers.connect.save }));
     await waitFor(() => {
       expect(

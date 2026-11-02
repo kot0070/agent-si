@@ -104,6 +104,10 @@ function installFetch(): void {
           },
         });
       }
+      // FXR2E two-step check (416ddaa, merged 0661228): read-only preflight.
+      if (url === '/api/v1/providers/keys/check' && method === 'POST') {
+        return json({});
+      }
       return json({ code: 'CONTEXT_MISSING' }, 404);
     },
   );
@@ -158,6 +162,11 @@ describe('K10FIRSTRUN served first run at the real /firstrun route', () => {
       within(dialog).getByLabelText(en.providers.connect.apiKey),
       { target: { value: 'fx-fake-key' } },
     );
+    // FXR2E two-step (416ddaa, merged 0661228): Check before Save.
+    fireEvent.click(
+      within(dialog).getByRole('button', { name: en.providers.connect.check }),
+    );
+    await within(dialog).findByText(en.providers.connect.checked);
     fireEvent.click(
       within(dialog).getByRole('button', { name: en.providers.connect.save }),
     );

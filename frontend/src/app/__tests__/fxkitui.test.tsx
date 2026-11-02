@@ -85,6 +85,10 @@ function installFetch(): void {
           { status: 201, headers: { "content-type": "application/json" } },
         );
       }
+      // FXR2E two-step check (416ddaa, merged 0661228): read-only preflight.
+      if (url === "/api/v1/providers/keys/check" && method === "POST") {
+        return json({});
+      }
       if (url === "/api/v1/providers/connect" && method === "POST") {
         const preset = (body as { preset_id: string }).preset_id;
         if (!mockState.providers.includes(preset)) {
@@ -219,6 +223,11 @@ describe("fxkitui fresh profile opens the guided first run", () => {
       within(dialog).getByLabelText(en.providers.connect.apiKey),
       { target: { value: "fx-fake-key" } },
     );
+    // FXR2E two-step (416ddaa, merged 0661228): Check before Save.
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: en.providers.connect.check }),
+    );
+    await within(dialog).findByText(en.providers.connect.checked);
     fireEvent.click(
       within(dialog).getByRole("button", { name: en.providers.connect.save }),
     );
