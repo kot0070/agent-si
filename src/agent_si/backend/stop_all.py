@@ -270,14 +270,14 @@ def request_stop(actor: str, project_id: str, grant_ref: str = "",
     for row in owned:
         if _terminate(row.proc):
             stopped += 1
-    live = _LIVE_RUNS.pop(key, [])
-    for run_id in live:
-        _STOP_REQUESTS.add((key, str(run_id)))
-    runs = len(live)
     with contextlib.suppress(Exception):
         _proc_tree.drop_records(
             [row.proc.pid for row in owned
              if row.proc.poll() is not None])
+    live = _LIVE_RUNS.pop(key, [])
+    for run_id in live:
+        _STOP_REQUESTS.add((key, str(run_id)))
+    runs = len(live)
     entry = journal_store.append_event(
         key, "backend", "STOP_ALL",
         "stop-all by %s: stopped %d of %d" % (who, stopped + runs,

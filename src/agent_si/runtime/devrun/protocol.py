@@ -13,78 +13,6 @@ import re
 from typing import Any
 
 
-#: Dirs never listed in the Director brief (caches, history, outputs,
-#: local virtualenvs): the plan stays about project work, never noise.
-_BRIEF_SKIP_DIRS = frozenset({
-    ".git", "node_modules", ".venv", "venv", "__pycache__",
-    ".devrun", "dist", "build", ".pytest_cache"})
-
-#: Manifests quoted into the brief so the Director uses the project's
-#: own test command instead of inventing one.
-_BRIEF_MANIFESTS = ("package.json", "pyproject.toml", "requirements.txt",
-                    "pytest.ini", "setup.py", "Makefile", "README.md")
-
-#: Test-file names collected into the brief.
-_BRIEF_TEST_RE = re.compile(
-    r"(^test_.*\.py$|_test\.py$|\.test\.[a-z]+$|\.spec\.[a-z]+$"
-    r"|^verify\.[a-z]+$)", re.I)
-
-
-def project_brief(folder: Any, max_entries: int = 200,
-                  max_tests: int = 40,
-                  manifest_chars: int = 1500) -> str:
-    """Short text: tree, test files, manifests. Real folder facts only."""
-    try:
-        base = os.path.abspath(str(folder))
-    except Exception:
-        return "The project folder is empty: this is a new project."
-    tree: list[str] = []
-    tests: list[str] = []
-    try:
-        walker = os.walk(base)
-    except Exception:
-        return "The project folder is empty: this is a new project."
-    try:
-        for root, dirs, files in walker:
-            try:
-                dirs[:] = sorted(
-                    d for d in dirs if d not in _BRIEF_SKIP_DIRS)
-            except Exception:
-                pass
-            try:
-                rel = os.path.relpath(root, base).replace("\\", "/")
-            except Exception:
-                continue
-            depth = 0 if rel == "." else rel.count("/") + 1
-            for name in sorted(files):
-                path = name if rel == "." else rel + "/" + name
-                if depth <= 2 and len(tree) < max_entries:
-                    tree.append(path)
-                try:
-                    if (_BRIEF_TEST_RE.search(name)
-                            and len(tests) < max_tests):
-                        tests.append(path)
-                except Exception:
-                    pass
-    except Exception:
-        pass
-    if not tree:
-        return "The project folder is empty: this is a new project."
-    out = ["Files now:", *tree]
-    if tests:
-        out += ["Test files now:", *tests]
-    for name in _BRIEF_MANIFESTS:
-        try:
-            full = os.path.join(base, name)
-            if os.path.isfile(full):
-                with open(full, encoding="utf-8",
-                          errors="replace") as fh:
-                    out += ["--- %s ---" % name, fh.read(manifest_chars)]
-        except Exception:
-            continue
-    return "\n".join(out)
-
-
 def missing_check_targets(parts: Any, folder: Any) -> list:
     """Script/test paths a check names that exist nowhere.
 
@@ -152,6 +80,40 @@ class PlanError(ValueError):
     code: str = "DEVRUN_PLAN_INVALID"
 
 
+def extract_json_object(text: Any) -> Any:
+    """First complete JSON object in text, or ValueError naming it.
+
+    Real replies arrive as plain JSON, ```json fences, or a sentence
+    then JSON. Empty or reasoning-only text raises "empty reply";
+    text with no object raises "no JSON object in reply: ...".
+    """
+    try:
+        src = (text or "").strip()
+    except Exception:
+        src = ""
+    if not src:
+        raise ValueError("empty reply")
+    start = src.find("{")
+    if start < 0:
+        raise ValueError("no JSON object in reply: %r" % (src[:120],))
+    try:
+        obj, _end = json.JSONDecoder().raw_decode(src[start:])
+    except Exception as exc:
+        raise ValueError("bad JSON object: %s" % (exc,)) from None
+    return obj
+
+
+#: What the worker hears after an empty reply; the attempt is not
+#: burned (retry the call, same attempt).
+EMPTY_REPLY_RETRY = (
+    "Your last reply had no visible content (reasoning only, no action). "
+    "Reply again now with one JSON object for your next action, no prose."
+)
+
+#: Empty-reply retries before the attempt is burned.
+MAX_EMPTY_RETRIES = 2
+
+
 def _clean_path(raw: Any) -> str:
     """Normalized relative path, or empty when the raw value is bad."""
     if not isinstance(raw, str) or not raw.strip():
@@ -177,8 +139,8 @@ def parse_director_reply(text: str) -> dict[str, Any]:
     files, non-list argv, unknown or cyclic depends_on).
     """
     try:
-        data = json.loads(text)
-    except Exception as exc:
+        data = extract_json_object(text)
+    except ValueError as exc:
         raise PlanError("director reply is not JSON: %s" % (exc,)) from None
     if not isinstance(data, dict):
         raise PlanError("director reply must be a JSON object")
@@ -305,8 +267,8 @@ def parse_agent_reply(text: str) -> dict[str, Any]:
     Raises AgentError quoting the exact problem.
     """
     try:
-        data = json.loads(text)
-    except Exception as exc:
+        data = extract_json_object(text)
+    except ValueError as exc:
         raise AgentError("agent reply is not JSON: %s" % (exc,)) from None
     if not isinstance(data, dict):
         raise AgentError("agent reply must be a JSON object")
@@ -340,8 +302,8 @@ def parse_auditor_reply(text: str) -> dict[str, Any]:
     that into FAIL, never a silent pass.
     """
     try:
-        data = json.loads(text)
-    except Exception as exc:
+        data = extract_json_object(text)
+    except ValueError as exc:
         raise AuditError("auditor reply is not JSON: %s" % (exc,)) from None
     if not isinstance(data, dict):
         raise AuditError("auditor reply must be a JSON object")

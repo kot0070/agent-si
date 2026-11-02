@@ -4,9 +4,9 @@ W1: director/worker prompts state sys.platform; on Windows they steer
   to executables present here (python -m pytest, findstr), never POSIX
   shell tools, and inline code stays refused.
 W2: a check whose executable is missing is could-not-start (never a red
-  check, never an attempt burn); auditor PASS with no check able to
-  start = PASS with an "auditor only" line; auditor FAIL stays FAIL;
-  real red checks still fail.
+  check); auditor PASS with no check able to start still FAILS after
+  the retry budget (a part whose check never ran is never PASS);
+  auditor FAIL stays FAIL; real red checks still fail.
 W3: green check status lines read "-> exit 0"; the auditor's long ref
   stays in the journal, never in chat.
 """
@@ -119,7 +119,7 @@ def _part_row(record, part_id="p1"):
     return parts[part_id]
 
 
-def test_w2_missing_exe_auditor_pass_is_auditor_only_pass(tmp_path):
+def test_w2_missing_exe_auditor_pass_still_fails(tmp_path):
     project = "fxdr-w2pass"
     folder = _project_dir(tmp_path, project)
     factory = _FakeFactory({
@@ -137,19 +137,14 @@ def test_w2_missing_exe_auditor_pass_is_auditor_only_pass(tmp_path):
     assert ("could not start: %s is not installed"
             % (_MISSING_TOOL,)) in text, text
     assert "exit None" not in text, text
-    assert "auditor only: check could not run" in text, text
+    assert "auditor only" not in text, text
     record = _run_record(app, project)
     assert record is not None
-    assert record.get("success") is True, record.get("summary")
+    assert record.get("success") is False, record.get("summary")
     row = _part_row(record)
-    assert row["verdict"] == "PASS", row
-    assert row["attempts"] == 1, row
+    assert row["verdict"] == "FAIL", row
+    assert row["attempts"] == 3, row
     assert row["checks"][0].get("could_not_start") is True, row["checks"]
-    worker_calls = [entry for entry in factory.spy
-                    if entry.get("role") == "worker"]
-    assert not [entry for entry in worker_calls
-                if "attempt 2" in json.dumps(entry["messages"])], (
-        "missing-exe check burns no attempt")
 
 
 def test_w2_missing_exe_auditor_fail_stays_fail(tmp_path):
