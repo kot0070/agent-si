@@ -137,6 +137,22 @@ function readTaskStatus(status: string): string {
   return status;
 }
 
+// N1: Team-now shows only live rows. Run-end paths move rows out of
+// RUNNING (RETURNED on success, BLOCKED on stop/budget/held) and the
+// parts register closes to RETURNED/ACCEPTED/REJECTED/BLOCKED; those
+// ended rows drop out while QUEUED/RUNNING/HANDOFF stay visible.
+// Rows carrying errors stay visible through their live status.
+const ENDED_LIVE_STATUSES: ReadonlySet<string> = new Set([
+  "RETURNED",
+  "ACCEPTED",
+  "REJECTED",
+  "BLOCKED",
+]);
+
+function isLiveRowActive(row: PartRow): boolean {
+  return !ENDED_LIVE_STATUSES.has(String(row.status).toUpperCase());
+}
+
 function fractionOf(value: number, total: number): number {
   if (!(total > 0)) {
     return 0;
@@ -355,7 +371,7 @@ export function Inspector(props: InspectorProps): ReactElement {
     };
   }, [client, projectId]);
 
-  const rows = liveRows ?? [];
+  const rows = (liveRows ?? []).filter(isLiveRowActive);
   const warnings: Array<{ agent: string; error: string }> = [];
   for (const row of rows) {
     const errors = readExtra(row, "errors");

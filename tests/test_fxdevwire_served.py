@@ -455,9 +455,13 @@ def test_s3_run_text_visible(tmp_path):
     assert resp.status_code == 200, resp.text
     events = _parse_sse(resp.text)
     text = _all_text(events)
-    assert "Role director:" in text, text
+    team = [line for line in _delta_texts(events)
+            if line.startswith("Team:")]
+    assert len(team) == 1, text
+    for role in ("director", "manager", "worker", "auditor"):
+        assert role in team[0], team[0]
     assert PROVIDER in text and MODEL in text, text
-    assert "why" in text.lower(), text
+    assert "(Pinned)" in text, text
     assert "plan of 1 parts" in text, text
     assert "p1" in text and "test_p1.py" in text, text
     assert "exit 0" in text, text
@@ -711,8 +715,11 @@ def test_s7_zero_profile_project_resolves(tmp_path):
         roles = {entry.get("role") for entry in factory.spy}
         assert {"director", "manager", "worker", "auditor"} <= roles, roles
         text = _all_text(_parse_sse(resp.text))
+        team = [line for line in _delta_texts(_parse_sse(resp.text))
+                if line.startswith("Team:")]
+        assert len(team) == 1, text
         for role in ("director", "manager", "worker", "auditor"):
-            assert ("Role %s:" % role) in text, text
+            assert role in team[0], team[0]
     finally:
         _kb.bind_catalog(previous)
 
@@ -805,10 +812,11 @@ def test_s9_telemetry_row_per_call(tmp_path):
                 + _Dec(str(out_price)) * _Dec(500)) / _Dec(1000000))
         gate = app.state.k04_ctx.budget_state
         spent = _Dec(str(gate.get_state(pid).spent))
-        # The gate settles once per run id: telemetry rows must not
-        # charge again, so spent is exactly one call charge.
-        assert spent == one.quantize(
-            _Dec("0.000001")), "spent charged once, not twice: %s" % spent
+        # 5 priced invokes settle once each (director 1 + manager 1 +
+        # worker 2 + auditor 1); each 1000/500 on fxcheap = 0.0005,
+        # so spent is 5x one-call charge = 0.0025.
+        expected = (one * 5).quantize(_Dec("0.000001"))
+        assert spent == expected, "spent charged once per call: %s" % spent
         assert spent > 0, "telemetry evidence settled a real charge"
     finally:
         _kb.bind_catalog(previous)

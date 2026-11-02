@@ -155,6 +155,11 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
   const cancelRef = useRef(false);
   const streamingRef = useRef(false);
   const lastSentRef = useRef<string | null>(null);
+  // FXRC1FIX P3: the message list owns the scroll inside the chat card;
+  // the composer sits below it in flow and never overlays text. stick
+  // follows the newest message unless the user scrolled up.
+  const messagesRef = useRef<HTMLDivElement | null>(null);
+  const stickRef = useRef(true);
 
   useEffect(() => {
     const onOnline = (): void => {
@@ -540,6 +545,28 @@ ${note}`,
     );
   };
 
+  // FXRC1FIX P3: follow new text only while the user stays pinned
+  // to the newest message; a manual scroll-up keeps its position.
+  useEffect(() => {
+    if (!stickRef.current) {
+      return;
+    }
+    const box = messagesRef.current;
+    if (box === null) {
+      return;
+    }
+    box.scrollTop = box.scrollHeight;
+  }, [messages, streaming]);
+
+  function handleMessagesScroll(): void {
+    const box = messagesRef.current;
+    if (box === null) {
+      return;
+    }
+    stickRef.current =
+      box.scrollHeight - box.scrollTop - box.clientHeight < 24;
+  }
+
   const channelLocale = readChannelLocale();
   const channelTags = messages.flatMap((message) =>
     message.role === "assistant" ? extractChatTags(message.text) : [],
@@ -550,8 +577,15 @@ ${note}`,
     <section data-testid="chat-area" aria-label={t("shell.sidebar.chat")}>
       <h1>{t("shell.sidebar.chat")}</h1>
       <HierarchyRows projectId={props.projectId} />
-      <div data-testid="chat-layout">
-        <div data-testid="chat-messages">
+      <div
+        data-testid="chat-layout"
+        style={{ maxHeight: "calc(100vh - 200px)" }}
+      >
+        <div
+          data-testid="chat-messages"
+          ref={messagesRef}
+          onScroll={handleMessagesScroll}
+        >
           {messages.map((message) => (
             <div
               key={message.id}
@@ -561,7 +595,7 @@ ${note}`,
                   : "chat-assistant-message"
               }
             >
-              <p>{message.text}</p>
+              <p style={{ whiteSpace: "pre-wrap" }}>{message.text}</p>
               <time
                 data-testid="chat-timestamp"
                 title={t("chat.stream.timestamp")}
@@ -640,7 +674,7 @@ ${note}`,
             </button>
           </div>
         ) : null}
-        <div data-testid="chat-composer">
+        <div data-testid="chat-composer" style={{ position: "static" }}>
           {draft !== "" ? (
             <span data-testid="chat-draft-chip">{t("chat.composer.draft")}</span>
           ) : null}
