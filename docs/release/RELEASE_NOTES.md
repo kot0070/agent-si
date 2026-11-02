@@ -31,8 +31,9 @@ The MANIFEST value is the hash of the canonical manifest bytes, not
 of the exe; the exe value above is the one to compare against
 app\AgentSI.exe. The pack step regenerates all three values from the
 shipped files; a release whose values differ from a fresh measurement
-must not ship. Expect one Windows SmartScreen warning: the exe is
-unsigned. If the zip was downloaded, unblock it before unzipping
+must not ship. Expect one Windows SmartScreen warning ("Windows protected
+your PC", publisher Unknown): the exe is unsigned. Click More info, then
+Run anyway — only after the SHA256 values above match. If the zip was downloaded, unblock it before unzipping
 (right-click the zip, Properties, Unblock).
 
 ## Known limits (RC4)

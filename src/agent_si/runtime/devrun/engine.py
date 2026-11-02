@@ -103,7 +103,9 @@ def _utcnow() -> str:
 
 
 def _kill_procs(procs: list, lock: Any) -> None:
-    """Terminate every live child at once; never waits, never raises."""
+    """Stop every live child tree at once; waits briefly, never raises."""
+    from agent_si.backend import proc_tree as _proc_tree
+
     snap: list = []
     if lock is not None:
         with contextlib.suppress(Exception), lock:
@@ -116,7 +118,7 @@ def _kill_procs(procs: list, lock: Any) -> None:
             continue
         with contextlib.suppress(Exception):
             if proc.poll() is None:
-                proc.terminate()
+                _proc_tree.kill_tree(proc)
 # FXPARALLEL END helpers.
 
 

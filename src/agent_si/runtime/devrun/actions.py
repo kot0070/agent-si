@@ -559,7 +559,9 @@ class _ExecTool:
                 flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
             try:
                 with open(log_path, "ab") as handle:
-                    proc = subprocess.Popen(
+                    from agent_si.backend import proc_tree as _proc_tree
+
+                    proc = _proc_tree.spawn(
                         resolved,
                         cwd=folder,
                         stdin=subprocess.DEVNULL,
@@ -808,16 +810,11 @@ def wait_proc(
 
 
 def _kill(proc: Any) -> None:
-    """Terminate then kill one child; never raises."""
+    """Terminate then tree-kill one child; never raises."""
+    from agent_si.backend import proc_tree as _proc_tree
+
     with contextlib.suppress(Exception):
-        proc.terminate()
-    with contextlib.suppress(Exception):
-        proc.wait(timeout=5)
-        return
-    with contextlib.suppress(Exception):
-        proc.kill()
-    with contextlib.suppress(Exception):
-        proc.wait(timeout=5)
+        _proc_tree.terminate_tree(proc)
 
 
 def ensure_dead(proc: Any, rounds: int = 3) -> None:
@@ -833,11 +830,15 @@ def ensure_dead(proc: Any, rounds: int = 3) -> None:
             return
         if not alive:
             with contextlib.suppress(Exception):
-                proc.wait(timeout=5)
+                from agent_si.backend import proc_tree as _proc_tree
+
+                proc.wait(timeout=_proc_tree.STOP_TIMEOUT_S)
             return
         _kill(proc)
     with contextlib.suppress(Exception):
-        proc.wait(timeout=5)
+        from agent_si.backend import proc_tree as _proc_tree
+
+        proc.wait(timeout=_proc_tree.STOP_TIMEOUT_S)
 
 
 def finalize_log(log_path: str, cap: int = 256 * 1024) -> str:
