@@ -39,7 +39,7 @@ Sections: general, appearance, local AI, models, routing, optimization, capabili
 
 - Appearance: theme switch.
 - Local AI: read-only stored bench path, models, and endpoint.
-- Models and routing: provider list, search, setup wizard, role pools, chat-model picker, leftover-key finder. Connecting shows the expected key format and warns before saving when the typed key does not fit; only ticked models reach Auto, the role pools, and the chat picker.
+- Models and routing: provider list, search, setup wizard, role pools, chat-model picker, leftover-key finder. Connecting is two-step — paste the key, press Check, then Save: only a checked key saves, a wrong key is refused in plain words and nothing is stored; only ticked models reach Auto, the role pools, and the chat picker.
 - Project: role profile editor, defaults bar, one-time risk acceptance switch.
 - Local bench: scan and run benchmark for local models.
 - Diagnostics: locale, telemetry, gateway, and history checks.
