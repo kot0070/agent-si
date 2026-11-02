@@ -4,7 +4,7 @@
 // locale surface: setLocale updates the module plus persistence, then a
 // window event carries the new locale to App for a full re-render.
 
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import type { PartRow, ProjectRecord } from "../api/iface";
@@ -61,6 +61,7 @@ export function TopBar(props: TopBarProps): ReactElement {
   const client = useApiClient();
   const current = useCurrentProject();
   const location = useLocation();
+  const navigate = useNavigate();
   const [locale, setLocaleUi] = useState<SupportedLocale>(readStoredLocale);
   const [projects, setProjects] = useState<ProjectRecord[] | null>(null);
   const [stopArmed, setStopArmed] = useState(false);
@@ -320,7 +321,13 @@ export function TopBar(props: TopBarProps): ReactElement {
           aria-label={t("shell.topbar.project")}
           value={effective ?? ""}
           onChange={(event) => {
-            current.select(event.target.value);
+            // FXCHATHIST Part 2 (H3): switching projects opens that
+            // project's chat with its history (the root chat route
+            // renders the selected project).
+            if (event.target.value !== "") {
+              current.select(event.target.value);
+              navigate("/");
+            }
           }}
         >
           {effective === null ? (
