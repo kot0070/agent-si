@@ -110,9 +110,11 @@ def get_data_dir(settings: Any = None) -> str | None:
     module never touches process environment directly (K04WIRE1 rule). The env dir
     wins; a differing harness settings dir is rejected (ValueError); with
     no env dir the harness dir (if any) is returned for the legacy path,
-    else None. An explicitly blank env value fails loud (never a silent
-    fallback). Resolving from env also ensures the dir exists and runs
-    the first-start legacy migration (originals kept).
+    else the frozen portable default (exe-folder data, else
+    LocalAppData; None unfrozen). An explicitly blank env value fails
+    loud (never a silent fallback). Resolving from env also ensures the
+    dir exists and runs the first-start legacy migration (originals
+    kept).
     """
     from agent_si.k10_start import resolve_env_data_dir
     _resolved = resolve_env_data_dir()

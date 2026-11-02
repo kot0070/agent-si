@@ -37,15 +37,69 @@ _EVIDENCE_DIR_NAME = "release-evidence"
 #: (K04WIRE1 rule).
 DATA_DIR_ENV_VAR = "AGENT_SI_DATA_DIR"
 
+#: Portable data leaf under the exe folder (frozen default, writable
+#: install case). Created on demand by resolve_env_data_dir.
+_PORTABLE_DATA_LEAF = "data"
+
+#: LocalAppData fallback leaf (read-only install case, e.g.
+#: Program Files): %LOCALAPPDATA%\AgentSI\data, created on demand.
+_APPDATA_VENDOR = "AgentSI"
+
+
+def _default_portable_dir() -> str | None:
+    """Return the frozen portable data dir, or None outside a freeze.
+
+    Frozen bundle (PyInstaller ``AgentSI.exe``) with no env dir:
+    ``<exe folder>\\data`` when that folder is writable (created on
+    demand), else ``%LOCALAPPDATA%\\AgentSI\\data`` (created on
+    demand). Unfrozen dev/test runs return None so the legacy
+    no-dir path is untouched. Env var still wins: this default
+    applies only when it is unset (a blank value still fails loud).
+    Portable only: stdlib, no machine paths written into this file.
+    """
+    import sys
+
+    if not getattr(sys, "frozen", False):
+        return None
+    exe = str(getattr(sys, "executable", "") or "")
+    if exe:
+        head = exe.replace("\\", "/")
+        anchor = head.rsplit("/", 1)[0] if "/" in head else ""
+        if anchor:
+            candidate = os.path.join(anchor, _PORTABLE_DATA_LEAF)
+            try:
+                os.makedirs(candidate, exist_ok=True)
+            except OSError:
+                pass
+            else:
+                return os.path.abspath(candidate)
+    base = os.environ.get("LOCALAPPDATA", "")
+    if base and str(base).strip():
+        fallback = os.path.join(
+            os.path.abspath(os.path.expanduser(str(base))),
+            _APPDATA_VENDOR, _PORTABLE_DATA_LEAF)
+        os.makedirs(fallback, exist_ok=True)
+        return fallback
+    home = os.path.expanduser("~")
+    if home and str(home).strip():
+        fallback = os.path.join(
+            os.path.abspath(home), ".agent_si", _PORTABLE_DATA_LEAF)
+        os.makedirs(fallback, exist_ok=True)
+        return fallback
+    return None
+
 
 def resolve_env_data_dir() -> str | None:
     """Return the validated env data dir, ensuring it exists (K10ST1-B).
 
-    None when unset. Blank fails loud (never a silent fallback).
+    None when unset (unfrozen). A frozen bundle with no env dir falls
+    back to the portable default (exe-folder data, else LocalAppData;
+    see _default_portable_dir). Blank fails loud (never a silent
+    fallback).
     """
     raw = os.environ.get(DATA_DIR_ENV_VAR)
     if raw is None:
-        return None
+        return _default_portable_dir()
     text = str(raw).strip()
     if not text:
         raise ValueError(

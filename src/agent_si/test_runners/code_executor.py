@@ -196,6 +196,27 @@ def frozen_python() -> str:
         "to a python executable or put python on PATH")
 
 
+def _need_python(test_id: str,
+                 folder: str) -> tuple[Optional[str], Optional[str]]:
+    """Interpreter for one CODE test, or (None, honest reason).
+
+    Frozen bundles with no interpreter on PATH and no AGENT_SI_PYTHON
+    refuse as a reason naming the fix (install Python or set
+    AGENT_SI_PYTHON) so callers report BLOCKED, never a bare 500.
+    There is no embedded-interpreter fallback: the frozen exe is
+    windowed with no console stdio for a pytest child (verified on
+    the RC1 bundle evidence, PORTABLE_CHECK section 3).
+    """
+    try:
+        return frozen_python(), None
+    except RuntimeError:
+        return None, (
+            "CODE test %r of folder %r has no python interpreter: "
+            "install Python or set AGENT_SI_PYTHON to a python "
+            "executable" % (test_id, folder)
+        )
+
+
 def resolve_code_command(
     *,
     project_dir: Optional[str],
@@ -218,7 +239,10 @@ def resolve_code_command(
                     "project but pytest is not installed; "
                     "install pytest to run the suite" % (test_id, folder)
                 )
-            return [frozen_python(), "-m", "pytest", folder, "-q"], None
+            _interp, _reason = _need_python(test_id, folder)
+            if _interp is None:
+                return None, _reason
+            return [_interp, "-m", "pytest", folder, "-q"], None
         if _node_test_script(folder):
             npm = shutil.which("npm")
             if not npm:
@@ -230,7 +254,10 @@ def resolve_code_command(
             return [npm, "test"], None
         candidate = os.path.join(folder, "%s.py" % _safe_name(test_id))
         if os.path.isfile(candidate):
-            return [frozen_python(), candidate], None
+            _interp2, _reason2 = _need_python(test_id, folder)
+            if _interp2 is None:
+                return None, _reason2
+            return [_interp2, candidate], None
     if not folder or not os.path.isdir(folder):
         return None, (
             "CODE test %r has no project folder %r to run in: "
@@ -355,8 +382,14 @@ def execute_code_test(
             "CODE test %r of project %r has no data root to stage "
             "evidence under" % (test_id, project_id),
         )
-    items = _check_argv(argv) if argv is not None else [
-        frozen_python(), "%s.py" % _safe_name(test_id)]
+    items = _check_argv(argv) if argv is not None else None
+    if items is None:
+        _interp3, _reason3 = _need_python(
+            test_id, project_dir or str(root))
+        if _interp3 is None:
+            raise ExecutorBlocked(
+                "EXECUTOR_TOOL_UNAVAILABLE", str(_reason3))
+        items = [_interp3, "%s.py" % _safe_name(test_id)]
     folder = _project_dir(root, project_id)
     workdir = project_dir or folder
     if not os.path.isdir(workdir):

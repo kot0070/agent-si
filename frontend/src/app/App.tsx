@@ -32,7 +32,7 @@ import {
   t,
 } from "../locale/index";
 import type { SupportedLocale } from "../locale/index";
-import { SETTINGS_ROUTES, AcceptedRiskSwitch, FirstRunGate, RoleProfileEditor } from "../settings/index";
+import { SETTINGS_ROUTES, AcceptedRiskSwitch, FirstRunGate, RoleProfileEditor, markFirstRunDone } from "../settings/index";
 import { OptimizationPolicySection } from "../settings/optimizationPolicy";
 import { ProvidersPage } from "../settings/ProvidersPage";
 import {
@@ -646,6 +646,9 @@ function FirstRunRoute(props: {
   return (
     <FirstRunFlowView
       onComplete={() => {
+        // Finishing the wizard completes the first run: the start
+        // gate must never send this profile back to /firstrun.
+        markFirstRunDone();
         const pid = current.projectId;
         if (pid === null) {
           navigate(ROUTES.chat);
