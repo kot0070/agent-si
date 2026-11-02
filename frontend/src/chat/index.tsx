@@ -1,5 +1,13 @@
-// Lane A ChatArea in frontend/src/chat/index.tsx: the mounted chat surface.
-// Chat-first layout (messages plus composer; no graph canvas anywhere).
+// FXCHATHIST Part 2: ChatArea wired onto the app-level per-project chat
+// store (frontend/src/chat/chatStore.ts). Messages plus the live runner,
+// the H4 verdict line (health) and the quiet dot state (online plus the
+// offline queue) live in the module store keyed by project, so a live
+// stream is NOT aborted on unmount: the module pump keeps driving the
+// streamChat chunk loop into the store, and remounting (or opening the
+// same project from any entry point) shows everything. History turns load
+// from the served route GET /api/v1/chat/history on project open, and
+// each clean completion POSTs its turn back (USER write, best effort and
+// silent). Chat-first layout (messages plus composer; no graph canvas).
 // Renders the prompt plus streamed tokens incrementally over the shared
 // ApiClient entry; draft chip plus spinner plus timestamp; an offline queue
 // dot while disconnected (prompts queue and flush on reconnect); abort
@@ -8,19 +16,38 @@
 // served inside assistant deltas; rapid sends raise a flooding warning with
 // a compact re-issue action; stream failure marks the channel degraded and
 // an offline-to-online return marks it reconnecting until the next stream
-// Production caller: wave-3 App chat route
-// (CODER-5-Vale frontend/src/app/App.tsx); owned test mounts this component.
+// Production caller: wave-3 App chat route plus the project chat tab
+// (frontend/src/app/App.tsx); owned test mounts this component.
 // FXASK: install-permission dialog (F2) answers APPROVAL_REQUIRED holds via F1.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { ReactElement } from "react";
+import { z } from "zod";
 import { useApiClient } from "../app/ApiClientProvider";
-import { ApiError, apiErrorLocaleKey, requestResponse } from "../api/errors";
+import type { ApiClient } from "../api/iface";
+import {
+  ApiError,
+  apiErrorLocaleKey,
+  requestJson,
+  requestResponse,
+} from "../api/errors";
 import { DEFAULT_LOCALE, formatDate, t } from "../locale/index";
 import enTable from "../locale/en.json";
 import { ErrorPanel } from "../ui/ErrorPanel";
 import { ApprovalCard } from "./ApprovalCard";
 import { HierarchyRows } from "./HierarchyRows";
+import {
+  appendChatMessage,
+  dequeueChatPrompt,
+  enqueueChatPrompt,
+  getChatState,
+  patchChatMessage,
+  setChatHealth,
+  setChatOnline,
+  setChatRunner,
+  subscribeChat,
+} from "./chatStore";
+import type { ProjectChatState } from "./chatStore";
 import {
   CHAT_FLOOD_WINDOW_MS,
   compactPrompt,
@@ -51,35 +78,273 @@ export interface ChatAreaProps {
   onSendConsumed?: () => void;
 }
 
-interface ChatMessage {
-  id: string;
-  role: "user" | "assistant";
-  text: string;
-  at: number;
-  final: boolean;
-  decided?: "accepted" | "rejected";
-  // D6(b): the done event of an executed engine turn marks its answer;
-  // the verdict card is withheld under finished engine runs (nothing to
-  // accept: the work already happened) and kept for plain answers.
-  engineRun?: boolean;
-}
-
 interface BlockingError {
   errorKey: string;
   code: string;
 }
 
+// FXCHATHIST Part 2: the store slice is session-scoped. The store itself
+// is keyed by a slice key; one slice is one (project, ApiClient session)
+// pair, so a remount on the same client (navigation) revives the same
+// messages plus the live runner, while a fresh client (a new test, a real
+// restart) starts clean and reloads from the served history route. The
+// ApiClientProvider client is stable for the app lifetime, so project
+// navigation never loses the slice.
+const sliceOwners = new WeakMap<object, number>();
+let sliceSeq = 0;
+
+function sliceKeyFor(client: ApiClient, projectId: string): string {
+  let ordinal = sliceOwners.get(client);
+  if (ordinal === undefined) {
+    sliceSeq += 1;
+    ordinal = sliceSeq;
+    sliceOwners.set(client, ordinal);
+  }
+  return `${projectId}#slice${ordinal}`;
+}
+
+// Slice subscription: the Part 1 useProjectChat getSnapshot mints a fresh
+// object per call, which loops useSyncExternalStore for any consumer, so
+// Part 2 subscribes here with normal useState batching instead (the store
+// file stays untouched). Batched commits keep chunk text plus the terminal
+// verdict in one observable commit, exactly like the pre-Part-2 local
+// state the chat suites assert against; a sync external store would flush
+// every chunk on its own and expose half-applied streams to text queries.
+function useSliceState(key: string): ProjectChatState {
+  const [, force] = useState(0);
+  useEffect(
+    () =>
+      subscribeChat(key, () => {
+        force((v) => v + 1);
+      }),
+    [key],
+  );
+  return getChatState(key);
+}
+
+// Slices with a mounted ChatArea. A run that finishes while its slice is
+// unmounted flags the quiet unseen dot instead of showing inline UI.
+const mountedSlices = new Set<string>();
+
+// Served history load runs once per slice; the served route is the only
+// durability across sessions (no browser persistent storage in chat files).
+const historyLoading = new Set<string>();
+const historyLoaded = new Set<string>();
+
+// Live module pumps: one streamChat driver per slice. The pump outlives
+// any mounted ChatArea (H1: unmount never cancels); completion writes the
+// final text plus the health verdict into the store.
+interface ChatPump {
+  cancelled: boolean;
+  runner: ChatRunner;
+  prompt: string;
+  assistantId: string;
+}
+
+const pumps = new Map<string, ChatPump>();
+
+// Executed engine turns (done event with executed:true) hide the verdict
+// card (D6(b), FXDESIGN6). The store shape is frozen, so the per-message
+// engine flag lives here, keyed by the unique store message id.
+const engineRunMessages = new Set<string>();
+
+// Assistant placeholders pruned after a failed stream (the store is
+// append/patch only). Render filters these ids out.
+const deadAssistants = new Set<string>();
+
+// Last sent prompt per slice (retry plus compact resend survive remount).
+const lastSentBySlice = new Map<string, string>();
+
+// Send timestamps per slice (flood window survives remount).
+const sendTimesBySlice = new Map<string, number[]>();
+
+// Single blocking error delivery: a mounted ChatArea registers its
+// setters; a completion while unmounted stashes the error for the next
+// mount, so the single error card (S5) is never lost nor doubled.
+interface SliceUI {
+  onBlocking(error: BlockingError | null): void;
+  onAsk(ask: InstallPermissionAsk | null): void;
+}
+
+const sliceUI = new Map<string, SliceUI>();
+const blockingStash = new Map<string, BlockingError>();
+const askStash = new Map<string, InstallPermissionAsk>();
+
+function consumeBlockingStash(key: string): BlockingError | null {
+  const stashed = blockingStash.get(key);
+  if (stashed !== undefined) {
+    blockingStash.delete(key);
+    return stashed;
+  }
+  return null;
+}
+
+function emitBlocking(key: string, error: BlockingError): void {
+  const ui = sliceUI.get(key);
+  if (ui !== undefined) {
+    ui.onBlocking(error);
+    return;
+  }
+  blockingStash.set(key, error);
+}
+
+function clearSliceBlocking(key: string): void {
+  blockingStash.delete(key);
+  sliceUI.get(key)?.onBlocking(null);
+}
+
+function emitAsk(key: string, ask: InstallPermissionAsk): void {
+  const ui = sliceUI.get(key);
+  if (ui !== undefined) {
+    ui.onAsk(ask);
+    return;
+  }
+  askStash.set(key, ask);
+}
+
+// H4 quiet dot: slices whose run finished while no ChatArea showed them.
+// Opening the chat (mount) clears it; the verdict line stays in the store.
+const unseenSlices = new Set<string>();
+const unseenListeners = new Set<() => void>();
+let unseenVersion = 0;
+
+function emitUnseen(): void {
+  unseenVersion += 1;
+  for (const notify of [...unseenListeners]) {
+    notify();
+  }
+}
+
+function flagChatUnseen(key: string): void {
+  if (mountedSlices.has(key)) {
+    return;
+  }
+  if (!unseenSlices.has(key)) {
+    unseenSlices.add(key);
+    emitUnseen();
+  }
+}
+
+function markSeenByKey(key: string): void {
+  if (unseenSlices.delete(key)) {
+    emitUnseen();
+  }
+}
+
+/** H4 quiet dot: true while this project's chat holds unseen activity. */
+export function hasChatUnseen(client: ApiClient, projectId: string): boolean {
+  return unseenSlices.has(sliceKeyFor(client, projectId));
+}
+
+/** Opening a project's chat clears its quiet dot. */
+export function markChatSeen(client: ApiClient, projectId: string): void {
+  markSeenByKey(sliceKeyFor(client, projectId));
+}
+
+/** Re-renders project rows when any quiet dot changes. */
+export function useUnseenVersion(): number {
+  return useSyncExternalStore(
+    (notify) => {
+      unseenListeners.add(notify);
+      return () => {
+        unseenListeners.delete(notify);
+      };
+    },
+    () => unseenVersion,
+  );
+}
+
+// Served chat history (FXCHATHIST Part 1 route, read oldest-first).
+const CHAT_HISTORY_ROUTE = "/api/v1/chat/history";
+
+function historyPath(projectId: string): string {
+  return `${CHAT_HISTORY_ROUTE}?project_id=${encodeURIComponent(projectId)}`;
+}
+
+const ChatHistoryTurnSchema = z.object({
+  project_id: z.string(),
+  user_text: z.string(),
+  assistant_text: z.string(),
+  time: z.string(),
+});
+
+const ChatHistoryResponseSchema = z.object({
+  turns: z.array(ChatHistoryTurnSchema),
+});
+
+async function loadHistoryOnce(key: string, projectId: string): Promise<void> {
+  if (historyLoaded.has(key) || historyLoading.has(key)) {
+    return;
+  }
+  historyLoading.add(key);
+  try {
+    const body = await requestJson(
+      historyPath(projectId),
+      { method: "GET", kind: "read" },
+      ChatHistoryResponseSchema,
+    );
+    // Merge, never duplicate: skip turns whose user text the slice holds.
+    const known = new Set(
+      getChatState(key)
+        .messages.filter((message) => message.role === "user")
+        .map((message) => message.text),
+    );
+    for (const turn of body.turns) {
+      if (known.has(turn.user_text)) {
+        continue;
+      }
+      known.add(turn.user_text);
+      const parsed = Date.parse(turn.time);
+      const at = Number.isNaN(parsed) ? Date.now() : parsed;
+      appendChatMessage(key, {
+        role: "user",
+        text: turn.user_text,
+        at,
+        final: true,
+      });
+      if (turn.assistant_text !== "") {
+        appendChatMessage(key, {
+          role: "assistant",
+          text: turn.assistant_text,
+          at,
+          final: true,
+        });
+      }
+    }
+  } catch {
+    // History is best effort: a failed load never breaks the composer.
+  } finally {
+    historyLoading.delete(key);
+    historyLoaded.add(key);
+  }
+}
+
+// Best-effort turn persist (USER write). A failed POST never surfaces.
+async function recordTurnBestEffort(
+  projectId: string,
+  userText: string,
+  assistantText: string,
+): Promise<void> {
+  try {
+    await requestResponse(CHAT_HISTORY_ROUTE, {
+      method: "POST",
+      kind: "write",
+      body: {
+        project_id: projectId,
+        user_text: userText,
+        assistant_text: assistantText,
+      },
+    });
+  } catch {
+    return;
+  }
+}
+
 let streamSeq = 0;
-let messageSeq = 0;
 
 function nextStreamId(): string {
   streamSeq += 1;
   return `chat-stream-${Date.now()}-${streamSeq}`;
-}
-
-function nextMessageId(): string {
-  messageSeq += 1;
-  return `chat-message-${Date.now()}-${messageSeq}`;
 }
 
 function readOnline(): boolean {
@@ -142,50 +407,266 @@ async function readBoundModels(projectId: string): Promise<unknown[] | null> {
   }
 }
 
+function handleRunError(
+  key: string,
+  assistantId: string,
+  error: unknown,
+): void {
+  if (isInstallPermissionAsk(error)) {
+    // FXASK2: the run is held for install permission (served
+    // approval event). The held message stays final so the answer is
+    // recorded on the run; the F1 ask-once ledger decides whether the
+    // dialog shows at all. The tool is the event's own tool id
+    // (guard tool_name), answered once per tool — never a
+    // project-derived key.
+    patchChatMessage(key, assistantId, { final: true });
+    const toolName = (error as ApiError).toolId as string;
+    if (isInstallHoldTool(toolName)) {
+      // FXASKB B1 hold: the dialog shows regardless of the
+      // asked-once flag; Allow/Deny records the decision and the
+      // same prompt resends, so the run continues stored and
+      // never asks again. The tool is the command's own id.
+      emitAsk(key, { toolName, messageId: assistantId });
+      return;
+    }
+    void askPermission(toolName).then(
+      (outcome) => {
+        if (!outcome.askedOnce) {
+          emitAsk(key, { toolName, messageId: assistantId });
+        }
+      },
+      () => {
+        emitAsk(key, { toolName, messageId: assistantId });
+      },
+    );
+    return;
+  }
+  const current = getChatState(key).messages.find(
+    (message) => message.id === assistantId,
+  );
+  if (current !== undefined && current.text === "") {
+    // Failed before any token: prune the empty placeholder (render
+    // filters pruned ids, the store stays append/patch only).
+    deadAssistants.add(assistantId);
+  } else {
+    patchChatMessage(key, assistantId, { final: false });
+  }
+  setChatHealth(key, "degraded");
+  if (error instanceof ApiError) {
+    emitBlocking(key, {
+      errorKey: apiErrorLocaleKey(error.code),
+      code: error.code,
+    });
+  } else {
+    emitBlocking(key, { errorKey: "errors.generic", code: "UNKNOWN" });
+  }
+}
+
+/**
+ * Module pump: starts one streamChat driver per slice and folds every
+ * chunk plus the terminal verdict into the store. Survives unmount (H1);
+ * a second call while the slice streams is a no-op (double-mount guard).
+ */
+function startChatRun(
+  client: ApiClient,
+  projectId: string,
+  prompt: string,
+): void {
+  const key = sliceKeyFor(client, projectId);
+  const text = prompt.trim();
+  if (text === "") {
+    return;
+  }
+  if (pumps.has(key) || getChatState(key).runner.streaming) {
+    return;
+  }
+  clearSliceBlocking(key);
+  lastSentBySlice.set(key, text);
+  const at = Date.now();
+  appendChatMessage(key, { role: "user", text, at, final: true });
+  const assistant = appendChatMessage(key, {
+    role: "assistant",
+    text: "",
+    at,
+    final: false,
+  });
+  const streamId = nextStreamId();
+  setChatRunner(key, { streamId, streaming: true });
+  let runner: ChatRunner;
+  try {
+    runner = streamChat(
+      client,
+      { project_id: projectId, prompt_ref: text, stream_id: streamId },
+      {
+        onChunkText: (delta) => {
+          const current = getChatState(key).messages.find(
+            (message) => message.id === assistant.id,
+          );
+          if (current !== undefined) {
+            patchChatMessage(key, assistant.id, {
+              text: current.text + delta,
+            });
+          }
+        },
+        isCancelled: () => pumps.get(key)?.cancelled ?? true,
+      },
+    );
+  } catch (error) {
+    setChatRunner(key, { streamId: null, streaming: false });
+    handleRunError(key, assistant.id, error);
+    if (!mountedSlices.has(key)) {
+      flagChatUnseen(key);
+    }
+    return;
+  }
+  pumps.set(key, {
+    cancelled: false,
+    runner,
+    prompt: text,
+    assistantId: assistant.id,
+  });
+  runner.done.then(
+    ({ aborted, executed }) => {
+      pumps.delete(key);
+      setChatRunner(key, { streamId: null, streaming: false });
+      if (!aborted) {
+        setChatHealth(key, "ok");
+      }
+      patchChatMessage(key, assistant.id, { final: !aborted });
+      if (executed === true) {
+        engineRunMessages.add(assistant.id);
+      }
+      const answer =
+        getChatState(key).messages.find(
+          (message) => message.id === assistant.id,
+        )?.text ?? "";
+      if (!aborted && answer !== "") {
+        void recordTurnBestEffort(projectId, text, answer);
+      }
+      if (!mountedSlices.has(key)) {
+        flagChatUnseen(key);
+      }
+    },
+    (error: unknown) => {
+      pumps.delete(key);
+      setChatRunner(key, { streamId: null, streaming: false });
+      handleRunError(key, assistant.id, error);
+      if (!mountedSlices.has(key)) {
+        flagChatUnseen(key);
+      }
+    },
+  );
+}
+
 export function ChatArea(props: ChatAreaProps): ReactElement {
   const client = useApiClient();
+  const key = sliceKeyFor(client, props.projectId);
+  // The slice is the render truth: messages, the live runner, the H4
+  // verdict line and the quiet dot state all survive unmount here.
+  const chatState = useSliceState(key);
+  const messages = chatState.messages.filter(
+    (message) => !deadAssistants.has(message.id),
+  );
+  const streaming = chatState.runner.streaming;
+  const health = chatState.health;
+  const online = chatState.online;
+  const queue = chatState.queue;
   const [boundModels, setBoundModels] = useState<unknown[] | null>(null);
   const [connected, setConnected] = useState<string[] | null>(null);
   const [directorModel, setDirectorModel] = useState<string | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState(props.initialDraft ?? "");
-  const [streaming, setStreaming] = useState(false);
-  const [blocking, setBlocking] = useState<BlockingError | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
-  const [online, setOnline] = useState(readOnline);
-  const [queue, setQueue] = useState<string[]>([]);
-  const [flooded, setFlooded] = useState(false);
-  const [health, setHealth] = useState<"ok" | "degraded" | "reconnecting">(
-    "ok",
+  const [blocking, setBlocking] = useState<BlockingError | null>(() =>
+    consumeBlockingStash(key),
   );
-  const sendTimesRef = useRef<number[]>([]);
+  const [toast, setToast] = useState<string | null>(null);
+  const [flooded, setFlooded] = useState(false);
   const offlineRef = useRef(!readOnline());
   const oneShotSentRef = useRef(false);
-  const runnerRef = useRef<ChatRunner | null>(null);
   const [pendingAsk, setPendingAsk] = useState<InstallPermissionAsk | null>(
     null,
   );
   const pendingAskRef = useRef<InstallPermissionAsk | null>(null);
-  const cancelRef = useRef(false);
-  const streamingRef = useRef(false);
-  const lastSentRef = useRef<string | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
   // FXRC1FIX P3: the message list owns the scroll inside the chat card;
   // the composer sits below it in flow and never overlays text. stick
   // follows the newest message unless the user scrolled up.
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const stickRef = useRef(true);
 
+  function dismissToast(): void {
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = null;
+    }
+    setToast(null);
+  }
+
+  function showToast(text: string): void {
+    // S5: toasts are transient: one visible at a time, gone after 5 s.
+    setToast(text);
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = window.setTimeout(() => {
+      setToast(null);
+      toastTimerRef.current = null;
+    }, 5000);
+  }
+
+  // Slice identity: opening the chat clears its quiet dot (H4), mirrors
+  // the device online state into the slice, loads served turns (H2) and
+  // registers this mount for inline error plus permission UI. Unmount only
+  // detaches: the pump keeps streaming into the store (H1).
+  useEffect(() => {
+    mountedSlices.add(key);
+    markSeenByKey(key);
+    const stashedBlocking = consumeBlockingStash(key);
+    if (stashedBlocking !== null) {
+      setBlocking(stashedBlocking);
+    }
+    setPendingAsk(null);
+    pendingAskRef.current = null;
+    const stashedAsk = askStash.get(key);
+    if (stashedAsk !== undefined) {
+      askStash.delete(key);
+      pendingAskRef.current = stashedAsk;
+      setPendingAsk(stashedAsk);
+    }
+    const ui: SliceUI = {
+      onBlocking: (error) => {
+        setBlocking(error);
+      },
+      onAsk: (ask) => {
+        pendingAskRef.current = ask;
+        setPendingAsk(ask);
+      },
+    };
+    sliceUI.set(key, ui);
+    setChatOnline(key, readOnline());
+    void loadHistoryOnce(key, props.projectId);
+    return () => {
+      mountedSlices.delete(key);
+      if (sliceUI.get(key) === ui) {
+        sliceUI.delete(key);
+      }
+      if (toastTimerRef.current !== null) {
+        window.clearTimeout(toastTimerRef.current);
+        toastTimerRef.current = null;
+      }
+    };
+  }, [key, props.projectId]);
+
   useEffect(() => {
     const onOnline = (): void => {
-      setOnline(true);
+      setChatOnline(key, true);
       if (offlineRef.current) {
         offlineRef.current = false;
-        setHealth("reconnecting");
+        setChatHealth(key, "reconnecting");
       }
     };
     const onOffline = (): void => {
       offlineRef.current = true;
-      setOnline(false);
+      setChatOnline(key, false);
     };
     window.addEventListener("online", onOnline);
     window.addEventListener("offline", onOffline);
@@ -193,21 +674,7 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
       window.removeEventListener("online", onOnline);
       window.removeEventListener("offline", onOffline);
     };
-  }, []);
-
-  useEffect(
-    () => () => {
-      cancelRef.current = true;
-      const runner = runnerRef.current;
-      if (runner !== null) {
-        runner.cancel().then(
-          () => undefined,
-          () => undefined,
-        );
-      }
-    },
-    [],
-  );
+  }, [key]);
 
   useEffect(() => {
     let alive = true;
@@ -273,141 +740,9 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
     return t(placementKey("SPLIT"));
   }
 
-  const sendPrompt = (text: string): void => {
-    const prompt = text.trim();
-    if (prompt === "" || streamingRef.current) {
-      return;
-    }
-    cancelRef.current = false;
-    lastSentRef.current = prompt;
-    const sentAt = Date.now();
-    const recentSends = [
-      ...sendTimesRef.current.filter((at) => sentAt - at < CHAT_FLOOD_WINDOW_MS),
-      sentAt,
-    ];
-    sendTimesRef.current = recentSends;
-    if (isFlooding(recentSends, sentAt)) {
-      setFlooded(true);
-    }
-    setBlocking(null);
-    setToast(null);
-    const userId = nextMessageId();
-    const assistantId = nextMessageId();
-    const at = Date.now();
-    setMessages((prev) => [
-      ...prev,
-      { id: userId, role: "user", text: prompt, at, final: true },
-      { id: assistantId, role: "assistant", text: "", at, final: false },
-    ]);
-    setStreaming(true);
-    streamingRef.current = true;
-    const runner = streamChat(
-      client,
-      { project_id: props.projectId, prompt_ref: prompt, stream_id: nextStreamId() },
-      {
-        onChunkText: (delta) => {
-          setMessages((prev) =>
-            prev.map((message) =>
-              message.id === assistantId
-                ? { ...message, text: message.text + delta }
-                : message,
-            ),
-          );
-        },
-        isCancelled: () => cancelRef.current,
-      },
-    );
-    runnerRef.current = runner;
-    runner.done.then(
-      ({ aborted, executed }) => {
-        runnerRef.current = null;
-        streamingRef.current = false;
-        setStreaming(false);
-        if (!aborted) {
-          setHealth("ok");
-        }
-        setMessages((prev) =>
-          prev.map((message) =>
-            message.id === assistantId
-              ? { ...message, final: !aborted, engineRun: executed }
-              : message,
-          ),
-        );
-      },
-      (error: unknown) => {
-        runnerRef.current = null;
-        streamingRef.current = false;
-        setStreaming(false);
-        if (isInstallPermissionAsk(error)) {
-          // FXASK2: the run is held for install permission (served
-          // approval event). The held message stays final so the answer is
-          // recorded on the run; the F1 ask-once ledger decides whether the
-          // dialog shows at all. The tool is the event's own tool id
-          // (guard tool_name), answered once per tool — never a
-          // project-derived key.
-          setMessages((prev) =>
-            prev.map((message) =>
-              message.id === assistantId
-                ? { ...message, final: true }
-                : message,
-            ),
-          );
-          const toolName = (error as ApiError).toolId as string;
-          if (isInstallHoldTool(toolName)) {
-            // FXASKB B1 hold: the dialog shows regardless of the
-            // asked-once flag; Allow/Deny records the decision and the
-            // same prompt resends, so the run continues stored and
-            // never asks again. The tool is the command's own id.
-            if (pendingAskRef.current?.toolName === toolName) {
-              return;
-            }
-            pendingAskRef.current = { toolName, messageId: assistantId };
-            setPendingAsk({ toolName, messageId: assistantId });
-            return;
-          }
-          if (pendingAskRef.current?.toolName === toolName) {
-            return;
-          }
-          void askPermission(toolName).then(
-            (outcome) => {
-              if (outcome.askedOnce) {
-                // Stored answer: the second run of that tool does not ask.
-                return;
-              }
-              pendingAskRef.current = { toolName, messageId: assistantId };
-              setPendingAsk({ toolName, messageId: assistantId });
-            },
-            () => {
-              pendingAskRef.current = { toolName, messageId: assistantId };
-              setPendingAsk({ toolName, messageId: assistantId });
-            },
-          );
-          return;
-        }
-        setMessages((prev) =>
-          prev
-            .map((message) =>
-              message.id === assistantId
-                ? { ...message, final: false }
-                : message,
-            )
-            .filter(
-              (message) => message.id !== assistantId || message.text !== "",
-            ),
-        );
-        setHealth("degraded");
-        if (error instanceof ApiError) {
-          setBlocking({ errorKey: apiErrorLocaleKey(error.code), code: error.code });
-        } else {
-          setBlocking({ errorKey: "errors.generic", code: "UNKNOWN" });
-        }
-      },
-    );
-  };
-
   // First-message one-shot: the start box created the project plus
-  // task already, so the kept message sends once through the existing
-  // sendPrompt on mount, guarded against double effects, then the
+  // task already, so the kept message sends once through the module
+  // pump on mount, guarded against double effects, then the
   // parent clears it. initialDraft keeps filling without sending.
   useEffect(() => {
     if (
@@ -416,7 +751,7 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
       !oneShotSentRef.current
     ) {
       oneShotSentRef.current = true;
-      sendPrompt(props.initialSend);
+      startChatRun(client, props.projectId, props.initialSend);
       props.onSendConsumed?.();
     }
     // One-shot only: the sent guard covers double effects.
@@ -429,10 +764,30 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
       if (next === undefined) {
         return;
       }
-      setQueue((prev) => prev.slice(1));
-      sendPrompt(next);
+      dequeueChatPrompt(key);
+      dismissToast();
+      startChatRun(client, props.projectId, next);
     }
   });
+
+  function handleSendPrompt(prompt: string): void {
+    const text = prompt.trim();
+    if (text === "" || streaming) {
+      return;
+    }
+    dismissToast();
+    const sentAt = Date.now();
+    const previous = sendTimesBySlice.get(key) ?? [];
+    const recentSends = [
+      ...previous.filter((at) => sentAt - at < CHAT_FLOOD_WINDOW_MS),
+      sentAt,
+    ];
+    sendTimesBySlice.set(key, recentSends);
+    if (isFlooding(recentSends, sentAt)) {
+      setFlooded(true);
+    }
+    startChatRun(client, props.projectId, text);
+  }
 
   const handleSend = (): void => {
     const prompt = draft.trim();
@@ -440,56 +795,59 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
       return;
     }
     if (!online) {
-      setQueue((prev) => [...prev, prompt]);
+      enqueueChatPrompt(key, prompt);
       setDraft("");
-      setToast(t("chat.stream.offline"));
+      showToast(t("chat.stream.offline"));
       return;
     }
     setDraft("");
-    sendPrompt(prompt);
+    handleSendPrompt(prompt);
   };
 
   const handleAbort = (): void => {
-    const runner = runnerRef.current;
-    if (runner === null) {
+    const pump = pumps.get(key);
+    if (pump === undefined) {
       return;
     }
-    cancelRef.current = true;
-    runner.cancel().then(
+    pump.cancelled = true;
+    pump.runner.cancel().then(
       () => undefined,
       () => {
-        setToast(t("errors.generic"));
+        showToast(t("errors.generic"));
       },
     );
   };
 
   const handleRetry = (): void => {
-    const prompt = lastSentRef.current;
+    const prompt = lastSentBySlice.get(key) ?? null;
     if (prompt === null || streaming) {
       return;
     }
+    clearSliceBlocking(key);
     setBlocking(null);
     if (!online) {
-      setQueue((prev) => [...prev, prompt]);
+      enqueueChatPrompt(key, prompt);
       return;
     }
-    sendPrompt(prompt);
+    handleSendPrompt(prompt);
   };
 
   const handleCompactResend = (): void => {
-    const prompt = lastSentRef.current;
+    const prompt = lastSentBySlice.get(key) ?? null;
     if (prompt === null || streaming) {
       return;
     }
     const compacted = compactPrompt(prompt);
-    sendTimesRef.current = [];
+    sendTimesBySlice.set(key, []);
     setFlooded(false);
+    clearSliceBlocking(key);
     setBlocking(null);
     if (!online) {
-      setQueue((prev) => [...prev, compacted]);
+      enqueueChatPrompt(key, compacted);
       return;
     }
-    sendPrompt(compacted);
+    // The compacted prompt bypasses the flood window it just cleared.
+    startChatRun(client, props.projectId, compacted);
   };
 
   const answerAsk = (allow: boolean): void => {
@@ -525,28 +883,23 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
                 "Install permission denied for '{tool}'.",
                 { tool: ask.toolName },
               );
-          setMessages((prev) =>
-            prev.map((message) =>
-              message.id === ask.messageId
-                ? {
-                    ...message,
-                    text:
-                      message.text === ""
-                        ? note
-                        : `${message.text}
-${note}`,
-                    decided: allow ? "accepted" : "rejected",
-                  }
-                : message,
-            ),
+          const current = getChatState(key).messages.find(
+            (message) => message.id === ask.messageId,
           );
-          const prompt = lastSentRef.current;
-          if (prompt !== null && !streamingRef.current) {
-            sendPrompt(prompt);
+          if (current !== undefined) {
+            patchChatMessage(key, ask.messageId, {
+              text:
+                current.text === "" ? note : `${current.text}\n${note}`,
+              decided: allow ? "accepted" : "rejected",
+            });
+          }
+          const prompt = lastSentBySlice.get(key) ?? null;
+          if (prompt !== null) {
+            startChatRun(client, props.projectId, prompt);
           }
         },
         () => {
-          setBlocking({ errorKey: "errors.generic", code: "UNKNOWN" });
+          emitBlocking(key, { errorKey: "errors.generic", code: "UNKNOWN" });
         },
       );
       return;
@@ -564,36 +917,27 @@ ${note}`,
               "Install permission denied for '{tool}'.",
               { tool: ask.toolName },
             );
-        setMessages((prev) =>
-          prev.map((message) =>
-            message.id === ask.messageId
-              ? {
-                  ...message,
-                  text:
-                    message.text === ""
-                      ? note
-                      : `${message.text}
-${note}`,
-                  decided: allow ? "accepted" : "rejected",
-                }
-              : message,
-          ),
+        const current = getChatState(key).messages.find(
+          (message) => message.id === ask.messageId,
         );
+        if (current !== undefined) {
+          patchChatMessage(key, ask.messageId, {
+            text: current.text === "" ? note : `${current.text}\n${note}`,
+            decided: allow ? "accepted" : "rejected",
+          });
+        }
       },
       () => {
-        setBlocking({ errorKey: "errors.generic", code: "UNKNOWN" });
+        emitBlocking(key, { errorKey: "errors.generic", code: "UNKNOWN" });
       },
     );
   };
 
   const decide = (id: string, decided: "accepted" | "rejected"): void => {
     const proposal =
-      messages.find((message) => message.id === id)?.text ?? "";
-    setMessages((prev) =>
-      prev.map((message) =>
-        message.id === id ? { ...message, decided } : message,
-      ),
-    );
+      getChatState(key).messages.find((message) => message.id === id)?.text ??
+      "";
+    patchChatMessage(key, id, { decided });
     // FXASKB B3: Accept and Reject each post one journal row through
     // the token-guarded route; a failed post never blocks the local
     // decision.
@@ -681,7 +1025,7 @@ ${note}`,
               message.final &&
               message.text !== "" &&
               message.decided === undefined &&
-              message.engineRun !== true &&
+              !engineRunMessages.has(message.id) &&
               !streaming ? (
                 <ApprovalCard
                   proposal={message.text}
