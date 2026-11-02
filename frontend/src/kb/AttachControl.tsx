@@ -7,6 +7,7 @@
 import { useState } from "react";
 import type { ReactElement } from "react";
 import { t } from "../locale/index";
+import { requestResponse } from "../api/errors";
 
 export interface KbAttachSource {
   kb_id: string;
@@ -41,14 +42,11 @@ export function AttachControl(props: {
       purpose: purpose.trim(),
     };
     try {
-      const response = await fetch("/api/v1/kb/attach", {
+      const response = await requestResponse("/api/v1/kb/attach", {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ source }),
+        kind: "write",
+        body: { source },
       });
-      if (!response.ok) {
-        throw new Error(`attach failed: ${response.status}`);
-      }
       const kbIdAnswer: unknown = await response.json();
       const id =
         typeof kbIdAnswer === "string"
