@@ -411,6 +411,109 @@ def get_decision(store_dir: Any = None, memory: Any = None,
     return None
 
 
+def decision_allows_run(store_dir: Any = None, memory: Any = None,
+                        tool_id: str = "",
+                        run_id: Any = None) -> bool:
+    """True when a recorded allow covers this run (FXR4A D4).
+
+    An allow is single-run: unconsumed allows cover any run, an allow
+    consumed by another run reads as spent (ask again), an allow
+    consumed by this run still covers it (same-run retries never
+    re-ask). Deny and unknown never allow.
+    """
+    store_dir, memory = _resolve_ledger(store_dir, memory)
+    key = str(tool_id)
+    entry = None
+    if isinstance(memory, dict):
+        entry = memory.get(key)
+    if entry is None and store_dir:
+        entry = load_decisions(store_dir).get(key)
+    if not isinstance(entry, dict):
+        return False
+    if entry.get("decision") != DECISION_ALLOW:
+        return False
+    spent = entry.get("consumed_by_run")
+    if spent and run_id is not None and str(spent) != str(run_id):
+        return False
+    return True
+
+
+def note_decision_consumed(store_dir: Any = None, memory: Any = None,
+                           tool_id: str = "",
+                           run_id: Any = "") -> dict[str, Any] | None:
+    """Mark one allow spent by a run; the next run asks again (FXR4A D4).
+
+    Only an unconsumed allow is stamped; a deny, an unknown id, or an
+    allow already spent by another run is left untouched (None).
+    """
+    if not str(run_id):
+        return None
+    store_dir, memory = _resolve_ledger(store_dir, memory)
+    key = str(tool_id)
+    merged = load_decisions(store_dir)
+    if isinstance(memory, dict):
+        for known_key, known in memory.items():
+            if isinstance(known, dict):
+                merged[known_key] = known
+    entry = merged.get(key)
+    if not isinstance(entry, dict):
+        return None
+    if entry.get("decision") != DECISION_ALLOW:
+        return None
+    spent = entry.get("consumed_by_run")
+    if spent and str(spent) != str(run_id):
+        return None
+    record = dict(entry)
+    record["consumed_by_run"] = str(run_id)
+    if isinstance(memory, dict):
+        memory[key] = record
+    merged[key] = record
+    save_decisions(store_dir, merged)
+    return dict(record)
+
+
+def repin_install_request(store_dir: Any = None, memory: Any = None,
+                          tool_id: str = "", argv: Any = None,
+                          project_id: str = "") -> dict[str, Any] | None:
+    """Point the pending ask pin at genuinely new words (FXR4A D5).
+
+    A recorded deny is never touched. Otherwise the pin moves to the
+    words the user is now asked about, so a later allow covers exactly
+    those words instead of looping on a stale pin. Same-word re-asks
+    keep first-ask-wins (record_install_request) semantics.
+    """
+    argv_words = _valid_decision_argv(argv)
+    if argv_words is None:
+        return None
+    store_dir, memory = _resolve_ledger(store_dir, memory)
+    key = str(tool_id)
+    if not key:
+        return None
+    merged = load_decisions(store_dir)
+    if isinstance(memory, dict):
+        for known_key, known in memory.items():
+            if isinstance(known, dict):
+                merged[known_key] = known
+    prior = merged.get(key)
+    if isinstance(prior, dict):
+        if prior.get("decision") == DECISION_DENY:
+            return dict(prior)
+        record = dict(prior)
+        record["argv"] = argv_words
+        record.setdefault("project", str(project_id))
+    else:
+        record = {
+            "time": _decision_now(),
+            "project": str(project_id),
+            "argv": argv_words,
+        }
+    if isinstance(memory, dict):
+        memory[key] = record
+    merged[key] = record
+    save_decisions(store_dir, merged)
+    return dict(record)
+
+
 def record_decision(store_dir: Any = None, memory: Any = None,
                     tool_id: str = "", decision: str = "",
                     project_id: str = "",
@@ -421,7 +524,9 @@ def record_decision(store_dir: Any = None, memory: Any = None,
     Raises PermissionCheckError (400) for a bad decision; unknown ids
     stay unreadable as none until recorded. ``argv`` optionally pins
     the exact approved words; when absent, an argv pinned by an earlier
-    install ask is preserved, so a later allow never widens it.
+    install ask is preserved, so a later allow never widens it. A fresh
+    decision resets once-consumption (FXR4A D4): the next run that uses
+    the allow consumes it anew.
     """
     if decision not in DECISION_VALUES:
         raise PermissionCheckError(
@@ -440,6 +545,8 @@ def record_decision(store_dir: Any = None, memory: Any = None,
         "time": decided_at or _decision_now(),
         "project": str(project_id),
     }
+    # A fresh decision is a fresh once-allow: drop any spent marker so
+    # the next run that uses it consumes it anew (FXR4A D4).
     if argv_words is not None:
         record["argv"] = argv_words
     else:

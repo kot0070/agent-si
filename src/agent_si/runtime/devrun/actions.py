@@ -61,6 +61,22 @@ class InstallAskNeeded(PermissionError):
         self.tool_id = str(tool_id)
 
 
+class InstallDenied(PermissionError):
+    """An install-class command the user denied (FXR4A D6).
+
+    Raised (not returned as text) so a denied installer is never
+    swallowed by checks-green success: the note still reaches the
+    worker's reply, and the engine closes the part FAILED with the
+    plain line. The tool id rides along like the ask does.
+    """
+
+    code: str = "DEVRUN_INSTALL_DENIED"
+
+    def __init__(self, tool_id: str, message: str) -> None:
+        super().__init__(message)
+        self.tool_id = str(tool_id)
+
+
 #: Secret file classes (suffixes built without literals): content is
 #: never returned and the refusal names only the class.
 _DOT = "."
@@ -595,6 +611,7 @@ def spawn_checked(
     argv: list[str],
     log_path: str,
     log_rel: str,
+    grant_run_id: str = "",
 ) -> dict[str, Any]:
     """Run one argv through guarded_dispatch; return the spawn row.
 
@@ -631,6 +648,15 @@ def spawn_checked(
             _ask_decision is None
             and _ask_permissions.install_grant_allows(
                 str(project_id), words))
+        # FXR4A D4: an allow covers one run only. Consumed by another
+        # run it reads as spent (ask again); consumed by this run it
+        # still covers same-run retries. The true run id rides
+        # grant_run_id (the positional run id is per-part derived).
+        _ask_scope = str(grant_run_id or run_id)
+        _ask_run_allow = (
+            _ask_project_grant
+            or _ask_permissions.decision_allows_run(
+                tool_id=_ask_tool_id, run_id=_ask_scope))
         if _ask_decision is None and not _ask_project_grant:
             with contextlib.suppress(Exception):
                 _ask_permissions.record_install_request(
@@ -642,11 +668,24 @@ def spawn_checked(
                 f"refused: install-class command {words[0]!r} needs "
                 "install permission (ungranted runs continue without "
                 "the install)")
-        if not _ask_project_grant and _ask_decision != "allow":
+        if not _ask_project_grant and _ask_decision == "deny":
             raise PermissionError(
                 f"refused: install-class command {words[0]!r} needs "
                 "install permission (ungranted runs continue without "
                 "the install)")
+        if not _ask_project_grant and not _ask_run_allow:
+            # FXR4A D4: the once-allow is spent by an earlier run; the
+            # next run asks again, never silently refuses.
+            with contextlib.suppress(Exception):
+                _ask_permissions.record_install_request(
+                    tool_id=_ask_tool_id,
+                    argv=list(words),
+                    project_id=str(project_id))
+            raise InstallAskNeeded(
+                _ask_tool_id,
+                f"refused: install-class command {words[0]!r} needs "
+                "install permission (an earlier allow is spent; "
+                "ungranted runs continue without the install)")
         _ask_approved = (
             [str(word) for word in words]
             if _ask_project_grant
@@ -660,10 +699,27 @@ def spawn_checked(
                     project_id=str(project_id))
         if _ask_approved is not None and [
                 str(word) for word in _ask_approved] != words:
-            raise PermissionError(
-                "refused: install approval covers "
-                f"{[str(word) for word in _ask_approved]!r}, got {words!r} "
-                "(an approval runs these exact words only)")
+            # FXR4A D5: different exact words are a new ask with the
+            # real words, never a silent no-op into checks-green
+            # success. The pin moves to what is actually asked about
+            # (denies are never touched), so an allow covers it.
+            with contextlib.suppress(Exception):
+                _ask_permissions.repin_install_request(
+                    tool_id=_ask_tool_id,
+                    argv=list(words),
+                    project_id=str(project_id))
+            raise InstallAskNeeded(
+                _ask_tool_id,
+                f"refused: install-class command {words[0]!r} needs "
+                "install permission for these exact words "
+                f"{words!r} (an approval runs these exact words only)")
+        if not _ask_project_grant:
+            # FXR4A D4: the replay consumes the once-allow; the next
+            # run asks again. Best effort: a consume failure never
+            # blocks the allowed spawn.
+            with contextlib.suppress(Exception):
+                _ask_permissions.note_decision_consumed(
+                    tool_id=_ask_tool_id, run_id=_ask_scope)
     if kind == "inline":
         raise PermissionError(
             "refused: inline code needs approval first "
