@@ -219,6 +219,16 @@ const TelemetryModelRowSchema = z.object({
 
 export type TelemetryModelRow = z.infer<typeof TelemetryModelRowSchema>;
 
+const TelemetryRoleRowSchema = z.object({
+  role: z.string(),
+  model: z.string(),
+  calls: z.number().int(),
+  tokens: TelemetryMoneySchema,
+  cost: TelemetryMoneySchema,
+});
+
+export type TelemetryRoleRow = z.infer<typeof TelemetryRoleRowSchema>;
+
 const TelemetrySummarySchema = z.object({
   project: z
     .object({ tasks: TelemetryCountSchema, audits: TelemetryCountSchema })
@@ -234,6 +244,7 @@ const TelemetrySummarySchema = z.object({
       }),
     )
     .optional(),
+  roles: z.array(TelemetryRoleRowSchema).optional(),
   unavailable: z.array(z.string()).optional(),
 });
 
@@ -268,13 +279,33 @@ export interface TokenRow {
   calls: number | null;
 }
 
-// Per-role+model token facts: live token cells first, analytics-telemetry
-// model rows fill gaps by model name. No served cell anywhere reads null
+// Per-role+model token facts. When the telemetry doc serves per-role
+// rows (recorded at record time, same events as the model aggregates),
+// role rows carry the served numbers and "Other calls" holds only calls
+// with no role (role ""). Live rows plus model rows are the legacy gap
+// fill for stores without roles. No served cell anywhere reads null
 // (UNKNOWN in the view), never zero invented as measured.
 export function buildTokenRows(
   live: PartRow[],
   telemetry: TelemetrySummary | null,
 ): TokenRow[] {
+  const roles = telemetry?.roles ?? [];
+  if (roles.length > 0) {
+    return roles
+      .map((row) => ({
+        role: row.role === "" ? undefined : row.role,
+        model: row.model,
+        tokens: typeof row.tokens === "number" ? row.tokens : null,
+        calls: row.calls,
+      }))
+      .filter(
+        (row) =>
+          row.role !== undefined ||
+          row.model !== undefined ||
+          row.tokens !== null ||
+          row.calls !== null,
+      );
+  }
   const byKey = new Map<string, TokenRow>();
   for (const row of dedupeLiveRows(live)) {
     const key = `${row.role ?? ""}\u0000${row.model ?? ""}`;
