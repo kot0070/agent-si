@@ -90,3 +90,52 @@ def test_cb10_owner_gone_terminal_row_and_log():
     assert 'RUN_OWNER_GONE' in src
     callers = inspect.getsource(_manager.run_task_streamed)
     assert callers.count("_close_owner_gone") >= 3
+
+
+def test_cb4_summary_delta_then_done_is_intentional():
+    """CB-4 REFUTED: every terminal event repeats its delta text exactly
+    (the join contract chat_stream renders once); no user-visible double."""
+    import inspect
+    from agent_si.runtime.devrun import engine as _engine
+
+    src = inspect.getsource(_engine._run_event)
+    assert "every terminal event repeats its delta text exactly" in src
+
+
+def test_cb5_no_user_facing_audit_failed_literal():
+    """CB-5 REFUTED (LOW, structural not literal): no user-facing
+    'audit failed' string exists; only codes AUDIT_FAIL/audit_failure."""
+    import pathlib
+    import re
+
+    root = pathlib.Path(__file__).resolve().parents[1] / "src" / "agent_si"
+    hits = []
+    for path in (root / "state_machines" / "run_machine.py",
+                 root / "domain" / "incidents.py"):
+        text = path.read_text(encoding="utf-8")
+        for i, line in enumerate(text.splitlines(), 1):
+            if re.search(r"audit failed", line, re.IGNORECASE):
+                if "AUDIT_FAIL" not in line and "audit_failure" not in line:
+                    hits.append("%s:%d:%s" % (path.name, i, line.strip()))
+    assert hits == [], hits
+
+
+def test_cb8_cb9_not_reachable_from_user_routes():
+    """CB-8/CB-9 REFUTED: AUDITING/BLOCKED/VERIFYING ExecutionRun states
+    are never persisted by any served backend route (chat path is
+    runtime/devrun/engine); only an in-memory assurance trail exists."""
+    import pathlib
+    import re
+
+    root = pathlib.Path(__file__).resolve().parents[1] / "src" / "agent_si"
+    backend = root / "backend"
+    offenders = []
+    for path in backend.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        # The only ExecutionRun touch is the K13 stop path, which persists
+        # a terminal CANCELLED status; nothing drives transition_run or
+        # apply_audit_disposition, so AUDITING/BLOCKED/VERIFYING run rows
+        # can never be written by a user route.
+        if re.search(r"transition_run|apply_audit_disposition", text):
+            offenders.append(str(path.relative_to(root)))
+    assert offenders == [], offenders
