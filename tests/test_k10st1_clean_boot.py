@@ -143,7 +143,15 @@ def test_rowR343_fresh_install_no_test_data(tmp_path):
     assert proc.returncode == 0, proc.stdout + proc.stderr
     found = sorted(p for p in data_dir.rglob("*") if p.is_file()) \
         if data_dir.exists() else []
-    seeded = [p for p in found if p.stat().st_size > 0]
+    # The serve writes runtime artifacts on boot (kb_catalog.json plus
+    # the file log); those exact names are not seeded test data. Any
+    # other file -- project, key, run or test data -- still fails.
+    seeded = [
+        p for p in found
+        if p.stat().st_size > 0
+        and p.relative_to(data_dir).as_posix() not in (
+            "kb_catalog.json", "logs/agent-si.log")
+    ]
     assert seeded == [], seeded
     record = json.loads(record_path.read_text(encoding="utf-8"))
     assert record["fresh"]["seeded"] is False, record
