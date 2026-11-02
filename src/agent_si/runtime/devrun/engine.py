@@ -2860,6 +2860,29 @@ def _cap_run_tail(tail: Any) -> str:
     return text
 
 
+#: Long model replies in loop history: head + tail kept verbatim.
+_REPLY_HISTORY_HEAD = 8192
+_REPLY_HISTORY_TAIL = 8192
+
+
+def _cap_reply_text(text: Any) -> str:
+    """Cap one model reply for loop history: head + tail, never the middle.
+
+    Over-long replies keep the first 8 KB and the last 8 KB verbatim with
+    one line naming the cut size; the current turn still parses the full
+    text and the run log keeps the whole text. Never raises.
+    """
+    try:
+        body = str(text or "")
+    except Exception:
+        return ""
+    if len(body) > _REPLY_HISTORY_HEAD + _REPLY_HISTORY_TAIL:
+        cut = len(body) - _REPLY_HISTORY_HEAD - _REPLY_HISTORY_TAIL
+        return "%s\n[...reply cut: %d chars omitted...]\n%s" % (
+            body[:_REPLY_HISTORY_HEAD], cut, body[-_REPLY_HISTORY_TAIL:])
+    return body
+
+
 def _cap_read_note(out: Any) -> str:
     """Cap read_file output for the worker note: head plus a marker."""
     text = str(out or "")
@@ -3099,13 +3122,12 @@ def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
 
     def _log_reply(kind: str, reply_text: Any) -> None:
         try:
-            tail = str(reply_text or "")
-            if len(tail) > 2000:
-                tail = tail[-2000:]
+            # The run log keeps the whole reply text (history trimming
+            # never touches this file); failures here never fail the run.
             with open(log_path, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps({"part": part_id, "attempt": attempt,
                                      "reply": reply_no, "kind": kind,
-                                     "tail": tail}) + "\n")
+                                     "tail": str(reply_text or "")}) + "\n")
         except OSError:
             pass
 
@@ -3147,7 +3169,8 @@ def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
                         return turn, False, None
                     empty_retries += 1
                     history.append({"role": "assistant",
-                                    "content": response.output_text or ""})
+                                    "content": _cap_reply_text(
+                                        response.output_text or "")})
                     history.append({"role": "user",
                                     "content": _protocol.EMPTY_REPLY_RETRY})
                     check_stop()
@@ -3187,7 +3210,8 @@ def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
                     return turn, False, None
                 retried_bad = True
                 history.append({"role": "assistant",
-                                "content": response.output_text or ""})
+                                "content": _cap_reply_text(
+                                    response.output_text or "")})
                 history.append({"role": "user", "content": (
                     "Your last reply was not valid JSON: %s "
                     "Return ONLY {\"actions\": [...], \"done\": bool}, "
@@ -3230,7 +3254,8 @@ def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
             attached=attached, stop_seen=stop_seen,
             repeat_counts=repeat_counts, lock=lock)
         history.append({"role": "assistant",
-                        "content": response.output_text or ""})
+                        "content": _cap_reply_text(
+                            response.output_text or "")})
         history.append({"role": "user", "content": notes})
         if stop_note is not None:
             row["reason"] = stop_note
