@@ -7,12 +7,14 @@
 div[data-testid="app-shell"]:has(> nav[data-testid="sidebar"]) {
   display: grid;
   grid-template-columns: 240px minmax(0, 1fr) 320px;
+  grid-template-rows: auto minmax(0, 1fr);
   grid-template-areas:
     "topbar topbar topbar"
     "sidebar main inspector";
   column-gap: 16px;
   row-gap: 8px;
-  align-items: start;
+  align-items: stretch;
+  height: 100vh;
 }
 
 div[data-testid="app-shell"]:has(> nav[data-testid="sidebar"]) > header[data-testid="topbar"] {
@@ -25,8 +27,10 @@ nav[data-testid="sidebar"] {
   flex-direction: column;
   flex-wrap: nowrap;
   align-items: stretch;
+  align-self: stretch;
+  min-height: 0;
   min-width: 0;
-  max-height: calc(100vh - 96px);
+  max-height: none;
   overflow-y: auto;
   border-right: 1px solid var(--fx-card-border);
   padding-right: 16px;
@@ -48,15 +52,20 @@ nav[data-testid="sidebar"] > span {
 
 main[data-testid="app-main"] {
   grid-area: main;
+  align-self: stretch;
+  min-height: 0;
   min-width: 0;
-  max-height: calc(100vh - 96px);
+  max-height: none;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 aside[data-testid="inspector"] {
   grid-area: inspector;
+  align-self: stretch;
+  min-height: 0;
   min-width: 0;
-  max-height: calc(100vh - 96px);
+  max-height: none;
   overflow-y: auto;
 }
 
@@ -224,6 +233,43 @@ nav [data-testid^="project-menu-"]:focus-visible {
   outline-offset: 2px;
 }
 
+/* FXDESIGN4 L5: one primary per card. The kit chevron, the hierarchy
+   toggle and the project row Stop/Leave controls are secondary; the
+   project name stays a link style; the date keeps its own gap. */
+.fx-kit-toggle {
+  background-color: transparent;
+  color: var(--fx-btn-quiet-ink);
+  border: 1px solid var(--fx-input-border);
+  border-radius: 6px;
+}
+
+.fx-kit-toggle:hover:not(:disabled) {
+  background-color: transparent;
+  border-color: var(--fx-accent);
+}
+
+button[data-testid="hierarchy-collapsed"],
+button[data-testid="hierarchy-collapse"] {
+  background-color: transparent;
+  color: var(--fx-btn-quiet-ink);
+  border: 1px solid var(--fx-input-border);
+  border-radius: 6px;
+}
+
+button[data-testid^="project-open-"] {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--fx-link);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+span[data-testid^="project-created-"] {
+  margin-left: 8px;
+}
+
 /* FXDESIGN1 S3: team rows read as separated labelled fields; long refs
    truncate with an ellipsis while the full ref stays in the title. */
 .fx-team-row {
@@ -260,6 +306,29 @@ main[data-testid="app-main"],
 nav[data-testid="sidebar"],
 aside[data-testid="inspector"] {
   overflow-x: hidden;
+}
+
+/* FXDESIGN4 L3: long unbroken values never push a card sideways; every
+   card keeps its own minimum width and wraps anywhere. */
+main[data-testid="app-main"] > *,
+div[data-testid^="agent-row-"],
+.fx-team-row,
+.fx-team-field,
+.fx-live-pair {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* FXDESIGN4 L4: each live label/value pair reads as its own line with a
+   visible gap and a quiet label. */
+.fx-live-pair {
+  display: block;
+  margin-top: 4px;
+}
+
+.fx-live-label {
+  opacity: 0.75;
+  margin-right: 4px;
 }
 
 /* FXDESIGN1 S5: comfortable centre column with vertical rhythm; the
@@ -300,9 +369,20 @@ div[data-testid="chat-composer"] > button {
 
 /* FXDESIGN3 S1: the shell fills the viewport height at 1280x800; each rail
    scrolls only on real overflow; scrollbars use tokens, never bright native
-   defaults. Lengths only, no colours. */
+   defaults. Lengths only, no colours. FXDESIGN4: the grid owns the height
+   (100vh with an auto top row plus one free row), so the top bar never
+   stretches and every page starts the nav at the same top. */
 div[data-testid="app-shell"]:has(> nav[data-testid="sidebar"]) {
+  height: 100vh;
   min-height: 100vh;
+}
+
+/* The shell fills the window: no page scrollbar on wide screens while the
+   stacked narrow layout keeps the page scroll. */
+@media (min-width: 801px) {
+  body {
+    overflow: hidden;
+  }
 }
 
 nav[data-testid="sidebar"],
@@ -337,12 +417,17 @@ div[data-testid="chat-messages"]::-webkit-scrollbar-track {
 
 /* FXDESIGN3 S2: the chat area fills the centre column; the message list
    takes the free height and the composer docks at the bottom. The 44rem
-   centre width stays on main (FXDESIGN1 S5) for every centre page. */
+   centre width stays on main (FXDESIGN1 S5) for every centre page.
+   FXDESIGN4 L2: the chat card takes the full main width up to 900px,
+   centred, and the same rule holds the other centre cards. */
 section[data-testid="chat-area"] {
   display: flex;
   flex-direction: column;
   min-height: calc(100vh - 160px);
-  max-width: 100%;
+  width: 100%;
+  max-width: 900px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 div[data-testid="chat-layout"] {
@@ -350,6 +435,10 @@ div[data-testid="chat-layout"] {
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
+  width: 100%;
+  max-width: 900px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 div[data-testid="chat-messages"] {

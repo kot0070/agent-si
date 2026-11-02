@@ -79,6 +79,52 @@ def _run_event(event: str, turn: int, subtask: str, detail: str,
                     detail=text, data=body)
 
 
+def _placement_for_provider(app: Any, provider: str) -> Any:
+    """LOCAL when the provider's facade type is local, else CLOUD.
+
+    The provider facade type already on the path decides; only when no
+    facade answers does the loopback leg list decide. Empty provider
+    yields None (the row shows UNKNOWN, never a guess).
+    """
+    name = str(provider or "")
+    if not name:
+        return None
+    try:
+        ctx = getattr(getattr(app, "state", None), "k04_ctx", None)
+        facade = getattr(ctx, "provider_facade", None)
+        views = facade.list_providers(True) if facade is not None else []
+    except Exception:
+        views = []
+    for view in views or ():
+        try:
+            if str(getattr(view, "provider_id", "")) == name:
+                return ("LOCAL" if str(
+                    getattr(view, "provider_type", "cloud")) == "local"
+                        else "CLOUD")
+        except Exception:
+            continue
+    if name in ("ollama", "lm_studio"):
+        return "LOCAL"
+    return "CLOUD"
+
+
+def _window_for_model(provider: str, model: str) -> Any:
+    """Model context size from the KB when known, else UNKNOWN."""
+    try:
+        from agent_si.model_kb import loader as _loader
+        from agent_si.model_kb import kb as _kb
+        row = _loader.find_row(
+            _kb.bound_catalog(), str(provider), str(model))
+        size = (row or {}).get("context_window")
+        if isinstance(size, bool):
+            return "UNKNOWN"
+        if isinstance(size, int) and size > 0:
+            return size
+    except Exception:
+        pass
+    return "UNKNOWN"
+
+
 def _journal_event(project: str, kind: str, summary: str) -> None:
     """One devrun journal row; a journal failure never breaks the run."""
     try:
@@ -186,6 +232,9 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
     attached: set[str] = set()
     known_parts: list[str] = []
     run_agents: dict[str, dict[str, Any]] = {}
+    live_cache: dict[str, dict[str, Any]] = {}
+    plan_keys: set[str] = set()
+    seen_placements: set[str] = set()
 
     def _publish() -> None:
         try:
@@ -222,11 +271,15 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
 
     def _live(role: str, model: str, part: Any, attempt: int,
               step: str, path: str, tokens: Any, cost: Any,
-              waits: list) -> None:
+              waits: list, provider: str = "") -> None:
         try:
             from agent_si.backend import agents_live as _live_mod
             row_tokens = tokens if isinstance(tokens, dict) else {}
             row_waits = [str(item) for item in waits]
+            try:
+                step_num = int(attempt or 0)
+            except (TypeError, ValueError):
+                step_num = 0
             if part is None:
                 # Plan-level agents (director, manager) are scoped to
                 # the whole part set once the plan lands; before that
@@ -242,25 +295,58 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                 scope = "fxdevrun:%s:%s:%s" % (project, part, role)
                 key = "%s/%s/%s/%s" % (run_id, part, role, attempt)
                 label = str(part)
-            _live_mod.record_live_row(key, {
+            placement = _placement_for_provider(app, provider)
+            if placement is not None:
+                seen_placements.add(str(placement))
+            row_input = row_tokens.get("input")
+            row_context: Any = (row_input if isinstance(row_input, int)
+                                and not isinstance(row_input, bool) else "")
+            row = {
                 "agent": "%s-%s" % (role, label),
                 "scope": scope,
                 "deliverable": "artifact://run/%s/%s" % (run_id, label),
                 "status": "RUNNING",
                 "role": str(role),
                 "model": str(model),
-                "step": 0,
+                "step": step_num,
                 "file": str(path or ""),
                 "cost": "UNKNOWN" if cost is None else str(cost),
                 "tokens": row_tokens,
-                "context": "UNKNOWN",
+                "context": row_context,
                 "errors": [],
                 "waits": row_waits,
-            })
+                "last_action": str(step or ""),
+                "window": _window_for_model(provider, model),
+            }
+            if provider:
+                row["provider"] = str(provider)
+            if placement is not None:
+                row["placement"] = str(placement)
+            _live_mod.record_live_row(key, row)
+            live_cache[key] = dict(row)
             if part is None:
+                plan_keys.add(key)
                 run_agents[str(role)] = {
                     "model": str(model), "tokens": row_tokens,
-                    "cost": cost, "waits": row_waits}
+                    "cost": cost, "waits": row_waits,
+                    "provider": str(provider or "")}
+            if {"LOCAL", "CLOUD"} <= seen_placements:
+                for plan_key in plan_keys:
+                    cached = live_cache.get(plan_key)
+                    if cached is None or cached.get("placement") == "SPLIT":
+                        continue
+                    cached["placement"] = "SPLIT"
+                    _live_mod.record_live_row(plan_key, dict(cached))
+        except Exception:
+            pass
+
+    def _close_live(status: str) -> None:
+        """Move every tracked row out of RUNNING at run end."""
+        try:
+            from agent_si.backend import agents_live as _live_mod
+            for key, cached in live_cache.items():
+                _live_mod.record_live_row(
+                    key, {**cached, "status": str(status)})
         except Exception:
             pass
 
@@ -269,7 +355,8 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         known_parts.extend([str(part["part_id"]) for part in parts])
         for saved_role, saved in run_agents.items():
             _live(saved_role, saved["model"], None, 0, "plan", "",
-                  saved["tokens"], saved["cost"], saved["waits"])
+                  saved["tokens"], saved["cost"], saved["waits"],
+                  saved.get("provider", ""))
 
     def _call(role: str, resolution: dict[str, Any], adapter: Any,
               messages: list, part: Any, attempt: int,
@@ -288,7 +375,8 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
             "ledger") else {}
         _live(role, str(resolution["model"]), part, attempt,
               "invoke", "", tokens,
-              (ledger or {}).get("cost"), waits)
+              (ledger or {}).get("cost"), waits,
+              str(resolution.get("provider", "")))
         if over:
             raise _BudgetOut(
                 "budget stop: call cost exceeds the remaining budget")
@@ -470,6 +558,7 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
             record["run_end"] = _run_end_tests(
                 project_id=project, run_id=run_id, task_id=task_id)
         _journal("DEVRUN_END", record.get("summary") or "run ended")
+        _close_live("RETURNED")
         yield _run_event("delta", turn, task_id,
                          _ledger_total_line(record),
                          {"run_id": run_id})
@@ -486,6 +575,7 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         record["success"] = False
         record["summary"] = "run stopped: user stop"
         _publish()
+        _close_live("BLOCKED")
         _journal("DEVRUN_END", record.get("summary") or "run ended")
         yield _run_event("delta", turn, task_id, record["summary"],
                          {"run_id": run_id})
@@ -496,6 +586,7 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         record["success"] = False
         record["summary"] = "run failed: %s" % (exc,)
         _publish()
+        _close_live("BLOCKED")
         _journal("DEVRUN_END", record.get("summary") or "run ended")
         stop_text = "budget stop: %s" % (exc,)
         yield _run_event("delta", turn, task_id, stop_text,
@@ -535,12 +626,14 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
             "%s (client disconnect: children reaped)"
             % (record.get("summary") or "run ended"))
         _publish()
+        _close_live("BLOCKED")
         raise
     except Exception as exc:
         record["success"] = False
         record["summary"] = "run failed: internal %s: %s" % (
             type(exc).__name__, exc)
         _publish()
+        _close_live("BLOCKED")
         yield _run_event("done", turn, task_id, record["summary"],
                          {"run_id": run_id, "success": False})
 
@@ -982,7 +1075,8 @@ def _apply_actions(*, record: Any, row: Any, folder: str, project: str,
                 live("worker", str(worker_spec.get("model", "")),
                      part_id, attempt, "write_file",
                      str(entry["path"]), {}, "UNKNOWN",
-                     ["agent:%s" % (part_id,)])
+                     ["agent:%s" % (part_id,)],
+                     str(worker_spec.get("provider", "")))
                 notes.append("write_file %s: ok sha256 %s" % (
                     entry["path"], entry["sha256"][:16]))
             elif name == "run":

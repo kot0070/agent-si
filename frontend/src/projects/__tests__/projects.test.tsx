@@ -8,6 +8,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import type { PartRow } from "../../api/iface";
 import {
   ApiClientProvider,
   useCurrentProject,
@@ -113,8 +114,8 @@ function fixtureClient(): FakeApiClient {
       },
     },
     liveRows: [
-      { agent: "n-local", scope: "s-1", deliverable: "d-1", status: "RUNNING" },
-      { agent: "n-cloud", scope: "s-2", deliverable: "d-2", status: "QUEUED" },
+      { agent: "n-local", scope: "s-1", deliverable: "d-1", status: "RUNNING", placement: "LOCAL" } as PartRow,
+      { agent: "n-cloud", scope: "s-2", deliverable: "d-2", status: "QUEUED", placement: "CLOUD" } as PartRow,
     ],
   });
 }

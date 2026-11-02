@@ -526,38 +526,51 @@ async def route_post_stop_all(request: Request) -> Any:
     """POST /api/v1/stop-all -> stop_all_request_stop (token).
 
     A body carrying ``project_id`` stops only that project; an empty
-    body stops every project's work.
+    body stops every project's work. The stop runs first; the live
+    stream cancel follows only when the receipt is accepted, so a
+    refused stop cancels nothing.
     """
     data = await _body(request)
     token = _guard_post(request, data)
     project_id = str(data.get("project_id", "") or data.get("project", ""))
-    try:
-        bridge = getattr(request.app.state, "chat_stream_bridge", None)
-        if bridge is not None:
-            if project_id:
-                cancel = getattr(bridge, "cancel_project", None)
-                if callable(cancel):
-                    cancel(project_id)
-            else:
-                cancel = getattr(bridge, "cancel_all", None)
-                if callable(cancel):
-                    cancel()
-    except Exception:
-        pass
     if not project_id:
-        return _serve_owned(
+        receipt = _serve_owned(
             _stop_home.request_stop_all,
             str(data.get("actor", "")),
             grant_ref=str(data.get("grant_ref", "")),
             session_token=token,
         )
-    return _call(
-        "stop_all_request_stop",
-        str(data.get("actor", "")),
-        project_id,
-        grant_ref=str(data.get("grant_ref", "")),
-        session_token=token,
-    )
+    else:
+        receipt = _call(
+            "stop_all_request_stop",
+            str(data.get("actor", "")),
+            project_id,
+            grant_ref=str(data.get("grant_ref", "")),
+            session_token=token,
+        )
+    try:
+        accepted = (
+            receipt.get("accepted")
+            if isinstance(receipt, dict)
+            else getattr(receipt, "accepted", False)
+        )
+    except Exception:
+        accepted = False
+    if accepted:
+        try:
+            bridge = getattr(request.app.state, "chat_stream_bridge", None)
+            if bridge is not None:
+                if project_id:
+                    cancel = getattr(bridge, "cancel_project", None)
+                    if callable(cancel):
+                        cancel(project_id)
+                else:
+                    cancel = getattr(bridge, "cancel_all", None)
+                    if callable(cancel):
+                        cancel()
+        except Exception:
+            pass
+    return receipt
 
 
 @router.get("/api/v1/watcher/alerts")

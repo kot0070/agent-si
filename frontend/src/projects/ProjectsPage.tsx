@@ -299,6 +299,7 @@ export function ProjectsPage(): ReactElement {
                     <button
                       type="button"
                       data-testid={`project-resume-${row.project_id}`}
+                      className="fx-btn-quiet"
                       onClick={() => {
                         resume(row.project_id);
                       }}
@@ -309,6 +310,7 @@ export function ProjectsPage(): ReactElement {
                     <button
                       type="button"
                       data-testid={`project-pause-${row.project_id}`}
+                      className="fx-btn-quiet"
                       onClick={() => {
                         pause(row.project_id);
                       }}
@@ -319,6 +321,7 @@ export function ProjectsPage(): ReactElement {
                   <button
                     type="button"
                     data-testid={`project-archive-${row.project_id}`}
+                    className="fx-btn-quiet"
                     onClick={() => {
                       void archive(row.project_id);
                     }}

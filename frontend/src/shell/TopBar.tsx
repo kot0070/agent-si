@@ -7,10 +7,17 @@
 import { Link, useLocation } from "react-router-dom";
 import { useEffect, useState } from "react";
 import type { ReactElement } from "react";
-import type { ProjectRecord } from "../api/iface";
+import type { PartRow, ProjectRecord } from "../api/iface";
 import { ApiError, requestResponse } from "../api/errors";
 import type { TopBarProps } from "../app/iface";
 import { useApiClient, useCurrentProject } from "../app/ApiClientProvider";
+import {
+  placementForProviderId,
+  placementForRow,
+  placementKey,
+} from "../agents/agentsApi";
+import type { Placement } from "../agents/agentsApi";
+import { listConnectedProviders } from "../settings/ProvidersPage/connectApi";
 import {
   DEFAULT_LOCALE,
   LOCALE_STORAGE_KEY,
@@ -57,7 +64,9 @@ export function TopBar(props: TopBarProps): ReactElement {
   const [locale, setLocaleUi] = useState<SupportedLocale>(readStoredLocale);
   const [projects, setProjects] = useState<ProjectRecord[] | null>(null);
   const [stopArmed, setStopArmed] = useState(false);
-  const [stopStatus, setStopStatus] = useState<number | null>(null);
+  const [stopText, setStopText] = useState<string | null>(null);
+  const [liveRows, setLiveRows] = useState<PartRow[] | null>(null);
+  const [connected, setConnected] = useState<string[] | null>(null);
 
   // W1: apply the stored locale to the locale module at boot so the
   // chrome matches the language select on first paint.
@@ -102,8 +111,85 @@ export function TopBar(props: TopBarProps): ReactElement {
     };
   }, [client]);
 
+  useEffect(() => {
+    let alive = true;
+    async function load(): Promise<void> {
+      try {
+        const next = await client.listAgentsLive();
+        if (alive) {
+          setLiveRows(next);
+        }
+      } catch {
+        if (alive) {
+          setLiveRows([]);
+        }
+      }
+    }
+    void load();
+    const timer = setInterval(() => {
+      void load();
+    }, 2000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [client]);
+
+  useEffect(() => {
+    let alive = true;
+    void listConnectedProviders().then((ids) => {
+      if (alive) {
+        setConnected(ids);
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   const effective = props.projectId ?? current.projectId;
   const options = projects ?? [];
+
+  // Top placement badge truth: the placement of the current live rows;
+  // with none running, the default route of the connected providers;
+  // hidden when neither is sourced. Never a guess.
+  function topPlacement(): Placement | null {
+    const running = (liveRows ?? []).filter(
+      (row) => row.status === "RUNNING",
+    );
+    if (running.length > 0) {
+      const known = new Set<Placement>();
+      for (const row of running) {
+        const placement = placementForRow(row);
+        if (placement !== "UNKNOWN") {
+          known.add(placement);
+        }
+      }
+      if (known.size === 0) {
+        return null;
+      }
+      if (known.size === 1) {
+        return [...known][0] ?? null;
+      }
+      return "SPLIT";
+    }
+    if (connected === null || liveRows === null) {
+      return null;
+    }
+    if (connected.length === 0) {
+      return null;
+    }
+    const route = new Set<Placement>();
+    for (const id of connected) {
+      route.add(placementForProviderId(id));
+    }
+    if (route.size === 1) {
+      return [...route][0] ?? null;
+    }
+    return "SPLIT";
+  }
+
+  const badge = topPlacement();
 
   function changeLocale(next: SupportedLocale): void {
     if (next === locale) {
@@ -123,18 +209,55 @@ export function TopBar(props: TopBarProps): ReactElement {
       return;
     }
     setStopArmed(false);
+    // The stop button acts as the user, in both branches.
+    const body =
+      effective === null
+        ? { actor: "user" }
+        : { project_id: effective, actor: "user" };
     try {
       const response = await requestResponse("/api/v1/stop-all", {
         method: "POST",
         kind: "write",
-        body: effective === null ? {} : { project_id: effective },
+        body,
       });
-      setStopStatus(response.status);
+      let receipt: {
+        accepted?: unknown;
+        stopped_count?: unknown;
+        reason?: unknown;
+      } = {};
+      try {
+        receipt = (await response.json()) as typeof receipt;
+      } catch {
+        receipt = {};
+      }
+      if (receipt.accepted === true) {
+        const count =
+          typeof receipt.stopped_count === "number"
+            ? receipt.stopped_count
+            : 0;
+        setStopText(
+          t("shell.topbar.stop_result", { status: `Stopped ${count}` }),
+        );
+      } else {
+        const reason =
+          typeof receipt.reason === "string" && receipt.reason !== ""
+            ? receipt.reason
+            : "stop refused";
+        setStopText(
+          t("shell.topbar.stop_result", { status: `Refused: ${reason}` }),
+        );
+      }
     } catch (error) {
       if (error instanceof ApiError) {
-        setStopStatus(error.status);
+        setStopText(
+          t("shell.topbar.stop_result", {
+            status: `Refused: ${error.code}`,
+          }),
+        );
       } else {
-        setStopStatus(0);
+        setStopText(
+          t("shell.topbar.stop_result", { status: "Refused: stop failed" }),
+        );
       }
     }
   }
@@ -158,11 +281,11 @@ export function TopBar(props: TopBarProps): ReactElement {
             {t("shell.topbar.watcher")}
           </Link>
         </span>{" "}
-        <span data-testid="pairing-badge">
-          {effective === null
-            ? t("agents.badge.cloud")
-            : t("agents.badge.local")}
-        </span>
+        {badge === null ? (
+          <span data-testid="pairing-badge" hidden />
+        ) : (
+          <span data-testid="pairing-badge">{t(placementKey(badge))}</span>
+        )}
       </div>
       <label>
         {t("shell.topbar.project")}
@@ -202,18 +325,16 @@ export function TopBar(props: TopBarProps): ReactElement {
       >
         {stopArmed ? t("shell.closing.confirm") : t("shell.topbar.stop_all")}
       </button>
-      {stopStatus === null ? null : (
+      {stopText === null ? null : (
         <>
-          <span data-testid="stop-all-result">
-            {t("shell.topbar.stop_result", { status: stopStatus })}
-          </span>
+          <span data-testid="stop-all-result">{stopText}</span>
           <button
             type="button"
             data-testid="stop-all-clear"
             className="fx-btn-quiet"
             aria-label={t("shell.topbar.stop_clear")}
             onClick={() => {
-              setStopStatus(null);
+              setStopText(null);
             }}
           >
             {t("shell.topbar.stop_clear")}
