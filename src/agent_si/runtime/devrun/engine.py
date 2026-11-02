@@ -3077,7 +3077,7 @@ def _worker_prompt(spec: dict, message: str, attempt: int,
             "Project task: %s. Files you may write: %s. "
             "Actions: read_file {path}, list_dir {path}, "
             "write_file {path, content}, run {argv}. Writes outside "
-            "your files are refused. Inspect first, then create "
+            "your files are refused. Inspect only what you need, then create "
             "deliverables with write_file. Relative paths only. "
             "To install packages, run the installer argv (for example "
             "[\"npm\", \"install\"]): the run action IS the permission "

@@ -125,6 +125,7 @@ def start_command(
     _guard_allow(words, project_id, rid)
     try:
         from agent_si.backend import proc_tree as _proc_tree
+        from agent_si.runtime.devrun.actions import scrub_env as _scrub_env
 
         proc = _proc_tree.spawn(
             words,
@@ -132,6 +133,7 @@ def start_command(
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            env=_scrub_env(),
         )
     except OSError as exc:
         raise ValueError(f"cannot spawn command: {exc}") from exc
