@@ -405,8 +405,73 @@ function disconnectClosedText(): string {
   );
 }
 
-/** FXR3B: engine-turn verdict from the lines plus the terminal state.
+/** FXCHATV V1: a run-log-looking text renders as one plain verdict line
+plus a collapsed Details disclosure, never twice. Markers are the
+engine's own vocabulary (Working folder, Team, Director, Part, Check,
+Total, run success/fail, cost lines): a juror reads the verdict, the
+full log stays behind Details. Plain answers keep the verdict card. */
+const ENGINE_LOG_MARKERS =
+  /^(?:working folder|team|director|part\s+\S+|check\s+\S+|total|run (?:success|fail)|.*cost:)/im;
 
+export function looksLikeEngineLog(text: string): boolean {
+  return ENGINE_LOG_MARKERS.test(text);
+}
+
+/** FXCHATV (d): check lines name the program only, never a full
+machine path (C:\Windows\..., C:\tool\...); a user profile segment
+(C:\Users\<name>) never reaches the screen. The working-folder line
+itself is untouched: it lives only inside Details. */
+export function shortProgramLine(line: string): string {
+  const redacted = line.replace(/C:\\Users\\[^\\\s"']+/gi, "~");
+  return redacted.replace(
+    /(\$\s+)([A-Za-z]:[\\/][^\s"']+)/g,
+    (_match, head: string, token: string) => {
+      const base = token.split(/[\\/]/).pop() ?? token;
+      const name = base.replace(/\.(exe|cmd|bat|ps1)$/i, "").toLowerCase();
+      return `${head}${name}`;
+    },
+  );
+}
+
+/** FXCHATV V4: one live step line while a run works — the current
+part, the count of check/step rows so far, the last streamed row in
+plain words, and elapsed seconds. Data comes from the streamed
+deltas only (the live store text); no raw machine paths. */
+export function liveStepLine(
+  text: string,
+  startedAt: number,
+  nowMs: number,
+): string {
+  const lines = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
+  const elapsed = Math.max(0, Math.floor((nowMs - startedAt) / 1000));
+  let part: string | null = null;
+  let steps = 0;
+  for (const line of lines) {
+    const found = /Part\s+([A-Za-z0-9_-]+)/.exec(line);
+    if (found !== null && found[1] !== undefined) {
+      part = found[1];
+    }
+    if (/^(Check|Step)\b/i.test(line)) {
+      steps += 1;
+    }
+  }
+  const lastRaw = lines[lines.length - 1] ?? "";
+  const last = shortProgramLine(lastRaw).slice(0, 90);
+  const who = part === null ? "Worker" : `Worker ${part}`;
+  const doing = last !== "" ? last : "waiting for the model";
+  return `${who}, step ${steps}, ${doing}, ${elapsed} s`;
+}
+
+/** FXCHATV V5: the plain layer carries no raw words. cost UNKNOWN
+becomes cost not known; a run-success line becomes the final line. */
+export function costKnown(text: string): boolean {
+  return !/cost:\s*unknown/i.test(text);
+}
+
+/** FXR3B: engine-turn verdict from the lines plus the terminal state.
 No new server events: the text carries the part rows ("Part p1:
 PASS"), "[files: ...]" markers and run lines; the done event (or the
 served executed flag) says it is an engine turn, the terminal state
@@ -468,7 +533,10 @@ export function summarizeEngineTurn(
 }
 
 /** One plain verdict line for a finished engine turn. */
-export function engineVerdictLine(summary: EngineSummary): string {
+export function engineVerdictLine(
+  summary: EngineSummary,
+  costNote = "",
+): string {
   const head = summary.done ? "Done" : "Failed";
   const parts =
     summary.parts === 1
@@ -483,20 +551,25 @@ export function engineVerdictLine(summary: EngineSummary): string {
   const next = summary.done
     ? ""
     : " Next: fix the failing part, then send the task again.";
-  return `${head} — ${parts}, ${passed}, ${files}.${next}`;
+  return `${head} — ${parts}, ${passed}, ${files}${costNote}.${next}`;
 }
 
 /** FXR3B: finished engine turn — verdict line first, steps disclosed. */
+/** FXCHATV V1: the verdict is the one plain reply line; the run log
+lives once, behind a collapsed Details disclosure (V5: plain layer
+carries no raw words, so the cost line becomes cost not known; (d):
+check lines name the program only). */
 export function EngineTurnView(props: {
   text: string;
   status: "ok" | "failed" | "stopped";
 }): ReactElement {
   const summary = summarizeEngineTurn(props.text, props.status);
+  const costNote = costKnown(props.text) ? "" : ", cost not known";
   const [open, setOpen] = useState(!summary.done);
   return (
     <>
       <p data-testid="run-verdict" style={{ whiteSpace: "pre-wrap" }}>
-        {engineVerdictLine(summary)}
+        {shortProgramLine(engineVerdictLine(summary, costNote))}
       </p>
       <button
         type="button"
@@ -507,12 +580,12 @@ export function EngineTurnView(props: {
           setOpen(!open);
         }}
       >
-        {pt("chat.run.steps", "Run steps")}
+        {pt("chat.run.steps", "Details")}
       </button>
       <div data-testid="run-steps" hidden={!open}>
         {summary.lines.map((line, index) => (
           <p key={`${index}`} style={{ whiteSpace: "pre-wrap" }}>
-            {line}
+            {shortProgramLine(line)}
           </p>
         ))}
       </div>
@@ -588,6 +661,18 @@ function buildHistoryBatch(
       if (turn.executed === true) {
         // Served engine mark: the verdict view renders from the lines,
         // never the approval card. Status rides along for Done/Failed.
+        engineTurnStatus.set(
+          assistantId,
+          turn.status === "stopped"
+            ? "stopped"
+            : turn.status === "failed"
+              ? "failed"
+              : "ok",
+        );
+      } else if (looksLikeEngineLog(turn.assistant_text)) {
+        // FXCHATV V1: a served run log without the executed flag is an
+        // engine reply too: verdict plus Details, never the card.
+        // History never marks a proposal: default is no card.
         engineTurnStatus.set(
           assistantId,
           turn.status === "stopped"
@@ -1058,7 +1143,12 @@ function startChatRun(
         // The stream's own clean terminal event marks the waiting
         // proposal — the ONLY card path. Engine turns (executed) never
         // mark: they render the verdict view instead, live or reloaded.
+        // FXCHATV V1: a run-log-looking text without the executed flag
+        // is an engine reply too (legacy terminals): verdict plus
+        // Details, never the card, never twice.
         if (ranEngine) {
+          engineTurnStatus.set(assistantId, "ok");
+        } else if (looksLikeEngineLog(answer)) {
           engineTurnStatus.set(assistantId, "ok");
         } else {
           proposalMessages.add(assistantId);
@@ -1705,7 +1795,9 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
                   status={engineTurnStatus.get(message.id) ?? "ok"}
                 />
               ) : (
-                <p style={{ whiteSpace: "pre-wrap" }}>{message.text}</p>
+                <p style={{ whiteSpace: "pre-wrap" }}>
+                  {shortProgramLine(message.text)}
+                </p>
               )}
               {message.role === "assistant" &&
               message.final &&
@@ -1755,8 +1847,16 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
                   {pt("chat.stream.stopped", "Stopped")}
                 </span>
               ) : null}
+              {/* FXCHATV V2: the card shows ONLY for a live plain
+                  answer waiting for its verdict (Accept / Edit /
+                  Reject): never on an engine turn (verdict view),
+                  never stopped, never interrupted (resend), never
+                  failed, never decided, never while streaming. */}
               {message.role === "assistant" &&
               proposalMessages.has(message.id) &&
+              !engineTurnStatus.has(message.id) &&
+              !stoppedAssistants.has(message.id) &&
+              message.resendPrompt === undefined &&
               message.final &&
               message.text !== "" &&
               message.decided === undefined &&
