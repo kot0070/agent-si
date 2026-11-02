@@ -51,8 +51,8 @@ def test_single_resolve_per_attempt(tmp_path, monkeypatch):
         return (int(kw.get("turn", 0)) + 1, True, None)
 
     def fake_checks(**kw):
-        rows = [{"argv": ["echo", "ok"], "exit_code": 0,
-                 "output_tail": "ok", "output_file": "f"}]
+        rows = [{"argv": ["python", "--version"], "exit_code": 0,
+                 "output_tail": "Python 3.13.15", "output_file": "f"}]
         return (int(kw.get("turn", 0)), rows, True)
 
     def fake_judge(*a, **kw):
@@ -70,7 +70,7 @@ def test_single_resolve_per_attempt(tmp_path, monkeypatch):
     record: dict = {"ledger": [], "parts": [], "artifacts": []}
     row = _records.part_add(record, part_id="p1", goal="g")
     spec = {"part_id": "p1", "goal": "g", "files": [],
-            "check_commands": [["echo", "ok"]], "depends_on": []}
+            "check_commands": [["python", "--version"]], "depends_on": []}
     gen = _engine._run_part(
         record=record, app=object(), spec=spec, row=row,
         auditor_spec={}, auditor_adapter=None, folder=str(tmp_path),

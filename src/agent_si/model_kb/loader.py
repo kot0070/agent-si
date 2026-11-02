@@ -394,7 +394,7 @@ __all__ = [
 # --- K04KBIMPORT staged section import (retrieved 2026-10-11) ---
 #
 # Data below is quoted verbatim from the 16 staged provider
-# section files (DIRECTOR inbox MODEL_KB sections bundle): every
+# section files (staged model-knowledge sections bundle): every
 # value, source URL and retrieval date comes from its section
 # file; a section datum with no KB field has no row home and
 # stays UNKNOWN (see mapping notes in the task return). Price

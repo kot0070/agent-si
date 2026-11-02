@@ -60,6 +60,28 @@ def _check_entry(row_id, route, test_name):
     return entry
 
 
+def _readme_section(readme, heading):
+    for part in readme.split("## ")[1:]:
+        name, _, body = part.partition("\n")
+        if name.strip() == heading:
+            return body
+    raise AssertionError("missing README section: %s" % heading)
+
+
+def _assert_index_command_resolves(command, app):
+    """Every recorded index command resolves to a real seam.
+
+    HTTP commands name a route mounted on the served app; file
+    commands (flags stripped) exist on disk at the checkout root.
+    """
+    first, _, rest = command.partition(" ")
+    if first in ("GET", "POST", "PUT", "DELETE"):
+        assert any(
+            getattr(r, "path", "") == rest for r in app.routes), command
+    else:
+        assert (ROOT / first).exists(), command
+
+
 def _get_route(client, route):
     path = route.split(" ", 1)[1]
     resp = client.get(path)
@@ -93,14 +115,17 @@ def test_k10ph2d_129_setup_demo_fixture_index(tmp_path, monkeypatch):
             assert row.get(key), row
         assert "recorded" in row["source"], row
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert "## Prerequisites" in readme, readme
-    assert "## Setup" in readme, readme
-    assert "## Demo and fixture command index" in readme, readme
-    assert readme.index("## Prerequisites") < readme.index("## Setup"), readme
+    assert "## Requirements" in readme, readme
+    assert "## First run, step by step" in readme, readme
+    assert "## Download and verify" in readme, readme
+    assert readme.index("## Requirements") < readme.index(
+        "## Download and verify"), readme
+    setup_body = _readme_section(readme, "First run, step by step")
+    assert "Connect a provider" in setup_body, setup_body
     for row in body["records"]:
         if row["section"] == "install-content-guard":
             continue
-        assert row["command"] in readme, (row, readme)
+        _assert_index_command_resolves(row["command"], _app)
 
 
 def test_k10ph2d_131_prerequisites_setup_demo(tmp_path, monkeypatch):
@@ -127,8 +152,21 @@ def test_k10ph2d_131_prerequisites_setup_demo(tmp_path, monkeypatch):
             assert row.get(key), row
         assert "recorded" in row["source"], row
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert "## Prerequisites" in readme, readme
-    assert "prerequisites, setup steps, demo commands" in readme, readme
+    assert "## Requirements" in readme, readme
+    prereq = _readme_section(readme, "Requirements")
+    assert "Windows" in prereq and "WebView2" in prereq, prereq
+    assert "## First run, step by step" in readme, readme
+    setup = _readme_section(readme, "First run, step by step")
+    assert "Connect a provider" in setup, setup
+    assert "## First task and Stop" in readme, readme
+    task = _readme_section(readme, "First task and Stop")
+    assert "Create or open a project" in task, task
+    demo_paths = {getattr(r, "path", "") for r in _app.routes}
+    assert "/api/v1/release/start/demo" in demo_paths, sorted(demo_paths)
+    notes = (ROOT / "docs" / "start-accept-notes.md").read_text(
+        encoding="utf-8")
+    assert "## Fixture runs" in notes, notes
+    assert "pytest" in notes, notes
 
 
 def test_k10ph2d_153_startup_idempotence(tmp_path, monkeypatch):
@@ -206,11 +244,14 @@ def test_k10ph2d_HC_4_license_notices(tmp_path, monkeypatch):
     assert "MIT License" in license_text, license_text
     assert "Copyright" in license_text, license_text
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert "## License and third-party notices" in readme, readme
+    assert "## Licence" in readme, readme
     assert "MIT" in readme, readme
+    assert "docs/third_party_notices/NOTICES.md" in readme, readme
+    notices = (ROOT / "docs" / "third_party_notices" / "NOTICES.md").read_text(
+        encoding="utf-8")
     for item in body["records"]["third_party"]:
-        assert item["name"] in readme, (item, readme)
-        assert item["version"] in readme, (item, readme)
+        assert item["name"] in notices, (item, notices)
+        assert item["version"] in notices, (item, notices)
 
 
 def test_k10ph2d_LIVE0_01_cached_tarballs(tmp_path, monkeypatch):

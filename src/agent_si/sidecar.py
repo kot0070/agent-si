@@ -110,6 +110,15 @@ _WINDOW_SIZE_FILE_NAME = "sidecar.window.json"
 _WEBVIEW2_DOWNLOAD_URL = (
     "https://developer.microsoft.com/microsoft-edge/webview2/")
 
+#: EdgeUpdate client key of the WebView2 runtime. The "missing"
+#: notice fires only when NONE of these keys carries a real pv
+#: version (empty or 0.0.0.0 counts as absent).
+_WEBVIEW2_CLIENT_GUID = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+_WEBVIEW2_SUBKEY = ("SOFTWARE\\Microsoft\\EdgeUpdate\\Clients\\"
+                    + _WEBVIEW2_CLIENT_GUID)
+_WEBVIEW2_SUBKEY_WOW64 = ("SOFTWARE\\WOW6432Node\\Microsoft\\EdgeUpdate\\"
+                          "Clients\\" + _WEBVIEW2_CLIENT_GUID)
+
 #: Single-instance port record under the product data dir. The first
 #: start writes ``<port>\n<pid>\n<token>`` after the server is up and
 #: removes it on exit; a second start with a live record POSTs the
@@ -258,6 +267,38 @@ def _here_root() -> str:
     return os.path.dirname(os.path.dirname(here))
 
 
+#: Mark-of-the-Web stream stripped from the frozen bundle's own
+#: files (a zip downloaded from the internet marks every file, and
+#: .NET then refuses the marked DLLs, so pythonnet + WebView2 fail).
+_ZONE_IDENTIFIER_STREAM = ":Zone.Identifier"
+
+
+def _unblock_zone_identifiers(root: str | None = None) -> int:
+    """Strip Mark-of-the-Web streams under the frozen exe folder.
+
+    Frozen exe only with an implicit root (the exe's own folder):
+    walk the folder and remove the Zone.Identifier stream from
+    every file, ignoring errors, touching nothing else. An explicit
+    root (probes) is processed as given. Returns the removed count.
+    """
+    if root is None:
+        if not getattr(sys, "frozen", False):
+            return 0
+        try:
+            root = os.path.dirname(os.path.abspath(sys.executable))
+        except Exception:
+            return 0
+    removed = 0
+    for dirpath, _dirnames, filenames in os.walk(str(root)):
+        for name in filenames:
+            stream = os.path.join(dirpath, name) + _ZONE_IDENTIFIER_STREAM
+            try:
+                os.remove(stream)
+            except OSError:
+                continue
+            removed += 1
+    return removed
+
 def _resolve_web_dir() -> str:
     """Return the web-tree dir (frozen bundle else source dist)."""
     meipass = getattr(sys, "_MEIPASS", None)
@@ -371,6 +412,86 @@ def _note_webview_missing(url: str) -> bool:
         "Install it from " + _WEBVIEW2_DOWNLOAD_URL + " "
         "and start Agent SI again. "
         "The app was also opened in your default browser: " + plain
+    )
+    shown = False
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            shown = bool(ctypes.windll.user32.MessageBoxW(
+                None, message, "Agent SI", 0x40))
+        except Exception:
+            shown = False
+    if not shown:
+        _log("agent-si-sidecar: " + message)
+    return shown
+
+
+def _read_webview2_pvs() -> list:
+    """Read the EdgeUpdate pv values; [] when unreadable.
+
+    Registry boundary: probes fake this (or the winreg module) and
+    run the real caller. Order is HKLM WOW6432Node, HKLM, HKCU.
+    """
+    try:
+        import winreg as _winreg
+    except Exception:
+        return []
+    roots = [
+        (_winreg.HKEY_LOCAL_MACHINE, _WEBVIEW2_SUBKEY_WOW64),
+        (_winreg.HKEY_LOCAL_MACHINE, _WEBVIEW2_SUBKEY),
+        (_winreg.HKEY_CURRENT_USER, _WEBVIEW2_SUBKEY),
+    ]
+    found = []
+    for hive, subkey in roots:
+        try:
+            with _winreg.OpenKey(hive, subkey) as key:
+                value, _kind = _winreg.QueryValueEx(key, "pv")
+        except OSError:
+            continue
+        found.append(value)
+    return found
+
+
+def _webview2_runtime_installed() -> bool:
+    """True when a client key carries a real pv version.
+
+    A pv that is empty or 0.0.0.0 counts as absent. Off Windows the
+    answer is always False (no WebView2 platform there).
+    """
+    if os.name != "nt":
+        return False
+    for value in _read_webview2_pvs():
+        text = str(value).strip() if value is not None else ""
+        if text and text != "0.0.0.0":
+            return True
+    return False
+
+
+def _note_window_open_failed(url: str, reason: str,
+                             log_file: str | None) -> bool:
+    """Tell the operator the window could not open (runtime IS present).
+
+    Windowed native message box on Windows (plain words only, no
+    download link, no "missing"); stderr log elsewhere or when the
+    box cannot show. Returns True when a box was shown. The dialog
+    carries the plain loopback address only, never the per-launch
+    session token (the token stays in the browser URL opened by the
+    fallback launch path).
+    """
+    plain = str(url).split("?", 1)[0]
+    short = " ".join(str(reason).split())
+    if len(short) > 240:
+        short = short[:237] + "..."
+    if log_file:
+        tail = "Details are in the log: " + str(log_file)
+    else:
+        tail = "Details are in the application log."
+    message = (
+        "Agent SI is running but its window could not open. "
+        "The app was opened in your default browser: " + plain + " "
+        "Reason: " + short + " "
+        + tail
     )
     shown = False
     if os.name == "nt":
@@ -1521,6 +1642,16 @@ def _logs_dir_for_failure(data_root: str | None) -> str | None:
         return None
 
 
+def _log_file_for_failure(data_root: str | None) -> str | None:
+    """Log file path for failure notices; None when unresolvable."""
+    try:
+        from agent_si import file_log as _failure_log
+
+        return _failure_log.log_file_for(data_root)
+    except Exception:
+        return None
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the sidecar: serve on loopback, open the native window."""
     args = list(sys.argv[1:] if argv is None else argv)
@@ -1567,10 +1698,16 @@ def main(argv: list[str] | None = None) -> int:
     # starts behind it. No window (headless) keeps the old path:
     # serve, then open the browser. background_color matches the splash
     # so no white flash paints before it.
+    # A zip downloaded from the internet marks every file and .NET
+    # refuses marked DLLs: strip the mark from the bundle's own files
+    # before webview (pythonnet) loads. Frozen exe only, errors ignored.
+    _unblock_zone_identifiers()
+    window_error: Exception | None = None
     try:
         import webview as _webview
-    except Exception:
+    except Exception as exc:
         _webview = None
+        window_error = exc
     window = None
     # pywebview 6.2.1 create_window takes no icon: the exe resource
     # (_ICON in the spec) owns the window + taskbar icon on Windows.
@@ -1584,8 +1721,9 @@ def main(argv: list[str] | None = None) -> int:
                 width=width, height=height, text_select=True,
                 background_color=_SPLASH_BG)
         except Exception as exc:
+            window_error = exc
             _log("agent-si-sidecar: window unavailable "
-                 f"({exc}); continuing headless")
+                 f"({type(exc).__name__}: {exc}); continuing headless")
             window = None
 
     port = resolve_start_port(data_root)
@@ -1669,12 +1807,18 @@ def main(argv: list[str] | None = None) -> int:
         else:
             raise RuntimeError("no native window")
     except Exception as exc:
+        cause = window_error if window_error is not None else exc
+        detail = f"{type(cause).__name__}: {cause}"
         _log(
             "agent-si-sidecar: webview unavailable "
-            f"({exc}); opened in default browser, serving until stopped"
+            f"({detail}); opened in default browser, serving until stopped"
         )
         _open_in_browser(url)
-        _note_webview_missing(url)
+        if _webview2_runtime_installed():
+            _note_window_open_failed(
+                url, detail, _log_file_for_failure(data_root))
+        else:
+            _note_webview_missing(url)
         stop.wait()
     finally:
         server.should_exit = True

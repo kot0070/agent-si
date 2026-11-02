@@ -201,6 +201,9 @@ def test_missing_window_launch_url_keeps_token(monkeypatch, tmp_path):
 
     monkeypatch.setattr(sidecar, "build_app", lambda: _App())
     monkeypatch.setattr(sidecar, "pick_free_port", lambda: 12998)
+    # FXWV: pin the missing branch (a machine WITH the runtime would
+    # otherwise take the installed notice and pop a real dialog here).
+    monkeypatch.setattr(sidecar, "_read_webview2_pvs", lambda: [])
     monkeypatch.setitem(sys.modules, "webview", _RaiseWebview())
     monkeypatch.setitem(sys.modules, "uvicorn", _CopyFakeUvicorn())
     monkeypatch.setattr(sidecar.threading, "Event", _NoWaitEvent)

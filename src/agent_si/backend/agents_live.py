@@ -73,6 +73,14 @@ def live_defaults() -> dict[str, Any]:
         "context": "",
         "errors": [],
         "waits": [],
+        # FXDESIGN4 truth fields with unevidenced defaults: every
+        # served row carries every LIVE_EXTRA_FIELDS entry, so a row
+        # written with only the frozen four still serves the full
+        # shape (R-317 proof asserts all of LIVE_EXTRA_FIELDS).
+        "provider": "",
+        "placement": "",
+        "last_action": "",
+        "window": None,
     }
 
 
@@ -108,16 +116,16 @@ def record_live_row(key: str, row: Mapping[str, Any]) -> dict[str, Any]:
         "waits": _live_strings(row.get("waits")),
     }
     # FXPARALLEL BEGIN run-lock: upsert as one unit.
-    # FXDESIGN4 truth fields ride only when a writer sourced them, so
-    # rows written before the upgrade parse and compare unchanged.
-    if "provider" in row:
-        stored["provider"] = str(row.get("provider", ""))
-    if "placement" in row:
-        stored["placement"] = str(row.get("placement", ""))
-    if "last_action" in row:
-        stored["last_action"] = str(row.get("last_action", ""))
+    # FXDESIGN4 truth fields always ride: sourced when a writer
+    # sourced them, else the unevidenced defaults above, so every
+    # stored row carries every LIVE_EXTRA_FIELDS entry.
+    stored["provider"] = str(row.get("provider", ""))
+    stored["placement"] = str(row.get("placement", ""))
+    stored["last_action"] = str(row.get("last_action", ""))
     if window is not None:
         stored["window"] = window
+    else:
+        stored["window"] = None
     with _LIVE_LOCK:
         _LIVE_ROWS[str(key)] = stored
     # FXPARALLEL END run-lock.

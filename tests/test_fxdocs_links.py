@@ -9,6 +9,12 @@ REFDEF = re.compile(r"(?m)^\s*\[[^\]]+\]:\s*(\S+)")
 REFUSE = re.compile(r"\[[^\]]*\]\[([^\]]*)\]")
 MACHINE = re.compile(r"^[A-Za-z]:[\\/]|^\\\\")
 
+# Build-artifact links: the portable zip plus its checksums exist only
+# as release artifacts (never in the repo), so a docs link naming them
+# is expected to miss on a checkout. Only packaging/README.md may carry
+# such links, and only under ../dist/.
+BUILD_ARTIFACT_ALLOW = (("packaging/README.md", "../dist/"),)
+
 
 def targets(text):
     found = INLINE.findall(text) + REFDEF.findall(text)
@@ -31,6 +37,9 @@ def dead_links():
                 continue
             base = ROOT if url.startswith("/") else page.parent
             if not (base / url.lstrip("/")).exists():
+                if any(rel == page_rel and url.startswith(prefix)
+                       for page_rel, prefix in BUILD_ARTIFACT_ALLOW):
+                    continue
                 bad.append(f"{rel} -> {raw}")
     return sorted(set(bad))
 
