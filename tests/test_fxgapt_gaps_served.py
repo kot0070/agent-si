@@ -430,7 +430,7 @@ def test_laptop_ukrainian_task_kept_across_restart(tmp_path, monkeypatch):
     (restart-kept, no duplicates)."""
     from agent_si.backend.orchestration import steplimits as _limits
 
-    client, _app = _served_chat_client(tmp_path, monkeypatch)
+    _app, client = _served_chat_client(tmp_path, monkeypatch)
     project = client.post("/api/v1/projects", json={
         "name": "uk-project", "folder_ref": "dock-fxgapt-uk",
     }, headers=_auth())
@@ -485,8 +485,7 @@ def test_red_laptop_chat_echoes_absolute_folder(tmp_path, monkeypatch):
     evaluated) and the probe would pass vacuously."""
     from agent_si.backend.orchestration import steplimits as _limits
 
-    client, _app = _served_chat_client(tmp_path, monkeypatch)
-    project_id = "fxgapt-laptop-path"
+    _app, client = _served_chat_client(tmp_path, monkeypatch)
     created = client.post("/api/v1/projects", json={
         "name": "laptop-path", "folder_ref": "dock-fxgapt-path",
     }, headers=_auth())
