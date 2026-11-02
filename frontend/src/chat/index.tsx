@@ -147,9 +147,14 @@ interface ChatPump {
 const pumps = new Map<string, ChatPump>();
 
 // Executed engine turns (done event with executed:true) hide the verdict
-// card (D6(b), FXDESIGN6). The store shape is frozen, so the per-message
-// engine flag lives here, keyed by the unique store message id.
+// card (D6(b), FXDESIGN6). Stored stopped/failed turns hide it too: the
+// flag does not survive a restart, so the history merge re-marks those
+// ids here. The store shape is frozen, so the per-message flags live
+// here, keyed by the unique store message id.
 const engineRunMessages = new Set<string>();
+
+// Stopped-turn assistants show one plain stopped line instead of the card.
+const stoppedAssistants = new Set<string>();
 
 // Assistant placeholders pruned after a failed stream (the store is
 // append/patch only). Render filters these ids out.
@@ -436,6 +441,15 @@ function buildHistoryBatch(
         at,
         final: true,
       });
+      if (turn.status === "stopped" || turn.status === "failed") {
+        // FXR1B: a stored terminal turn never shows the approval card
+        // after a restart — the per-message flags above do not survive
+        // one. Stopped turns show one plain stopped line instead.
+        engineRunMessages.add(assistantId);
+        if (turn.status === "stopped") {
+          stoppedAssistants.add(assistantId);
+        }
+      }
     }
     if (turn.status === "failed" || turn.status === "stopped") {
       sawTerminal = true;
@@ -764,6 +778,12 @@ function startChatRun(
     ({ aborted, executed }) => {
       pumps.delete(key);
       setChatRunner(key, { streamId: null, streaming: false });
+      // FXR1B: the done event carries executed on stop too. An engine
+      // turn never shows the approval card, stopped or not — the abort
+      // path below must honor it exactly like the ok path did.
+      if (executed === true) {
+        engineRunMessages.add(assistantId);
+      }
       const answer =
         getChatState(key).messages.find(
           (message) => message.id === assistantId,
@@ -771,6 +791,7 @@ function startChatRun(
       if (aborted) {
         // Stop closes the run as stopped: stored, never Working.
         patchChatMessage(key, assistantId, { final: false });
+        stoppedAssistants.add(assistantId);
         void recordTurnBestEffort(projectId, text, answer, {
           status: "stopped",
           run_id: runId,
@@ -792,9 +813,6 @@ function startChatRun(
       } else {
         setChatHealth(key, "ok");
         patchChatMessage(key, assistantId, { final: true });
-        if (executed === true) {
-          engineRunMessages.add(assistantId);
-        }
         void recordTurnBestEffort(projectId, text, answer, {
           status: "ok",
           run_id: runId,
@@ -1345,6 +1363,16 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
                 >
                   {pt("chat.stream.resend", "Resend")}
                 </button>
+              ) : null}
+              {message.role === "assistant" &&
+              stoppedAssistants.has(message.id) ? (
+                <span
+                  data-testid="chat-stopped-line"
+                  role="status"
+                  className="fx-quiet"
+                >
+                  {pt("chat.stream.stopped", "Stopped")}
+                </span>
               ) : null}
               {message.role === "assistant" &&
               message.final &&
