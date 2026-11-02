@@ -470,8 +470,12 @@ export function Inspector(props: InspectorProps): ReactElement {
 
   // FXTELEM: Team now lists one row per agent+role+model+placement+status
   // with an attempt count (the shared snapshot is the current run while
-  // live, else the last run's team). Details come from the first matching
-  // live row; rows never invent, they only fold.
+  // live, else the last run's team). "Now" means now: the dev-run engine
+  // serves the run id inside each row's deliverable
+  // ("artifact://run/<run_id>/<label>", engine.py), so rows from older
+  // runs sort behind a Show more. RUNNING rows come first, then queued,
+  // then ended rows newest-run-first. Details come from the first
+  // matching live row; rows never invent, they only fold and sort.
   const foldedTeam = useMemo(() => dedupeLiveRows(rows), [rows]);
   const foldedTeamIds = useMemo(() => {
     const counts = new Map<string, number>();
@@ -516,9 +520,83 @@ export function Inspector(props: InspectorProps): ReactElement {
       ) ?? null
     );
   }
+  function teamRunIdOf(row: PartRow): string | null {
+    const match = /^artifact:\/\/run\/([^/]+)\//.exec(row.deliverable);
+    return match ? (match[1] ?? null) : null;
+  }
+  function teamStatusRank(status: PartRow["status"]): number {
+    const key = String(status).toUpperCase();
+    if (key === "RUNNING") {
+      return 0;
+    }
+    if (key === "QUEUED" || key === "CREATED") {
+      return 1;
+    }
+    return 2;
+  }
+  const latestTeamRunId =
+    (runs ?? []).length === 0
+      ? null
+      : (runs?.[(runs?.length ?? 0) - 1]?.run_id ?? null);
+  function teamRunRank(runId: string | null): number {
+    // Latest run and unattributed rows stay visible; older listed runs
+    // sort behind Show more, newest run first (higher runs index first).
+    if (runId === null || runId === latestTeamRunId) {
+      return Number.MAX_SAFE_INTEGER;
+    }
+    const at = (runs ?? []).findIndex((run) => run.run_id === runId);
+    return at < 0 ? -1 : at;
+  }
+  interface TeamItem {
+    entry: (typeof foldedTeam)[number];
+    testId: string;
+    row: PartRow;
+    running: boolean;
+    primary: boolean;
+    statusRank: number;
+    runRank: number;
+  }
+  const teamItems = useMemo(() => {
+    const items: TeamItem[] = [];
+    foldedTeam.forEach((entry, index) => {
+      const row = teamRepresentative(entry);
+      if (row === null) {
+        return;
+      }
+      const running =
+        String(entry.status).toUpperCase() === "RUNNING";
+      const runRank = teamRunRank(teamRunIdOf(row));
+      items.push({
+        entry,
+        testId: foldedTeamIds[index] ?? `team-row-${entry.agent}`,
+        row,
+        running,
+        primary:
+          running || runRank === Number.MAX_SAFE_INTEGER,
+        statusRank: teamStatusRank(entry.status),
+        runRank,
+      });
+    });
+    const primary = items
+      .filter((item) => item.primary)
+      .sort((left, right) => left.statusRank - right.statusRank);
+    const secondary = items
+      .filter((item) => !item.primary)
+      .sort(
+        (left, right) =>
+          right.runRank - left.runRank ||
+          left.statusRank - right.statusRank,
+      );
+    return { primary, secondary };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [foldedTeam, foldedTeamIds, rows, runs]);
 
   const [resultsOpen, setResultsOpen] = useState(false);
   const [backgroundOpen, setBackgroundOpen] = useState(false);
+  const [teamMoreOpen, setTeamMoreOpen] = useState(false);
+  const teamMoreLabel = teamMoreOpen
+    ? t("shell.cards.showLess")
+    : t("shell.cards.showMore");
 
   // FXDESIGN6: the ref legend splits the bar by role. Grouped from the live
   // rows' own extras (role + tokens); with no live token data the legend
@@ -833,13 +911,13 @@ export function Inspector(props: InspectorProps): ReactElement {
           {liveRows === null || rows.length === 0 ? (
             <p data-testid="team-empty">{t("agents.live.empty")}</p>
           ) : (
+            <>
             <ul data-testid="team-rows">
-              {foldedTeam.map((entry, index) => {
-                const row = teamRepresentative(entry);
-                if (row === null) {
-                  return null;
-                }
-                const rowTestId = foldedTeamIds[index] ?? `team-row-${entry.agent}`;
+              {(teamMoreOpen
+                ? [...teamItems.primary, ...teamItems.secondary]
+                : teamItems.primary
+              ).map((item) => {
+                const { entry, row, testId: rowTestId } = item;
                 const fileRef = readRef(readExtra(row, "file"));
                 const lastActionRef = readRef(readExtra(row, "last_action"));
                 const scopeRef = shortenLiveRef(row.scope);
@@ -989,6 +1067,21 @@ export function Inspector(props: InspectorProps): ReactElement {
                 );
               })}
             </ul>
+            {teamItems.secondary.length > 0 && (
+              <button
+                type="button"
+                data-testid="team-show-more"
+                className="fx-btn-quiet fx-show-more"
+                aria-expanded={teamMoreOpen}
+                onClick={() => {
+                  setTeamMoreOpen(!teamMoreOpen);
+                }}
+              >
+                <Icon name="expand" />
+                <span>{teamMoreLabel}</span>
+              </button>
+            )}
+            </>
           )}
           <Link data-testid="team-open-agents" to="/agents/live">
             {t("shell.cards.team.openAgents")}

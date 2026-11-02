@@ -3,7 +3,7 @@
 // The rail names each number: "Last run 13,938" and "This project 19,080";
 // per-model rows add up to the project total, never a global sum.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import type { ReactElement } from "react";
 import { HttpApiClient } from "../../api/client";
@@ -238,5 +238,142 @@ describe("fxtelem two-run truth", () => {
     const providers = await screen.findByTestId("kit-metric-fx-providers");
     expect(providers.textContent).toContain("meta");
     expect(providers.textContent).not.toContain("Unknown");
+  });
+});
+
+describe("fxtelem team now means now", () => {
+  // F13: a run live ("Working on it") while old Blocked/Returned rows sit
+  // on top. RUNNING rows come first, ended rows after them newest-first,
+  // only the latest run is visible, older runs sit behind Show more.
+  const TEAM_RUNS = {
+    rows: [
+      { package_id: "pkg-1", agents: 2, peak_concurrency: 2, wall_time_s: 60 },
+    ],
+    runs: [
+      {
+        run_id: "run-old",
+        start: "2026-02-11T06:40:00Z",
+        end: "2026-02-11T06:41:00Z",
+        parts: [],
+        verdicts: {},
+        tokens: 100,
+        cost: "UNKNOWN",
+        files: [],
+        success: false,
+        summary: "old",
+      },
+      {
+        run_id: "run-new",
+        start: "2026-02-11T06:42:00Z",
+        end: "2026-02-11T06:43:00Z",
+        parts: [],
+        verdicts: {},
+        tokens: 200,
+        cost: "UNKNOWN",
+        files: [],
+        success: true,
+        summary: "new",
+      },
+    ],
+  };
+
+  // Snapshot order is stale-first on purpose: the card must still lead
+  // with the RUNNING row, then the latest run's ended row.
+  const TEAM_LIVE = {
+    agents: [
+      {
+        agent: "worker-old",
+        scope: "s",
+        deliverable: "artifact://run/run-old/p1",
+        status: "BLOCKED",
+        role: "worker",
+        model: "m-1",
+      },
+      {
+        agent: "worker-new",
+        scope: "s",
+        deliverable: "artifact://run/run-new/p1",
+        status: "RETURNED",
+        role: "worker",
+        model: "m-1",
+      },
+      {
+        agent: "boss",
+        scope: "s",
+        deliverable: "artifact://run/run-new/plan",
+        status: "RUNNING",
+        role: "manager",
+        model: "m-1",
+      },
+    ],
+  };
+
+  function stubTeamNow(): void {
+    vi.stubGlobal(
+      "fetch",
+      async (input: unknown, init?: RequestInit): Promise<Response> => {
+        const url = String(input);
+        const method = (init?.method ?? "GET").toUpperCase();
+        if (method === "GET" && url === "/api/v1/projects") {
+          return jsonBody({ projects: [PROJECT] });
+        }
+        if (method === "GET" && url === "/api/v1/projects/p-1") {
+          return jsonBody({ project: PROJECT });
+        }
+        if (method === "GET" && url === "/api/v1/agents/live") {
+          return jsonBody(TEAM_LIVE);
+        }
+        if (method === "GET" && url.startsWith("/api/v1/runs/ledger")) {
+          return jsonBody(TEAM_RUNS);
+        }
+        if (method === "GET" && url.startsWith("/api/v1/tasks")) {
+          return jsonBody({ tasks: [] });
+        }
+        if (method === "GET" && url.startsWith("/api/v1/budget")) {
+          return jsonBody({ project_id: "p-1", budget: null });
+        }
+        if (method === "GET" && url.startsWith("/api/v1/watcher/status")) {
+          return jsonBody({
+            project_id: "p-1",
+            integrity_ok: true,
+            journal_head: "evt-1",
+            generated_at: "2026-02-11T06:42:44Z",
+          });
+        }
+        if (method === "GET" && url.startsWith("/api/v1/watcher/journal")) {
+          return jsonBody([]);
+        }
+        if (method === "GET" && url.startsWith("/api/v1/apps/card")) {
+          return jsonBody({
+            project_id: "p-1",
+            service_ids: [],
+            paused: false,
+            generated_at: "t-0",
+          });
+        }
+        if (method === "GET" && url.startsWith("/api/v1/analytics/telemetry")) {
+          return jsonBody(TELEMETRY_PROJECT);
+        }
+        return jsonBody({ code: "FXTELEM_UNEXPECTED_API" }, 404);
+      },
+    );
+  }
+
+  it("leads with RUNNING, then the latest run, older runs behind Show more", async () => {
+    stubTeamNow();
+    renderInspector();
+    const boss = await screen.findByTestId("team-row-boss");
+    const workerNew = await screen.findByTestId("team-row-worker-new");
+    // RUNNING first, then the latest run's ended row, even though the
+    // snapshot arrived stale-first.
+    expect(
+      boss.compareDocumentPosition(workerNew) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    // The older run is not in the visible list yet.
+    expect(screen.queryByTestId("team-row-worker-old")).toBeNull();
+    const more = await screen.findByTestId("team-show-more");
+    fireEvent.click(more);
+    expect(await screen.findByTestId("team-row-worker-old")).toBeTruthy();
   });
 });
