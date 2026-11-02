@@ -9,7 +9,141 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Any
+
+
+#: Dirs never listed in the Director brief (caches, history, outputs,
+#: local virtualenvs): the plan stays about project work, never noise.
+_BRIEF_SKIP_DIRS = frozenset({
+    ".git", "node_modules", ".venv", "venv", "__pycache__",
+    ".devrun", "dist", "build", ".pytest_cache"})
+
+#: Manifests quoted into the brief so the Director uses the project's
+#: own test command instead of inventing one.
+_BRIEF_MANIFESTS = ("package.json", "pyproject.toml", "requirements.txt",
+                    "pytest.ini", "setup.py", "Makefile", "README.md")
+
+#: Test-file names collected into the brief.
+_BRIEF_TEST_RE = re.compile(
+    r"(^test_.*\.py$|_test\.py$|\.test\.[a-z]+$|\.spec\.[a-z]+$"
+    r"|^verify\.[a-z]+$)", re.I)
+
+
+def project_brief(folder: Any, max_entries: int = 200,
+                  max_tests: int = 40,
+                  manifest_chars: int = 1500) -> str:
+    """Short text: tree, test files, manifests. Real folder facts only."""
+    try:
+        base = os.path.abspath(str(folder))
+    except Exception:
+        return "The project folder is empty: this is a new project."
+    tree: list[str] = []
+    tests: list[str] = []
+    try:
+        walker = os.walk(base)
+    except Exception:
+        return "The project folder is empty: this is a new project."
+    try:
+        for root, dirs, files in walker:
+            try:
+                dirs[:] = sorted(
+                    d for d in dirs if d not in _BRIEF_SKIP_DIRS)
+            except Exception:
+                pass
+            try:
+                rel = os.path.relpath(root, base).replace("\\", "/")
+            except Exception:
+                continue
+            depth = 0 if rel == "." else rel.count("/") + 1
+            for name in sorted(files):
+                path = name if rel == "." else rel + "/" + name
+                if depth <= 2 and len(tree) < max_entries:
+                    tree.append(path)
+                try:
+                    if (_BRIEF_TEST_RE.search(name)
+                            and len(tests) < max_tests):
+                        tests.append(path)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    if not tree:
+        return "The project folder is empty: this is a new project."
+    out = ["Files now:", *tree]
+    if tests:
+        out += ["Test files now:", *tests]
+    for name in _BRIEF_MANIFESTS:
+        try:
+            full = os.path.join(base, name)
+            if os.path.isfile(full):
+                with open(full, encoding="utf-8",
+                          errors="replace") as fh:
+                    out += ["--- %s ---" % name, fh.read(manifest_chars)]
+        except Exception:
+            continue
+    return "\n".join(out)
+
+
+def missing_check_targets(parts: Any, folder: Any) -> list:
+    """Script/test paths a check names that exist nowhere.
+
+    A word after argv[0] naming a path (with an extension, or a slash)
+    must exist now or be planned by this or an earlier part. Flag
+    words, ``-c``/``-e`` programs and bare tool names never count;
+    ``pytest tests/a.py::test_b`` checks ``tests/a.py``.
+    """
+    planned: set = set()
+    missing: list = []
+    try:
+        base = os.path.abspath(str(folder))
+    except Exception:
+        base = ""
+    try:
+        for part in parts or []:
+            try:
+                pid = str(part.get("part_id"))
+                argv_list = part.get("check_commands") or []
+                own = {str(item).replace("\\", "/")
+                       for item in (part.get("files") or [])}
+            except Exception:
+                continue
+            for argv in argv_list:
+                try:
+                    words = list(argv or [])
+                except Exception:
+                    continue
+                skip_next = False
+                for word in words[1:]:
+                    try:
+                        text = str(word)
+                    except Exception:
+                        continue
+                    if skip_next:
+                        skip_next = False
+                        continue
+                    if text in ("-c", "-e", "--eval"):
+                        skip_next = True
+                        continue
+                    if text.startswith("-"):
+                        continue
+                    cell = text.split("::")[0].replace("\\", "/")
+                    if not re.search(r"\.[A-Za-z0-9]{1,5}$", cell) \
+                            and "/" not in cell:
+                        continue
+                    if cell in planned or cell in own:
+                        continue
+                    try:
+                        exists = (bool(base) and os.path.exists(
+                            os.path.join(base, cell)))
+                    except Exception:
+                        exists = False
+                    if not exists:
+                        missing.append((pid, cell))
+            planned |= own
+    except Exception:
+        pass
+    return missing
 
 
 class PlanError(ValueError):
@@ -82,9 +216,8 @@ def _clean_parts(raw: Any) -> list[dict[str, Any]]:
         if not isinstance(goal, str) or not goal.strip():
             raise PlanError("part %r needs a non-empty goal" % (part_id,))
         files = entry.get("files")
-        if not isinstance(files, list) or not files:
-            raise PlanError("part %r needs a non-empty files list"
-                            % (part_id,))
+        if not isinstance(files, list):
+            raise PlanError("part %r files must be a list" % (part_id,))
         clean_files: list[str] = []
         for path in files:
             cleaned = _clean_path(path)
