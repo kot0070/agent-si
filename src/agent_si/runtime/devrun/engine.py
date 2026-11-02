@@ -1763,11 +1763,20 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
             if gate_reason is not None:
                 # The worker gets the gate line back; attempts continue
                 # until the budget is spent, then FAIL with this line.
+                # No-start plus an already-failed auditor fails at once:
+                # nothing later can change that verdict.
+                auditor_ok_here = bool(
+                    entry is not None and entry.get("result") == "PASS")
+                no_runnable = not any(
+                    not check.get("could_not_start")
+                    and not check.get("refused")
+                    for check in (check_rows or []))
                 failing.append(gate_reason)
                 for line in (entry or {}).get("reasons", []) or []:
                     if line not in reasons:
                         reasons.append(line)
-                if attempt >= _EXTRA_ATTEMPTS + 1:
+                if attempt >= _EXTRA_ATTEMPTS + 1 or (
+                        no_runnable and not auditor_ok_here):
                     row["verdict"] = "FAIL"
                     row["reason"] = gate_reason
                     turn += 1
@@ -1839,7 +1848,12 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
                     str(check.get("output_tail") or "")[:2000]))
         reasons = list((entry or {}).get("reasons", [])) or [
             "auditor gave no reason"]
-        if attempt < _EXTRA_ATTEMPTS + 1:
+        started_any = any(
+            not check.get("could_not_start")
+            and not check.get("refused")
+            for check in (check_rows or []))
+        if attempt < _EXTRA_ATTEMPTS + 1 and (
+                started_any or auditor_ok):
             turn += 1
             if failing:
                 outcome_line = "Part %s: checks red, attempt %d" % (
