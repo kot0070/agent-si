@@ -14,15 +14,23 @@ stopping anything). Standard library only.
 
 from __future__ import annotations
 
+import contextlib
+import os
 import subprocess
 import time
 from dataclasses import dataclass
 from typing import Dict, List, Tuple
 
+from agent_si.backend import proc_tree as _proc_tree
 from agent_si.watcher import journal as journal_store
 from agent_si.watcher.journal import WatcherError
 
+#: One stop timeout (seconds): the single constant every stop path in
+#: this lane set shares (owned by agent_si.backend.proc_tree).
+STOP_TIMEOUT_S = _proc_tree.STOP_TIMEOUT_S
+
 __all__ = (
+    "STOP_TIMEOUT_S",
     "StopReceipt",
     "AttachedChild",
     "attach_child",
@@ -30,6 +38,7 @@ __all__ = (
     "issue_grant",
     "request_stop",
     "request_stop_all",
+    "reap_stale_at_startup",
     "reset_state",
 )
 
@@ -61,10 +70,51 @@ _GRANTS: Dict[str, float] = {}
 _ATTACHED: Dict[str, List[AttachedChild]] = {}
 
 
+def reap_stale_at_startup() -> int:
+    """Reap stale owners recorded by a previous run; return kill count.
+
+    Every recorded row is checked by pid plus creation stamp: a dead
+    pid is dropped; a live pid whose stamp differs from the recorded
+    one is a PID reuse and is spared (dropped); a live pid with a
+    matching stamp is tree-killed and dropped. One STOP_ALL journal
+    row carries the totals.
+    """
+    rows = _proc_tree.read_records()
+    killed = 0
+    dropped: list = []
+    for row in rows:
+        try:
+            pid = int(row.get("pid"))
+        except (TypeError, ValueError):
+            continue
+        stamp = str(row.get("create_time") or "")
+        if not _proc_tree.proc_alive(pid):
+            dropped.append(pid)
+            continue
+        if not stamp or _proc_tree.proc_create_time(pid) != stamp:
+            dropped.append(pid)
+            continue
+        _proc_tree.kill_tree_pid(pid)
+        killed += 1
+        dropped.append(pid)
+    with contextlib.suppress(Exception):
+        _proc_tree.drop_records(dropped)
+    journal_store.append_event(
+        "", "backend", "STOP_ALL",
+        "startup reap: stopped %d of %d stale" % (killed, len(rows)),
+        ("",),
+    )
+    return killed
+
+
 def reset_state() -> None:
     """Drop every grant and every attached child (probe isolation)."""
     _GRANTS.clear()
     _ATTACHED.clear()
+    with contextlib.suppress(Exception):
+        path = _proc_tree._record_path()
+        if os.path.isfile(path):
+            os.unlink(path)
 
 
 def issue_grant(grant_ref: str, ttl_s: float = 600.0) -> str:
@@ -78,11 +128,22 @@ def issue_grant(grant_ref: str, ttl_s: float = 600.0) -> str:
 
 def attach_child(project_id: str, run_id: str,
                  proc: "subprocess.Popen") -> int:
-    """Attach a run-owned child process; return its attach index."""
+    """Attach a run-owned child process; return its attach index.
+
+    The pid plus its creation stamp also persists in the data file, so
+    a restart can reap stale owners after checking the stamp (a live
+    pid with a different stamp is a PID reuse and is spared).
+    """
     key = str(project_id)
     row = AttachedChild(run_id=str(run_id), proc=proc)
     rows = _ATTACHED.setdefault(key, [])
     rows.append(row)
+    try:
+        pid = int(proc.pid)
+        _proc_tree.record_spawn(
+            pid, _proc_tree.proc_create_time(pid), key, str(run_id))
+    except Exception:
+        pass
     return len(rows) - 1
 
 
@@ -103,26 +164,10 @@ def _utcnow() -> str:
     )
 
 
-def _terminate(proc: "subprocess.Popen", timeout: float = 5.0) -> bool:
-    """Stop one attached child; True when it is no longer running."""
-    try:
-        if proc.poll() is not None:
-            return True
-        proc.terminate()
-    except Exception:
-        return proc.poll() is not None
-    try:
-        proc.wait(timeout=timeout)
-    except Exception:
-        try:
-            proc.kill()
-        except Exception:
-            pass
-        try:
-            proc.wait(timeout=timeout)
-        except Exception:
-            pass
-    return proc.poll() is not None
+def _terminate(proc: "subprocess.Popen",
+               timeout: float = STOP_TIMEOUT_S) -> bool:
+    """Stop one attached child plus its tree; True when it is reaped dead."""
+    return _proc_tree.terminate_tree(proc, timeout=timeout)
 
 
 def _refuse(project_id: str, reason: str) -> StopReceipt:
@@ -175,6 +220,10 @@ def request_stop(actor: str, project_id: str, grant_ref: str = "",
     for row in owned:
         if _terminate(row.proc):
             stopped += 1
+    with contextlib.suppress(Exception):
+        _proc_tree.drop_records(
+            [row.proc.pid for row in owned
+             if row.proc.poll() is not None])
     entry = journal_store.append_event(
         key, "backend", "STOP_ALL",
         "stop-all by %s: stopped %d of %d" % (who, stopped, len(owned)),
@@ -226,12 +275,18 @@ def request_stop_all(actor: str, grant_ref: str = "",
     keys = sorted(_ATTACHED.keys())
     owned_total = 0
     stopped = 0
+    reaped: list = []
     for key in keys:
         rows = _ATTACHED.pop(key, [])
         owned_total += len(rows)
         for row in rows:
             if _terminate(row.proc):
                 stopped += 1
+            with contextlib.suppress(Exception):
+                if row.proc.poll() is not None:
+                    reaped.append(row.proc.pid)
+    with contextlib.suppress(Exception):
+        _proc_tree.drop_records(reaped)
     entry = journal_store.append_event(
         "", "backend", "STOP_ALL",
         "stop-all by %s: stopped %d of %d across %d projects"

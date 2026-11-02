@@ -124,7 +124,9 @@ def start_command(
             raise ValueError(f"duplicate run_id {rid!r} is refused")
     _guard_allow(words, project_id, rid)
     try:
-        proc = subprocess.Popen(
+        from agent_si.backend import proc_tree as _proc_tree
+
+        proc = _proc_tree.spawn(
             words,
             cwd=os.getcwd(),
             stdin=subprocess.DEVNULL,
@@ -163,18 +165,12 @@ def tracked() -> tuple[str, ...]:
 
 
 def reset_state() -> None:
-    """Terminate every tracked child and drop the registry (isolation)."""
+    """Terminate every tracked child tree and drop registry (isolation)."""
+    from agent_si.backend import proc_tree as _proc_tree
+
     with _LOCK:
         procs = list(_RUNS.values())
         _RUNS.clear()
     for proc in procs:
-        try:
-            if proc.poll() is None:
-                proc.terminate()
-        except Exception:
-            continue
-        try:
-            proc.wait(timeout=5)
-        except Exception:
-            with contextlib.suppress(Exception):
-                proc.kill()
+        with contextlib.suppress(Exception):
+            _proc_tree.terminate_tree(proc)

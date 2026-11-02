@@ -4,7 +4,8 @@ Drives the real seam app (create_app + TestClient) with the loop interval
 shortened through its parameter: a declared local TCP service stopped
 mid-run -> OUTAGE_SIGNAL + SERVICE_STATE in GET /api/v1/watcher/journal
 without manual POST; a live run and a live chat stream each lead to a
-WATCH_DECISION row; shutdown leaves no task running.
+WATCH_DECISION row once stored facts push a card off base (idle ticks
+journal nothing); shutdown leaves no task running.
 """
 
 import os
@@ -216,6 +217,14 @@ def test_live_chat_stream_tick_once_records_decision():
         try:
             assert stream_id in bridge._live
             assert "WATCH_DECISION" not in _kinds_for(PROJ_CHAT)
+            # Idle first: normal verdicts journal nothing (no row, no call).
+            idle = _loop.tick_once(app)
+            assert PROJ_CHAT in idle["watched"]
+            assert "WATCH_DECISION" not in _kinds_for(PROJ_CHAT)
+            # Abnormal next: stored tamper facts push the card off base.
+            _journal.append_event(
+                PROJ_CHAT, "agent-x", "TAMPER_ATTEMPT",
+                "loop probe tamper", ("ref-fxwatchloop-chat",))
             summary = _loop.tick_once(app)
             assert PROJ_CHAT in summary["watched"]
             kinds = _kinds_for(PROJ_CHAT)
@@ -223,7 +232,10 @@ def test_live_chat_stream_tick_once_records_decision():
             decisions = list(_journal.stored_rows(
                 PROJ_CHAT, "WATCH_DECISION"))
             assert decisions, "live stream left no WATCH_DECISION row"
-            assert any("model=" in row.summary for row in decisions), (
+            assert any(
+                "model=" in row.summary
+                or "no watcher model: default action" in row.summary
+                for row in decisions), (
                 "WATCH_DECISION names no deciding model: %r"
                 % ([row.summary for row in decisions],))
             assert not any("run_check" in row.summary
@@ -262,6 +274,11 @@ def test_served_loop_outage_and_decision_no_manual_post():
                 % (first, second))
             _runner.register_template(TEMPLATE_ID, PROJ, name="loop")
             _runner.start_run(PROJ, TEMPLATE_ID)
+            # The live run idles normal until stored facts push a card
+            # off base; the tamper fact below makes the tick abnormal.
+            _journal.append_event(
+                PROJ, "agent-x", "TAMPER_ATTEMPT",
+                "loop probe tamper", ("ref-fxwatchloop",))
             kinds = _wait_for_route(client, PROJ, ("WATCH_DECISION",))
             assert "WATCH_DECISION" in kinds, (
                 "live run never ticked the watcher: %r" % (kinds,))
