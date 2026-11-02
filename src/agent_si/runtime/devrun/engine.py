@@ -1432,14 +1432,10 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
             turn += 1
             yield _run_event(
                 "delta", turn, part_id,
-                "Part %s: FAILED (%s)" % (part_id, row["reason"]),
+                "Part %s: FAILED (needs you: %s)"
+                % (part_id, row["reason"]),
                 {"run_id": run_id, "part_id": part_id})
             publish()
-            turn += 1
-            yield _run_event(
-                "delta", turn, part_id,
-                "Needs you: %s: %s" % (part_id, row["reason"]),
-                {"run_id": run_id, "part_id": part_id})
             return "FAIL", turn
         if checks_ok and auditor_ok:
             row["verdict"] = "PASS"
@@ -1482,14 +1478,10 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
         turn += 1
         yield _run_event(
             "delta", turn, part_id,
-            "Part %s: FAILED (%s)" % (part_id, row["reason"]),
+            "Part %s: FAILED (needs you: %s)"
+            % (part_id, row["reason"]),
             {"run_id": run_id, "part_id": part_id})
         publish()
-        turn += 1
-        yield _run_event(
-            "delta", turn, part_id,
-            "Needs you: %s: %s" % (part_id, row["reason"]),
-            {"run_id": run_id, "part_id": part_id})
         return "FAIL", turn
     row["verdict"] = "FAIL"
     row["reason"] = "attempt budget exhausted"

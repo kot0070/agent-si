@@ -191,13 +191,17 @@ def _note_webview_missing(url: str) -> bool:
     Windowed native message box on Windows (plain words plus the
     download link and the browser fallback); stderr log elsewhere or
     when the box cannot show. Returns True when a box was shown.
+    The dialog carries the plain loopback address only, never the
+    per-launch session token (the token stays in the browser URL
+    opened by the fallback launch path).
     """
+    plain = str(url).split("?", 1)[0]
     message = (
         "Agent SI is running but its window cannot open: "
         "the WebView2 runtime is missing. "
         "Install it from " + _WEBVIEW2_DOWNLOAD_URL + " "
         "and start Agent SI again. "
-        "The app was also opened in your default browser: " + str(url)
+        "The app was also opened in your default browser: " + plain
     )
     shown = False
     if os.name == "nt":
@@ -750,7 +754,8 @@ def main(argv: list[str] | None = None) -> int:
 
         width, height = resolve_window_size(data_root)
         window = webview.create_window(
-            "Agent SI", url, width=width, height=height)
+            "Agent SI", url, width=width, height=height,
+            text_select=True)
         _ = window
         webview.start(private_mode=False, storage_path=webview_storage_dir())
         if data_root is not None:
