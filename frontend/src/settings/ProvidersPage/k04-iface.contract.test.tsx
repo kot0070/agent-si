@@ -96,23 +96,51 @@ describe("k04-iface static assignability", () => {
 
 describe("k04-iface ConnectDialog contract", () => {
   it("match: onConnected called with the frozen preset_id value", async () => {
-    const store = createMemorySecretStore("contract-sess");
-    const onConnected = vi.fn();
-    render(
-      <ConnectDialog
-        preset_id="openai"
-        preset={contractOpenaiPreset()}
-        open
-        store={store}
-        onClose={() => {}}
-        onConnected={onConnected}
-      />,
+    // Network-boundary stub: the success line requires the real route
+    // round trip (key-save 201 plus connect 200); the contract then
+    // proves onConnected fires with the frozen preset_id through it.
+    vi.stubGlobal(
+      "fetch",
+      async (input: unknown) => {
+        const url = String(input);
+        const body = (data: unknown, status = 200): Response =>
+          new Response(JSON.stringify(data), {
+            status,
+            headers: { "content-type": "application/json" },
+          });
+        if (url === "/api/v1/providers/keys") {
+          return body(
+            { key_ref: { secret_id: "openai", provider_id: "openai" } },
+            201,
+          );
+        }
+        if (url === "/api/v1/providers/connect") {
+          return body({ provider: { provider_id: "openai" } });
+        }
+        return body({});
+      },
     );
-    fireEvent.change(screen.getByLabelText("API key"), { target: { value: "sk-test" } });
-    fireEvent.click(screen.getByText("Save"));
-    expect(await screen.findByText(/Reference saved/)).toBeTruthy();
-    expect(onConnected).toHaveBeenCalledTimes(1);
-    expect(onConnected.mock.calls[0][0]).toBe("openai");
+    try {
+      const store = createMemorySecretStore("contract-sess");
+      const onConnected = vi.fn();
+      render(
+        <ConnectDialog
+          preset_id="openai"
+          preset={contractOpenaiPreset()}
+          open
+          store={store}
+          onClose={() => {}}
+          onConnected={onConnected}
+        />,
+      );
+      fireEvent.change(screen.getByLabelText("API key"), { target: { value: "sk-test" } });
+      fireEvent.click(screen.getByText("Save"));
+      expect(await screen.findByText(/Reference saved/)).toBeTruthy();
+      expect(onConnected).toHaveBeenCalledTimes(1);
+      expect(onConnected.mock.calls[0][0]).toBe("openai");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("mismatch: visible refusal, no store.save", async () => {

@@ -1,8 +1,10 @@
 // Clean-disconnect dialog. Confirming removes the key's store entry;
 // the parent clears the provider state via onDisconnected.
-// Closable via Escape, the X button, and Cancel.
+// A centred modal over a backdrop (same overlay as the connect dialog);
+// focus starts on Cancel. Closable via backdrop click, Escape, the X
+// button, and Cancel.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { disconnectProvider, isNetworkFailure } from "./connectApi";
 import { ApiError } from "../../api/errors";
 import { t } from "../../locale/index";
@@ -43,6 +45,7 @@ export function DisconnectDialog({
 }: DisconnectDialogProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const cancelRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     if (!open) {
@@ -50,6 +53,18 @@ export function DisconnectDialog({
     }
     setBusy(false);
     setError(null);
+    return undefined;
+  }, [open, secretId, provider_id]);
+
+  // The modal opens on the safe choice: focus starts on Cancel, never
+  // on the destructive confirm.
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+    if (cancelRef.current !== null) {
+      cancelRef.current.focus();
+    }
     return undefined;
   }, [open, secretId, provider_id]);
 
@@ -135,28 +150,67 @@ export function DisconnectDialog({
 
   return (
     <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={t("providers.disconnect.title", { label: providerLabel })}
+      data-testid="disconnect-backdrop"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        backgroundColor: "rgba(0, 0, 0, 0.45)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 50,
+      }}
     >
-      <button type="button" aria-label={t("providers.disconnect.close")} onClick={onClose}>
-        {t("providers.disconnect.closeGlyph")}
-      </button>
-      <h2>{t("providers.disconnect.title", { label: providerLabel })}</h2>
-      <p>{t("providers.disconnect.body", { id: secretId })}</p>
-      {error !== null ? <p role="alert">{error}</p> : null}
-      <button type="button" onClick={onClose}>
-        {t("providers.disconnect.cancel")}
-      </button>
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => {
-          void handleDisconnect();
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={t("providers.disconnect.title", { label: providerLabel })}
+        style={{
+          backgroundColor: "var(--agent-si-surface, #fff)",
+          padding: 16,
+          borderRadius: 8,
+          width: "calc(100% - 32px)",
+          maxWidth: 480,
+          maxHeight: "calc(100vh - 64px)",
+          overflowY: "auto",
         }}
       >
-        {busy ? t("providers.disconnect.busy") : t("providers.disconnect.confirm")}
-      </button>
+        <button
+          type="button"
+          data-variant="quiet"
+          aria-label={t("providers.disconnect.close")}
+          onClick={onClose}
+        >
+          {t("providers.disconnect.closeGlyph")}
+        </button>
+        <h2>{t("providers.disconnect.title", { label: providerLabel })}</h2>
+        <p>{t("providers.disconnect.body", { id: secretId })}</p>
+        {error !== null ? <p role="alert">{error}</p> : null}
+        <button
+          type="button"
+          ref={cancelRef}
+          data-variant="quiet"
+          onClick={onClose}
+        >
+          {t("providers.disconnect.cancel")}
+        </button>
+        <button
+          type="button"
+          data-variant="primary"
+          style={{ fontWeight: 700 }}
+          disabled={busy}
+          onClick={() => {
+            void handleDisconnect();
+          }}
+        >
+          {busy ? t("providers.disconnect.busy") : t("providers.disconnect.confirm")}
+        </button>
+      </div>
     </div>
   );
 }

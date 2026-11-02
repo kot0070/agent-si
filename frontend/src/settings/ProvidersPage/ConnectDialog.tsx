@@ -1,12 +1,16 @@
 // Key-only connect dialog. The preset fills id, type and base URL;
 // the user only types the key. Save is bounded and reports visibly.
-// Closable via Escape, the X button, and Cancel.
+// The dialog is a centred modal over a backdrop (it renders at the end
+// of the Providers page, so only an overlay keeps it on screen); focus
+// starts in the key field. Closable via backdrop click, Escape, the X
+// button, and Cancel. The success line appears only after a real route
+// round trip (plus the local mirror write): an unreachable store shows
+// an honest error and the provider stays disconnected.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   connectCloud,
   connectLocal,
-  isNetworkFailure,
   saveKey,
 } from "./connectApi";
 import { ApiError } from "../../api/errors";
@@ -72,6 +76,7 @@ export function ConnectDialog({
   const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<ConnectResult | null>(null);
+  const keyRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!open) {
@@ -80,6 +85,18 @@ export function ConnectDialog({
     setApiKey("");
     setResult(null);
     setSaving(false);
+    return undefined;
+  }, [open, preset, preset_id]);
+
+  // L1: the key field takes focus whenever the modal opens, so the
+  // keyboard lands in the single input rather than on a button.
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+    if (keyRef.current !== null) {
+      keyRef.current.focus();
+    }
     return undefined;
   }, [open, preset, preset_id]);
 
@@ -144,19 +161,10 @@ export function ConnectDialog({
         const savedRef = await saveKey(preset_id, capturedKey);
         await connectCloud({ preset_id, model: firstModel.id, key_ref: savedRef ?? ref });
       }
-      // The route answered: the key leaves component state at once.
+      // The route answered: the key leaves component state at once, and
+      // the mirror write below runs only now, so "Connected" always
+      // names a real save — never an unreachable store.
       setApiKey("");
-    } catch (err: unknown) {
-      if (!isNetworkFailure(err)) {
-        setResult({ kind: "error", text: connectFailure(err) });
-        setApiKey("");
-        setSaving(false);
-        return;
-      }
-      // No route answered (offline run): fall through to the local
-      // reference flow below, which keeps the saved behavior.
-    }
-    try {
       await saveWithTimeout(store.save(ref), timeoutMs);
       setResult({
         kind: "success",
@@ -164,10 +172,10 @@ export function ConnectDialog({
       });
       onConnected(preset_id, ref);
     } catch (err: unknown) {
-      setResult({
-        kind: "error",
-        text: err instanceof Error ? err.message : t("providers.connect.saveFailed"),
-      });
+      // Any failure (route or mirror write) shows an honest error: the
+      // key never reached a store, so the provider stays disconnected.
+      setApiKey("");
+      setResult({ kind: "error", text: connectFailure(err) });
     } finally {
       setSaving(false);
     }
@@ -175,13 +183,44 @@ export function ConnectDialog({
 
   return (
     <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={t("providers.connect.title", { label: preset.label })}
+      data-testid="connect-backdrop"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        backgroundColor: "rgba(0, 0, 0, 0.45)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 50,
+      }}
     >
-      <button type="button" aria-label={t("providers.connect.close")} onClick={onClose}>
-        {t("providers.connect.closeGlyph")}
-      </button>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={t("providers.connect.title", { label: preset.label })}
+        style={{
+          backgroundColor: "var(--agent-si-surface, #fff)",
+          padding: 16,
+          borderRadius: 8,
+          width: "calc(100% - 32px)",
+          maxWidth: 480,
+          maxHeight: "calc(100vh - 64px)",
+          overflowY: "auto",
+        }}
+      >
+        <button
+          type="button"
+          data-variant="quiet"
+          aria-label={t("providers.connect.close")}
+          onClick={onClose}
+        >
+          {t("providers.connect.closeGlyph")}
+        </button>
       <h2>{t("providers.connect.title", { label: preset.label })}</h2>
       <dl>
         <div>
@@ -200,6 +239,7 @@ export function ConnectDialog({
       <label>
         {t("providers.connect.apiKey")}
         <input
+          ref={keyRef}
           type="password"
           aria-label={t("providers.connect.apiKey")}
           value={apiKey}
@@ -210,11 +250,13 @@ export function ConnectDialog({
       <p>{t("providers.connect.keyFormat", { hint: preset.keyHint })}</p>
       {showHintWarning ? <p>{t("providers.connect.hintMismatch")}</p> : null}
       {result !== null ? <p role="status">{result.text}</p> : null}
-      <button type="button" onClick={onClose}>
+      <button type="button" data-variant="quiet" onClick={onClose}>
         {t("providers.connect.cancel")}
       </button>
       <button
         type="button"
+        data-variant="primary"
+        style={{ fontWeight: 700 }}
         disabled={apiKey.length === 0 || saving}
         onClick={() => {
           void handleSave();
@@ -222,6 +264,7 @@ export function ConnectDialog({
       >
         {saving ? t("providers.connect.saving") : t("providers.connect.save")}
       </button>
+      </div>
     </div>
   );
 }
