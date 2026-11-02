@@ -388,6 +388,40 @@ def classify_argv(argv: list[str]) -> str:
     return "read-only"
 
 
+def _windows_findstr_files(words: list[str]) -> list[str]:
+    """Backslash file operands for findstr on Windows (F13).
+
+    Windows findstr cannot open forward-slash paths, so on Windows
+    only, for a findstr head, file operands get ``\\`` separators.
+    Flags (words starting with ``/`` or ``-``) and the search string
+    (the first non-flag word, unless ``/C:`` or ``/G:`` already names
+    the pattern or file source) are never touched. Off Windows, or
+    for any other head, the words pass through unchanged.
+    """
+    if os.name != "nt" or not words:
+        return words
+    if _bare_head(words[0]) != "findstr":
+        return words
+    lowered = [str(word).lower() for word in words[1:]]
+    pattern_sourced = any(
+        word == "/c:" or word.startswith("/c:")
+        or word == "/g:" or word.startswith("/g:")
+        for word in lowered)
+    out = [words[0]]
+    first_operand = True
+    for word in words[1:]:
+        text = str(word)
+        if text.startswith("/") or text.startswith("-"):
+            out.append(text)
+            continue
+        if first_operand and not pattern_sourced:
+            first_operand = False
+            out.append(text)
+            continue
+        out.append(text.replace("/", os.sep))
+    return out
+
+
 def _deny_shape(argv: list[str]) -> str:
     """Refusal reason for a DETAILS A denied shape, or empty."""
     if not argv:
@@ -659,6 +693,7 @@ def spawn_checked(
     missing = _missing_head(words, str(folder))
     if missing is not None:
         raise SpawnNotInstalled(missing)
+    words = _windows_findstr_files(words)
     job: dict[str, Any] = {
         "project_id": str(project_id),
         "check_run_id": str(run_id),
