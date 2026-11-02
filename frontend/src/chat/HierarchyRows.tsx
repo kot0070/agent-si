@@ -114,8 +114,12 @@ function isSplitAuditor(
 
 export function HierarchyRows({
   projectId,
+  onExpandedChange,
 }: {
   projectId: string;
+  /** FXCHATV (b): the chat composer hides its own Connect CTA while the
+      expanded rows already offer one, so one state carries one CTA. */
+  onExpandedChange?: (expanded: boolean) => void;
 }): ReactElement | null {
   const [connected, setConnected] = useState<string[] | null>(null);
   const [profiles, setProfiles] = useState<RoleProfileMap | null>(null);
@@ -157,6 +161,7 @@ export function HierarchyRows({
   function toggle(expandedNext: boolean): void {
     writeCollapsed(projectId, !expandedNext);
     setExpanded(expandedNext);
+    onExpandedChange?.(expandedNext);
   }
 
   function refresh(): void {
@@ -286,6 +291,9 @@ export function HierarchyRows({
     profile: RoleModelProfile | undefined,
     ids: string[],
     split: boolean,
+    /** FXCHATV (b): one Connect CTA per state — only the first empty
+        row carries the link, the rest name the empty state quietly. */
+    showConnect: boolean,
   ): ReactElement {
     const selected =
       profile !== undefined &&
@@ -304,9 +312,11 @@ export function HierarchyRows({
           {exactModelText(profile)}
         </span>
         {ids.length === 0 ? (
-          <a data-testid="hierarchy-connect-link" href={CONNECT_HREF}>
-            {pt("chat.hierarchy.connect", "Connect a provider")}
-          </a>
+          showConnect ? (
+            <a data-testid="hierarchy-connect-link" href={CONNECT_HREF}>
+              {pt("chat.hierarchy.connect", "Connect a provider")}
+            </a>
+          ) : null
         ) : (
           <select
             data-testid={`hierarchy-select-${row}`}
@@ -339,6 +349,7 @@ export function HierarchyRows({
     );
   }
 
+  const emptyRows = connected !== null && connected.length === 0;
   const rows =
     connected !== null && profiles !== null ? (
       <>
@@ -348,14 +359,16 @@ export function HierarchyRows({
           profiles.director,
           connected,
           false,
+          emptyRows,
         )}
-        {renderRow("manager", managerLabel, profiles.manager, connected, false)}
+        {renderRow("manager", managerLabel, profiles.manager, connected, false, false)}
         {renderRow(
           "agents",
           agentsLabel,
           profiles.worker,
           connected,
           isSplitAuditor(profiles.worker, profiles.auditor),
+          false,
         )}
       </>
     ) : null;

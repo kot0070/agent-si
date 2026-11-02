@@ -84,6 +84,36 @@ else:
         "sidecar spec: skip missing FXCATALOG catalog data "
         "(owning lane pending): src/agent_si/qa_catalog/catalog_v2.json")
 
+# FXLOC lane: the frozen About refs (sidecar._license_ref/_notices_ref)
+# resolve to the bundle root plus docs/third_party_notices. Absent
+# sources are skipped with a build-log line (never synthesized here).
+_LICENSE_SRC = os.path.join(ROOT, "LICENSE")
+if os.path.isfile(_LICENSE_SRC):
+    datas.append((_LICENSE_SRC, "."))
+else:
+    print("sidecar spec: skip missing LICENSE (owning lane pending)")
+
+_NOTICES_SRC = os.path.join(
+    ROOT, "docs", "third_party_notices", "NOTICES.md")
+if os.path.isfile(_NOTICES_SRC):
+    datas.append((_NOTICES_SRC, os.path.join("docs", "third_party_notices")))
+else:
+    print(
+        "sidecar spec: skip missing docs/third_party_notices/NOTICES.md "
+        "(owning lane pending)")
+
+# FXLOC lane: the frozen host runner (catalog_v2._host_path resolves
+# under sys._MEIPASS at runtime); the runner modules themselves ride
+# the hiddenimports above.
+_QA_RUNNERS_SRC = os.path.join(
+    ROOT, "src", "agent_si", "qa_catalog", "runners")
+if os.path.isdir(_QA_RUNNERS_SRC):
+    datas.append((_QA_RUNNERS_SRC, os.path.join("qa_catalog", "runners")))
+else:
+    print(
+        "sidecar spec: skip missing FXCATALOG runners "
+        "(owning lane pending)")
+
 block_cipher = None
 
 # pathex is src-first so the frozen backend package resolves before site-packages.
@@ -129,7 +159,11 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    # FXR2E-6: the frozen K02 contract stub
+    # (src/agent_si/backend/orchestration/interface.py) ships in source
+    # for the contract test only; zero product modules import it, so it
+    # stays out of the frozen exe. Never delete the file.
+    excludes=["agent_si.backend.orchestration.interface"],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,

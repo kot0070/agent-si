@@ -70,7 +70,15 @@ def _refs(n):
 
 
 def test_r302_hierarchy_run_splits_runs_integrates(tmp_path):
-    client = TestClient(create_app(_settings(tmp_path)))
+    app = create_app(_settings(tmp_path))
+    # FXLOC C5: fail-closed gate needs the default project configured
+    # on the app's real gate; generous limits, idempotent.
+    try:
+        app.state.k04_ctx.budget_state.get_state("run")
+    except (KeyError, LookupError):
+        app.state.k04_ctx.budget_state.configure_project(
+            "run", "USD", "1000000.00", "900000.00", "1000000.00")
+    client = TestClient(app)
     _canned_patch = _bind_canned()
     resp = client.get("/api/v1/hierarchy/control-plane")
     assert resp.status_code == 200, resp.text

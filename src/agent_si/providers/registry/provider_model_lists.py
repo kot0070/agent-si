@@ -119,28 +119,28 @@ def resolve_kb_row(kb_rows: Any, provider_id: str,
     """Resolve one live id to its KB row by the exact rule or None.
 
     Exact canonical match first, then the dated/tag base of the same id.
-    Never fuzzy: ``gpt-4o`` never resolves to ``gpt-4o-mini``.
+    Never fuzzy: ``gpt-4o`` never resolves to ``gpt-4o-mini``. The match
+    itself runs through the single loader match function
+    (``agent_si.model_kb.loader.match_row``); only the UI-list
+    canonicalization stays here.
     """
-    candidate = canonical_model_id(provider_id, live_id)
-    base = dated_base_id(candidate)
-    for row in kb_rows or []:
-        if not isinstance(row, Mapping):
-            continue
-        provider, canonical = _kb_canonical(row)
-        if provider != str(provider_id or ""):
-            continue
-        if canonical == candidate:
-            return row
-    if base != candidate:
-        for row in kb_rows or []:
-            if not isinstance(row, Mapping):
-                continue
-            provider, canonical = _kb_canonical(row)
-            if provider != str(provider_id or ""):
-                continue
-            if canonical == canonical_model_id(provider, base):
-                return row
-    return None
+    from agent_si.model_kb import loader as _loader
+
+    provider = str(provider_id or "")
+    rows = [row for row in kb_rows or []
+            if isinstance(row, Mapping)
+            and str(row.get("provider_id", "") or "") == provider]
+    if not rows:
+        return None
+    view = {"models": [
+        {"provider_id": provider,
+         "model_id": canonical_model_id(provider, row.get("model_id", "")),
+         "_row": row} for row in rows]}
+    hit = _loader.match_row(
+        view, provider, canonical_model_id(provider, live_id))
+    if hit is None:
+        return None
+    return hit.get("_row")
 
 
 # --- strict parse ---------------------------------------------------------------
@@ -228,14 +228,30 @@ def read_secret_value(credential_store: Any, secret_id: str) -> str:
 
 def _default_http_get(url: str, headers: Mapping[str, str],
                       timeout: float) -> Any:
-    """Stdlib GET returning the parsed JSON body (FAKE seam: urlopen)."""
+    """Stdlib GET returning the parsed JSON body (FAKE seam: urlopen).
+
+    HTTP failures log the numeric status only (never URL, body or key)
+    and surface as the generic keyless error.
+    """
+    import urllib.error as _urlerror
     import urllib.request as _urlrequest
 
     request = _urlrequest.Request(url, headers=dict(headers), method="GET")
     try:
         with _urlrequest.urlopen(request, timeout=timeout) as response:
             raw = response.read()
-    except Exception:
+    except Exception as exc:
+        try:
+            import logging as _logging
+
+            status = getattr(exc, "code", None)
+            if isinstance(exc, _urlerror.HTTPError):
+                status = exc.code
+            _logging.getLogger("agent_si.providers").error(
+                "provider models fetch failed with status %s",
+                status if status is not None else "?")
+        except Exception:
+            pass
         raise LiveModelsError(GENERIC_ERROR) from None
     try:
         return _json.loads(raw.decode("utf-8"))

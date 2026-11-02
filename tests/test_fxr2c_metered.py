@@ -97,8 +97,12 @@ def test_chat_orchestration_hard_cap_blocks_provider(
         events = list(bridge._orchestration_events(
             "s-1", "run-1", request, {"cancelled": False}))
         assert gateway.calls == [], "provider ran past a hard cap of 0"
-        assert any(
-            b.get("type") == "error" for b in _event_types(events)), events
+        # FXLOC C5: a refused admission streams budget_stop with plain
+        # text (never a generic error, never a call past the cap).
+        stops = [b for b in _event_types(events)
+                 if b.get("type") == "budget_stop"]
+        assert stops, events
+        assert str(stops[0].get("reason") or stops[0].get("text") or ""), stops
     finally:
         _manager.set_budget_gate(prev)
 

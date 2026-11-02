@@ -49,6 +49,38 @@ def _lane():
     _status.reset_state()
 
 
+# FXLOC2: fail-closed gate needs a real gate: the abnormal path admits
+# the watcher model call before invoking the transport. Generous
+# limits, all static project ids, restored after.
+_FXLOC2_GATE_PROJECTS = (
+    "fxr2c-idle-1",
+    "fxr2c-idle-2",
+    "fxr2c-abn-1",
+    "fxr2c-abn-2",
+    "fxr2c-abn-3",
+    "fxr2c-abn-4",
+    "fxr2c-guard-1",
+    "fxr2c-st-1",
+    "fxr2c-st-2",
+    "fxr2c-st-3",
+)
+
+
+@pytest.fixture(autouse=True)
+def _fxloc2_real_budget_gate():
+    from agent_si.budget.gate import BudgetGate
+    from agent_si.runtime import manager as _manager
+
+    prev = _manager._BUDGET_GATE
+    gate = BudgetGate()
+    for project in _FXLOC2_GATE_PROJECTS:
+        gate.configure_project(
+            project, "USD", "1000000.00", "900000.00", "1000000.00")
+    _manager.set_budget_gate(gate)
+    yield
+    _manager.set_budget_gate(prev)
+
+
 class _FakeLocalTransport:
     """Fake local model transport: records calls, answers in-list."""
 
