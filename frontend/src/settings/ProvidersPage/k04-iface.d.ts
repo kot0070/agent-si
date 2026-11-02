@@ -11,6 +11,12 @@ export interface ConnectDialogProps {
   open: boolean;
   store: SecretStorePort;
   timeoutMs?: number;
+  // Step-2 additions (all optional; omitting them keeps the old key-only
+  // contract). initialStep 2 opens Manage-models directly; a non-empty
+  // initialTicked seeds the ticks (empty falls back to the recommended
+  // text model); the served enabled list wins when present; Done reports
+  // (preset_id, tickedIds) through onModelsDone. Proved in
+  // k04-iface.contract.test.tsx "step-2 props".
   initialStep?: 1 | 2;
   initialTicked?: string[];
   onModelsDone?: (presetId: string, modelIds: string[]) => void;

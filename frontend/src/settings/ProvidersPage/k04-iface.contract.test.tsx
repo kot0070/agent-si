@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { PROVIDER_CATALOG, getPreset } from "./catalog";
 import { ConnectDialog } from "./ConnectDialog";
 import { DisconnectDialog } from "./DisconnectDialog";
@@ -166,6 +166,226 @@ describe("k04-iface ConnectDialog contract", () => {
     expect(await screen.findByText(/Refused: preset mismatch/)).toBeTruthy();
     expect(saveSpy).not.toHaveBeenCalled();
     expect(onConnected).not.toHaveBeenCalled();
+  });
+});
+
+describe("k04-iface ConnectDialog step-2 props", () => {
+  // Spec for the three optional step-2 additions on ConnectDialogProps
+  // (k04-iface.d.ts): initialStep / initialTicked / onModelsDone. Each
+  // test renders the REAL ConnectDialog through the entry props; only
+  // the network boundary is stubbed (GET/PUT model routes). Proved:
+  // step-2 entry skips the key form; a non-empty initialTicked seeds the
+  // ticks (unknown ids dropped, empty falls back to the recommended
+  // model); the served enabled list wins over the passed ticks; Done
+  // reports (preset_id, tickedIds) through onModelsDone, reaches the
+  // real PUT route, and closes; Done with nothing ticked warns and stays
+  // open with no callback (Y2 guard).
+  type RecordedPut = { url: string; method: string; body: unknown };
+  function step2ModelsStub(modelsPayload: unknown, puts: RecordedPut[]) {
+    return async (
+      input: unknown,
+      init?: { method?: string; body?: string },
+    ): Promise<Response> => {
+      const url = String(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+      const json = (data: unknown, status = 200): Response =>
+        new Response(JSON.stringify(data), {
+          status,
+          headers: { "content-type": "application/json" },
+        });
+      if (url === "/api/v1/providers/openai/models" && method === "GET") {
+        return json(modelsPayload);
+      }
+      if (url === "/api/v1/providers/openai/models" && method === "PUT") {
+        let ids: string[] = [];
+        try {
+          const parsed: unknown =
+            init?.body === undefined ? null : JSON.parse(init.body);
+          if (
+            typeof parsed === "object" &&
+            parsed !== null &&
+            Array.isArray((parsed as { ids?: unknown }).ids)
+          ) {
+            ids = ((parsed as { ids: unknown[] }).ids).filter(
+              (entry): entry is string => typeof entry === "string",
+            );
+          }
+        } catch {
+          ids = [];
+        }
+        puts.push({ url, method, body: { ids } });
+        return json({ enabled: ids });
+      }
+      return json({});
+    };
+  }
+
+  function step2RowsPayload(enabled: string[] | null) {
+    return {
+      models: [
+        { model: "openai/gpt-4o-mini", name: "Standard", in_base: true },
+        { model: "openai/gpt-4o", name: "Advanced", in_base: true },
+      ],
+      enabled,
+      source: "provider",
+    };
+  }
+
+  function tickedOf(id: string): boolean {
+    return (screen.getByLabelText(id) as HTMLInputElement).checked;
+  }
+
+  it("initialStep=2 opens at the model list with no key entry", async () => {
+    const puts: RecordedPut[] = [];
+    vi.stubGlobal("fetch", step2ModelsStub(step2RowsPayload(null), puts));
+    try {
+      render(
+        <ConnectDialog
+          preset_id="openai"
+          preset={contractOpenaiPreset()}
+          open
+          store={createMemorySecretStore("contract-sess")}
+          initialStep={2}
+          onClose={() => {}}
+          onConnected={() => {}}
+        />,
+      );
+      expect(await screen.findByTestId("connect-model-list")).toBeTruthy();
+      expect(screen.getByText("Done")).toBeTruthy();
+      expect(screen.queryByLabelText("API key")).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("initialTicked seeds the ticks; unknown ids are dropped", async () => {
+    const puts: RecordedPut[] = [];
+    vi.stubGlobal("fetch", step2ModelsStub(step2RowsPayload(null), puts));
+    try {
+      render(
+        <ConnectDialog
+          preset_id="openai"
+          preset={contractOpenaiPreset()}
+          open
+          store={createMemorySecretStore("contract-sess")}
+          initialStep={2}
+          initialTicked={["openai/gpt-4o", "nope/ghost"]}
+          onClose={() => {}}
+          onConnected={() => {}}
+        />,
+      );
+      expect(await screen.findByTestId("connect-model-list")).toBeTruthy();
+      expect(tickedOf("openai/gpt-4o")).toBe(true);
+      expect(tickedOf("openai/gpt-4o-mini")).toBe(false);
+      expect(screen.queryByLabelText("nope/ghost")).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("served enabled list wins over the passed ticks", async () => {
+    const puts: RecordedPut[] = [];
+    vi.stubGlobal(
+      "fetch",
+      step2ModelsStub(step2RowsPayload(["openai/gpt-4o-mini"]), puts),
+    );
+    try {
+      render(
+        <ConnectDialog
+          preset_id="openai"
+          preset={contractOpenaiPreset()}
+          open
+          store={createMemorySecretStore("contract-sess")}
+          initialStep={2}
+          initialTicked={["openai/gpt-4o"]}
+          onClose={() => {}}
+          onConnected={() => {}}
+        />,
+      );
+      expect(await screen.findByTestId("connect-model-list")).toBeTruthy();
+      expect(tickedOf("openai/gpt-4o-mini")).toBe(true);
+      expect(tickedOf("openai/gpt-4o")).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("Done reports (preset_id, tickedIds) through onModelsDone, PUTs, and closes", async () => {
+    const puts: RecordedPut[] = [];
+    vi.stubGlobal(
+      "fetch",
+      step2ModelsStub(step2RowsPayload(["openai/gpt-4o-mini"]), puts),
+    );
+    try {
+      const onModelsDone = vi.fn();
+      const onClose = vi.fn();
+      render(
+        <ConnectDialog
+          preset_id="openai"
+          preset={contractOpenaiPreset()}
+          open
+          store={createMemorySecretStore("contract-sess")}
+          initialStep={2}
+          initialTicked={["openai/gpt-4o"]}
+          onClose={onClose}
+          onConnected={() => {}}
+          onModelsDone={onModelsDone}
+        />,
+      );
+      expect(await screen.findByTestId("connect-model-list")).toBeTruthy();
+      fireEvent.click(screen.getByText("Done"));
+      expect(onModelsDone).toHaveBeenCalledTimes(1);
+      expect(onModelsDone).toHaveBeenCalledWith("openai", [
+        "openai/gpt-4o-mini",
+      ]);
+      expect(onClose).toHaveBeenCalledTimes(1);
+      await waitFor(() => expect(puts).toHaveLength(1));
+      expect(puts[0]).toEqual({
+        url: "/api/v1/providers/openai/models",
+        method: "PUT",
+        body: { ids: ["openai/gpt-4o-mini"] },
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("Done with nothing ticked warns and stays open, no callback", async () => {
+    const puts: RecordedPut[] = [];
+    vi.stubGlobal("fetch", step2ModelsStub(step2RowsPayload(null), puts));
+    try {
+      const onModelsDone = vi.fn();
+      const onClose = vi.fn();
+      render(
+        <ConnectDialog
+          preset_id="openai"
+          preset={contractOpenaiPreset()}
+          open
+          store={createMemorySecretStore("contract-sess")}
+          initialStep={2}
+          initialTicked={[]}
+          onClose={onClose}
+          onConnected={() => {}}
+          onModelsDone={onModelsDone}
+        />,
+      );
+      const rows = await screen.findAllByTestId("connect-model-row");
+      expect(rows.length).toBe(2);
+      for (const row of rows) {
+        const box = within(row).getByRole("checkbox") as HTMLInputElement;
+        if (box.checked) {
+          fireEvent.click(box);
+        }
+      }
+      fireEvent.click(screen.getByText("Done"));
+      expect(await screen.findByTestId("connect-done-note")).toBeTruthy();
+      expect(screen.getByRole("dialog")).toBeTruthy();
+      expect(onModelsDone).not.toHaveBeenCalled();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(puts).toHaveLength(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 
