@@ -73,6 +73,9 @@ function stubConnectRoutes(): void {
       if (url === "/api/v1/providers") {
         return body({ providers: [] });
       }
+      if (url === "/api/v1/providers/keys/check") {
+        return body({ ok: true }, 200);
+      }
       if (url === "/api/v1/providers/keys") {
         return body(
           { key_ref: { secret_id: "openai", provider_id: "openai" } },
@@ -121,6 +124,8 @@ describe("ConnectDialog", () => {
       />,
     );
     fireEvent.change(screen.getByLabelText("API key"), { target: { value: "sk-test" } });
+    fireEvent.click(screen.getByText("Check"));
+    await screen.findByText("Key checked. Save to connect.");
     fireEvent.click(screen.getByText("Save"));
     expect(await screen.findByText(/timed out/i)).toBeTruthy();
   });
@@ -133,6 +138,8 @@ describe("ConnectDialog", () => {
       <ConnectDialog preset_id="openai" preset={openaiPreset()} open store={store} onClose={() => {}} onConnected={onConnected} />,
     );
     fireEvent.change(screen.getByLabelText("API key"), { target: { value: "sk-test" } });
+    fireEvent.click(screen.getByText("Check"));
+    await screen.findByText("Key checked. Save to connect.");
     fireEvent.click(screen.getByText("Save"));
     expect(await screen.findByText(/Reference saved/)).toBeTruthy();
     expect(onConnected).toHaveBeenCalledTimes(1);
@@ -147,6 +154,8 @@ describe("ConnectDialog", () => {
       <ConnectDialog preset_id="openai" preset={openaiPreset()} open store={store} onClose={() => {}} onConnected={onConnected} />,
     );
     fireEvent.change(screen.getByLabelText("API key"), { target: { value: "sk-test" } });
+    fireEvent.click(screen.getByText("Check"));
+    await screen.findByText("Key checked. Save to connect.");
     fireEvent.click(screen.getByText("Save"));
     expect(await screen.findByText(/Reference saved/)).toBeTruthy();
     expect(onConnected).toHaveBeenCalledTimes(1);
@@ -165,7 +174,7 @@ describe("ConnectDialog", () => {
       <ConnectDialog preset_id="ollama" preset={openaiPreset()} open store={store} onClose={() => {}} onConnected={onConnected} />,
     );
     fireEvent.change(screen.getByLabelText("API key"), { target: { value: "sk-test" } });
-    fireEvent.click(screen.getByText("Save"));
+    fireEvent.click(screen.getByText("Check"));
     expect(await screen.findByText(/Refused: preset mismatch/)).toBeTruthy();
     expect(saveSpy).not.toHaveBeenCalled();
     expect(onConnected).not.toHaveBeenCalled();
@@ -340,6 +349,8 @@ describe("ProvidersPage", () => {
     fireEvent.click(screen.getByLabelText("Connect OpenAI"));
     const connectDialog = screen.getByRole("dialog");
     fireEvent.change(within(connectDialog).getByLabelText("API key"), { target: { value: "sk-test" } });
+    fireEvent.click(within(connectDialog).getByText("Check"));
+    await within(connectDialog).findByText("Key checked. Save to connect.");
     fireEvent.click(within(connectDialog).getByText("Save"));
     // Step 2 opens in the same dialog; Done closes it.
     expect(await within(connectDialog).findByText(/Reference saved/)).toBeTruthy();
@@ -464,12 +475,44 @@ describe("RolePoolPicker", () => {
 
 describe("ProvidersPage role pools wiring (page-level)", () => {
   async function connectOpenaiAndEnableStandard() {
-    const fetchMock = vi.fn(async () => ({ ok: true }));
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      const body = (data: unknown, status = 200): Response =>
+        new Response(JSON.stringify(data), {
+          status,
+          headers: { "content-type": "application/json" },
+        });
+      if (url === "/api/v1/providers") {
+        return body({ providers: [] });
+      }
+      if (url === "/api/v1/providers/keys/check") {
+        return body({ ok: true }, 200);
+      }
+      if (url === "/api/v1/providers/keys") {
+        return body(
+          { key_ref: { secret_id: "openai", provider_id: "openai" } },
+          201,
+        );
+      }
+      if (url === "/api/v1/providers/connect") {
+        return body({ provider: { provider_id: "openai" } });
+      }
+      if (url === "/api/v1/local/models") {
+        return body([]);
+      }
+      const match = url.match(/^\/api\/v1\/providers\/([^/]+)\/models$/);
+      if (match !== null) {
+        return body({ provider_id: match[1], models: [] });
+      }
+      return body({});
+    });
     vi.stubGlobal("fetch", fetchMock);
     render(<ProvidersPage project_id="local" />);
     fireEvent.click(screen.getByLabelText("Connect OpenAI"));
     const connectDialog = screen.getByRole("dialog");
     fireEvent.change(within(connectDialog).getByLabelText("API key"), { target: { value: "sk-test" } });
+    fireEvent.click(within(connectDialog).getByText("Check"));
+    await within(connectDialog).findByText("Key checked. Save to connect.");
     fireEvent.click(within(connectDialog).getByText("Save"));
     expect(await within(connectDialog).findByText(/Reference saved/)).toBeTruthy();
     fireEvent.click(within(connectDialog).getByText("Done"));
@@ -700,20 +743,45 @@ describe("ProvidersPage project setup", () => {
 describe("ProvidersPage chat model save wiring (page-level)", () => {
   async function connectOpenaiAndEnableStandardForChat() {
     const fetchMock = vi.fn(
-      async (
-        _url: string,
-        _init: {
-          method?: string;
-          headers?: Record<string, string>;
-          body?: string;
-        },
-      ) => ({ ok: true }),
+      async (input: unknown) => {
+        const url = String(input);
+        const body = (data: unknown, status = 200): Response =>
+          new Response(JSON.stringify(data), {
+            status,
+            headers: { "content-type": "application/json" },
+          });
+        if (url === "/api/v1/providers") {
+          return body({ providers: [] });
+        }
+        if (url === "/api/v1/providers/keys/check") {
+          return body({ ok: true }, 200);
+        }
+        if (url === "/api/v1/providers/keys") {
+          return body(
+            { key_ref: { secret_id: "openai", provider_id: "openai" } },
+            201,
+          );
+        }
+        if (url === "/api/v1/providers/connect") {
+          return body({ provider: { provider_id: "openai" } });
+        }
+        if (url === "/api/v1/local/models") {
+          return body([]);
+        }
+        const match = url.match(/^\/api\/v1\/providers\/([^/]+)\/models$/);
+        if (match !== null) {
+          return body({ provider_id: match[1], models: [] });
+        }
+        return body({});
+      },
     );
     vi.stubGlobal("fetch", fetchMock);
     render(<ProvidersPage project_id="local" />);
     fireEvent.click(screen.getByLabelText("Connect OpenAI"));
     const connectDialog = screen.getByRole("dialog");
     fireEvent.change(within(connectDialog).getByLabelText("API key"), { target: { value: "sk-test" } });
+    fireEvent.click(within(connectDialog).getByText("Check"));
+    await within(connectDialog).findByText("Key checked. Save to connect.");
     fireEvent.click(within(connectDialog).getByText("Save"));
     expect(await within(connectDialog).findByText(/Reference saved/)).toBeTruthy();
     fireEvent.click(within(connectDialog).getByText("Done"));
