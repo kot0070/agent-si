@@ -116,10 +116,12 @@ def test_iss_version_is_the_portable_version():
 def test_iss_every_visible_name_reads_agent_si():
     text = _read_iss()
     setup = _setup_directives(text)
-    visible = [setup.get("AppName", ""), setup.get("AppVerName", setup.get("AppName", "")),
+    visible = [setup.get("AppName", ""),
+               setup.get("AppVerName", setup.get("AppName", "")),
                setup.get("DefaultGroupName", "")]
     visible += _section_names(text, "Icons")
-    visible += _section_names(text, "Tasks")
+    # Tasks carry internal ids (e.g. desktopicon), not visible names;
+    # their Description renders from the standard messages.
     assert visible, "no visible names found in .iss"
     for name in visible:
         assert APP_NAME in name, f"visible name misses '{APP_NAME}': {name!r}"
@@ -283,7 +285,7 @@ def test_build_records_setup_hash_next_to_portable(tmp_path):
     sums = build.record_setup_hash(dist, setup_exe)
     assert sums.is_file(), "SHA256SUMS.txt not written"
     lines = sums.read_text(encoding="utf-8").splitlines()
-    assert any(l.endswith("AgentSI-setup-0.1.0.exe") for l in lines), \
+    assert any(line.endswith("AgentSI-setup-0.1.0.exe") for line in lines), \
         f"setup exe missing from SHA256SUMS.txt: {lines}"
     sums2 = build.record_setup_hash(dist, setup_exe)
     assert sums2.read_text(encoding="utf-8").splitlines() == lines, \
