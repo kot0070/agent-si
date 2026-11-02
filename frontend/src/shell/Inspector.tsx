@@ -36,6 +36,7 @@ import { MetricCard } from "../ui/MetricCard";
 import { useKitExpanded } from "../ui/Card";
 import { fetchAppsCard } from "../watcher/AppsCard";
 import type { AppsCardData } from "../watcher/AppsCard";
+import { backoffForFailures, isHiddenTick, onVisible } from "../api/polling";
 import {
   fetchWatcherJournal,
   fetchWatcherStatus,
@@ -248,13 +249,16 @@ export function Inspector(props: InspectorProps): ReactElement {
 
   useEffect(() => {
     let alive = true;
-    async function loadProject(target: string): Promise<void> {
+    let failures = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    async function loadProject(target: string): Promise<boolean> {
+      let ok = true;
       try {
         // FXDESIGN8: one ledger-route round trip serves both the package
         // rows and the runs key (last run verdict/tokens/files).
         const { rows, runs: runRows } = await readLedgerWithRuns(target);
         if (!alive) {
-          return;
+          return true;
         }
         setLedger(rows);
         setRuns(runRows);
@@ -276,6 +280,7 @@ export function Inspector(props: InspectorProps): ReactElement {
           }
         }
       } catch {
+        ok = false;
         if (alive) {
           setLedger([]);
           setRuns([]);
@@ -436,6 +441,7 @@ export function Inspector(props: InspectorProps): ReactElement {
           setLocalModels(null);
         }
       }
+      return ok;
     }
     if (projectId === null) {
       setLedger(null);
@@ -456,13 +462,50 @@ export function Inspector(props: InspectorProps): ReactElement {
         alive = false;
       };
     }
-    void loadProject(projectId);
-    const timer = setInterval(() => {
-      void loadProject(projectId);
-    }, PROJECT_POLL_MS);
+    const target: string = projectId;
+    void loadProject(target);
+    // FXCLASS P5: skip the tick when hidden, one fresh read on
+    // visibilitychange, back off 3-6-12-30 s on failure, reset on success.
+    function chain(): void {
+      if (timer !== null) {
+        clearTimeout(timer);
+      }
+      const delay =
+        failures === 0 ? PROJECT_POLL_MS : backoffForFailures(failures);
+      timer = setTimeout(() => {
+        timer = null;
+        if (!alive) {
+          return;
+        }
+        if (isHiddenTick()) {
+          chain();
+          return;
+        }
+        void loadProject(target).then((ok) => {
+          if (!alive) {
+            return;
+          }
+          failures = ok ? 0 : failures + 1;
+          chain();
+        });
+      }, delay);
+    }
+    chain();
+    const stopVisible = onVisible(() => {
+      if (alive && !isHiddenTick()) {
+        void loadProject(target).then((ok) => {
+          if (alive) {
+            failures = ok ? 0 : failures + 1;
+          }
+        });
+      }
+    });
     return () => {
       alive = false;
-      clearInterval(timer);
+      if (timer !== null) {
+        clearTimeout(timer);
+      }
+      stopVisible();
     };
   }, [client, projectId]);
 

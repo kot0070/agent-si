@@ -392,6 +392,7 @@ export type LocaleKey =
   | 'settings.optimization.riskCeiling'
   | 'settings.optimization.title'
   | 'settings.optimization.weights'
+  | 'settings.project.limitsBlank'
   | 'settings.project.needItNow'
   | 'settings.project.parallel'
   | 'settings.project.purpose'

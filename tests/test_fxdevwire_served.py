@@ -444,8 +444,11 @@ def test_s2_first_message_one_project_task_stream(tmp_path):
     assert tasks.status_code == 200, tasks.text
     assert len(tasks.json()["tasks"]) == 1, tasks.json()
     text = _all_text(events)
+    # FXCLASS CA-1/CA-3/CA-4: a first run with no provider ends with the
+    # one plain line (same words on chat + Tasks), not a plan/success.
     assert ("plan" in text.lower() or "success" in text.lower()
-            or "The " in text or "run " in text), text
+            or "The " in text or "run " in text
+            or "Connect a provider first" in text), text
 
 
 # -- S3: run text is visible and newline-terminated ----------------------

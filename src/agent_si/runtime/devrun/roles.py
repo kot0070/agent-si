@@ -8,6 +8,7 @@ event naming the role, never a silent substitute.
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 from typing import Any
@@ -37,6 +38,47 @@ class ModelStopped(RuntimeError):
     code: str = "DEVRUN_MODEL_STOPPED"
 
 
+class ProviderUnreachable(RuntimeError):
+    """A provider call failed by connection/5xx after bounded retries.
+
+    The engine converts this to a paused run (never a silent provider
+    switch): the outage was already signalled once for the run.
+    """
+
+    code: str = "DEVRUN_PROVIDER_UNREACHABLE"
+
+
+#: Bounded provider attempts before the outage signal: the first
+#: try plus one retry (a dead connection fails fast, and tests stay
+#: fast). Retries reuse invoke_timed, so its waiting line still fires
+#: on a slow second try.
+_OUTAGE_ATTEMPTS = 2
+
+
+def _is_outage_error(exc: BaseException) -> bool:
+    """True for connection/5xx failures (never timeouts or stops)."""
+    if isinstance(exc, (ModelStopped, ModelTimeout)):
+        return False
+    if isinstance(exc, (ConnectionError, TimeoutError)):
+        return True
+    try:
+        text = str(exc or "").lower()
+    except Exception:
+        return False
+    if not text:
+        return False
+    markers = (
+        "connection refused", "connection reset", "connection aborted",
+        "connection error", "failed to connect", "could not connect",
+        "unreachable", "network is unreachable", "broken pipe",
+        "bad gateway", "service unavailable", "gateway timeout",
+        "internal server error", " 500", " 502", " 503", " 504",
+        "(500)", "(502)", "(503)", "(504)", " 5xx", "status 500",
+        "status 502", "status 503", "status 504",
+    )
+    return any(marker in text for marker in markers)
+
+
 #: Default per-call model timeout in seconds (bounded by the max).
 _CALL_TIMEOUT_S = 300.0
 
@@ -58,6 +100,60 @@ def _clamp_timeout(value: Any) -> float:
     except (TypeError, ValueError):
         return float(_CALL_TIMEOUT_S)
     return min(max(clamped, 1.0), float(_CALL_TIMEOUT_MAX))
+
+
+def _clean_outage_text(exc: BaseException) -> str:
+    """User-safe outage detail: no class names, no "internal" word.
+
+    Strips a leading ``XxxError:`` class prefix and neutralises the
+    "internal server error" phrase; the full class-qualified error goes
+    to the log in _signal_outage_once, never to the user line.
+    """
+    try:
+        text = str(exc or "").strip()
+    except Exception:
+        text = ""
+    if not text:
+        return "no response"
+    text = re.sub(r"^[A-Za-z_][\w.]*Error\s*:\s*", "", text).strip()
+    text = re.sub(r"(?i)\binternal server error\b", "server error", text)
+    return text or "no response"
+
+
+def _signal_outage_once(app: Any, record: Any, project_id: str,
+                         provider: str, exc: BaseException) -> None:
+    """Signal one provider outage for the run (first failure only).
+
+    Uses the watcher's stop-and-report signal (real stop-all lane plus
+    one OUTAGE_SIGNAL row); its own dedupe replays repeats. A flag on
+    the run record keeps it to once per run. Never raises.
+    """
+    try:
+        if isinstance(record, dict) and record.get("outage_signalled"):
+            return
+    except Exception:
+        return
+    try:
+        import logging as _logging
+
+        _logging.getLogger(__name__).warning(
+            "provider outage signalled: project=%s provider=%s error=%s: %s",
+            project_id, provider, type(exc).__name__, exc)
+    except Exception:
+        pass
+    try:
+        from agent_si.watcher import outage as _outage
+
+        _outage.signal_outage(
+            str(project_id), str(provider),
+            "provider %s unreachable: %s" % (provider, exc))
+    except Exception:
+        pass
+    try:
+        if isinstance(record, dict):
+            record["outage_signalled"] = str(provider)
+    except Exception:
+        pass
 
 
 def waiting_line(role: str, elapsed_s: float) -> str:
@@ -762,10 +858,30 @@ def invoke_owned(
         raise _BudgetOut(str(_admit_exc)) from None
     except Exception:
         pass
-    response = invoke_timed(
-        adapter, messages, timeout_s=timeout_s,
-        first_notice_s=first_notice_s, notice_every_s=notice_every_s,
-        tick_s=tick_s, stop_seen=stop_seen, on_waiting=on_waiting)
+    _missing: Any = object()
+    response: Any = _missing
+    failures: list[BaseException] = []
+    for _try in range(max(1, int(_OUTAGE_ATTEMPTS))):
+        try:
+            response = invoke_timed(
+                adapter, messages, timeout_s=timeout_s,
+                first_notice_s=first_notice_s,
+                notice_every_s=notice_every_s,
+                tick_s=tick_s, stop_seen=stop_seen,
+                on_waiting=on_waiting)
+            break
+        except (ModelStopped, ModelTimeout):
+            raise
+        except Exception as exc:
+            if not _is_outage_error(exc):
+                raise
+            failures.append(exc)
+    if response is _missing:
+        last = failures[-1] if failures else RuntimeError("no response")
+        _signal_outage_once(app, record, project_id, provider, last)
+        raise ProviderUnreachable(
+            "provider %s unreachable after %d tries: %s"
+            % (provider, _OUTAGE_ATTEMPTS, _clean_outage_text(last)))
     usage = getattr(response, "usage", {}) or {}
 
     # FXPARALLEL BEGIN charge-lock: post-call block as one unit.
