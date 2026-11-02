@@ -348,8 +348,17 @@ def test_row_324_alerts_never_stops_agents(client):
         assert proc.poll() is None
         tick = _engine.tick(W_PROJ)
         assert tick.fired != ()
+        # Idle tick: normal verdicts journal nothing (no row, no call).
+        assert _journal.stored_rows(W_PROJ, "WATCH_DECISION") == ()
+        _journal.append_event(
+            W_PROJ, "agent-x", "TAMPER_ATTEMPT", "entry probe",
+            ("ref-r7-324",))
+        fired = _engine.tick(W_PROJ)
+        assert fired.fired != ()
         alerts = _journal.stored_rows(W_PROJ, "WATCH_DECISION")
-        assert len(alerts) >= len(tick.fired)
+        assert len(alerts) == 1
+        assert "rule-tamper" in alerts[0].summary
+        assert alerts[0].refs == ("rule-tamper",)
     finally:
         proc.terminate()
         proc.wait(timeout=10)

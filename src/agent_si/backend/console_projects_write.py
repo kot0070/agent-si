@@ -17,6 +17,7 @@ ends a live stream by stream_id through the shared chat bridge
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -173,6 +174,69 @@ def ensure_first_chat_task(app: Any, project_id: str, message: str,
             "stream continues", project)
         return None
     return stored
+
+
+def mirror_run_task_status(app: Any, project_id: str, task_id: str,
+                           message: str, status: str) -> int:
+    """Mirror one run's state onto its task rows, best effort.
+
+    Sets the named run task plus every same-project row titled exactly
+    with the run's message (the first-chat auto task, whose id never
+    matches the run's task) to status through compare_and_set, then
+    persists once. Returns the mirrored row count. Unknown project or
+    task, empty inputs, or any write failure: no-op (0), never raises,
+    so the stream never breaks.
+    """
+    try:
+        project = (project_id or "").strip()
+        wanted = (status or "").strip()
+        if not project or not wanted:
+            return 0
+        text = (message or "").strip()
+        name = (task_id or "").strip()
+        if not text and not name:
+            return 0
+        _projects, tasks = repos_for(app)
+        targets: dict[str, dict] = {}
+        if name:
+            try:
+                stored = tasks.load(name)
+            except Exception:
+                stored = None
+            if isinstance(stored, dict) and str(
+                    stored.get("project_id") or "") == project:
+                targets[name] = stored
+        if text:
+            try:
+                rows = list(tasks.list_by({"project_id": project}))
+            except Exception:
+                rows = []
+            for row in rows:
+                try:
+                    if not isinstance(row, dict):
+                        continue
+                    if str(row.get("title", "")).strip() != text:
+                        continue
+                    key = row.get("record_id") or row.get("task_id")
+                    if key and key not in targets:
+                        targets[str(key)] = row
+                except Exception:
+                    continue
+        mirrored = 0
+        for key, stored in targets.items():
+            try:
+                updated = dict(stored)
+                updated["status"] = wanted
+                tasks.compare_and_set(key, stored.get("version"), updated)
+                mirrored += 1
+            except Exception:
+                continue
+        if mirrored:
+            with contextlib.suppress(Exception):
+                persist_k02r3_store(app)
+        return mirrored
+    except Exception:
+        return 0
 
 
 def register_console_projects_write_routes(app: Any) -> Any:

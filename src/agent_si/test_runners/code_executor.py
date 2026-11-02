@@ -583,8 +583,13 @@ def _gateway_reply_text(response: Any) -> str:
 
 
 def _record_gateway_cost(project_id: str, task_id: str, run_id: str,
-                         gateway: Any, response: Any) -> None:
-    """Record gateway cost like any product call (never breaks the run)."""
+                         gateway: Any, response: Any,
+                         role: str = "ai-test") -> None:
+    """Record gateway cost like any product call (never breaks the run).
+
+    The same admit + charge + telemetry every metered entry shares,
+    with the entry role named on the metered-call log.
+    """
     try:
         config = getattr(gateway, "config", None)
         provider_id = str(getattr(config, "provider_id", "") or "")
@@ -592,24 +597,12 @@ def _record_gateway_cost(project_id: str, task_id: str, run_id: str,
         usage = getattr(response, "usage", None)
         if usage is None and isinstance(response, Mapping):
             usage = response.get("usage")
-        from agent_si.telemetry import run_store as _store
+        from agent_si.runtime.devrun import roles as _roles
 
-        _store.record_provider_usage(
-            project_id=str(project_id or "run"),
-            task_id=str(task_id or ""),
-            run_id=str(run_id or ""),
-            provider=provider_id,
-            model=model,
-            usage=usage,
-        )
-        try:
-            from agent_si.runtime import manager as _manager
-
-            _manager._charge_budget_gate(
-                str(project_id or "run"), provider_id, model, usage,
-                str(run_id or ""))
-        except Exception:
-            pass
+        _roles.settle_role_call(
+            project_id=str(project_id or "run"), task_id=str(task_id or ""),
+            run_id=str(run_id or ""), role=str(role or "ai-test"),
+            provider_id=provider_id, model=model, usage=usage)
     except Exception:
         pass
 
@@ -741,9 +734,33 @@ def execute_catalog_test(
                 "duration_s": time.monotonic() - started,
             }
         try:
+            from agent_si.runtime import manager as _manager
+            from agent_si.runtime.devrun import roles as _roles
+
+            config = getattr(resolved, "config", None)
+            admit_provider = str(
+                getattr(config, "provider_id", "") or "")
+            _roles.admit_role_call(
+                _manager._BUDGET_GATE, project_id=str(project_id),
+                task_id="local-tests", run_id="test-%s" % test_id,
+                role="ai-test", provider_id=admit_provider)
             response = resolved.invoke(
                 [{"role": "user", "content": str(intent)}])
         except Exception as exc:
+            from agent_si.budget.gate import (
+                BudgetBlockedError as _AdmitBlocked,
+            )
+
+            if isinstance(exc, _AdmitBlocked):
+                return {
+                    "test_id": test_id, "kind": outcome_kind,
+                    "status": "BLOCKED",
+                    "evidence_ref": _pending_ref(
+                        project_id, test_id, runner_id),
+                    "reason": "budget stop: %s" % (exc,),
+                    "output": "",
+                    "duration_s": time.monotonic() - started,
+                }
             return {
                 "test_id": test_id, "kind": outcome_kind,
                 "status": "BLOCKED",

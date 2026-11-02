@@ -204,9 +204,9 @@ describe("id-keyed history merge", () => {
     renderChat();
     const users = await screen.findAllByTestId("chat-user-message");
     expect(users).toHaveLength(2);
-    // Each served answer renders in its message plus its verdict card.
-    expect(await screen.findAllByText("first answer")).toHaveLength(2);
-    expect(await screen.findAllByText("second answer")).toHaveLength(2);
+    // Each served answer renders once: history never shows a card.
+    expect(await screen.findAllByText("first answer")).toHaveLength(1);
+    expect(await screen.findAllByText("second answer")).toHaveLength(1);
   });
 });
 

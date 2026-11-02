@@ -1,9 +1,10 @@
 """FXDEVRUN run record: the queryable rows behind every served run.
 
 One record per (project) run lives on ``app.state.devrun_runs`` while
-the stream runs and after it ends. Ledger rows, audits, parts, checks
-and the summary below are the new data fields HITS.md lists; nothing
-here is invented (no record reads UNKNOWN at the edges).
+the stream runs and after it ends, keyed by run id (plus a project
+alias holding the latest run for older readers). Ledger rows, audits,
+parts, checks and the summary below are the new data fields HITS.md
+lists; nothing here is invented (no record reads UNKNOWN at the edges).
 """
 
 from __future__ import annotations
@@ -29,6 +30,10 @@ DEVRUN_RUNS_FILE = "devrun_runs.jsonl"
 
 #: Row status when no served cell exists (never a faked zero).
 UNKNOWN = "UNKNOWN"
+
+
+#: Max runs kept per project in state and on file (newest first).
+MAX_RUNS_PER_PROJECT = 200
 
 
 def _utcnow_iso() -> str:
@@ -194,13 +199,22 @@ def format_install_runs(rows: Any) -> list[str]:
 
 
 def new_run_record(
-    run_id: str, project: str, task: str, folder: str
+    run_id: str, project: str, task: str, folder: str,
+    title: str = "", message: str = "",
 ) -> dict[str, Any]:
-    """Blank record for one dev run; the engine fills it as it goes."""
+    """Blank record for one dev run; the engine fills it as it goes.
+
+    ``title`` is the first 80 chars of the user task text (served so
+    the UI shows it instead of a hash); ``message`` keeps the full
+    user text for the next run's Director brief.
+    """
+    text = str(title) or str(message) or str(task)
     return {
         "run_id": str(run_id),
         "project": str(project),
         "task": str(task),
+        "message": str(message),
+        "title": text[:80],
         "folder": str(folder),
         "success": False,
         "stopped": False,
@@ -397,10 +411,20 @@ def to_runs_row(record: dict[str, Any]) -> dict[str, Any]:
         files = list(record.get("files", []) or [])
     except Exception:
         files = []
+    try:
+        title = record.get("title")
+        if not title:
+            fallback = record.get("message") or record.get("task") or ""
+            title = str(fallback)[:80]
+        else:
+            title = str(title)[:80]
+    except Exception:
+        title = ""
     return {
         "run_id": record.get("run_id"),
         "project": record.get("project"),
         "task": record.get("task"),
+        "title": title,
         "start": record.get("started_at") or UNKNOWN,
         "end": record.get("ended_at") or UNKNOWN,
         "interrupted": bool(record.get("interrupted", False)),
@@ -428,20 +452,163 @@ def _devrun_store_dir(app: Any) -> str:
     return ""
 
 
-def persist_devrun_runs(app: Any) -> None:
-    """Snapshot every in-memory devrun record to the data dir.
+def _run_sort_key(record: dict[str, Any]) -> str:
+    """Newest-first order key: start stamp, then run id (never raises)."""
+    try:
+        stamp = str(record.get("started_at") or "")
+    except Exception:
+        stamp = ""
+    try:
+        run_id = str(record.get("run_id") or "")
+    except Exception:
+        run_id = ""
+    return "%s\x00%s" % (stamp, run_id)
 
-    No-op when no store dir is bound or nothing is stored. Atomic
-    temp-file + replace write, one JSON object per line. Never raises:
+
+def _unique_run_records(store: Any) -> list[dict[str, Any]]:
+    """Dedupe a store's values to one record per run id (never raises).
+
+    The state holds run-id keys plus one project alias per project
+    pointing at the latest record; both read the same object, so the
+    dedupe is by run id (alias entries collapse onto their run).
+    """
+    try:
+        values = list(store.values())
+    except Exception:
+        return []
+    seen: set[str] = set()
+    out: list[dict[str, Any]] = []
+    for record in values:
+        if not isinstance(record, dict):
+            continue
+        try:
+            run_id = str(record.get("run_id") or "")
+        except Exception:
+            continue
+        if not run_id or run_id in seen:
+            continue
+        seen.add(run_id)
+        out.append(record)
+    return out
+
+
+def prune_old_runs(store: Any, project: str) -> None:
+    """Drop runs past the per-project cap, oldest first (never raises).
+
+    Keeps the newest MAX_RUNS_PER_PROJECT records of one project plus
+    its project alias on the latest; other projects stay untouched.
+    """
+    try:
+        mine = [record for record in _unique_run_records(store)
+                if str(record.get("project") or "") == str(project)]
+        if len(mine) <= MAX_RUNS_PER_PROJECT:
+            return
+        mine.sort(key=_run_sort_key, reverse=True)
+        drop = {str(record.get("run_id")) for record in
+                mine[MAX_RUNS_PER_PROJECT:]}
+        for key in list(store.keys()):
+            try:
+                record = store.get(key)
+            except Exception:
+                continue
+            if isinstance(record, dict) and str(
+                    record.get("run_id") or "") in drop:
+                with contextlib.suppress(Exception):
+                    del store[key]
+        latest = mine[0]
+        with contextlib.suppress(Exception):
+            store[str(project)] = latest
+    except Exception:
+        pass
+
+
+def latest_run_for_project(app: Any, project: str) -> Any:
+    """Newest run record of one project, or None (never raises)."""
+    try:
+        memory = getattr(getattr(app, "state", None), "devrun_runs", None) or {}
+        aliased = memory.get(str(project))
+        if isinstance(aliased, dict) and str(
+                aliased.get("project") or "") == str(project):
+            return aliased
+    except Exception:
+        pass
+    try:
+        rows = runs_for_project(app, project)
+    except Exception:
+        return None
+    if not rows:
+        return None
+    # Rows are newest-first dicts; map back to the stored record.
+    newest_id = rows[0].get("run_id")
+    try:
+        memory = getattr(getattr(app, "state", None), "devrun_runs", None) or {}
+        for record in _unique_run_records(memory):
+            if str(record.get("run_id")) == str(newest_id):
+                return record
+    except Exception:
+        pass
+    return None
+
+
+def persist_devrun_runs(app: Any) -> None:
+    """Snapshot every known devrun record to the data dir.
+
+    Merge-first: the file's rows plus the in-memory rows (memory wins
+    per run id), so a fresh app after a restart never wipes the runs
+    it has not loaded yet when its first run publishes. No-op when no
+    store dir is bound or nothing is stored anywhere. Atomic temp-file
+    + replace write, one JSON object per line, newest first per
+    project, capped at MAX_RUNS_PER_PROJECT. Never raises:
     a persist failure must not break the running stream.
     """
     try:
         store_dir = _devrun_store_dir(app)
         if not store_dir:
             return
-        runs = getattr(getattr(app, "state", None), "devrun_runs", None) or {}
-        rows = [runs[key] for key in sorted(runs)
-                if isinstance(runs.get(key), dict)]
+        merged: dict[str, dict[str, Any]] = {}
+        try:
+            path = os.path.join(store_dir, DEVRUN_RUNS_FILE)
+            with open(path, encoding="utf-8") as handle:
+                text = handle.read()
+            for line in text.splitlines():
+                if not line.strip():
+                    continue
+                row = json.loads(line)
+                if isinstance(row, dict) and row.get("project"):
+                    try:
+                        key = str(row.get("run_id") or row["project"])
+                    except Exception:
+                        continue
+                    if key and key not in merged:
+                        merged[key] = row
+        except Exception:
+            pass
+        try:
+            runs = getattr(getattr(app, "state", None),
+                           "devrun_runs", None) or {}
+            for record in _unique_run_records(runs):
+                try:
+                    key = str(record.get("run_id") or "")
+                except Exception:
+                    continue
+                if key:
+                    merged[key] = record
+        except Exception:
+            pass
+        by_project: dict[str, list[dict[str, Any]]] = {}
+        for record in merged.values():
+            try:
+                by_project.setdefault(
+                    str(record.get("project") or ""), []).append(record)
+            except Exception:
+                continue
+        rows: list[dict[str, Any]] = []
+        for records_of_project in by_project.values():
+            records_of_project.sort(key=_run_sort_key, reverse=True)
+            rows.extend(records_of_project[:MAX_RUNS_PER_PROJECT])
+        rows.sort(key=lambda row: (
+            str(row.get("project") or ""), _run_sort_key(row)),
+            reverse=True)
         if not rows:
             return
         os.makedirs(store_dir, exist_ok=True)
@@ -463,7 +630,12 @@ def persist_devrun_runs(app: Any) -> None:
 
 
 def load_devrun_runs(app: Any) -> dict:
-    """Read persisted devrun records, keyed by project (missing: {})."""
+    """Read persisted devrun records, keyed by run id (missing: {}).
+
+    Old one-row-per-project files still load: the key is the record's
+    own run id (falling back to the project when a row has none), so
+    one surviving row reads as that project's single run.
+    """
     try:
         store_dir = _devrun_store_dir(app)
         if not store_dir:
@@ -480,7 +652,12 @@ def load_devrun_runs(app: Any) -> dict:
                 continue
             row = json.loads(line)
             if isinstance(row, dict) and row.get("project"):
-                out[str(row["project"])] = row
+                try:
+                    key = str(row.get("run_id") or row["project"])
+                except Exception:
+                    continue
+                if key and key not in out:
+                    out[key] = row
     except Exception:
         return {}
     return out
@@ -490,19 +667,26 @@ def runs_for_project(app: Any, project: str) -> list:
     """Serve rows for one project: persisted file first, memory wins.
 
     Restart-safe: a fresh app with an empty memory store still serves
-    the persisted records of its data dir.
+    the persisted records of its data dir. Newest first, capped at
+    MAX_RUNS_PER_PROJECT per project.
     """
     merged = load_devrun_runs(app)
     try:
         memory = getattr(getattr(app, "state", None), "devrun_runs", None) or {}
-        for key, record in memory.items():
-            if isinstance(record, dict) and str(
-                    record.get("project") or "") == str(project):
-                merged[str(key)] = record
+        for record in _unique_run_records(memory):
+            if str(record.get("project") or "") != str(project):
+                continue
+            try:
+                key = str(record.get("run_id") or "")
+            except Exception:
+                continue
+            if key:
+                merged[key] = record
     except Exception:
         pass
-    rows = [to_runs_row(record) for key, record in merged.items()
-            if isinstance(record, dict) and str(
-                record.get("project") or "") == str(project)]
-    rows.sort(key=lambda row: str(row.get("run_id") or ""))
-    return rows
+    records = [record for record in merged.values()
+               if isinstance(record, dict) and str(
+                   record.get("project") or "") == str(project)]
+    records.sort(key=_run_sort_key, reverse=True)
+    records = records[:MAX_RUNS_PER_PROJECT]
+    return [to_runs_row(record) for record in records]
