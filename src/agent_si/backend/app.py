@@ -384,16 +384,27 @@ def create_app(settings: Any = None,
     @app.get("/api/v1/runs/ledger")
     def runs_ledger(project_id: str) -> dict[str, Any]:
         ledger = ledgers.get(project_id)
-        if ledger is None:
-            return {"rows": []}
         rows = []
-        for pid in ledger.package_ids():
-            row = ledger.get_row(pid)
-            if row is not None:
-                rows.append(_ledger_row_payload(
-                    row.package_id, row.agents,
-                    row.peak_concurrency, row.wall_time_s))
-        return {"rows": rows}
+        if ledger is not None:
+            for pid in ledger.package_ids():
+                row = ledger.get_row(pid)
+                if row is not None:
+                    rows.append(_ledger_row_payload(
+                        row.package_id, row.agents,
+                        row.peak_concurrency, row.wall_time_s))
+        # FXVIEWS2: devrun run records for this project ride the same
+        # route as runs rows (additions-only: the key is present only
+        # when devrun runs exist, so the legacy {"rows": [...]} body
+        # stays byte-identical otherwise). Served cells only: run id,
+        # start/end stamps, parts, verdicts, tokens, cost or UNKNOWN.
+        try:
+            from agent_si.runtime.devrun import records as _devrun_records
+            runs = _devrun_records.runs_for_project(app, project_id)
+        except Exception:
+            runs = []
+        if not runs:
+            return {"rows": rows}
+        return {"rows": rows, "runs": runs}
 
     def _find_ledger_with(package_id: str,
                           project_id: str | None) -> PackageLedger | None:
