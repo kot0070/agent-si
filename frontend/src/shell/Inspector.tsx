@@ -83,6 +83,41 @@ function readWaiting(value: unknown): string {
   return DASH;
 }
 
+function readRoleText(value: unknown): string {
+  if (typeof value === "string") {
+    const key = value.toLowerCase();
+    if (key === "director") {
+      return t("providers.role.director");
+    }
+    if (key === "manager") {
+      return t("providers.role.manager");
+    }
+    if (key === "worker") {
+      return t("providers.role.worker");
+    }
+    if (key === "auditor") {
+      return t("providers.role.auditor");
+    }
+    if (key === "watcher") {
+      return t("providers.role.watcher");
+    }
+  }
+  return DASH;
+}
+
+interface RefText {
+  text: string;
+  title?: string;
+}
+
+function readRef(value: unknown): RefText {
+  if (value === undefined || value === null || value === "") {
+    return { text: DASH };
+  }
+  const text = String(value);
+  return text.length > 40 ? { text, title: text } : { text };
+}
+
 function readTaskStatus(status: string): string {
   if (status === "RUNNING") {
     return t("tasks.status.running");
@@ -358,40 +393,60 @@ export function Inspector(props: InspectorProps): ReactElement {
             <p data-testid="team-empty">{t("agents.live.empty")}</p>
           ) : (
             <ul data-testid="team-rows">
-              {rows.map((row) => (
-                <li key={row.agent} data-testid={`team-row-${row.agent}`}>
-                  <span>{row.agent}</span>
-                  <span>
-                    {t("settings.roleProfile.roleLabel")}{" "}
-                    {readText(readExtra(row, "role"))}
-                  </span>
-                  <span>
-                    {t("settings.roleProfile.providerLabel")}{" "}
-                    {readText(readExtra(row, "provider"))}
-                  </span>
-                  <span>
-                    {t("settings.roleProfile.modelLabel")}{" "}
-                    {readText(readExtra(row, "model"))}
-                  </span>
-                  <span>
-                    {t("shell.cards.team.step")}{" "}
-                    {readText(readExtra(row, "step"))}
-                  </span>
-                  <span>
-                    {t("shell.cards.team.file")}{" "}
-                    {readText(readExtra(row, "file"))}
-                  </span>
-                  <span>
-                    {t("shell.cards.team.lastAction")}{" "}
-                    {readText(readExtra(row, "last_action"))}
-                  </span>
-                  <span>{readSilent(readExtra(row, "silent_min"))}</span>
-                  <span>
-                    {t("shell.cards.team.waiting")}{" "}
-                    {readWaiting(readExtra(row, "waits"))}
-                  </span>
-                </li>
-              ))}
+              {rows.map((row) => {
+                const fileRef = readRef(readExtra(row, "file"));
+                const lastActionRef = readRef(readExtra(row, "last_action"));
+                return (
+                  <li
+                    key={row.agent}
+                    data-testid={`team-row-${row.agent}`}
+                    className="fx-team-row"
+                  >
+                    <span className="fx-team-field">{row.agent}</span>
+                    <span className="fx-team-field">
+                      {t("settings.roleProfile.roleLabel")}{" "}
+                      {readRoleText(readExtra(row, "role"))}
+                    </span>
+                    <span className="fx-team-field">
+                      {t("settings.roleProfile.providerLabel")}{" "}
+                      {readText(readExtra(row, "provider"))}
+                    </span>
+                    <span className="fx-team-field">
+                      {t("settings.roleProfile.modelLabel")}{" "}
+                      {readText(readExtra(row, "model"))}
+                    </span>
+                    <span className="fx-team-field">
+                      {t("shell.cards.team.step")}{" "}
+                      {readText(readExtra(row, "step"))}
+                    </span>
+                    <span className="fx-team-field">
+                      {t("shell.cards.team.file")}{" "}
+                      <span
+                        className="fx-team-value fx-truncate"
+                        title={fileRef.title}
+                      >
+                        {fileRef.text}
+                      </span>
+                    </span>
+                    <span className="fx-team-field">
+                      {t("shell.cards.team.lastAction")}{" "}
+                      <span
+                        className="fx-team-value fx-truncate"
+                        title={lastActionRef.title}
+                      >
+                        {lastActionRef.text}
+                      </span>
+                    </span>
+                    <span className="fx-team-field">
+                      {readSilent(readExtra(row, "silent_min"))}
+                    </span>
+                    <span className="fx-team-field">
+                      {t("shell.cards.team.waiting")}{" "}
+                      {readWaiting(readExtra(row, "waits"))}
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
           )}
           <Link data-testid="team-open-agents" to="/agents/live">

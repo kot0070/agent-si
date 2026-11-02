@@ -1,4 +1,6 @@
 /* provenance: authored for K07 Lane A STEP2 wave 1 (ui kit); no copied content. */
+/* FXDESIGN1: --fx-* lane tokens. Product colour flows only through these
+   custom props; base.css and shell.css consume var(--fx-*) only. */
 :root,
 [data-theme="dark"] {
   --agent-si-surface: #14161a;
@@ -8,6 +10,18 @@
   --agent-si-chart-a: #6aa8ff;
   --agent-si-chart-b: #7fd08a;
   --agent-si-chart-c: #e0a35f;
+  --fx-surface: #14161a;
+  --fx-ink: #f2f4f8;
+  --fx-accent: #6aa8ff;
+  --fx-card-border: #2a2f3a;
+  --fx-card-bg: #1b1f26;
+  --fx-input-bg: #101318;
+  --fx-input-border: #3a4356;
+  --fx-link: #6aa8ff;
+  --fx-btn-primary-bg: #2f6fed;
+  --fx-btn-primary-ink: #ffffff;
+  --fx-btn-quiet-ink: #f2f4f8;
+  --fx-focus-ring: #6aa8ff;
 }
 
 [data-theme="light"] {
@@ -18,4 +32,16 @@
   --agent-si-chart-a: #2456c6;
   --agent-si-chart-b: #2e7d46;
   --agent-si-chart-c: #b06a1a;
+  --fx-surface: #ffffff;
+  --fx-ink: #16181d;
+  --fx-accent: #2456c6;
+  --fx-card-border: #dfe3ea;
+  --fx-card-bg: #f5f7fa;
+  --fx-input-bg: #ffffff;
+  --fx-input-border: #c3ccd9;
+  --fx-link: #2456c6;
+  --fx-btn-primary-bg: #2456c6;
+  --fx-btn-primary-ink: #ffffff;
+  --fx-btn-quiet-ink: #16181d;
+  --fx-focus-ring: #2456c6;
 }

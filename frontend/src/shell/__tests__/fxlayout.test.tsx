@@ -251,7 +251,7 @@ describe("fxlayout shell over the real app", () => {
 
     const team = await screen.findByTestId("inspector-card-team");
     expect(team.textContent).toContain("agent-1");
-    expect(team.textContent).toContain("manager");
+    expect(team.textContent).toContain(t("providers.role.manager"));
     expect(team.textContent).toContain("m-1");
     expect(screen.getByTestId("team-warnings").textContent).toContain("boom-1");
     expect(screen.getByTestId("team-row-agent-1").textContent).toContain(
