@@ -197,6 +197,25 @@ export class HttpApiClient implements ApiClient {
             if (wire.type === "done" && wire.executed === true) {
               executedSeen = true;
             }
+            // FXCHATHIST engine-run verdict (minimal wire touch): the
+            // autonomous dev engine ends with a done that repeats the run
+            // text but carries no executed flag and no output_ref (the SSE
+            // mapper only forwards present fields, and devrun data has
+            // neither; the proper fix is the backend setting executed on
+            // those terminals). A text-carrying done without output_ref
+            // reads as the engine's own final line, so the verdict card
+            // stays withheld exactly like an executed turn. Plain answers
+            // keep the card: the typed plain done carries no text, and the
+            // legacy done vocabulary repeats text WITH an output_ref.
+            if (
+              wire.type === "done" &&
+              wire.executed !== true &&
+              typeof wire.text === "string" &&
+              wire.text !== "" &&
+              typeof record["output_ref"] !== "string"
+            ) {
+              executedSeen = true;
+            }
             finished = true;
             yield terminal();
             return;

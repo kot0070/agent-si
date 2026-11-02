@@ -410,6 +410,14 @@ describe("H3 every entry point opens that project's chat", () => {
       }),
     );
     expect(await screen.findByTestId("chat-prompt")).toBeTruthy();
+    // Let the auto-select settle on p-1 first: the mount-time project
+    // list resolves after the first paint and would otherwise overwrite
+    // the manual switch below (stale select wins the race).
+    await waitFor(() => {
+      expect(
+        (screen.getByTestId("topbar-project") as HTMLSelectElement).value,
+      ).toBe("p-1");
+    });
     fireEvent.change(screen.getByTestId("topbar-project"), {
       target: { value: "p-2" },
     });
@@ -487,4 +495,73 @@ describe("S5 single card, quiet no-provider line, transient toast", () => {
       { timeout: 7000 },
     );
   }, 15000);
+});
+
+describe("engine run verdict: log lines once, no card, time-only stamp", () => {
+  function stubDevrunFetch(): void {
+    vi.stubGlobal("fetch", async (url: unknown) => {
+      const target = String(url);
+      if (target.startsWith("/api/v1/chat/history")) {
+        return jsonBody({ turns: [] });
+      }
+      if (target.startsWith("/api/v1/chat/models")) {
+        return jsonBody({ project_id: "p-1", models: [] });
+      }
+      if (target === "/api/v1/providers") {
+        return jsonBody({ providers: [] });
+      }
+      if (target.includes("/api/v1/chat/stream")) {
+        return new Response(
+          [
+            'data: {"type":"start","stream_id":"srv-d","run_id":"r-d"}',
+            'data: {"type":"delta","stream_id":"srv-d","run_id":"r-d","text":"Director: plan of 2 parts\\n"}',
+            'data: {"type":"delta","stream_id":"srv-d","run_id":"r-d","text":"Total: 10 input + 5 output = 15 tokens\\n"}',
+            'data: {"type":"delta","stream_id":"srv-d","run_id":"r-d","text":"run success: all 2 parts PASS"}',
+            'data: {"type":"done","stream_id":"srv-d","run_id":"r-d","text":"run success: all 2 parts PASS"}',
+            "",
+          ].join("\n"),
+          {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          },
+        );
+      }
+      throw new Error(`unexpected fetch to ${target}`);
+    });
+  }
+
+  it("renders the engine log once with no verdict card", async () => {
+    stubDevrunFetch();
+    render(
+      <ApiClientProvider client={new HttpApiClient()}>
+        <ChatArea projectId="p-1" />
+      </ApiClientProvider>,
+    );
+    promptAndSend("run it");
+    // The streamed log lines land in the one assistant block...
+    const block = await screen.findByTestId("chat-assistant-message");
+    const text = block.querySelector("p")?.textContent ?? "";
+    expect(text).toContain("Director: plan of 2 parts");
+    expect(text).toContain("Total: 10 input + 5 output = 15 tokens");
+    expect(text).toContain("run success: all 2 parts PASS");
+    // ...exactly once (the done-carried repeat is dropped, not appended).
+    expect(text.indexOf("run success")).toBe(text.lastIndexOf("run success"));
+    // No verdict card for the engine run: no accept/edit/reject.
+    await waitFor(() => {
+      expect(screen.queryByTestId("chat-spinner")).toBeNull();
+    });
+    expect(screen.queryByTestId("approval-card")).toBeNull();
+    expect(screen.queryByTestId("approval-accept")).toBeNull();
+    expect(screen.queryByTestId("approval-edit")).toBeNull();
+    expect(screen.queryByTestId("approval-reject")).toBeNull();
+    expect(screen.queryByTestId("kit-error-panel")).toBeNull();
+    // Bubbles carry time only, never the date.
+    const stamps = await screen.findAllByTestId("chat-timestamp");
+    expect(stamps.length).toBeGreaterThan(0);
+    for (const stamp of stamps) {
+      const label = stamp.textContent ?? "";
+      expect(label).toMatch(/\d{1,2}:\d{2}/);
+      expect(label).not.toMatch(/2026|2025|\//);
+    }
+  });
 });

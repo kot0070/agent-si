@@ -534,6 +534,75 @@ def list_role_pools(ctx: RoutingCtx, query, body) -> Tuple[int, Dict]:
     return 200, {"roles": roles}
 
 
+def _enabled_allows(ctx: RoutingCtx, provider: Any,
+                    model: Any) -> Optional[str]:
+    """None when a (provider, model) pick is allowed, else the reason.
+
+    The server's tick list is the routing truth: a provider with a stored
+    tick list allows only its ticks (canonical compare, so ``meta/x``
+    and ``x`` are one model). No stored tick lists anywhere means the
+    legacy read: allowed.
+    """
+    if not provider or not model:
+        return None
+    state_dir = getattr(ctx, "model_state_dir", None)
+    if not state_dir:
+        return None
+    pid = str(provider)
+    enabled = _model_lists.load_enabled(state_dir, pid)
+    if enabled is None:
+        return None
+    wanted = {_model_lists.canonical_model_id(pid, i) for i in enabled}
+    if _model_lists.canonical_model_id(pid, model) in wanted:
+        return None
+    return ("model %r is not enabled for provider %r "
+            "(tick it in the provider model list first)" % (model, pid))
+
+
+def _member_provider_model(item: Any) -> Tuple[Any, Any]:
+    if isinstance(item, Mapping):
+        return (item.get("provider_id", item.get("provider")),
+                item.get("model", item.get("model_id")))
+    return (getattr(item, "provider_id", getattr(item, "provider", None)),
+            getattr(item, "model", getattr(item, "model_id", None)))
+
+
+def _chat_model_allowed(ctx: RoutingCtx, model_id: str) -> Optional[str]:
+    """None when a chat model_id pick is allowed, else the reason.
+
+    Same truth as above, across every provider with a stored tick list:
+    allowed when some provider ticks it (canonical compare either with
+    its own prefix or the model's own head).
+    """
+    state_dir = getattr(ctx, "model_state_dir", None)
+    if not state_dir or not model_id:
+        return None
+    head = str(model_id).split("/", 1)[0]
+    candidates = [head] if "/" in str(model_id) else []
+    try:
+        views = ctx.provider_facade.list_providers(False)
+    except Exception:
+        views = []
+    for view in views or []:
+        pid = getattr(view, "provider_id", "")
+        if pid and pid not in candidates:
+            candidates.append(pid)
+    saw_state = False
+    for pid in candidates:
+        enabled = _model_lists.load_enabled(state_dir, pid)
+        if enabled is None:
+            continue
+        saw_state = True
+        wanted = {_model_lists.canonical_model_id(pid, i)
+                  for i in enabled}
+        if _model_lists.canonical_model_id(pid, model_id) in wanted:
+            return None
+    if not saw_state:
+        return None
+    return ("model %r is not enabled on any connected provider "
+            "(tick it in the provider model list first)" % (model_id,))
+
+
 def put_role_pools(ctx: RoutingCtx, query, body) -> Tuple[int, Dict]:
     # Thin adapter: the 4-guard (raw-secret refusal + mode/strategy
     # validation) lives in the set_role_pool facade; this handler only
@@ -549,6 +618,17 @@ def put_role_pools(ctx: RoutingCtx, query, body) -> Tuple[int, Dict]:
             project_id = body.get("project_id")
             if not isinstance(project_id, str) or not project_id:
                 return 400, {"error": "project_id required"}
+            denied = _enabled_allows(
+                ctx, body.get("provider"), body.get("model"))
+            if denied is not None:
+                return 400, {"error": "bad role pool: %s" % denied}
+            for item in body.get("pool") or []:
+                member_provider, member_model = _member_provider_model(
+                    item)
+                denied = _enabled_allows(
+                    ctx, member_provider, member_model)
+                if denied is not None:
+                    return 400, {"error": "bad role pool: %s" % denied}
             profile = set_role_pool(
                 project_id, body.get("role"),
                 body.get("mode"), body.get("provider"), body.get("model"),
@@ -668,6 +748,9 @@ def put_chat_model(ctx: RoutingCtx, query, body) -> Tuple[int, Dict]:
             isinstance(model_id, str) and model_id.strip()):
         return 400, {"error": "chat save needs non-empty project_id plus "
                               "model_id"}
+    denied = _chat_model_allowed(ctx, model_id)
+    if denied is not None:
+        return 400, {"error": denied}
     if not _chat_project_known(ctx, project_id):
         return 404, {"error": "unknown project %r (no role profile, no pool "
                               "binding, no chat record)" % (project_id,)}
@@ -1348,6 +1431,7 @@ def serve(ctx: RoutingCtx, host: str = "127.0.0.1", port: int = 0):
 # so the backend never joins the budget cycle.
 
 from agent_si.providers.registry import provider_routes as _provider_routes
+from agent_si.providers.registry import provider_model_lists as _model_lists
 from agent_si.backend import modelkb as _modelkb
 from agent_si.budget.routes import BUDGET_ROUTES as _BUDGET_ROUTES
 
@@ -1436,6 +1520,23 @@ def _provider_models(ctx):
     return models
 
 
+def _served_kb_rows() -> list:
+    """Catalog rows with price fields for the provider-model merge."""
+    try:
+        rows = _modelkb.get_models([], None)
+    except Exception:
+        return []
+    out = []
+    for row in rows or []:
+        if not isinstance(row, Mapping):
+            continue
+        out.append({"provider_id": row.get("provider_id"),
+                    "model_id": row.get("model_id"),
+                    "fields": row.get("fields") if isinstance(
+                        row.get("fields"), Mapping) else {}})
+    return out
+
+
 def _provider_served(name, fn, *, write):
     """Serve a provider-lane handler on the pools-routes host ctx.
 
@@ -1452,7 +1553,10 @@ def _provider_served(name, fn, *, write):
         if facade is None:
             facade = _provider_routes._default_facade
         pctx = _provider_routes.ProviderCtx(
-            facade=facade, models=_provider_models(ctx))
+            facade=facade, models=_provider_models(ctx),
+            credential_store=getattr(ctx, "credential_store", None),
+            model_state_dir=getattr(ctx, "model_state_dir", None),
+            kb_rows=_served_kb_rows())
         return fn(pctx, query or {}, body)
     wrapper.__name__ = "served_" + name
     wrapper.__wrapped__ = fn
@@ -1478,6 +1582,14 @@ def _d9_merge():
         ("get", "/api/v1/providers/{id}/models", "provider_models",
          _provider_served("provider_models",
                           _provider_routes.provider_models, write=False)),
+        ("post", "/api/v1/providers/{id}/models/refresh",
+         "refresh_provider_models",
+         _provider_served("refresh_provider_models",
+                          _provider_routes.refresh_provider_models,
+                          write=True)),
+        ("put", "/api/v1/providers/{id}/models", "put_provider_models",
+         _provider_served("put_provider_models",
+                          _provider_routes.put_provider_models, write=True)),
         ("get", "/api/v1/chat/models", "chat_models",
          _provider_served("chat_models",
                           _provider_routes.chat_models, write=False)),

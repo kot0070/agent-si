@@ -8,9 +8,10 @@
 // input stays editable and submits the typed path exactly as before, and
 // the control hides itself when no native dialog exists (409).
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { FormEvent, ReactElement } from "react";
 import { useNavigate } from "react-router-dom";
+import { useProjectList } from "./projectList";
 import type { ProjectRecord } from "../api/iface";
 import { ApiError, apiErrorLocaleKey, requestResponse } from "../api/errors";
 import { useApiClient, useCurrentProject } from "../app/ApiClientProvider";
@@ -116,45 +117,21 @@ export function ProjectsPage(): ReactElement {
   // H4 quiet dot: re-renders rows when any slice flags unseen activity.
   const unseenTick = useUnseenVersion();
   void unseenTick;
-  const [projects, setProjects] = useState<ProjectRecord[] | null>(null);
-  const [failure, setFailure] = useState<{
+  // FXPROJ J1: the one shared project list (refetch on create, delete
+  // and route change). Null is loading, never an empty list. Add and
+  // archive refresh the shared list; their own failures stay local so a
+  // failed write never hides the served rows.
+  const { projects, failure: listFailure, refresh } = useProjectList();
+  const [opFailure, setOpFailure] = useState<{
     errorKey: string;
     code: string;
   } | null>(null);
-  const [nonce, setNonce] = useState(0);
+  const failure = listFailure ?? opFailure;
   const [collapsed, setCollapsed] = useState(false);
   const [paused, setPaused] = useState<ReadonlySet<string>>(new Set());
   const [name, setName] = useState("");
   const [folder, setFolder] = useState("");
   const [pickOpen, setPickOpen] = useState(true);
-
-  useEffect(() => {
-    let alive = true;
-    async function load(): Promise<void> {
-      try {
-        const next = await client.listProjects();
-        if (alive) {
-          setProjects(next);
-          setFailure(null);
-        }
-      } catch (error) {
-        if (alive) {
-          if (error instanceof ApiError) {
-            setFailure({
-              errorKey: apiErrorLocaleKey(error.code),
-              code: error.code,
-            });
-          } else {
-            setFailure({ errorKey: "errors.generic", code: "CONTEXT_MISSING" });
-          }
-        }
-      }
-    }
-    void load();
-    return () => {
-      alive = false;
-    };
-  }, [client, nonce]);
 
   async function submitAdd(event: FormEvent): Promise<void> {
     event.preventDefault();
@@ -164,15 +141,16 @@ export function ProjectsPage(): ReactElement {
         setName("");
         setFolder("");
       }
-      setNonce((value) => value + 1);
+      setOpFailure(null);
+      refresh();
     } catch (error) {
       if (error instanceof ApiError) {
-        setFailure({
+        setOpFailure({
           errorKey: apiErrorLocaleKey(error.code),
           code: error.code,
         });
       } else {
-        setFailure({ errorKey: "errors.generic", code: "CONTEXT_MISSING" });
+        setOpFailure({ errorKey: "errors.generic", code: "CONTEXT_MISSING" });
       }
     }
   }
@@ -189,12 +167,12 @@ export function ProjectsPage(): ReactElement {
           setPickOpen(false);
           return;
         }
-        setFailure({
+        setOpFailure({
           errorKey: apiErrorLocaleKey(error.code),
           code: error.code,
         });
       } else {
-        setFailure({ errorKey: "errors.generic", code: "CONTEXT_MISSING" });
+        setOpFailure({ errorKey: "errors.generic", code: "CONTEXT_MISSING" });
       }
     }
   }
@@ -202,15 +180,16 @@ export function ProjectsPage(): ReactElement {
   async function archive(id: string): Promise<void> {
     try {
       await client.deleteProject(id);
-      setNonce((value) => value + 1);
+      setOpFailure(null);
+      refresh();
     } catch (error) {
       if (error instanceof ApiError) {
-        setFailure({
+        setOpFailure({
           errorKey: apiErrorLocaleKey(error.code),
           code: error.code,
         });
       } else {
-        setFailure({ errorKey: "errors.generic", code: "CONTEXT_MISSING" });
+        setOpFailure({ errorKey: "errors.generic", code: "CONTEXT_MISSING" });
       }
     }
   }
@@ -241,7 +220,8 @@ export function ProjectsPage(): ReactElement {
           errorKey={failure.errorKey}
           code={failure.code}
           onRetry={() => {
-            setNonce((value) => value + 1);
+            setOpFailure(null);
+            refresh();
           }}
         />
       ) : projects === null ? (

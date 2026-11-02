@@ -1209,3 +1209,88 @@ section[data-testid^="kit-card-"] > button[class*="fx-kit-toggle"] {
   background: none;
   vertical-align: baseline;
 }
+
+/* ===== FXDESIGN8 (owner laptop round): right-rail facts plus centre
+   column width. Lengths only, no colours. ===== */
+
+/* FXDESIGN8 item 1: the composer plus the message column use the full
+   centre column, max 760. The old flex row on the composer id squeezed
+   the box; the composer stacks block-level at full width. The grid main
+   must fill its track: auto margins plus max-width shrank the grid item
+   to fit (the 400 px column), so the rail rule resets both and the chat
+   cards cap the line at 760. */
+section[data-testid="chat-area"],
+div[data-testid="chat-layout"] {
+  max-width: 760px;
+}
+
+div[data-testid="app-shell"]:has(> nav[data-testid="sidebar"])
+  > main[data-testid="app-main"] {
+  margin-left: 0;
+  margin-right: 0;
+  max-width: none;
+}
+
+div[data-testid="chat-composer"] {
+  display: block;
+}
+
+/* FXDESIGN8 item 3: result Opens read as quiet text links on the name
+   line, never tall boxed buttons (links carry the class, not buttons). */
+a.fx-why-quiet {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--fx-link);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.fx-result-row .fx-why-quiet {
+  flex: none;
+  margin-left: auto;
+}
+
+/* FXDESIGN8 item 5: the project picker names the project without an
+   underline (the language select keeps its quiet control look). */
+.fx-topbar-project select.fx-topbar-control {
+  text-decoration: none;
+}
+
+/* FXDESIGN8 item 2: one agent reads as one line; the rest opens under
+   the row disclosure. The summary marker stays hidden: the status chip
+   is the row affordance. */
+details[data-testid^="team-detail-"] > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+details[data-testid^="team-detail-"] > summary::-webkit-details-marker {
+  display: none;
+}
+
+.fx-team-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+
+.fx-team-detail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin-top: 4px;
+}
+
+.fx-status-chip {
+  flex: none;
+  padding: 1px 8px;
+  border: 1px solid var(--fx-card-border);
+  border-radius: 999px;
+  font-size: 12px;
+}

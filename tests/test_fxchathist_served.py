@@ -143,7 +143,16 @@ def test_history_snapshot_holds_only_turn_fields(tmp_path):
     rows = _snapshot_rows(tmp_path)
     assert len(rows) == 1, rows
     assert set(rows[0].keys()) == {
-        "project_id", "user_text", "assistant_text", "time"}, rows
+        "project_id", "user_text", "assistant_text", "time",
+        "id", "status", "run_id", "error_code"}, rows
+    assert rows[0]["id"], rows
+    assert rows[0]["status"] == "ok", rows
+    assert isinstance(rows[0]["run_id"], str), rows
+    assert isinstance(rows[0]["error_code"], str), rows
+    for key in rows[0].keys():
+        lowered = key.lower()
+        assert "api_key" not in lowered, rows
+        assert "secret" not in lowered, rows
     dumped = json.dumps(rows)
     assert "sk-should-never-persist" not in dumped, rows
     assert "shh-should-never-persist" not in dumped, rows
