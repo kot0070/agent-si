@@ -543,6 +543,7 @@ def run_task_streamed(
     run_id: str | None = None,
     data_root: str | None = None,
     run_end_hook: bool = True,
+    app: Any = None,
 ) -> Iterator[RunEvent]:
     """Stream a Manager run as RunEvents; a terminal event is always last.
 
@@ -680,8 +681,21 @@ def run_task_streamed(
     captured: dict[str, Any] = {}
 
     def _runner(payload: dict[str, Any]) -> dict[str, Any]:
-        response = provider.invoke(
-            [{"role": "user", "content": str(shape["message"])}])
+        # FXCTX: earlier turns of this project's chat ride along as
+        # context (best effort: without an app or on a history read
+        # failure the plain single-message call stays, the turn answers).
+        try:
+            from agent_si.backend import chat_history as _chat_history
+
+            history_messages = _chat_history.chat_messages(
+                app, str(shape["project_id"] or "run"),
+                str(shape["message"]), exclude_run_id=active_run_id)
+        except Exception:
+            history_messages = None
+        if not history_messages:
+            history_messages = [
+                {"role": "user", "content": str(shape["message"])}]
+        response = provider.invoke(history_messages)
         captured["text"] = str(getattr(response, "output_text", "") or "")
         captured["mock"] = bool(getattr(response, "mock", False))
         captured["finish_reason"] = str(

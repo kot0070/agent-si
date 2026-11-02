@@ -378,6 +378,108 @@ def _copy_turns(app: Any, project: str) -> list:
         return [dict(turn) for turn in _memory(app).get(project, [])]
 
 
+#: FXCTX plain-chat context: how many earlier turns ride the next call.
+_CHAT_CONTEXT_TURNS = 6
+
+#: FXCTX plain-chat context budget: total chars of earlier-turn text.
+_CHAT_CONTEXT_CHARS = 6000
+
+#: FXCTX: one assistant reply never contributes more than this to context.
+_CHAT_REPLY_CUT = 1500
+
+#: FXCTX system line opening every history-carrying plain-chat call.
+_CHAT_CONTEXT_SYSTEM = (
+    "You are the assistant in this project. Answer in the user's "
+    "language. Earlier turns are context."
+)
+
+
+def _pairs_chars(pairs: list) -> int:
+    """Total chars of user + reply text across context pairs."""
+    return sum(len(user_text) + len(reply_text)
+               for user_text, reply_text in pairs)
+
+
+def recent_context(app: Any, project_id: str, *, limit: int = 6,
+                   cap_chars: int = 6000,
+                   exclude_run_id: str | None = None) -> list:
+    """Earlier turns as provider messages, oldest first, best effort.
+
+    Built on list_turns: each stored turn contributes its user text plus
+    its final reply text (already scrubbed at record time). A turn with
+    no final reply yet (the running row the server stored at stream
+    start) contributes nothing, so the current turn never appears twice;
+    rows carrying exclude_run_id are skipped too. Every reply is cut to
+    1500 chars; oldest pairs drop first until the text fits cap_chars.
+    A history read failure returns [] and never fails the turn.
+    """
+    try:
+        count = int(limit)
+    except (TypeError, ValueError):
+        count = _CHAT_CONTEXT_TURNS
+    if count <= 0:
+        return []
+    try:
+        cap = int(cap_chars)
+    except (TypeError, ValueError):
+        cap = _CHAT_CONTEXT_CHARS
+    if cap <= 0:
+        return []
+    try:
+        turns = list_turns(app, project_id, limit=count + 1)
+    except Exception:
+        return []
+    excluded = (exclude_run_id.strip()
+                if isinstance(exclude_run_id, str) else "")
+    pairs: list = []
+    for turn in turns:
+        if not isinstance(turn, dict):
+            continue
+        if excluded and turn.get("run_id") == excluded:
+            continue
+        user_text = turn.get("user_text")
+        reply_text = turn.get("assistant_text")
+        user_text = user_text if isinstance(user_text, str) else ""
+        reply_text = reply_text if isinstance(reply_text, str) else ""
+        if not reply_text:
+            continue
+        pairs.append((user_text, reply_text[:_CHAT_REPLY_CUT]))
+    pairs = pairs[-count:] if len(pairs) > count else pairs
+    while len(pairs) > 1 and _pairs_chars(pairs) > cap:
+        pairs.pop(0)
+    if pairs and _pairs_chars(pairs) > cap:
+        user_text, reply_text = pairs[0]
+        pairs[0] = (user_text[:max(cap - len(reply_text), 0)], reply_text)
+    messages: list = []
+    for user_text, reply_text in pairs:
+        if user_text:
+            messages.append({"role": "user", "content": user_text})
+        messages.append({"role": "assistant", "content": reply_text})
+    return messages
+
+
+def chat_messages(app: Any, project_id: str, message: str, *,
+                  exclude_run_id: str | None = None,
+                  limit: int = 6, cap_chars: int = 6000) -> list:
+    """Full plain-chat provider messages: system + history + current.
+
+    Best effort: a history read failure still returns system + current,
+    so the turn always answers.
+    """
+    current = message if isinstance(message, str) else ""
+    try:
+        context = recent_context(
+            app, project_id, limit=limit, cap_chars=cap_chars,
+            exclude_run_id=exclude_run_id)
+    except Exception:
+        context = []
+    if not isinstance(context, list):
+        context = []
+    return [{"role": "system", "content": _CHAT_CONTEXT_SYSTEM},
+            *context,
+            {"role": "user", "content": current}]
+
+
 def list_turns(app: Any, project_id: str, *, limit: int = _DEFAULT_LIMIT,
                before: str = "") -> list:
     """Return the stored turns for a project, oldest first.
@@ -521,8 +623,10 @@ def register_chat_history_routes(app: Any) -> Any:
 
 
 __all__ = [
+    "chat_messages",
     "history_page",
     "list_turns",
+    "recent_context",
     "record_turn",
     "register_chat_history_routes",
 ]
