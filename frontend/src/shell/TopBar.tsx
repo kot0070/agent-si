@@ -65,6 +65,7 @@ export function TopBar(props: TopBarProps): ReactElement {
   const navigate = useNavigate();
   const [locale, setLocaleUi] = useState<SupportedLocale>(readStoredLocale);
   const [projects, setProjects] = useState<ProjectRecord[] | null>(null);
+  const [projectsFailed, setProjectsFailed] = useState(false);
   const [stopArmed, setStopArmed] = useState(false);
   const [stopText, setStopText] = useState<string | null>(null);
   // FXDESIGN8: the shared agents-live store owns the single poller;
@@ -103,11 +104,13 @@ export function TopBar(props: TopBarProps): ReactElement {
       (rows) => {
         if (alive) {
           setProjects(rows);
+          setProjectsFailed(false);
         }
       },
       () => {
         if (alive) {
           setProjects([]);
+          setProjectsFailed(true);
         }
       },
     );
@@ -139,7 +142,9 @@ export function TopBar(props: TopBarProps): ReactElement {
     projects !== null &&
     !options.some((project) => project.project_id === effective);
   useEffect(() => {
-    if (!effectiveMissing || effective === null) {
+    if (!effectiveMissing || effective === null || projectsFailed) {
+      // No blind second round trip after a failed list: a dead server
+      // would just burn another bounded retry sequence per mount.
       return undefined;
     }
     if (refetchedRef.current === effective) {
@@ -151,11 +156,13 @@ export function TopBar(props: TopBarProps): ReactElement {
       (rows) => {
         if (alive) {
           setProjects(rows);
+          setProjectsFailed(false);
         }
       },
       () => {
         if (alive) {
           setProjects([]);
+          setProjectsFailed(true);
         }
       },
     );

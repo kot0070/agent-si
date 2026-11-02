@@ -478,7 +478,13 @@ export function FirstRunGate(): ReactElement | null {
           return;
         }
         setSettled(true);
-        if (providers !== null && providers.length > 0) {
+        if (providers === null) {
+          // Unknown probe (offline, 404, bad shape): fail open to chat.
+          // A start gate must never throw a working install into /firstrun
+          // when the server could not answer.
+          return;
+        }
+        if (providers.length > 0) {
           // A connected provider means the profile is no longer fresh:
           // mark the run done and never redirect again.
           markFirstRunDone();

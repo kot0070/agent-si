@@ -127,10 +127,10 @@ function seedProfiles(next: Record<string, Profile>): void {
 
 function defaultSeed(): void {
   seedProfiles({
-    director: { mode: "PINNED", provider: "anthropic", model: "anthropic/model-2" },
+    director: { mode: "PINNED", provider: "anthropic", model: "anthropic/claude-haiku-5-5" },
     manager: { mode: "AUTO" },
-    worker: { mode: "PINNED", provider: "openai", model: "openai/model-1" },
-    auditor: { mode: "PINNED", provider: "openai", model: "openai/model-1" },
+    worker: { mode: "PINNED", provider: "openai", model: "openai/gpt-4o-mini" },
+    auditor: { mode: "PINNED", provider: "openai", model: "openai/gpt-4o-mini" },
   });
 }
 
@@ -217,7 +217,7 @@ describe("fxroles chat hierarchy rows", () => {
       role: "manager",
       mode: "PINNED",
       provider: "anthropic",
-      model: "anthropic/model-1",
+      model: "anthropic/claude-haiku-4-5",
     });
     expect(put.headers["x-ui-session-token"]).toBe(SESSION_TOKEN);
     await waitFor(() => {
@@ -249,7 +249,7 @@ describe("fxroles chat hierarchy rows", () => {
         project_id: PROJECT_ID,
         mode: "PINNED",
         provider: "openai",
-        model: "openai/model-1",
+        model: "openai/gpt-4o-mini",
       });
       expect(put.headers["x-ui-session-token"]).toBe(SESSION_TOKEN);
     }
@@ -273,8 +273,8 @@ describe("fxroles chat hierarchy rows", () => {
     seedProfiles({
       director: { mode: "AUTO" },
       manager: { mode: "AUTO" },
-      worker: { mode: "PINNED", provider: "openai", model: "openai/model-1" },
-      auditor: { mode: "PINNED", provider: "anthropic", model: "anthropic/model-2" },
+      worker: { mode: "PINNED", provider: "openai", model: "openai/gpt-4o-mini" },
+      auditor: { mode: "PINNED", provider: "anthropic", model: "anthropic/claude-haiku-5-5" },
     });
     renderChat();
     await expandRows();

@@ -51,7 +51,11 @@ class _FakeResp:
 
 
 def _ok_body():
-    return {"choices": [{"message": {"content": CANNED_TEXT},
+    # Director-protocol answer shape: the dev engine answers plain chat
+    # with one provider call (no parts, no repair); the canned text rides
+    # the answer so delta assertions keep reading the same fact.
+    return {"choices": [{"message": {"content": json.dumps(
+        {"answer": CANNED_TEXT})},
                          "finish_reason": "stop"}],
             "usage": dict(CANNED_USAGE)}
 

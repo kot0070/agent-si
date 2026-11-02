@@ -91,7 +91,9 @@ class _FakeResp:
 
 
 def _fake_chat(request, timeout=None):
-    return _FakeResp({"choices": [{"message": {"content": "fxkb hi"},
+    # Director-protocol answer shape: one provider call answers the turn.
+    return _FakeResp({"choices": [{"message": {"content": json.dumps(
+        {"answer": "fxkb hi"})},
                                    "finish_reason": "stop"}],
                       "usage": {"input_tokens": 4, "output_tokens": 6}})
 
@@ -335,7 +337,9 @@ class _FakeResp:
         return False
 
 def _fake(request, timeout=None):
-    return _FakeResp({"choices": [{"message": {"content": "fxkb hi"},
+    # Director-protocol answer shape: one provider call answers the turn.
+    return _FakeResp({"choices": [{"message": {"content": json.dumps(
+        {"answer": "fxkb hi"})},
                                    "finish_reason": "stop"}],
                       "usage": {"input_tokens": 4, "output_tokens": 6}})
 

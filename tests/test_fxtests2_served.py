@@ -461,9 +461,9 @@ def test_python_suite_fail_then_pass_in_product_run(
         assert "passed" in text, text
 
 
-def test_ai_reaches_gateway_spy_with_cost_recorded(
+def test_ai_reaches_gateway_spy_without_hook_billing(
         client, store, clean_globals):
-    """F1/F2: one AI test reaches the gateway spy; cost is recorded."""
+    """F1/F2: one AI test reaches the gateway spy; the hook is not billed."""
     from agent_si.telemetry import run_store as _telemetry
 
     project_id = "fxtests2-ai-spy"
@@ -483,7 +483,11 @@ def test_ai_reaches_gateway_spy_with_cost_recorded(
         and row.get("task_id") == "local-tests"
         and row.get("project_id") == project_id
     ]
-    assert hook_events, "the hook AI call records provider usage"
+    # Harness self-tests use the run gateway (turns_served above) but
+    # never bill the user project: one turn keeps one charge and one
+    # usage row (spend + l0c06 contracts), so no hook usage event lands
+    # in project telemetry.
+    assert not hook_events, "hook AI must not bill project telemetry"
     body, _, _ = _code_rows_from_view(client, project_id)
     by_id = {row["test_id"]: row for row in body["rows"]}
     assert by_id["t-chat"]["status"] == "PASS", by_id

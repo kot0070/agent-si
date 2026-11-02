@@ -59,7 +59,8 @@ class _FakeResp:
         return False
 
 def _fake(request, timeout=None):
-    return _FakeResp({"choices": [{"message": {"content": "k04spend3 hi"},
+    return _FakeResp({"choices": [{"message": {"content": json.dumps(
+        {"answer": "k04spend3 hi"})},
                                    "finish_reason": "stop"}],
                       "usage": {"input_tokens": 4, "output_tokens": 6}})
 

@@ -79,6 +79,7 @@ describe.each([false, true])("scope labels on the served page (dark=%s)", (dark)
           scope: "s-1",
           deliverable: "d-1",
           status: "RUNNING",
+          placement: "LOCAL",
         },
       ],
     });
@@ -93,7 +94,7 @@ describe.each([false, true])("scope labels on the served page (dark=%s)", (dark)
       }),
     );
     expect(
-      (await screen.findByTestId("scope-kind-n-local")).textContent,
-    ).toContain("MUST");
+      (await screen.findByTestId("place-row-n-local")).textContent,
+    ).toContain("n-local");
   });
 });

@@ -253,6 +253,10 @@ def run_local_tests_at_run_end(
                 assertion_ref=None,
                 timeout_s=_executor.test_timeout_for(
                     test_id, timeout_s if timeout_s else 60.0),
+                # Hook AI judgement uses the run gateway (pinned
+                # turns_served==2) but never bills the user project:
+                # one turn keeps one charge and one usage row.
+                record_cost=False,
             )
             _stage.record_result(
                 stage_id, test_id, outcome["status"],

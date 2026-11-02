@@ -161,6 +161,7 @@ beforeEach(() => {
   resetLocaleForTests();
   window.localStorage.clear();
   window.sessionStorage.clear();
+  window.localStorage.setItem("agentsi.firstrun.done", "true");
   setLocale("en");
 });
 

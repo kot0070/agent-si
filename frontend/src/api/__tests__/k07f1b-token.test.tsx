@@ -266,22 +266,30 @@ describe("k07f1b session token behaviour", () => {
     setWindowToken(TOKEN);
     const { seen } = captureFetch((url) => {
       if (url === "/api/v1/stop-all") {
-        return new Response(JSON.stringify({ ok: true }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
+        // Accepted receipt shape (Stop-all posts {project_id} or {} plus
+        // actor user and renders the Stopped N receipt, not a bare 200).
+        return new Response(
+          JSON.stringify({ accepted: true, stopped_count: 1 }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
       }
       return projectsListBody();
     });
+    const router = createMemoryRouter([{ path: "*", element: <TopBar projectId="p-1" /> }], {
+      initialEntries: ["/"],
+    });
     render(
       <ApiClientProvider client={new HttpApiClient()}>
-        <TopBar projectId="p-1" />
+        <RouterProvider router={router} />
       </ApiClientProvider>,
     );
     fireEvent.click(await screen.findByTestId("topbar-stop-all"));
     fireEvent.click(await screen.findByTestId("topbar-stop-all"));
     const result = await screen.findByTestId("stop-all-result");
-    expect(result.textContent).toBe("200");
+    expect(result.textContent).toContain("Stopped 1");
 
     const posts = seen.filter(
       (request) =>

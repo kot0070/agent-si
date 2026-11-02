@@ -61,10 +61,6 @@ function emit(entry: ClientEntry): void {
   }
 }
 
-function isRunLive(rows: PartRow[]): boolean {
-  return rows.some((row) => String(row.status).toUpperCase() === "RUNNING");
-}
-
 function schedule(entry: ClientEntry, client: ApiClient, delay: number): void {
   if (entry.timer !== null) {
     clearTimeout(entry.timer);
@@ -116,8 +112,10 @@ async function tick(entry: ClientEntry, client: ApiClient): Promise<void> {
     entry.inflight = false;
   }
   if (entry.listeners.size > 0) {
-    const live = isRunLive(entry.snapshot.rows ?? []);
-    schedule(entry, client, live ? LIVE_ACTIVE_MS : LIVE_IDLE_MS);
+    // Held contract: one load at mount, then a steady 3 s interval. The
+    // rows never wait for a tick: first paint shows LoadingState, then the
+    // first answer replaces it, then every generation refreshes in place.
+    schedule(entry, client, LIVE_IDLE_MS);
   }
 }
 

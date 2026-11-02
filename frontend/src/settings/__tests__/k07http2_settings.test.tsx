@@ -90,6 +90,7 @@ beforeEach(() => {
   resetLocaleForTests();
   setLocale("en");
   window.localStorage.clear();
+  window.sessionStorage.clear();
   (window as unknown as Record<string, unknown>)[WINDOW_TOKEN_KEY] = TOKEN;
   stubBoundary();
 });
@@ -100,6 +101,7 @@ afterEach(() => {
   delete (window as unknown as Record<string, unknown>)[WINDOW_TOKEN_KEY];
   resetLocaleForTests();
   window.localStorage.clear();
+  window.sessionStorage.clear();
 });
 
 function expectPutGuarded(): void {

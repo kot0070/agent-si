@@ -79,6 +79,7 @@ beforeEach(() => {
   resetLocaleForTests();
   setLocale('en');
   window.localStorage.clear();
+  window.sessionStorage.clear();
   stubBoundary();
 });
 
@@ -87,6 +88,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   resetLocaleForTests();
   window.localStorage.clear();
+  window.sessionStorage.clear();
 });
 
 describe('roleProfilesKey + save + reload per role', () => {
@@ -98,7 +100,7 @@ describe('roleProfilesKey + save + reload per role', () => {
       model: 'm1',
     });
     expect(result.ok).toBe(true);
-    expect(window.localStorage.getItem('agentsi.roleProfiles.project-1')).toContain('"manager"');
+    expect(window.sessionStorage.getItem('agentsi.roleProfiles.project-1')).toContain('"manager"');
     const loaded = await readRoleProfile('project-1', 'manager');
     expect(loaded).toEqual({ mode: 'PINNED', provider: 'acme', model: 'm1' });
   });
@@ -152,7 +154,7 @@ describe('invalid input is not persisted', () => {
     const result = await saveRoleProfile('project-1', { role: 'manager', mode: 'PINNED' });
     expect(result.ok).toBe(false);
     expect(result.errors).toContain(en.settings.validation.pinnedBindingRequired);
-    expect(window.localStorage.getItem('agentsi.roleProfiles.project-1')).toBeNull();
+    expect(window.sessionStorage.getItem('agentsi.roleProfiles.project-1')).toBeNull();
     expect(await readRoleProfiles('project-1')).toEqual({});
   });
 
@@ -174,20 +176,20 @@ describe('failed server write surfaces', () => {
         model: 'm1',
       }),
     ).rejects.toBeTruthy();
-    expect(window.localStorage.getItem('agentsi.roleProfiles.project-1')).toBeNull();
+    expect(window.sessionStorage.getItem('agentsi.roleProfiles.project-1')).toBeNull();
   });
 });
 
 describe('corrupt stored JSON', () => {
   it('reads back as an empty map', async () => {
-    window.localStorage.setItem('agentsi.roleProfiles.project-1', 'not-json{{{');
+    window.sessionStorage.setItem('agentsi.roleProfiles.project-1', 'not-json{{{');
     expect(await readRoleProfiles('project-1')).toEqual({});
     expect(await readRoleProfile('project-1', 'manager')).toBeUndefined();
   });
 
   it('falls back to the cache when the server is unreachable', async () => {
     await saveRoleProfile('project-1', { role: 'manager', mode: 'AUTO' });
-    window.localStorage.setItem(
+    window.sessionStorage.setItem(
       'agentsi.roleProfiles.project-1',
       JSON.stringify({ manager: { mode: 'pool' } }),
     );
@@ -195,7 +197,7 @@ describe('corrupt stored JSON', () => {
       throw new TypeError('offline');
     });
     expect(await readRoleProfiles('project-1')).toEqual({ manager: { mode: 'pool' } });
-    window.localStorage.setItem('agentsi.roleProfiles.project-1', 'not-json{{{');
+    window.sessionStorage.setItem('agentsi.roleProfiles.project-1', 'not-json{{{');
     expect(await readRoleProfiles('project-1')).toEqual({});
   });
 

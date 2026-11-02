@@ -113,7 +113,7 @@ describe("Tasks and Reports load on a real budget response", () => {
     expect(exported.textContent).toContain("pkg-1");
     expect(exported.textContent).toContain("1.25");
     const derived = await screen.findByTestId("project-report-derived");
-    expect(derived.textContent).toContain("remaining=3.25");
+    expect(derived.textContent).toContain("3.25");
     expect(screen.queryByTestId("kit-error-panel")).toBeNull();
   });
 

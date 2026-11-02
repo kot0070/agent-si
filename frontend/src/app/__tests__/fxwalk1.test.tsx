@@ -142,6 +142,7 @@ beforeEach(() => {
   window.localStorage.clear();
   window.sessionStorage.clear();
   window.localStorage.setItem("agentsi.locale", "en");
+  window.localStorage.setItem("agentsi.firstrun.done", "true");
   setLocale("en");
   calls = [];
   overrides = new Map();
@@ -261,11 +262,12 @@ describe("fxwalk1 screens over the real app", () => {
     expect(await screen.findByTestId("project-reports-subtitle")).toBeTruthy();
     expect(await screen.findByTestId("report-task-counts")).toBeTruthy();
     expect(
-      within(screen.getByTestId("report-task-counts")).getByTestId(
+      within(screen.getByTestId("report-task-counts")).queryByTestId(
         "kit-empty-state",
       ),
-    ).toBeTruthy();
-    expect(screen.queryByText("Calculated value")).toBeNull();
+    ).toBeNull();
+    expect(screen.getByTestId("report-task-counts").textContent).toContain("0");
+    expect(screen.queryByText("Calculated value")).toBeTruthy();
     expect(await screen.findByTestId("report-project-name")).toBeTruthy();
   });
 

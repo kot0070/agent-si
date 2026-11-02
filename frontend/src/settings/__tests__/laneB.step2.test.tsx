@@ -144,7 +144,7 @@ describe('AcceptedRiskSwitch', () => {
     expect(box.checked).toBe(false);
     fireEvent.click(box);
     expect(box.checked).toBe(true);
-    expect(window.localStorage.getItem('agentsi.acceptedRisk.project-1')).toBe('true');
+    expect(window.sessionStorage.getItem('agentsi.acceptedRisk.project-1')).toBe('true');
     unmount();
     render(<AcceptedRiskSwitch projectId="project-1" />);
     expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(true);

@@ -155,6 +155,10 @@ def _consume_part(task: Any, graph: Any, adapter: Any, *,
             message=message,
             manager_id=manager_id,
             run_id=run_id,
+            # Hierarchy part sub-runs skip the run-end hook: the hook
+            # belongs to user-facing turns, and each part must cost
+            # exactly its own provider calls (adapter calls == parts).
+            run_end_hook=False,
         ):
             terminal = event
     except Exception as err:
