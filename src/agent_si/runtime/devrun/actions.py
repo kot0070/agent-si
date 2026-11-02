@@ -15,6 +15,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import locale
 import os
 import re
 import shutil
@@ -185,6 +186,50 @@ def describe_binary(folder: str, path: str) -> str:
     return "binary file, %d bytes, sha256 %s" % (size, digest.hexdigest())
 
 
+def _console_code_page() -> str | None:
+    """This console's output code page name (Windows) or None."""
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+
+        code = ctypes.windll.kernel32.GetConsoleOutputCP()  # type: ignore[attr-defined]
+        if code:
+            return "cp" + str(int(code))
+    except Exception:
+        return None
+    return None
+
+
+def _decode_console_text(blob: bytes) -> str:
+    """Decode child/file bytes without mojibake or a crash.
+
+    Strict in order: utf-8-sig, then the console code page, cp1251,
+    cp866; utf-8 with replace is the last resort and never raises.
+    """
+    candidates = ["utf-8-sig"]
+    console = _console_code_page()
+    if console is not None:
+        candidates.append(console)
+    else:
+        with contextlib.suppress(Exception):
+            preferred = locale.getpreferredencoding(False)
+            if preferred:
+                candidates.append(preferred)
+    candidates.extend(["cp1251", "cp866"])
+    seen: set[str] = set()
+    for encoding in candidates:
+        key = str(encoding).lower().replace("_", "-")
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            return bytes(blob).decode(encoding, "strict")
+        except Exception:
+            continue
+    return bytes(blob).decode("utf-8", "replace")
+
+
 def read_file(folder: str, path: str) -> str:
     """Read one jailed file; caps 256 KiB and 2000 lines."""
     target = jail_abs(folder, path)
@@ -201,7 +246,7 @@ def read_file(folder: str, path: str) -> str:
     if b"\x00" in blob[:8192]:
         raise ActionRefused("refused: binary files are never returned")
     truncated = len(blob) > 256 * 1024
-    text = blob[: 256 * 1024].decode("utf-8", "replace")
+    text = _decode_console_text(blob[: 256 * 1024])
     lines = text.splitlines()
     if len(lines) > 2000:
         text = "\n".join(lines[:2000])
@@ -223,6 +268,26 @@ def list_dir(folder: str, path: str = ".") -> str:
     if len(entries) > 2000:
         entries = entries[:2000]
     return "\n".join(entries)
+
+
+#: Antivirus-lock retry: a transient PermissionError around file
+#: opens and replaces is retried this many times, this far apart.
+_AV_LOCK_ATTEMPTS = 3
+_AV_LOCK_PAUSE_S = 0.2
+
+
+def _retry_av_lock(func: Any) -> Any:
+    """Run one file op, retrying AV-lock PermissionError 3x, 0.2 s apart."""
+    last: BaseException | None = None
+    for attempt in range(_AV_LOCK_ATTEMPTS):
+        try:
+            return func()
+        except PermissionError as exc:
+            last = exc
+            if attempt + 1 < _AV_LOCK_ATTEMPTS:
+                time.sleep(_AV_LOCK_PAUSE_S)
+    assert last is not None
+    raise last
 
 
 def write_file(
@@ -262,12 +327,12 @@ def write_file(
     # folder, so a peer part never reads a half-written file. The
     # temp name is dot-prefixed plus .tmp (never a project file,
     # never inside the part's allowed list) and is removed on failure.
-    fd, tmp_path = tempfile.mkstemp(
-        dir=parent or ".", prefix=".write-", suffix=".tmp")
+    fd, tmp_path = _retry_av_lock(lambda: tempfile.mkstemp(
+        dir=parent or ".", prefix=".write-", suffix=".tmp"))
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
             handle.write(content)
-        os.replace(tmp_path, target)
+        _retry_av_lock(lambda: os.replace(tmp_path, target))
     except BaseException:
         with contextlib.suppress(OSError):
             os.unlink(tmp_path)
@@ -541,13 +606,16 @@ def _deny_shape(argv: list[str]) -> str:
 def _missing_head(words: list[str], folder: str) -> str | None:
     """Bare tool head when no executable can start it, else None.
 
-    Mirrors resolve_argv (pytest falls back to python -m pytest, the
-    python pair falls back to each other); a head naming an existing
-    file under the folder also counts as startable (Popen resolves it
-    against the child cwd).
+    Mirrors resolve_argv (a project .venv interpreter wins for bare
+    python/python3/pytest; pytest falls back to python -m pytest, the
+    python pair falls back to each other and then to the py launcher);
+    a head naming an existing file under the folder also counts as
+    startable (Popen resolves it against the child cwd).
     """
-    resolved = resolve_argv([str(word) for word in words])
+    resolved = resolve_argv([str(word) for word in words], folder)
     if shutil.which(resolved[0]) is not None:
+        return None
+    if os.path.isabs(resolved[0]) and os.path.isfile(resolved[0]):
         return None
     head = str(words[0])
     if "/" in head or "\\" in head or os.path.isabs(head):
@@ -558,16 +626,59 @@ def _missing_head(words: list[str], folder: str) -> str | None:
     return _bare_head(head)
 
 
-def resolve_argv(argv: list[str]) -> list[str]:
+#: Bare heads the project .venv interpreter wins for (Windows
+#: ``.venv\\Scripts\\python.exe`` first, POSIX ``.venv/bin/python``).
+_VENV_HEADS = frozenset({"python", "python3", "pytest"})
+
+
+def _workspace_python(folder: str, head: str) -> str | None:
+    """Project .venv interpreter for a bare head, else None.
+
+    Only exact bare ``python``/``python3``/``pytest`` heads (no dirs,
+    no suffixes): the venv python runs them (pytest via ``-m``), so a
+    project run never escapes its own environment. The venv lives
+    inside the folder, so the jail is unchanged.
+    """
+    if head not in _VENV_HEADS:
+        return None
+    for rel in (os.path.join(".venv", "Scripts", "python.exe"),
+                os.path.join(".venv", "bin", "python")):
+        candidate = os.path.join(str(folder), rel)
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def _workspace_venv_bin(folder: str) -> str | None:
+    """Project .venv binary dir for the child PATH, else None."""
+    interp = _workspace_python(str(folder), "python")
+    if interp is None:
+        return None
+    return os.path.dirname(interp)
+
+
+def resolve_argv(argv: list[str], folder: str | None = None) -> list[str]:
     """Resolve the tool head with shutil.which (never sys.executable).
 
-    A bare ``pytest`` becomes ``python -m pytest`` when only python
-    is found, so project suites run without inventing an interpreter.
+    A project ``.venv`` interpreter wins for bare ``python``,
+    ``python3`` and ``pytest`` in that folder (pytest becomes
+    ``python -m pytest`` on the venv interpreter). Otherwise a bare
+    ``pytest`` becomes ``python -m pytest`` when only python is
+    found, the python pair falls back to each other and then to the
+    ``py`` launcher, so a PC with only py.exe still starts project
+    suites.
     """
     words = [str(word) for word in argv]
     head = words[0]
+    if folder is not None and head in _VENV_HEADS:
+        venv = _workspace_python(str(folder), head)
+        if venv is not None:
+            if head == "pytest":
+                return [venv, "-m", "pytest", *words[1:]]
+            return [venv, *words[1:]]
     if head == "pytest" and shutil.which("pytest") is None:
-        python = shutil.which("python") or shutil.which("python3")
+        python = (shutil.which("python") or shutil.which("python3")
+                  or shutil.which("py"))
         if python is not None:
             return [python, "-m", "pytest", *words[1:]]
         return words
@@ -577,6 +688,8 @@ def resolve_argv(argv: list[str]) -> list[str]:
     if head in ("python", "python3"):
         fallback = shutil.which(
             "python3" if head == "python" else "python")
+        if fallback is None:
+            fallback = shutil.which("py")
         if fallback is not None:
             return [fallback, *words[1:]]
     return words
@@ -655,27 +768,35 @@ class _ExecTool:
             denied = _deny_shape(words)
             if denied:
                 raise PermissionError("toolguard refused: %s" % (denied,))
-            resolved = resolve_argv(words)
+            resolved = resolve_argv(words, self._folder)
             if str(resolved[0]).lower().endswith((".cmd", ".bat")):
                 # A resolved script carrier re-parses its arguments
                 # through cmd.exe: only known installer heads may run
-                # that way, and no cmd metacharacter may ride along.
+                # that way, and no cmd metacharacter may ride along
+                # (& and | would chain a second command through the
+                # shim, so they refuse like > < ^ %).
                 if _bare_head(words[0]) not in _INSTALL_PROGRAMS:
                     raise PermissionError(
                         "refused: script carriers never run through cmd "
                         "(got %r)" % (words[0],))
                 for item in words:
-                    if any(fragment in item for fragment in (">", "<", "^", "%")):
+                    if any(fragment in item
+                           for fragment in (">", "<", "^", "%", "&", "|")):
                         raise PermissionError(
                             "refused: cmd metacharacters in installer argv "
                             "element: %r" % (item,))
             log_path = str(job.get("log_path") or "")
             env = scrub_env()
+            venv_bin = _workspace_venv_bin(self._folder)
+            if venv_bin is not None:
+                env["PATH"] = (venv_bin + os.pathsep
+                               + env.get("PATH", ""))
             flags = 0
             if os.name == "nt":
                 flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
             try:
-                with open(log_path, "ab") as handle:
+                with _retry_av_lock(
+                        lambda: open(log_path, "ab")) as handle:
                     from agent_si.backend import proc_tree as _proc_tree
 
                     proc = _proc_tree.spawn(
@@ -855,7 +976,7 @@ def spawn_checked(
     parent = os.path.dirname(log_path)
     if parent:
         os.makedirs(parent, exist_ok=True)
-    with open(log_path, "wb"):
+    with _retry_av_lock(lambda: open(log_path, "wb")):
         pass
     from agent_si.worker_tools.dispatcher import guarded_dispatch
 
@@ -971,7 +1092,7 @@ def finalize_log(log_path: str, cap: int = 256 * 1024) -> str:
         blob = b"[... truncated at the 256 KiB cap ...]\n" + blob[-cap:]
         with contextlib.suppress(OSError), open(log_path, "wb") as handle:
             handle.write(blob)
-    text = blob.decode("utf-8", "replace")
+    text = _decode_console_text(blob)
     redacted = redact_text(text)
     if redacted != text:
         with contextlib.suppress(OSError), open(
