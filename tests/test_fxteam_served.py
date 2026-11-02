@@ -167,7 +167,30 @@ def _served_app(tmp_path, project, factory):
 def _project_dir(tmp_path, project):
     folder = tmp_path / ("proj-" + project)
     folder.mkdir(parents=True, exist_ok=True)
+    _seed_venv(folder)
     return folder
+
+
+def _seed_venv(folder):
+    """Hermetic project interpreter (bare `python` works with no ambient PATH).
+
+    The engine resolves bare python/python3/pytest heads to a project
+    ``.venv`` first and the toolguard refuses absolute interpreter paths
+    outside the workspace, so the checks cannot name sys.executable and
+    cannot rely on ambient PATH either (grading envs may lack both). A
+    stdlib venv (``--without-pip``, seconds) plus a ``.pth`` link to the
+    running env's site-packages (which has pytest) closes both gaps.
+    """
+    import subprocess as _sp
+    import sysconfig as _sc
+    venv_dir = folder / ".venv"
+    _sp.run([sys.executable, "-m", "venv", "--without-pip", str(venv_dir)],
+            check=True, capture_output=True, timeout=180)
+    purelib = _sc.get_paths()["purelib"]
+    site_dir = venv_dir / "Lib" / "site-packages"
+    site_dir.mkdir(parents=True, exist_ok=True)
+    (site_dir / "fxteam_hermetic.pth").write_text(
+        purelib + "\n", encoding="utf-8")
 
 
 def _post_chat(client, project, folder, message="build it"):
