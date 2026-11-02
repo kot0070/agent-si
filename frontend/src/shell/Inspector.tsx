@@ -21,6 +21,7 @@ import { readLedgerWithRuns } from "../api/projectsApi";
 import type { RunLedgerRow } from "../api/projectsApi";
 import { readProjectTelemetry } from "../k07next2/k07next2Api";
 import type { ProjectTelemetry } from "../k07next2/k07next2Api";
+import { ApiError, requestResponse } from "../api/errors";
 import { formatNumber, t } from "../locale/index";
 import { formatDateTime } from "../locale/index";
 import { shortenLiveRef } from "../agents/agentsApi";
@@ -372,6 +373,29 @@ export function Inspector(props: InspectorProps): ReactElement {
 
   const [resultsOpen, setResultsOpen] = useState(false);
   const [backgroundOpen, setBackgroundOpen] = useState(false);
+  // H6: the native open runs only where the sidecar can open; a 409
+  // hides the button, any other refusal names its code quietly.
+  const [openFolderOk, setOpenFolderOk] = useState(true);
+  const [openFolderNote, setOpenFolderNote] = useState<string | null>(null);
+
+  async function openResultFolder(folder: string): Promise<void> {
+    try {
+      await requestResponse("/api/v1/sidecar/open-folder", {
+        method: "POST",
+        kind: "write",
+        body: { path: folder },
+      });
+      setOpenFolderNote(null);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) {
+        setOpenFolderOk(false);
+        return;
+      }
+      setOpenFolderNote(
+        error instanceof ApiError ? error.code : "CONTEXT_MISSING",
+      );
+    }
+  }
 
   // FXDESIGN6: the ref legend splits the bar by role. Grouped from the live
   // rows' own extras (role + tokens); with no live token data the legend
@@ -924,6 +948,7 @@ export function Inspector(props: InspectorProps): ReactElement {
               {/* FXDESIGN8: the last run's verdict plus its files, read from
                   the runs key of the ledger route; served facts only. */}
               {lastRun === null ? null : (
+                <>
                 <div data-testid="result-last" className="fx-result-row">
                   <Icon name="file" />
                   <span
@@ -951,6 +976,37 @@ export function Inspector(props: InspectorProps): ReactElement {
                     {t("shell.cards.results.open")}
                   </Link>
                 </div>
+                {/* H6: the run record's folder plus its produced files;
+                    Open folder shows only where the sidecar can open. */}
+                {lastRun.folder ? (
+                  <p
+                    data-testid="result-last-folder"
+                    className="fx-quiet fx-truncate"
+                    title={lastRun.folder}
+                  >
+                    {lastRun.folder}
+                  </p>
+                ) : null}
+                {lastRun.folder && openFolderOk ? (
+                  <button
+                    type="button"
+                    data-testid="result-open-folder"
+                    className="fx-btn-quiet"
+                    onClick={() => {
+                      if (lastRun.folder) {
+                        void openResultFolder(lastRun.folder);
+                      }
+                    }}
+                  >
+                    {t("shell.cards.results.openFolder")}
+                  </button>
+                ) : null}
+                {openFolderNote !== null ? (
+                  <p data-testid="result-open-folder-note" className="fx-quiet">
+                    {openFolderNote}
+                  </p>
+                ) : null}
+                </>
               )}
               {lastRunFiles.length === 0 ? null : (
                 <ul data-testid="result-last-files" className="fx-bg-list">

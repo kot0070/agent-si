@@ -397,6 +397,7 @@ export type DevrunPart = z.infer<typeof DevrunPartSchema>;
 
 const DevrunRunSchema = z.object({
   run_id: z.string(),
+  folder: z.string().optional(),
   start: z.string(),
   end: z.string(),
   parts: z.array(DevrunPartSchema),

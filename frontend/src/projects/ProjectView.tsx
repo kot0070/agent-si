@@ -52,7 +52,6 @@ import {
   PROJECT_VIEWS,
   buildDerivedSplit,
   computeAgeDays,
-  CONTEXT_SOURCE,
   contextUsage,
   exportProjectReport,
   projectMenuTestId,
@@ -1067,7 +1066,6 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
                   <span>{t("projects.tokens.title")}</span>
                   <span data-testid="context-remaining">{usage.remaining}</span>
                   <span data-testid="context-total">{usage.total}</span>
-                  <span data-testid="context-source">{CONTEXT_SOURCE}</span>
                 </div>
                 <Fact
                   testId="cost-spent"
@@ -1100,7 +1098,7 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
               panelError(ledgerError)
             ) : budget === null || ledger === null || runs === null ? (
               <LoadingState loadingKey="ui.loading.more" />
-            ) : ledger.length === 0 && runs.length === 0 ? (
+            ) : ledger.length === 0 && runs.length === 0 && budget === null ? (
               <span className="fxpv-note">{t("projectView.noLedger")}</span>
             ) : (
               <HealthView ledger={ledger} budget={budget} />
