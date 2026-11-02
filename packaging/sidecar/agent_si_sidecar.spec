@@ -102,6 +102,25 @@ else:
         "sidecar spec: skip missing docs/third_party_notices/NOTICES.md "
         "(owning lane pending)")
 
+# FXSPLASH lane: the product mark rasters (icon.ico holds the exe +
+# window + taskbar icon on Windows; mark_256.png feeds README/favicon
+# contexts). Absent until this lane stages them; missing sources are
+# skipped with a build-log line (never synthesized here).
+_ASSETS_SRC = os.path.join(ROOT, "src", "agent_si", "assets")
+if os.path.isdir(_ASSETS_SRC):
+    datas.append((_ASSETS_SRC, "assets"))
+else:
+    print("sidecar spec: skip missing FXSPLASH assets "
+          "(owning lane pending): src/agent_si/assets")
+
+# FXSPLASH: exe + window + taskbar icon. The .ico carries
+# 16/24/32/48/64/128/256 (see packaging/generate_mark_assets.py).
+_ICON_SRC = os.path.join(_ASSETS_SRC, "icon.ico")
+_ICON = _ICON_SRC if os.path.isfile(_ICON_SRC) else None
+if _ICON is None:
+    print("sidecar spec: skip missing FXSPLASH icon "
+          "(owning lane pending): src/agent_si/assets/icon.ico")
+
 # FXLOC lane: the frozen host runner (catalog_v2._host_path resolves
 # under sys._MEIPASS at runtime); the runner modules themselves ride
 # the hiddenimports above.
@@ -159,7 +178,11 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    # FXR2E-6: the frozen K02 contract stub
+    # (src/agent_si/backend/orchestration/interface.py) ships in source
+    # for the contract test only; zero product modules import it, so it
+    # stays out of the frozen exe. Never delete the file.
+    excludes=["agent_si.backend.orchestration.interface"],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
@@ -201,4 +224,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=_ICON,
 )

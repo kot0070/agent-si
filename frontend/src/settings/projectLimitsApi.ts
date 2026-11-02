@@ -61,6 +61,42 @@ const ParallelPartsSchema = z.object({
 
 export type ParallelParts = z.infer<typeof ParallelPartsSchema>;
 
+const TeamModeSchema = z.object({
+  project_id: z.string().min(1),
+  team: z.enum(["on", "off"]),
+});
+
+export type TeamMode = z.infer<typeof TeamModeSchema>;
+
+export function teamModePath(projectId: string): string {
+  return `/api/v1/projects/${encodeURIComponent(projectId)}/team`;
+}
+
+export async function readTeamMode(
+  projectId: string,
+): Promise<TeamMode> {
+  return requestJson(
+    teamModePath(projectId),
+    { method: "GET", kind: "read" },
+    TeamModeSchema,
+  );
+}
+
+export async function saveTeamMode(
+  projectId: string,
+  team: "on" | "off",
+): Promise<TeamMode> {
+  return requestJson(
+    teamModePath(projectId),
+    {
+      method: "PUT",
+      kind: "write",
+      body: { team },
+    },
+    TeamModeSchema,
+  );
+}
+
 export function parallelPartsPath(projectId: string): string {
   return `/api/v1/projects/${encodeURIComponent(projectId)}/parallel-parts`;
 }

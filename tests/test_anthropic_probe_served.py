@@ -174,6 +174,10 @@ def test_anthropic_probe_sends_messages_shape(tmp_path, monkeypatch):
     captured = {}
 
     def _fake(request, timeout=None):
+        url = (request.full_url
+               if hasattr(request, "full_url") else "")
+        if url.rstrip("/").endswith("/models"):
+            return _FakeResp({"data": [{"id": MODEL}]})
         try:
             raw = request.data
             body = json.loads(raw.decode("utf-8")) if raw else {}
@@ -213,19 +217,15 @@ def test_anthropic_probe_sends_messages_shape(tmp_path, monkeypatch):
 
 
 def test_anthropic_probe_real_network_fails_closed(tmp_path):
-    """No urlopen fake (no external hosts): the probe fails closed."""
+    """No urlopen fake (no external hosts): the save fails closed."""
     client, _app = _make_client(tmp_path)
     _create_project(client)
-    key_ref = _save_key(client, BAIT_NET)
-    conn = client.post("/api/v1/providers/connect",
+    resp = client.post("/api/v1/providers/keys",
                        json={"preset_id": "anthropic",
-                             "model": "claude-fb2b3-net",
-                             "key_ref": key_ref},
+                             "key_value": BAIT_NET},
                        headers=HEADERS)
-    assert conn.status_code == 200, conn.text
-    assert BAIT_NET not in conn.text
-    rows = _rows(client)
-    assert "anthropic" in rows, rows
-    assert rows["anthropic"]["evidenced"] is False, rows
-    assert rows["anthropic"]["health"] == "ERROR", rows
-    assert BAIT_NET not in json.dumps(rows)
+    assert resp.status_code in (401, 503), resp.text
+    assert BAIT_NET not in resp.text
+    listed = client.get("/api/v1/providers", headers=HEADERS)
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["providers"] == [], listed.text

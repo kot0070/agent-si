@@ -10,9 +10,11 @@ import {
   readBudgetLine,
   readParallelParts,
   readStepLimits,
+  readTeamMode,
   saveBudgetLimits,
   saveParallelParts,
   saveStepLimits,
+  saveTeamMode,
 } from "./projectLimitsApi";
 
 export interface ProjectLimitsSectionProps {
@@ -32,6 +34,7 @@ export function ProjectLimitsSection(
   const [taskText, setTaskText] = useState("");
   const [chatText, setChatText] = useState("");
   const [parallelText, setParallelText] = useState("1");
+  const [teamText, setTeamText] = useState<"on" | "off">("on");
   const [budgetText, setBudgetText] = useState<string | null>(null);
   const [capsText, setCapsText] = useState("");
   const [spendingLines, setSpendingLines] = useState<ReadonlyArray<string>>(
@@ -40,8 +43,10 @@ export function ProjectLimitsSection(
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [parallelSaving, setParallelSaving] = useState(false);
+  const [teamSaving, setTeamSaving] = useState(false);
   const [capsSaving, setCapsSaving] = useState(false);
   const [errorKey, setErrorKey] = useState<string | null>(null);
+  const [fieldError, setFieldError] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
 
   function parseCapsText(raw: string): Record<string, string> | null {
@@ -81,12 +86,20 @@ export function ProjectLimitsSection(
         } catch {
           parallel = 1;
         }
+        let team: "on" | "off" = "on";
+        try {
+          const storedTeam = await readTeamMode(props.projectId);
+          team = storedTeam.team;
+        } catch {
+          team = "on";
+        }
         if (!alive) {
           return;
         }
         setTaskText(String(limits.task_max_steps));
         setChatText(String(limits.chat_max_steps));
         setParallelText(String(parallel));
+        setTeamText(team);
         setBudgetText(
           `${budget.budget.spent} / ${budget.budget.hard_limit} ${budget.budget.currency}`,
         );
@@ -121,12 +134,21 @@ export function ProjectLimitsSection(
   }, [props.projectId, nonce]);
 
   async function onSave(): Promise<void> {
-    const task = Number(taskText);
-    const chat = Number(chatText);
-    if (!Number.isInteger(task) || !Number.isInteger(chat)) {
-      setErrorKey("errors.generic");
+    // FXCLASS CA-6: a blank limit input shows a field message, sends
+    // nothing, and never falls back to a generic error.
+    const taskRaw = taskText.trim();
+    const chatRaw = chatText.trim();
+    if (taskRaw === "" || chatRaw === "") {
+      setFieldError("settings.project.limitsBlank");
       return;
     }
+    const task = Number(taskRaw);
+    const chat = Number(chatRaw);
+    if (!Number.isInteger(task) || !Number.isInteger(chat) || task < 1 || chat < 1) {
+      setFieldError("settings.project.limitsBlank");
+      return;
+    }
+    setFieldError(null);
     setSaving(true);
     try {
       const saved = await saveStepLimits(props.projectId, task, chat);
@@ -168,15 +190,21 @@ export function ProjectLimitsSection(
   }
 
   async function onSaveParallel(): Promise<void> {
-    const parallel = Number(parallelText);
+    const raw = parallelText.trim();
+    if (raw === "") {
+      setFieldError("settings.project.limitsBlank");
+      return;
+    }
+    const parallel = Number(raw);
     if (
       !Number.isInteger(parallel) ||
       parallel < 1 ||
       parallel > 4
     ) {
-      setErrorKey("errors.generic");
+      setFieldError("settings.project.limitsBlank");
       return;
     }
+    setFieldError(null);
     setParallelSaving(true);
     try {
       const saved = await saveParallelParts(props.projectId, parallel);
@@ -191,6 +219,28 @@ export function ProjectLimitsSection(
       setErrorKey(errorKeyOf(error));
     } finally {
       setParallelSaving(false);
+    }
+  }
+
+  async function onSaveTeam(): Promise<void> {
+    if (teamText !== "on" && teamText !== "off") {
+      setErrorKey("errors.generic");
+      return;
+    }
+    setTeamSaving(true);
+    try {
+      const saved = await saveTeamMode(props.projectId, teamText);
+      if (saved.project_id !== props.projectId) {
+        setErrorKey("errors.generic");
+        return;
+      }
+      setTeamText(saved.team);
+      setErrorKey(null);
+      setNonce((value) => value + 1);
+    } catch (error) {
+      setErrorKey(errorKeyOf(error));
+    } finally {
+      setTeamSaving(false);
     }
   }
 
@@ -223,7 +273,7 @@ export function ProjectLimitsSection(
           </button>
         </div>
       ) : null}
-      <label htmlFor="project-limits-task">{t("tasks.list.title")}</label>
+      <label htmlFor="project-limits-task">{t("settings.project.taskStepsLabel")}</label>
       <input
         id="project-limits-task"
         data-testid="project-limits-task"
@@ -233,7 +283,7 @@ export function ProjectLimitsSection(
           setTaskText(event.target.value);
         }}
       />
-      <label htmlFor="project-limits-chat">{t("shell.sidebar.chat")}</label>
+      <label htmlFor="project-limits-chat">{t("settings.project.chatStepsLabel")}</label>
       <input
         id="project-limits-chat"
         data-testid="project-limits-chat"
@@ -243,6 +293,9 @@ export function ProjectLimitsSection(
           setChatText(event.target.value);
         }}
       />
+      <p data-testid="project-limits-steps-hint" className="fx-quiet-line">
+        {t("settings.project.stepsHint")}
+      </p>
       <button
         type="button"
         data-testid="project-limits-save"
@@ -251,8 +304,11 @@ export function ProjectLimitsSection(
           void onSave();
         }}
       >
-        {t("chat.composer.send")}
+        {t("settings.project.save")}
       </button>
+      {fieldError !== null ? (
+        <p data-testid="project-limits-field-error">{t(fieldError)}</p>
+      ) : null}
       <label htmlFor="project-limits-parallel">
         {t("settings.project.parallel")}
       </label>
@@ -275,11 +331,36 @@ export function ProjectLimitsSection(
           void onSaveParallel();
         }}
       >
+        {t("settings.project.save")}
+      </button>
+      <label htmlFor="project-limits-team">{t("settings.project.team")}</label>
+      <select
+        id="project-limits-team"
+        data-testid="project-limits-team"
+        value={teamText}
+        onChange={(event: { target: { value: string } }) => {
+          const next = event.target.value;
+          if (next === "on" || next === "off") {
+            setTeamText(next);
+          }
+        }}
+      >
+        <option value="on">{t("settings.project.teamOn")}</option>
+        <option value="off">{t("settings.project.teamOff")}</option>
+      </select>
+      <button
+        type="button"
+        data-testid="project-limits-team-save"
+        disabled={teamSaving}
+        onClick={() => {
+          void onSaveTeam();
+        }}
+      >
         {t("chat.composer.send")}
       </button>
       {budgetText !== null ? (
         <div data-testid="project-limits-budget">
-          <span>{t("projects.cost.title")}</span>
+          <span>{t("projects.cost.title")}</span>{" "}
           <span>{budgetText}</span>
         </div>
       ) : null}
@@ -288,7 +369,7 @@ export function ProjectLimitsSection(
           <div key={line}>{line}</div>
         ))}
       </div>
-      <label htmlFor="project-limits-caps">{t("projects.cost.title")}</label>
+      <label htmlFor="project-limits-caps">{t("settings.project.spendCaps")}</label>
       <input
         id="project-limits-caps"
         data-testid="project-limits-caps"
@@ -306,7 +387,7 @@ export function ProjectLimitsSection(
           void onSaveCaps();
         }}
       >
-        {t("chat.composer.send")}
+        {t("settings.project.save")}
       </button>
     </section>
   );

@@ -13,6 +13,7 @@
 
 import { Component, useEffect, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
 import type {
   BudgetState,
   LedgerRow,
@@ -22,7 +23,8 @@ import type {
   TaskRecord,
 } from "../api/iface";
 import { ApiError, apiErrorLocaleKey } from "../api/errors";
-import { useApiClient } from "../app/ApiClientProvider";
+import { backoffForFailures, isHiddenTick, onVisible } from "../api/polling";
+import { useApiClient, useCurrentProject } from "../app/ApiClientProvider";
 import { formatDate, formatNumber, t, useLocale } from "../locale/index";
 import type { SupportedLocale } from "../locale/index";
 import { EmptyState } from "../ui/EmptyState";
@@ -39,6 +41,7 @@ import {
   humanDuration,
   humanRunRef,
   isFinishedStatus,
+  partVerdictText,
   readRuns,
   readTelemetrySummary,
   runStatusText,
@@ -47,12 +50,12 @@ import {
   sumTokenRows,
 } from "./viewsApi";
 import type { DevrunRun, TelemetrySummary } from "./viewsApi";
+import { RunId } from "./RunId";
 import "./projectview.css";
 import {
   PROJECT_VIEWS,
   buildDerivedSplit,
   computeAgeDays,
-  CONTEXT_SOURCE,
   contextUsage,
   exportProjectReport,
   projectMenuTestId,
@@ -110,15 +113,17 @@ function Fact(props: {
   );
 }
 
-// One deduped agent row: short human name, served role plus model plus
-// tokens, attempt count when repeated, finished wording for passed rows,
-// and the served reason note for blocked ends. No scope-kind verdict.
+// One deduped agent row: short human name, labelled role plus model plus
+// tokens plus cost cells that wrap instead of chopping mid-word, attempt
+// count when repeated, finished wording for passed rows. Blocked rows share
+// one note above the list (never one per row). No scope-kind verdict.
 function AgentPlacementRow(props: {
   testId: string;
   agent: string;
   role?: string;
   model?: string;
   tokensTotal: number | null;
+  costText: string | null;
   attempts: number;
   status: PartRow["status"];
   statusHuman: unknown;
@@ -127,14 +132,29 @@ function AgentPlacementRow(props: {
   const { locale } = useLocale();
   const short = humanRunRef(props.agent);
   return (
-    <div key={props.testId} data-testid={props.testId} className="fxpv-row">
-      <span title={short.title}>{short.text}</span>
-      <span>{props.role ?? t("shell.common.unknown")}</span>
-      <span>{props.model ?? t("shell.common.unknown")}</span>
-      <span>
+    <div key={props.testId} data-testid={props.testId} className="fxpv-row fxpv-place">
+      <span className="fxpv-place-name" title={short.title}>{short.text}</span>
+      <span className="fxpv-place-cell">
+        <span className="fxpv-place-label">{t("projectView.live.role")}</span>
+        {": "}
+        {props.role ?? t("shell.common.unknown")}
+      </span>
+      <span className="fxpv-place-cell">
+        <span className="fxpv-place-label">{t("projectView.live.model")}</span>
+        {": "}
+        {props.model ?? t("shell.common.unknown")}
+      </span>
+      <span className="fxpv-place-cell">
+        <span className="fxpv-place-label">{t("projectView.live.tokens")}</span>
+        {": "}
         {props.tokensTotal === null
           ? t("shell.common.unknown")
           : formatNumber(props.tokensTotal, locale)}
+      </span>
+      <span className="fxpv-place-cell">
+        <span className="fxpv-place-label">{t("projectView.live.cost")}</span>
+        {": "}
+        {props.costText ?? t("projectView.cost.notKnown")}
       </span>
       {props.attempts > 1 ? (
         <span>{t("projectView.attempts", { count: props.attempts })}</span>
@@ -144,9 +164,6 @@ function AgentPlacementRow(props: {
           ? t("projectView.finished")
           : resolveStatusHuman(props.statusHuman, props.status, locale)}
       </span>
-      {props.status === "BLOCKED" ? (
-        <span className="fxpv-note">{t("projectView.blockedNote")}</span>
-      ) : null}
       <span className="fxpv-note">{props.placementLabel}</span>
     </div>
   );
@@ -427,11 +444,22 @@ const RUNS_VIEWS: ReadonlySet<string> = new Set([
   "cost",
   "reports",
   "audits",
+  // FXTABS T7: the errors tab reads the run record for the row's reason.
+  "errors",
 ]);
 
 export function ProjectView(props: ProjectViewProps): ReactElement {
   const client = useApiClient();
   const { locale } = useLocale();
+  const current = useCurrentProject();
+  // SH-04: without a router (unit probes) there is no list route to
+  // reach: still clear the ghost id, show the banner link instead.
+  let navigate: ((path: string) => void) | null = null;
+  try {
+    navigate = useNavigate();
+  } catch {
+    navigate = null;
+  }
   // L0C-01: one state per served read. No shared Promise.all and no shared
   // failure flag: each panel below renders from its own state and shows its
   // own ErrorPanel, so a single failing read never unmounts the others.
@@ -483,6 +511,17 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
         if (alive) {
           setProject(null);
           setProjectError(toPanelError(error));
+        }
+        // SH-04: the selected project is archived or gone (read 404):
+        // drop the ghost id and go to the list, no stuck error panels.
+        if (
+          error instanceof ApiError &&
+          (error.status === 404 || error.code === "CONTEXT_MISSING")
+        ) {
+          current.clear();
+          if (navigate !== null) {
+            navigate("/projects");
+          }
         }
       });
     return () => {
@@ -636,10 +675,15 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
     };
   }, [client, props.projectId, props.view, nonce]);
 
-  // FXVIEWS: optional telemetry enrichment for the tokens and audits
-  // tabs. A missing doc reads null and the tabs stay honestly empty.
+  // FXVIEWS: optional telemetry enrichment for the tokens, audits and
+  // routing-decisions tabs. A missing doc reads null and the tabs stay
+  // honestly empty.
   useEffect(() => {
-    if (props.view !== "tokens" && props.view !== "audits") {
+    if (
+      props.view !== "tokens" &&
+      props.view !== "audits" &&
+      props.view !== "routing-decisions"
+    ) {
       setTelemetry(null);
       return;
     }
@@ -714,11 +758,49 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
     if (props.view !== "tasks" || !tasksUnfinished) {
       return;
     }
-    const timer = setInterval(() => {
-      setNonce((value) => value + 1);
-    }, 5000);
+    // FXCLASS P5: skip the tick when hidden, one fresh read on
+    // visibilitychange. The nonce read resets naturally on success; a
+    // failed read backs off via the same 3-6-12-30 s ladder.
+    let alive = true;
+    let failures = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    function chain(): void {
+      if (timer !== null) {
+        clearTimeout(timer);
+      }
+      timer = setTimeout(
+        () => {
+          timer = null;
+          if (!alive) {
+            return;
+          }
+          if (isHiddenTick()) {
+            chain();
+            return;
+          }
+          try {
+            setNonce((value) => value + 1);
+          } catch {
+            failures += 1;
+          }
+          failures = 0;
+          chain();
+        },
+        failures === 0 ? 5000 : backoffForFailures(failures),
+      );
+    }
+    chain();
+    const stopVisible = onVisible(() => {
+      if (alive) {
+        setNonce((value) => value + 1);
+      }
+    });
     return () => {
-      clearInterval(timer);
+      alive = false;
+      if (timer !== null) {
+        clearTimeout(timer);
+      }
+      stopVisible();
     };
   }, [props.view, tasksUnfinished]);
 
@@ -737,6 +819,15 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
               <LoadingState loadingKey="ui.loading.more" />
             ) : (
               <>
+                {/* SH-05: the working folder is gone: one plain banner,
+                never green facts over a missing dir. */}
+                {project.folder_ok === false ? (
+                  <p data-testid="project-folder-banner" role="alert">
+                    {t("projects.folder.missing", {
+                      path: project.folder_path ?? "",
+                    })}
+                  </p>
+                ) : null}
                 <Fact
                   testId="overview-name"
                   labelKey="shell.topbar.project"
@@ -779,22 +870,34 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
               <LoadingState loadingKey="ui.loading.more" />
             ) : (
               <>
+                {/* FXTABS T5: an empty ledger serves no numbers: unknown,
+                    never 0 as a guess. A real run record still counts. */}
                 <Fact
                   testId="overview-package-count"
                   labelKey="projects.runs.title"
-                  value={sums.packages + runs.length}
+                  value={
+                    ledger.length === 0 && runs.length === 0
+                      ? t("shell.common.unknown")
+                      : sums.packages + runs.length
+                  }
                 />
                 <Fact
                   testId="overview-agents-total"
                   labelKey="agents.live.title"
-                  value={sums.agents}
+                  value={
+                    ledger.length === 0
+                      ? t("shell.common.unknown")
+                      : sums.agents
+                  }
                 />
                 <Fact
                   testId="overview-wall-total"
                   labelKey="projects.time.title"
                   value={
-                    humanDuration(sums.wall + (runsWall ?? 0)) ??
-                    t("shell.common.unknown")
+                    ledger.length === 0 && (runsWall ?? null) === null
+                      ? t("shell.common.unknown")
+                      : (humanDuration(sums.wall + (runsWall ?? 0)) ??
+                        t("shell.common.unknown"))
                   }
                 />
               </>
@@ -868,13 +971,16 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
         );
       }
       case "time": {
-        if (ledgerError !== null) {
-          return panelError(ledgerError);
-        }
-        if (ledger === null || runs === null) {
-          return <LoadingState loadingKey="ui.loading.more" />;
-        }
-        if (ledger.length === 0 && runs.length === 0) {
+        // FXTABS T9: the ledger part and the runs part load and fail
+        // independently; one served side never waits on the other, so the
+        // tab always ends on content or the honest empty state.
+        const unknown = t("shell.common.unknown");
+        const bothEmpty =
+          ledger !== null &&
+          runs !== null &&
+          ledger.length === 0 &&
+          runs.length === 0;
+        if (bothEmpty) {
           return (
             <EmptyState
               stateKey="ui.table.empty"
@@ -883,53 +989,72 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
             />
           );
         }
-        const unknown = t("shell.common.unknown");
         return (
           <div>
-            <div data-testid="time-runs-count" className="fxpv-row">
-              <span>
-                {t("projects.runs.title")}: {runs.length}
-              </span>
-            </div>
-            {runs.map((run) => {
-              const short = humanRunRef(run.run_id);
-              const wall = humanDuration(runWallS(run));
-              return (
-                <div
-                  key={run.run_id}
-                  data-testid={`time-run-${run.run_id}`}
-                  className="fxpv-row"
-                >
-                  <span>{t("projectView.time.package")}</span>
-                  <span title={short.title}>{short.text}</span>
-                  <span>{formatRunMoment(run.start, locale)}</span>
-                  <span>{formatRunMoment(run.end, locale)}</span>
-                  <span>{wall ?? unknown}</span>
+            {ledgerError !== null ? (
+              panelError(ledgerError)
+            ) : ledger === null ? (
+              <LoadingState loadingKey="ui.loading.more" />
+            ) : (
+              <>
+                <div data-testid="time-runs-count" className="fxpv-row">
+                  <span>
+                    {t("projects.runs.title")}: {runs?.length ?? 0}
+                  </span>
                 </div>
-              );
-            })}
-            {ledger.map((row) => {
-              const short = humanRunRef(row.package_id);
-              return (
-                <div
-                  key={row.package_id}
-                  data-testid={`time-row-${row.package_id}`}
-                  className="fxpv-row"
-                >
-                  <span>{t("projectView.time.package")}</span>
-                  <span title={short.title}>{short.text}</span>
-                  <span>{humanDuration(row.wall_time_s)}</span>
-                </div>
-              );
-            })}
-            <Fact
-              testId="time-wall-total"
-              labelKey="projects.time.title"
-              value={
-                humanDuration(sumLedger(ledger).wall) ??
-                t("shell.common.unknown")
-              }
-            />
+                {ledger.map((row) => {
+                  const wall = humanDuration(row.wall_time_s);
+                  return (
+                    <div
+                      key={row.package_id}
+                      data-testid={`time-row-${row.package_id}`}
+                      className="fxpv-row"
+                    >
+                      <span>{t("projectView.time.package")}:</span>
+                      <span>
+                        <RunId id={row.package_id} />
+                      </span>
+                      <span>{wall ?? unknown}</span>
+                    </div>
+                  );
+                })}
+              </>
+            )}
+            {runs === null ? (
+              <LoadingState loadingKey="ui.loading.more" />
+            ) : (
+              runs.map((run) => {
+                const wall = humanDuration(runWallS(run));
+                return (
+                  <div
+                    key={run.run_id}
+                    data-testid={`time-run-${run.run_id}`}
+                    className="fxpv-row"
+                  >
+                    <span>{t("projectView.time.run")}:</span>
+                    <span>
+                      <RunId id={run.run_id} />
+                    </span>
+                    <span>{formatRunMoment(run.start, locale)}</span>
+                    <span>{formatRunMoment(run.end, locale)}</span>
+                    <span>{wall ?? unknown}</span>
+                  </div>
+                );
+              })
+            )}
+            {ledger === null ? (
+              <LoadingState loadingKey="ui.loading.more" />
+            ) : (
+              <Fact
+                testId="time-wall-total"
+                labelKey="projects.time.title"
+                value={
+                  ledger.length === 0
+                    ? unknown
+                    : (humanDuration(sumLedger(ledger).wall) ?? unknown)
+                }
+              />
+            )}
           </div>
         );
       }
@@ -1067,7 +1192,6 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
                   <span>{t("projects.tokens.title")}</span>
                   <span data-testid="context-remaining">{usage.remaining}</span>
                   <span data-testid="context-total">{usage.total}</span>
-                  <span data-testid="context-source">{CONTEXT_SOURCE}</span>
                 </div>
                 <Fact
                   testId="cost-spent"
@@ -1100,7 +1224,7 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
               panelError(ledgerError)
             ) : budget === null || ledger === null || runs === null ? (
               <LoadingState loadingKey="ui.loading.more" />
-            ) : ledger.length === 0 && runs.length === 0 ? (
+            ) : ledger.length === 0 && runs.length === 0 && budget === null ? (
               <span className="fxpv-note">{t("projectView.noLedger")}</span>
             ) : (
               <HealthView ledger={ledger} budget={budget} />
@@ -1145,8 +1269,14 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
         for (const row of rows) {
           agentCounts.set(row.agent, (agentCounts.get(row.agent) ?? 0) + 1);
         }
+        const hasBlocked = rows.some((row) => row.status === "BLOCKED");
         return (
           <div>
+            {hasBlocked ? (
+              <p data-testid="live-blocked-note" className="fxpv-note">
+                {t("projectView.blockedNote")}
+              </p>
+            ) : null}
             {rows.map((row, index) => (
               <AgentPlacementRow
                 key={`${row.agent}-${row.status}-${row.role ?? ""}-${row.model ?? ""}`}
@@ -1159,6 +1289,7 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
                 role={row.role}
                 model={row.model}
                 tokensTotal={row.tokensTotal}
+                costText={row.costText}
                 attempts={row.attempts}
                 status={row.status}
                 statusHuman={readStatusHuman(
@@ -1249,12 +1380,42 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
           return <LoadingState loadingKey="ui.loading.more" />;
         }
         if (why === null) {
+          // FXTABS T8: the why-this-model function has content after any
+          // run even with no stored decision: per role the model used,
+          // plus the auto-selection reason.
+          if (live === null && telemetry === null) {
+            return <LoadingState loadingKey="ui.loading.more" />;
+          }
+          const fallback = buildTokenRows(live ?? [], telemetry);
+          if (fallback.length === 0) {
+            return (
+              <EmptyState
+                stateKey="ui.table.empty"
+                actionKey={null}
+                onAction={null}
+              />
+            );
+          }
+          const unknown = t("shell.common.unknown");
           return (
-            <EmptyState
-              stateKey="ui.table.empty"
-              actionKey={null}
-              onAction={null}
-            />
+            <div>
+              {fallback.map((row, index) => (
+                <div
+                  key={`${row.role ?? ""}-${row.model ?? ""}-${index}`}
+                  data-testid={`routing-role-${index}`}
+                  className="fxpv-row"
+                >
+                  <span>{row.role ?? unknown}:</span>
+                  <span>{row.model ?? unknown}</span>
+                  {row.tokens === null ? null : (
+                    <span>{formatNumber(row.tokens, locale)}</span>
+                  )}
+                </div>
+              ))}
+              <p data-testid="routing-auto-why" className="fxpv-note">
+                {t("projectView.routing.autoWhy")}
+              </p>
+            </div>
           );
         }
         return (
@@ -1330,15 +1491,18 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
           (task) => task.status === "BLOCKED" || task.status === "REJECTED",
         );
         const counts = telemetry?.project;
+        // FXTABS (c): one run reads as one header (outcome + reason) plus
+        // one row per part with that part's own verdict; the run outcome
+        // never repeats as a second verdict inside a part row. Verdicts
+        // read as localized status words (U5b).
         const runParts = runs.flatMap((run) =>
           run.parts.map((part) => ({ run, part })),
         );
-        if (
-          counts === undefined &&
-          attention.length === 0 &&
-          attentionTasks.length === 0 &&
-          runParts.length === 0
-        ) {
+        const hasRows =
+          attention.length > 0 ||
+          attentionTasks.length > 0 ||
+          runParts.length > 0;
+        if (counts === undefined && !hasRows) {
           return (
             <EmptyState
               stateKey="ui.table.empty"
@@ -1348,36 +1512,66 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
           );
         }
         const unknown = t("shell.common.unknown");
+        // FXTABS (d): the header reflects the rows listed below: served
+        // telemetry counts win, otherwise the listed rows are counted.
+        const shownTasks = counts?.tasks ?? attentionTasks.length;
+        const shownAudits =
+          counts?.audits ?? attention.length + runParts.length;
         return (
           <div>
-            {counts === undefined ? null : (
-              <div data-testid="audits-project-counts" className="fxpv-row">
-                <span>{t("projectView.audits.projectTasks")}</span>
-                <span>{counts.tasks ?? unknown}</span>
-                <span>{t("projectView.audits.projectAudits")}</span>
-                <span>{counts.audits ?? unknown}</span>
-              </div>
-            )}
-            {runParts.length === 0 ? null : (
+            <div data-testid="audits-project-counts" className="fxpv-row">
+              <span>{t("projectView.audits.projectTasks")}:</span>
+              <span>{shownTasks}</span>
+              <span>{t("projectView.audits.projectAudits")}:</span>
+              <span>{shownAudits}</span>
+            </div>
+            {runs.length === 0 ? null : (
               <div>
                 <p data-testid="audits-run-verdicts">
                   {t("projects.runs.title")}
                 </p>
-                {runParts.map(({ run, part }) => (
-                  <div
-                    key={`${run.run_id}-${part.part_id}`}
-                    data-testid={`audit-part-${run.run_id}-${part.part_id}`}
-                    className="fxpv-row"
-                  >
-                    <span>{humanRunRef(run.run_id).text}</span>
-                    <span>{part.part_id}</span>
-                    <span>{part.verdict ?? unknown}</span>
-                    <span>{runStatusText(run)}</span>
-                    {part.reason === undefined || part.reason === "" ? null : (
-                      <span>{part.reason}</span>
-                    )}
-                  </div>
-                ))}
+                {runs.map((run) => {
+                  const reason =
+                    run.summary !== ""
+                      ? run.summary
+                      : (run.parts
+                          .map((part) => part.reason)
+                          .find(
+                            (item) => item !== undefined && item !== "",
+                          ) ?? null);
+                  return (
+                    <div
+                      key={run.run_id}
+                      data-testid={`audit-run-${run.run_id}`}
+                    >
+                      <div className="fxpv-row">
+                        <span>{runStatusText(run)}:</span>
+                        <span>
+                          <RunId id={run.run_id} />
+                        </span>
+                        {reason === null ? (
+                          <span>{unknown}</span>
+                        ) : (
+                          <span>{reason}</span>
+                        )}
+                      </div>
+                      {run.parts.map((part) => (
+                        <div
+                          key={`${run.run_id}-${part.part_id}`}
+                          data-testid={`audit-part-${run.run_id}-${part.part_id}`}
+                          className="fxpv-row"
+                        >
+                          <span>{part.part_id}:</span>
+                          <span>{partVerdictText(part)}</span>
+                          {part.reason === undefined ||
+                          part.reason === "" ? null : (
+                            <span>{part.reason}</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
               </div>
             )}
             {attention.length === 0 && attentionTasks.length === 0 ? null : (
@@ -1438,7 +1632,7 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
         if (liveError !== null) {
           return panelError(liveError);
         }
-        if (tasks === null || live === null) {
+        if (tasks === null || live === null || runs === null) {
           return <LoadingState loadingKey="ui.loading.more" />;
         }
         const blocked = dedupeLiveRows(live).filter(
@@ -1456,6 +1650,21 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
             />
           );
         }
+        // FXTABS T7: a blocked row carries the run record's real reason
+        // (first served part reason, else the run summary); with no reason
+        // served it reads "Stopped when the run ended." Never served/guard
+        // jargon, and no pointer back at this tab.
+        const latestRun =
+          runs.length === 0 ? null : (runs[runs.length - 1] ?? null);
+        const runReason =
+          latestRun === null
+            ? null
+            : (latestRun.parts
+                .map((part) => part.reason)
+                .find((item) => item !== undefined && item !== "") ??
+              (latestRun.summary !== "" ? latestRun.summary : null));
+        const blockedReason =
+          runReason ?? t("projectView.errors.stoppedAtEnd");
         return (
           <div>
             {blocked.map((row, index) => (
@@ -1464,11 +1673,9 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
                 data-testid={`error-blocked-${index}`}
                 className="fxpv-row"
               >
-                <span>{t("projectView.errors.blockedAgents")}</span>
-                <span>{humanRunRef(row.agent).text}</span>
-                <span className="fxpv-note">
-                  {t("projectView.blockedNote")}
-                </span>
+                <span>{t("projectView.errors.blockedAgents")}:</span>
+                <span title={row.agent}>{row.agent}</span>
+                <span className="fxpv-note">{blockedReason}</span>
               </div>
             ))}
             {failedTasks.map((task) => (
@@ -1495,7 +1702,7 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
               ) : project === null ? (
                 <LoadingState loadingKey="ui.loading.more" />
               ) : (
-                <div data-testid="report-project-name">
+                <div data-testid="report-project-name" className="fxpv-fact">
                   <span>{t("shell.topbar.project")}:</span>
                   <span>{project.name}</span>
                 </div>
@@ -1506,17 +1713,20 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
                 <LoadingState loadingKey="ui.loading.more" />
               ) : (
                 <div data-testid="report-task-counts">
-                  <span>{t("tasks.list.title")}:</span>
-                  {tasks.length === 0 ? (
-                    <span>0</span>
-                  ) : (
-                    statusCounts(tasks).map(({ status, count }) => (
-                      <div key={status} data-testid={`report-task-count-${status}`}>
-                        <span>{taskStatusLabel(status)}</span>
-                        <span>{count}</span>
-                      </div>
-                    ))
-                  )}
+                  <div className="fxpv-fact">
+                    <span>{t("tasks.list.title")}:</span>
+                    {tasks.length === 0 ? <span>0</span> : null}
+                  </div>
+                  {statusCounts(tasks).map(({ status, count }) => (
+                    <div
+                      key={status}
+                      data-testid={`report-task-count-${status}`}
+                      className="fxpv-fact"
+                    >
+                      <span>{taskStatusLabel(status)}:</span>
+                      <span>{count}</span>
+                    </div>
+                  ))}
                 </div>
               )}
               {budgetError !== null ? (
@@ -1525,15 +1735,18 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
                 <LoadingState loadingKey="ui.loading.more" />
               ) : (
                 <>
-                  <div data-testid="report-budget-spent">
+                  <div data-testid="report-budget-spent" className="fxpv-fact">
                     <span>{t("projectView.cost.spent")}:</span>
                     <span>{`${budget.spent} ${budget.currency}`}</span>
                   </div>
-                  <div data-testid="report-budget-reserved">
+                  <div
+                    data-testid="report-budget-reserved"
+                    className="fxpv-fact"
+                  >
                     <span>{t("projectView.cost.reserved")}:</span>
                     <span>{`${budget.reserved} ${budget.currency}`}</span>
                   </div>
-                  <div data-testid="report-budget-limit">
+                  <div data-testid="report-budget-limit" className="fxpv-fact">
                     <span>{t("projectView.cost.limit")}:</span>
                     <span>{`${budget.hard_limit} ${budget.currency}`}</span>
                   </div>
@@ -1564,22 +1777,22 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
                   <span>{t("projects.derived.label")}:</span>
                   {(
                     [
-                      ["projectView.reports.packages", formatNumber(sumLedger(ledger).packages, locale)],
+                      ["projectView.reports.packages", ledger.length === 0 ? null : formatNumber(sumLedger(ledger).packages, locale)],
                       ["projectView.reports.tasks", formatNumber(tasks.length, locale)],
-                      ["projectView.reports.agents", formatNumber(sumLedger(ledger).agents, locale)],
-                      ["projectView.reports.peak", formatNumber(sumLedger(ledger).peak, locale)],
-                      ["projectView.reports.wall", formatNumber(sumLedger(ledger).wall, locale)],
+                      ["projectView.reports.agents", ledger.length === 0 ? null : formatNumber(sumLedger(ledger).agents, locale)],
+                      ["projectView.reports.peak", ledger.length === 0 ? null : formatNumber(sumLedger(ledger).peak, locale)],
+                      ["projectView.reports.wall", ledger.length === 0 ? null : formatNumber(sumLedger(ledger).wall, locale)],
                       ["projectView.reports.spent", `${formatNumber(budget.spent, locale)} ${budget.currency}`],
                       ["projectView.reports.reserved", `${formatNumber(budget.reserved, locale)} ${budget.currency}`],
                       [
                         "projectView.reports.remaining",
                         `${formatNumber(remainingBudget(budget), locale)} ${budget.currency}`,
                       ],
-                    ] as Array<[string, string]>
+                    ] as Array<[string, string | null]>
                   ).map(([labelKey, value]) => (
-                    <div key={labelKey} className="fxpv-row">
+                    <div key={labelKey} className="fxpv-fact">
                       <span>{t(labelKey)}:</span>
-                      <span>{value}</span>
+                      <span>{value ?? t("shell.common.unknown")}</span>
                     </div>
                   ))}
                 </>
@@ -1611,8 +1824,8 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
                 ))
               )}
             </div>
-            <div data-testid="project-report-files">
-              <span>{t("projectView.reports.changedFiles")}</span>
+            <div data-testid="project-report-files" className="fxpv-fact">
+              <span>{t("projectView.reports.changedFiles")}:</span>
               {liveError !== null ? (
                 panelError(liveError)
               ) : live === null ? (
@@ -1650,8 +1863,8 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
                     data-testid={`report-run-${run.run_id}`}
                     className="fxpv-row"
                   >
-                    <span title={run.run_id}>
-                      {humanRunRef(run.run_id).text}
+                    <span>
+                      <RunId id={run.run_id} />
                     </span>
                     <span>{runStatusText(run)}</span>
                     <span>{run.summary}</span>
@@ -1688,6 +1901,7 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
           type="button"
           data-testid="project-chat-tab"
           className="fxpv-tab"
+          aria-selected="false"
           onClick={() => {
             props.onSelect?.("chat" as ProjectViewName);
           }}
@@ -1706,6 +1920,7 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
             type="button"
             data-testid={projectMenuTestId(name)}
             aria-current={props.view === name ? "true" : undefined}
+            aria-selected={props.view === name ? "true" : "false"}
             className={
               props.view === name ? "fxpv-tab fxpv-tab-selected" : "fxpv-tab"
             }

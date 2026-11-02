@@ -82,7 +82,12 @@ describe("fxdesign1 topbar select", () => {
     ) as HTMLSelectElement;
     const options = Array.from(select.querySelectorAll("option"));
     expect(options.length).toBeGreaterThan(0);
-    expect(select.textContent).toContain(t("shell.topbar.projectPlaceholder"));
+    // J8: an empty served list reads "No project yet", never the
+    // "Select a project" placeholder (kept for loading and choice).
+    expect(select.textContent).toContain(t("shell.topbar.noProject"));
+    expect(select.textContent).not.toContain(
+      t("shell.topbar.projectPlaceholder"),
+    );
   });
 });
 

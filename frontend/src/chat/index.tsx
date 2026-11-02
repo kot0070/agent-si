@@ -39,9 +39,11 @@ import {
   appendChatMessage,
   dequeueChatPrompt,
   enqueueChatPrompt,
+  getChatDraft,
   getChatState,
   patchChatMessage,
   prependChatMessages,
+  setChatDraft,
   setChatHealth,
   setChatOnline,
   setChatRunner,
@@ -64,6 +66,7 @@ import {
 import type { Placement } from "../agents/agentsApi";
 import { listConnectedProviders } from "../settings/ProvidersPage/connectApi";
 import { readRoleProfiles } from "../settings/index";
+import { readTeamMode, saveTeamMode } from "../settings/projectLimitsApi";
 import { Icon } from "../ui/icons";
 import {
   askPermission,
@@ -149,6 +152,40 @@ interface ChatPump {
 }
 
 const pumps = new Map<string, ChatPump>();
+
+// FXSAVED item 5: live-pump signal for the close warning. True while any
+// chat pump drives a stream; the shell ClosingGuard arms on it through
+// useSyncExternalStore, so closing the window mid-run warns while an
+// idle app closes quietly.
+const pumpListeners = new Set<() => void>();
+let pumpVersion = 0;
+
+function emitPumpsChanged(): void {
+  pumpVersion += 1;
+  for (const notify of [...pumpListeners]) {
+    notify();
+  }
+}
+
+export function subscribeLivePumps(listener: () => void): () => void {
+  pumpListeners.add(listener);
+  return () => {
+    pumpListeners.delete(listener);
+  };
+}
+
+/** True while any chat pump drives a stream (test and guard probe). */
+export function hasLivePump(): boolean {
+  return pumps.size > 0;
+}
+
+export function useLivePumpActive(): boolean {
+  return useSyncExternalStore(
+    subscribeLivePumps,
+    () => pumps.size > 0,
+    () => pumps.size > 0,
+  );
+}
 
 // A card shows ONLY for a live waiting proposal: the stream's own
 // clean terminal event marks the message id here. Default is no card —
@@ -467,6 +504,26 @@ function disconnectClosedText(): string {
   );
 }
 
+/** FXOPEN J6: visible composer rows for a draft, about six lines max.
+Newlines always count (pasted tasks grow at once); the measured pixel
+height covers wrapped lines in a real browser. jsdom reports no
+layout, so the text count alone drives the rows there. */
+export const COMPOSER_MAX_ROWS = 6;
+
+export function composerRowsFor(
+  text: string,
+  lineHeightPx: number,
+  scrollHeightPx: number,
+): number {
+  const line = lineHeightPx > 0 ? lineHeightPx : 20;
+  const fromText = text.split("\n").length;
+  const fromMeasure = Math.ceil(Math.max(0, scrollHeightPx) / line);
+  return Math.min(
+    COMPOSER_MAX_ROWS,
+    Math.max(1, fromText, fromMeasure),
+  );
+}
+
 /** FXCHATV V1: a run-log-looking text renders as one plain verdict line
 plus a collapsed Details disclosure, never twice. Markers are the
 engine's own vocabulary (Working folder, Team, Director, Part, Check,
@@ -482,10 +539,13 @@ export function looksLikeEngineLog(text: string): boolean {
 /** FXCHATV (d): check lines name the program only, never a full
 machine path (C:\Windows\..., C:\tool\...); a user profile segment
 (C:\Users\<name>) never reaches the screen. The working-folder line
-itself is untouched: it lives only inside Details. */
+itself is untouched: it lives only inside Details.
+FXOPEN O4: any other absolute Windows path token shows its file name
+only (no drive, no user name) — the backstop for history rows stored
+before the server started sending relative paths. */
 export function shortProgramLine(line: string): string {
   const redacted = line.replace(/C:\\Users\\[^\\\s"']+/gi, "~");
-  return redacted.replace(
+  const shortCmd = redacted.replace(
     /(\$\s+)([A-Za-z]:[\\/][^\s"']+)/g,
     (_match, head: string, token: string) => {
       const base = token.split(/[\\/]/).pop() ?? token;
@@ -493,6 +553,10 @@ export function shortProgramLine(line: string): string {
       return `${head}${name}`;
     },
   );
+  return shortCmd.replace(/[A-Za-z]:[\\/][^\s"']*/g, (token: string) => {
+    const base = token.split(/[\\/]/).pop() ?? token;
+    return base !== "" ? base : token;
+  });
 }
 
 /** FXCHATV V4: one live step line while a run works — the current
@@ -546,6 +610,39 @@ export interface EngineSummary {
   passed: number;
   files: string[];
   lines: string[];
+  /** FXOPEN O4: one plain line when the text announces a second plan
+  ("Director: plan of 2 parts" then "of 3 parts"); null otherwise. */
+  planChanged: string | null;
+}
+
+const PLAN_OF_RE = /Director:\s*plan of (\d+)\s*parts?/i;
+
+/** FXOPEN O4: a re-planned run says so in one plain line, never by
+silently growing "of 2 parts" into "of 3 parts". The reason names the
+old and the new part count; null when the text holds at most one
+plan announcement. */
+export function planChangedLine(text: string): string | null {
+  const counts: number[] = [];
+  for (const line of text.split("\n")) {
+    const found = PLAN_OF_RE.exec(line);
+    if (found?.[1] === undefined) {
+      continue;
+    }
+    const count = Number(found[1]);
+    if (!counts.includes(count)) {
+      counts.push(count);
+    }
+  }
+  if (counts.length < 2) {
+    return null;
+  }
+  const first = counts[0] ?? 0;
+  const last = counts[counts.length - 1] ?? 0;
+  const word = (n: number): string => (n === 1 ? "part" : "parts");
+  return (
+    `Plan changed: the director announced a new plan ` +
+    `(was ${first} ${word(first)}, now ${last} ${word(last)})`
+  );
 }
 
 export function summarizeEngineTurn(
@@ -591,6 +688,7 @@ export function summarizeEngineTurn(
     passed,
     files,
     lines,
+    planChanged: planChangedLine(text),
   };
 }
 
@@ -633,6 +731,11 @@ export function EngineTurnView(props: {
       <p data-testid="run-verdict" style={{ whiteSpace: "pre-wrap" }}>
         {shortProgramLine(engineVerdictLine(summary, costNote))}
       </p>
+      {summary.planChanged !== null ? (
+        <p data-testid="plan-changed" style={{ whiteSpace: "pre-wrap" }}>
+          {summary.planChanged}
+        </p>
+      ) : null}
       <button
         type="button"
         data-testid="run-steps-toggle"
@@ -661,16 +764,32 @@ export function EngineTurnView(props: {
 // interrupted with its stored text plus a resend — or the named
 // disconnect line when the server record says the window closed;
 // failed and stopped turns restore the error card.
+// FXOPEN O4: one entry per interrupted task — after a restart the same
+// task can stand twice (10:11 + 10:14, each with Resend); running
+// turns sharing one user text collapse to the latest, everything else
+// keeps its row.
 function buildHistoryBatch(
   key: string,
   page: ChatHistoryPage,
 ): { batch: NewChatMessage[]; sawTerminal: boolean } {
+  const lastInterruptedByTask = new Map<string, number>();
+  page.turns.forEach((turn, index) => {
+    if (turn.status === "running" && turn.user_text.trim() !== "") {
+      lastInterruptedByTask.set(turn.user_text.trim(), index);
+    }
+  });
+  const turns = page.turns.filter((turn, index) => {
+    if (turn.status !== "running" || turn.user_text.trim() === "") {
+      return true;
+    }
+    return lastInterruptedByTask.get(turn.user_text.trim()) === index;
+  });
   const known = new Set(
     getChatState(key).messages.map((message) => message.id),
   );
   const batch: NewChatMessage[] = [];
   let sawTerminal = false;
-  for (const turn of page.turns) {
+  for (const turn of turns) {
     const tid =
       turn.id !== "" ? turn.id : `${turn.time}::${turn.user_text}`;
     const userId = `hist-user-${tid}`;
@@ -1162,9 +1281,11 @@ function startChatRun(
     prompt: text,
     assistantId,
   });
+  emitPumpsChanged();
   runner.done.then(
     ({ aborted, executed }) => {
       pumps.delete(key);
+      emitPumpsChanged();
       setChatRunner(key, { streamId: null, streaming: false });
       const answer =
         getChatState(key).messages.find(
@@ -1228,6 +1349,7 @@ function startChatRun(
     },
     (error: unknown) => {
       pumps.delete(key);
+      emitPumpsChanged();
       setChatRunner(key, { streamId: null, streaming: false });
       handleRunError(key, assistantId, error, {
         projectId,
@@ -1257,7 +1379,31 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
   const [boundModels, setBoundModels] = useState<unknown[] | null>(null);
   const [connected, setConnected] = useState<string[] | null>(null);
   const [directorModel, setDirectorModel] = useState<string | null>(null);
-  const [draft, setDraft] = useState(props.initialDraft ?? "");
+  const [draft, setDraft] = useState(() => props.initialDraft ?? getChatDraft(key));
+  // FXUIB-B4: every keystroke lands in the per-slice store draft, so a
+  // page change or remount revives it; a send clears it.
+  function updateDraft(next: string): void {
+    setChatDraft(key, next);
+    setDraft(next);
+  }
+  const [teamMode, setTeamMode] = useState<"on" | "off">("on");
+  useEffect(() => {
+    let alive = true;
+    void readTeamMode(props.projectId)
+      .then((stored) => {
+        if (alive) {
+          setTeamMode(stored.team);
+        }
+      })
+      .catch(() => {
+        if (alive) {
+          setTeamMode("on");
+        }
+      });
+    return () => {
+      alive = false;
+    };
+  }, [props.projectId]);
   // FXCHATV (a): mirror for the batched no-provider restore below.
   const draftRef = useRef(draft);
   draftRef.current = draft;
@@ -1275,11 +1421,36 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
       blocking.task.trim() !== "" &&
       draft.trim() === ""
     ) {
-      setDraft(blocking.task);
+      updateDraft(blocking.task);
     }
   }, [blocking, draft]);
   const [toast, setToast] = useState<string | null>(null);
   const [flooded, setFlooded] = useState(false);
+  // FXOPEN J6: the composer grows with the draft, about six lines.
+  // The ref read stays inside the change handler and this effect, so
+  // the rows follow restored drafts too (never a stuck one-liner).
+  const promptRef = useRef<HTMLTextAreaElement | null>(null);
+  function growComposer(): void {
+    const area = promptRef.current;
+    if (area === null) {
+      return;
+    }
+    let line = 20;
+    try {
+      const parsed = parseFloat(
+        window.getComputedStyle(area).lineHeight,
+      );
+      if (Number.isFinite(parsed) && parsed > 0) {
+        line = parsed;
+      }
+    } catch {
+      line = 20;
+    }
+    area.rows = composerRowsFor(draft, line, area.scrollHeight);
+  }
+  useEffect(() => {
+    growComposer();
+  });
   const offlineRef = useRef(!readOnline());
   const oneShotSentRef = useRef(false);
   const [pendingAsk, setPendingAsk] = useState<InstallPermissionAsk | null>(
@@ -1410,7 +1581,7 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
           error.task.trim() !== "" &&
           draftRef.current.trim() === ""
         ) {
-          setDraft(error.task);
+          updateDraft(error.task);
         }
       },
       onAsk: (ask) => {
@@ -1588,11 +1759,11 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
     }
     if (!online) {
       enqueueChatPrompt(key, prompt);
-      setDraft("");
+      updateDraft("");
       showToast(t("chat.stream.offline"));
       return;
     }
-    setDraft("");
+    updateDraft("");
     handleSendPrompt(prompt);
   };
 
@@ -1604,8 +1775,11 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
     pump.cancelled = true;
     pump.runner.cancel().then(
       () => undefined,
-      () => {
-        showToast(t("errors.generic"));
+      (err: unknown) => {
+        // FXCLASS CD-8: the toast names the cause (code), never a bare
+        // generic line that vanishes without a cause.
+        const code = err instanceof ApiError ? err.code : "CONTEXT_MISSING";
+        showToast(`${t(apiErrorLocaleKey(code))} (${code})`);
       },
     );
   };
@@ -2007,7 +2181,7 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
                     decide(message.id, "accepted");
                   }}
                   onEdit={(next) => {
-                    setDraft(next);
+                    updateDraft(next);
                   }}
                   onReject={() => {
                     decide(message.id, "rejected");
@@ -2025,7 +2199,7 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
               data-testid="chat-sample-1"
               className="fx-btn-quiet"
               onClick={() => {
-                setDraft(t("chat.empty.sample1"));
+                updateDraft(t("chat.empty.sample1"));
               }}
             >
               {t("chat.empty.sample1")}
@@ -2035,7 +2209,7 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
               data-testid="chat-sample-2"
               className="fx-btn-quiet"
               onClick={() => {
-                setDraft(t("chat.empty.sample2"));
+                updateDraft(t("chat.empty.sample2"));
               }}
             >
               {t("chat.empty.sample2")}
@@ -2126,6 +2300,30 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
             inside, the send as an icon button inside right; a small status
             line under it (model | route | working state). */}
         <div data-testid="chat-composer" className="fx-composer">
+          <div>
+            <span>{t("settings.project.team")}</span>
+            <button
+              type="button"
+              data-testid="composer-team-toggle"
+              aria-label={t("settings.project.team")}
+              title={t("settings.project.team")}
+              onClick={() => {
+                const next = teamMode === "on" ? "off" : "on";
+                setTeamMode(next);
+                void saveTeamMode(props.projectId, next)
+                  .then((saved) => {
+                    setTeamMode(saved.team);
+                  })
+                  .catch(() => {
+                    setTeamMode(next);
+                  });
+              }}
+            >
+              {teamMode === "on"
+                ? t("settings.project.teamOn")
+                : t("settings.project.teamOff")}
+            </button>
+          </div>
           {/* FXCHATV (b): single Connect CTA for one state — the rows
               above already offer it when expanded and empty. */}
           {boundModels !== null &&
@@ -2148,12 +2346,15 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
               <span className="fx-vh">{t("chat.composer.prompt")}</span>
               <textarea
                 data-testid="chat-prompt"
+                ref={promptRef}
+                id="chat-prompt"
                 rows={1}
                 placeholder={t("chat.composer.prompt")}
                 aria-label={t("chat.composer.prompt")}
                 value={draft}
                 onChange={(event) => {
-                  setDraft(event.target.value);
+                  updateDraft(event.target.value);
+                  growComposer();
                 }}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey) {

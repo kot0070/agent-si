@@ -532,7 +532,20 @@ def resolve(test, project_profile: dict) -> dict:
     if runner == "suite_invoke":
         params = dict(row.get("params") or {})
         tool = params.get("tool", "")
-        if not tool or shutil.which(tool) is None:
+        _hit3 = shutil.which(tool) if isinstance(tool, str) and tool else None
+        _stub3 = False
+        if _hit3 is not None:
+            try:
+                _stub3 = ("windowsapps" in str(_hit3).lower())
+            except Exception:
+                _stub3 = False
+            if not _stub3:
+                try:
+                    if os.path.isfile(_hit3) and os.path.getsize(_hit3) == 0:
+                        _stub3 = True
+                except OSError:
+                    _stub3 = False
+        if not tool or _hit3 is None or _stub3:
             return {
                 "test_id": test_id,
                 "status": "UNSUPPORTED",
@@ -669,8 +682,20 @@ def run_code_test(test_id: str, project_root: str, evidence_dir: str, budgets=No
         "budgets": {"timeout_s": timeout_s, "evidence_dir": evidence},
     }
     try:
+        if getattr(sys, "frozen", False):
+            # Frozen exe: sys.executable is the app itself, so spawning
+            # [exe, host, runner] would start a second full app (window
+            # + single-instance lock + folder picker). Route through the
+            # sidecar flag instead: main() handles --qa-runner before
+            # any window, lock, port pick or server start. The literal
+            # must stay equal to agent_si.sidecar._QA_RUNNER_FLAG
+            # (pinned by test; literal here keeps catalog_v2 stdlib-only
+            # with no sidecar import).
+            argv = [sys.executable, "--qa-runner", runner]
+        else:
+            argv = [sys.executable, host, runner]
         proc = subprocess.Popen(
-            [sys.executable, host, runner],
+            argv,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

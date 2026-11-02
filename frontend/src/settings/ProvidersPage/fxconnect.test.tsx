@@ -83,15 +83,18 @@ describe("fxconnect save posts the connect route with the operator token", () =>
     fireEvent.click(screen.getByLabelText("Connect OpenAI"));
     const dialog = screen.getByRole("dialog");
     fireEvent.change(within(dialog).getByLabelText("API key"), { target: { value: FX_KEY } });
+    // FXR2E two-step (416ddaa, merged 0661228): Check before Save.
+    fireEvent.click(within(dialog).getByText("Check"));
+    expect(await within(dialog).findByText("Key checked. Save to connect.")).toBeTruthy();
     fireEvent.click(within(dialog).getByText("Save"));
     // Step 1 done: the same dialog moves to step 2 (Connected line plus
     // the tickable list); the key field is gone with step 1.
-    expect(await within(dialog).findByText("Connected OpenAI. Reference saved.")).toBeTruthy();
+    expect(await within(dialog).findByText("Connected OpenAI.")).toBeTruthy();
     expect(screen.queryByLabelText("API key")).toBeNull();
     fireEvent.click(within(dialog).getByText("Done"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(screen.getByLabelText("Disconnect OpenAI")).toBeTruthy();
-    expect(screen.getByText("Connected OpenAI. Reference saved.")).toBeTruthy();
+    expect(screen.getByText("Connected OpenAI.")).toBeTruthy();
 
     const keyPosts = callsTo(seen, "/api/v1/providers/keys");
     expect(keyPosts).toHaveLength(1);
@@ -136,6 +139,10 @@ describe("fxconnect save posts the connect route with the operator token", () =>
     fireEvent.click(screen.getByLabelText("Connect OpenAI"));
     const dialog = screen.getByRole("dialog");
     fireEvent.change(within(dialog).getByLabelText("API key"), { target: { value: FX_KEY } });
+    // FXR2E two-step (416ddaa, merged 0661228): Check before Save; the
+    // refused connect (400) surfaces only after a passed check.
+    fireEvent.click(within(dialog).getByText("Check"));
+    expect(await within(dialog).findByText("Key checked. Save to connect.")).toBeTruthy();
     fireEvent.click(within(dialog).getByText("Save"));
     expect(await within(dialog).findByText(/CREDENTIAL_ENTRY_MISSING/)).toBeTruthy();
     expect(screen.getByRole("dialog")).toBeTruthy();

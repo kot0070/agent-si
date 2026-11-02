@@ -101,10 +101,13 @@ function openOpenai(): HTMLElement {
   return screen.getByRole("dialog");
 }
 
-function saveKey(dialog: HTMLElement, key = "sk-fxprov2"): void {
+async function saveKey(dialog: HTMLElement, key = "sk-fxprov2"): Promise<void> {
   fireEvent.change(within(dialog).getByLabelText("API key"), {
     target: { value: key },
   });
+  // FXR2E two-step (416ddaa, merged 0661228): Check before Save.
+  fireEvent.click(within(dialog).getByText("Check"));
+  await within(dialog).findByText("Key checked. Save to connect.");
   fireEvent.click(within(dialog).getByText("Save"));
 }
 
@@ -113,15 +116,15 @@ describe("FXPROV2 step 2 opens in the same dialog", () => {
     stubServed({ providers: [], models: {} });
     render(<ProvidersPage project_id="local" />);
     const dialog = openOpenai();
-    saveKey(dialog);
-    expect(await within(dialog).findByText("Connected OpenAI. Reference saved.")).toBeTruthy();
+    await saveKey(dialog);
+    expect(await within(dialog).findByText(/Connected OpenAI\./)).toBeTruthy();
     const rows = await within(dialog).findAllByTestId("connect-model-row");
     expect(rows.length).toBe(2);
     const checked = rows
       .map((row) => within(row).getByRole("checkbox") as HTMLInputElement)
       .filter((box) => box.checked);
     expect(checked).toHaveLength(1);
-    expect(checked[0].getAttribute("aria-label")).toBe("OpenAI Standard");
+    expect(checked[0].getAttribute("aria-label")).toBe("openai/gpt-4o-mini");
     fireEvent.click(within(dialog).getByText("Done"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(screen.getByText("1 enabled")).toBeTruthy();
@@ -131,7 +134,7 @@ describe("FXPROV2 step 2 opens in the same dialog", () => {
     stubServed({ providers: [], models: {}, hangKeys: true });
     render(<ProvidersPage project_id="local" />);
     const dialog = openOpenai();
-    saveKey(dialog);
+    await saveKey(dialog);
     expect(await screen.findByText("Saving...", {}, { timeout: 2000 })).toBeTruthy();
     fireEvent.click(within(dialog).getByLabelText("Close"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -142,7 +145,7 @@ describe("FXPROV2 step 2 opens in the same dialog", () => {
     stubServed({ providers: [], models: {} });
     render(<ProvidersPage project_id="local" />);
     const dialog = openOpenai();
-    saveKey(dialog);
+    await saveKey(dialog);
     const rows = await within(dialog).findAllByTestId("connect-model-row");
     fireEvent.click(within(rows[1]).getByRole("checkbox"));
     fireEvent.keyDown(document, { key: "Escape" });
@@ -157,7 +160,7 @@ describe("FXPROV2 list source and fallback", () => {
     stubServed({ providers: [], models: {} });
     render(<ProvidersPage project_id="local" />);
     const dialog = openOpenai();
-    saveKey(dialog);
+    await saveKey(dialog);
     expect(await within(dialog).findByText("showing the known list")).toBeTruthy();
     const rows = await within(dialog).findAllByTestId("connect-model-row");
     expect(rows.length).toBe(2);
@@ -238,7 +241,7 @@ describe("FXPROV2 many rows: filter plus compact scroll", () => {
     stubServed({ providers: [], models });
     render(<ProvidersPage project_id="local" />);
     const dialog = openOpenai();
-    saveKey(dialog);
+    await saveKey(dialog);
     const rows = await within(dialog).findAllByTestId("connect-model-row");
     // Live list wins (served rows only); the catalog is the fallback.
     expect(rows.length).toBe(30);
@@ -262,7 +265,7 @@ describe("FXPROV2 cards after Done", () => {
     render(<ProvidersPage project_id="local" />);
     expect(await screen.findByLabelText("Disconnect OpenAI")).toBeTruthy();
     expect(screen.getByLabelText("Manage OpenAI models")).toBeTruthy();
-    expect(screen.getByText("0 enabled")).toBeTruthy();
+    expect(screen.getByText("None enabled — open Manage models to choose.")).toBeTruthy();
     const card = screen
       .getAllByTestId("provider-card")
       .find((entry) => entry.getAttribute("data-provider-id") === "openai");

@@ -19,7 +19,7 @@ from dataclasses import asdict
 from typing import Any
 
 
-from fastapi import APIRouter, Request  # noqa: E402
+from fastapi import APIRouter, HTTPException, Request  # noqa: E402
 
 from agent_si.kb import savings as _savings  # noqa: E402
 from agent_si.kb import telemetry as _telemetry  # noqa: E402
@@ -74,7 +74,29 @@ def k09b_savings_report() -> dict[str, Any]:
 
 @k09b_router.post("/api/v1/kb/validate")
 async def k09b_validate(request: Request) -> dict[str, Any]:
-    """B0B-BP05-43: validate a TEST-only KB dir payload, return code JSON."""
+    """B0B-BP05-43: validate a TEST-only KB dir payload, return code JSON.
+
+    USER_WRITE guarded like the other write routes: 401 without an
+    x-actor header, 403 with a bad x-ui-session-token.
+    """
+    actor = (request.headers.get("x-actor") or "").strip()
+    if not actor:
+        raise HTTPException(status_code=401,
+                            detail="missing x-actor header")
+    token = request.headers.get("x-ui-session-token")
+    state = getattr(getattr(request, "app", None), "state", None)
+    auth_hook = getattr(state, "auth_hook", None) if state is not None else None
+    allowed = False
+    if callable(auth_hook):
+        try:
+            allowed = bool(auth_hook(token, actor, "USER_WRITE"))
+        except Exception:
+            allowed = False
+    else:
+        expected = getattr(state, "ui_session_token", None)
+        allowed = expected is not None and token == expected
+    if not allowed:
+        raise HTTPException(status_code=403, detail="forbidden")
     try:
         try:
             body = await request.json()

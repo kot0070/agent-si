@@ -14,6 +14,7 @@
 import { useEffect, useState } from "react";
 import type { ReactElement } from "react";
 import { ApiError, apiErrorLocaleKey } from "../api/errors";
+import { backoffForFailures, isHiddenTick, onVisible } from "../api/polling";
 import { t } from "../locale/index";
 import { EmptyState } from "../ui/EmptyState";
 import { ErrorPanel } from "../ui/ErrorPanel";
@@ -111,16 +112,69 @@ export function TestsTab(props: TestsTabProps): ReactElement {
     if (!unfinished || readyPlanId === null || readyRunId === null) {
       return;
     }
-    const timer = setInterval(() => {
-      void readTestsView(readyPlanId, readyRunId).then(
+    const activePlanId: string = readyPlanId;
+    const activeRunId: string = readyRunId;
+    // FXCLASS P5: skip the tick when hidden, one fresh read on
+    // visibilitychange, back off 3-6-12-30 s on failure, reset on success.
+    let alive = true;
+    let failures = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    function chain(): void {
+      if (timer !== null) {
+        clearTimeout(timer);
+      }
+      timer = setTimeout(
+        () => {
+          timer = null;
+          if (!alive) {
+            return;
+          }
+          if (isHiddenTick()) {
+            chain();
+            return;
+          }
+          void readTestsView(activePlanId, activeRunId).then(
+            (view) => {
+              if (!alive) {
+                return;
+              }
+              failures = 0;
+              setPhase({ kind: "ready", view });
+              chain();
+            },
+            () => {
+              if (!alive) {
+                return;
+              }
+              failures += 1;
+              chain();
+            },
+          );
+        },
+        failures === 0 ? TESTS_POLL_MS : backoffForFailures(failures),
+      );
+    }
+    chain();
+    const stopVisible = onVisible(() => {
+      if (!alive || isHiddenTick()) {
+        return;
+      }
+      void readTestsView(activePlanId, activeRunId).then(
         (view) => {
-          setPhase({ kind: "ready", view });
+          if (alive) {
+            failures = 0;
+            setPhase({ kind: "ready", view });
+          }
         },
         () => undefined,
       );
-    }, TESTS_POLL_MS);
+    });
     return () => {
-      clearInterval(timer);
+      alive = false;
+      if (timer !== null) {
+        clearTimeout(timer);
+      }
+      stopVisible();
     };
   }, [unfinished, readyPlanId, readyRunId]);
 

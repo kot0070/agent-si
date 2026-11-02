@@ -29,6 +29,7 @@ from __future__ import annotations
 import importlib
 import json
 import os
+import re
 import uuid
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
@@ -54,6 +55,40 @@ CHAT_DISPATCH_REJECTED = "CHAT_DISPATCH_REJECTED"
 CHAT_ACTOR_MISSING = "CHAT_ACTOR_MISSING"
 CHAT_FORBIDDEN = "CHAT_FORBIDDEN"
 CHAT_RATE_LIMITED = "CHAT_RATE_LIMITED"
+
+#: The manager run emitted no terminal event: the stream still closes
+#: with exactly one `done`, now carrying this reason code so the UI
+#: can name it, and the server logs why (run id plus forwarded count).
+NO_TERMINAL_EVENT = "NO_TERMINAL_EVENT"
+
+#: SH-05: the send target folder is missing. The honest line streams
+#: first (the bubble names the reason), then this terminal error
+#: closes the turn failed — never green, never an approval card.
+PROJECT_FOLDER_MISSING = "PROJECT_FOLDER_MISSING"
+
+
+def _log_stream_failure(run_id: str, stream_id: str,
+                        err: Exception) -> None:
+    """Log a terminal chat-stream failure with run id and traceback."""
+    try:
+        from agent_si import file_log as _file_log
+
+        _file_log.log_exception("chat-stream %s" % stream_id, run_id, err)
+    except Exception:
+        pass
+
+
+def _log_no_terminal(run_id: str, stream_id: str, forwarded: int) -> None:
+    """Log why a stream closed with no terminal event from the run."""
+    try:
+        import logging as _logging
+
+        _logging.getLogger("agent_si.chat").error(
+            "run %s stream %s closed with no terminal event "
+            "(%d events forwarded); answering synthesized done %s",
+            run_id, stream_id, int(forwarded), NO_TERMINAL_EVENT)
+    except Exception:
+        pass
 
 #: FXKBCHAT KB-context reason code (unknown kb_id on chat open).
 CHAT_KB_UNKNOWN = "CHAT_KB_UNKNOWN"
@@ -203,10 +238,9 @@ def _record_server_turn(app: Any, project: str, user_text: str,
                         run_id: str = "", error_code: str = "") -> None:
     """Store one server-side chat turn; never raises, never breaks flow.
 
-    The stream start stores the user message (no run id: every stream
-    opens its own row); the terminal write carries the run id. Client
-    writes keep their own run ids, so their running/terminal pair
-    still upserts to one row.
+    The stream start stores the user message with the run id; the
+    terminal write carries the same run id, so the pair upserts to one
+    row. Client writes with the same run id upsert the same row.
     """
     try:
         if app is None:
@@ -427,6 +461,9 @@ class ManagerSdkBridge:
         self._run_task_streamed = run_task_streamed
         self._agents_live_rows = agents_live_rows
         self._live: dict[str, dict[str, Any]] = {}
+        # U8: per-chat memory (by project): last shown folder + team
+        # signature, so repeats stay quiet across turns.
+        self._chat_seen: dict[str, dict[str, str]] = {}
 
     def run(
         self,
@@ -528,18 +565,17 @@ class ManagerSdkBridge:
                 {"type": "cancelled", "stream_id": stream_id})
             return
         self._finish(stream_id)
-        # K04BIND1: append the verbatim last failure reason (never secret).
-        base = ("no provider is connected; "
-                "connect a provider to enable chat")
-        reason = state.get("no_provider_reason")
-        if isinstance(reason, str) and reason.strip():
-            base = base + " (last error: " + reason.strip() + ")"
+        # FXCLASS CA-1/CA-3/CA-4: one plain line, same words on chat +
+        # Tasks, no role word. The verbatim last failure stays server-side
+        # only when explicitly passed; the wire message stays plain.
+        base = "Connect a provider first"
         yield sse_bytes({
             "type": "error",
             "stream_id": stream_id,
             "run_id": run_id,
             "code": NO_PROVIDER_BOUND,
             "message": base,
+            "connectHref": "/providers",
         })
 
     def _devrun_folder(
@@ -627,6 +663,9 @@ class ManagerSdkBridge:
         except ImportError:
             return None
         if honest is not None:
+            # SH-05: a missing folder refuses the send with the reason:
+            # the honest line streams first so the bubble names it, then
+            # a terminal error closes failed (never green, never a card).
             text = str(honest)
             if not text.endswith("\n"):
                 text = text + "\n"
@@ -635,8 +674,8 @@ class ManagerSdkBridge:
                 dev_request: ChatStreamRequest, **kwargs: Any
             ) -> Any:
                 yield {"type": "delta", "text": text}
-                yield {"type": "done", "text": text}
-
+                yield {"type": "error", "text": text,
+                       "code": PROJECT_FOLDER_MISSING}
             return _honest_entry
         if not resolved:
             return None
@@ -653,14 +692,26 @@ class ManagerSdkBridge:
         except Exception:
             return None
         working = "Working folder: %s\n" % (resolved,)
+        project_key = str(getattr(request, "project", "") or "")
 
         def _entry(dev_request: ChatStreamRequest, **kwargs: Any) -> Any:
-            yield {"type": "delta", "text": working}
+            # U8: the folder line reads only on the first run of this
+            # chat or when the folder changed; repeats hid the answer.
+            seen = self._chat_seen.setdefault(project_key, {})
+            state["chat_team_last"] = seen.get("team")
+            if seen.get("folder") != resolved:
+                seen["folder"] = resolved
+                yield {"type": "delta", "text": working}
             # FXCTX: _manager_events threads app through run kwargs; the
             # engine already takes it explicitly, so drop the duplicate.
             kwargs.pop("app", None)
             yield from _devrun.run_dev_task(
                 effective, stream_state=state, app=app, **kwargs)
+            # Remember the team this run showed, so the next turn stays
+            # quiet unless the team changed.
+            sig = state.get("chat_team_sig")
+            if isinstance(sig, str) and sig:
+                seen["team"] = sig
 
         return _entry
 
@@ -761,6 +812,17 @@ class ManagerSdkBridge:
         message = str(getattr(request, "message", "") or "")
         texts: list[str] = []
         closed = False
+        # FXOPEN O4: chat-facing run text carries file names plus
+        # project-relative paths only, never host absolute paths.
+        display_folder = ""
+        try:
+            folder = str(getattr(request, "folder", "") or "")
+            if app is not None and project:
+                resolved, honest = self._devrun_folder(app, project, folder)
+                if honest is None and resolved:
+                    display_folder = resolved
+        except Exception:
+            display_folder = ""
 
         def _close(kind: str, error_code: str = "") -> None:
             """Store the terminal turn + mirror tasks once (idempotent)."""
@@ -777,7 +839,8 @@ class ManagerSdkBridge:
             _mirror_run_tasks(app, project, task, message, task_status)
 
         yield sse_bytes(self._start_event(stream_id, run_id, request))
-        _record_server_turn(app, project, message, "", "running")
+        _record_server_turn(app, project, message, "", "running",
+                            run_id=run_id)
         _mirror_run_tasks(app, project, task, message, "running")
         if state["cancelled"]:
             yield sse_bytes({"type": "cancelled", "stream_id": stream_id})
@@ -801,6 +864,7 @@ class ManagerSdkBridge:
                 getattr(err, "code", None) or type(err).__name__))
             return
         terminal_emitted = False
+        forwarded = 0
         try:
             for event in run_events:
                 if state["cancelled"]:
@@ -812,6 +876,10 @@ class ManagerSdkBridge:
                     stream_id, run_id, event)
                 if payload.get("type") == "start":
                     continue
+                if display_folder and isinstance(
+                        payload.get("text"), str):
+                    payload["text"] = _chat_display_text(
+                        payload["text"], display_folder)
                 if (kb_note and payload.get("type") == "delta"
                         and isinstance(payload.get("text"), str)
                         and not state.get("kb_cited")):
@@ -821,6 +889,7 @@ class ManagerSdkBridge:
                 if isinstance(text, str) and text:
                     texts.append(text)
                 yield sse_bytes(payload)
+                forwarded += 1
                 if payload.get("type") in self._TERMINAL_TYPES:
                     terminal_emitted = True
                     kind = str(payload.get("type"))
@@ -845,12 +914,16 @@ class ManagerSdkBridge:
                         _mirror_run_tasks(
                             app, project, task, message, task_status)
             if not terminal_emitted:
+                _log_no_terminal(run_id, stream_id, forwarded)
                 yield sse_bytes({
                     "type": "done",
                     "stream_id": stream_id,
                     "run_id": run_id,
+                    "code": NO_TERMINAL_EVENT,
                 })
-                _close("done")
+                _close("done", error_code=NO_TERMINAL_EVENT)
+            elif not closed:
+                _close("cancelled", error_code="STOPPED")
         except Exception as err:
             self._finish(stream_id)
             if not terminal_emitted:
@@ -888,7 +961,8 @@ class ManagerSdkBridge:
         task = str(getattr(request, "task", "") or "")
         message = str(getattr(request, "message", "") or "")
         yield sse_bytes(self._start_event(stream_id, run_id, request))
-        _record_server_turn(app, project, message, "", "running")
+        _record_server_turn(app, project, message, "", "running",
+                            run_id=run_id)
         _mirror_run_tasks(app, project, task, message, "running")
         if state["cancelled"] or provider is None:
             if not state["cancelled"]:
@@ -1078,6 +1152,57 @@ class ManagerSdkBridge:
             app, project, message, str(captured.get("text", "")), "ok",
             run_id=run_id)
         _mirror_run_tasks(app, project, task, message, "done")
+
+
+#: One absolute Windows path token (drive letter, either slash).
+_DRIVE_PATH_RE = re.compile(r"[A-Za-z]:(?:[\\/])[^\s\"']*")
+
+
+def _replace_ci(text: str, old: str, new: str) -> str:
+    """Case-insensitive literal replace (Windows paths vary in case)."""
+    if not old:
+        return text
+    return re.sub(re.escape(old), lambda _match: new, text,
+                  flags=re.IGNORECASE)
+
+
+def _chat_display_text(text: str, folder: str) -> str:
+    """Render run text for chat without host absolute paths.
+
+    Paths under the working folder become project-relative (the folder
+    itself becomes its base name); any other absolute Windows path
+    token shows its file name only. User names in ``C:\\Users\\<name>``
+    segments never reach the screen. Plain words, never a refusal.
+    """
+    if not isinstance(text, str) or not text:
+        return text
+    out = text
+    if folder:
+        norm = os.path.normpath(folder)
+        base = os.path.basename(norm) or norm
+        prefixes = [norm + os.sep]
+        for variant in (norm.replace("\\", "/"), norm.replace("/", "\\")):
+            for sep in ("\\", "/"):
+                candidate = variant + sep
+                if candidate not in prefixes:
+                    prefixes.append(candidate)
+        for prefix in sorted(prefixes, key=len, reverse=True):
+            out = _replace_ci(out, prefix, "")
+        # A lone folder mention (not followed by more path) becomes
+        # its base name; longer sibling paths keep their own shape for
+        # the drive-token rule below.
+        for lone in dict.fromkeys(
+                (norm, norm.replace("\\", "/"), norm.replace("/", "\\"))):
+            out = re.sub(
+                re.escape(lone) + r"(?![\\/])", lambda _m: base, out,
+                flags=re.IGNORECASE)
+
+    def _basename(match: "re.Match[str]") -> str:
+        token = match.group(0)
+        name = token.replace("/", "\\").rsplit("\\", 1)[-1]
+        return name or token
+
+    return _DRIVE_PATH_RE.sub(_basename, out)
 
 
 def _manager_event_payload(
@@ -1300,7 +1425,12 @@ def _gateway_transport(base_url: str, credential_store: Any,
             method="POST",
         )
         try:
-            with _urlrequest.urlopen(http_request, timeout=60) as response:
+            # Aligned with the devrun per-call model bound (300 s):
+            # a shorter provider read timeout fired first with an
+            # "internal"-looking timeout error while the model call was
+            # still inside its bound. Slow-but-healthy calls now run to
+            # the same bound; dead connections still fail fast.
+            with _urlrequest.urlopen(http_request, timeout=300) as response:
                 try:
                     raw = response.read().decode("utf-8")
                 except (ValueError, _httpclient.HTTPException):

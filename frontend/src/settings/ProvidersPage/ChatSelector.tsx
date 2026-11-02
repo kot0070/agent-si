@@ -67,21 +67,28 @@ type ChatSelectorProps = {
 
 export function ChatSelector({ catalog, states, value, onChange }: ChatSelectorProps) {
   const choices = enabledChatChoices(catalog, states);
+  const label = t("providers.chat.label");
+  const placeholder = t("providers.chat.selectOption");
   return (
     <label>
-      {t("providers.chat.label")}
+      {label}
       <select
-        aria-label={t("providers.chat.label")}
+        aria-label={label}
         value={value}
         onChange={(event) => onChange(event.target.value)}
       >
-        <option value="">{t("providers.chat.selectOption")}</option>
+        <option value="">{placeholder}</option>
         {choices.map((choice) => (
           <option key={`${choice.providerId}/${choice.modelId}`} value={choice.modelId}>
             {choice.label}
           </option>
         ))}
       </select>
+      {value === "" && choices.length > 0 ? (
+        <p data-testid="chat-model-empty">
+          {label}: {placeholder}
+        </p>
+      ) : null}
     </label>
   );
 }

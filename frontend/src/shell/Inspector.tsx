@@ -22,6 +22,7 @@ import type { RunLedgerRow } from "../api/projectsApi";
 import { dedupeLiveRows, readLiveExtras } from "../projects/viewsApi";
 import { readProjectTelemetry } from "../k07next2/k07next2Api";
 import type { ProjectTelemetry } from "../k07next2/k07next2Api";
+import { ApiError, requestResponse } from "../api/errors";
 import { formatNumber, t } from "../locale/index";
 import { formatDateTime } from "../locale/index";
 import { shortenLiveRef } from "../agents/agentsApi";
@@ -36,7 +37,9 @@ import { MetricCard } from "../ui/MetricCard";
 import { useKitExpanded } from "../ui/Card";
 import { fetchAppsCard } from "../watcher/AppsCard";
 import type { AppsCardData } from "../watcher/AppsCard";
+import { backoffForFailures, isHiddenTick, onVisible } from "../api/polling";
 import {
+  describeLastAction,
   fetchWatcherJournal,
   fetchWatcherStatus,
   watcherModelName,
@@ -248,13 +251,16 @@ export function Inspector(props: InspectorProps): ReactElement {
 
   useEffect(() => {
     let alive = true;
-    async function loadProject(target: string): Promise<void> {
+    let failures = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    async function loadProject(target: string): Promise<boolean> {
+      let ok = true;
       try {
         // FXDESIGN8: one ledger-route round trip serves both the package
         // rows and the runs key (last run verdict/tokens/files).
         const { rows, runs: runRows } = await readLedgerWithRuns(target);
         if (!alive) {
-          return;
+          return true;
         }
         setLedger(rows);
         setRuns(runRows);
@@ -276,6 +282,7 @@ export function Inspector(props: InspectorProps): ReactElement {
           }
         }
       } catch {
+        ok = false;
         if (alive) {
           setLedger([]);
           setRuns([]);
@@ -436,6 +443,7 @@ export function Inspector(props: InspectorProps): ReactElement {
           setLocalModels(null);
         }
       }
+      return ok;
     }
     if (projectId === null) {
       setLedger(null);
@@ -456,13 +464,50 @@ export function Inspector(props: InspectorProps): ReactElement {
         alive = false;
       };
     }
-    void loadProject(projectId);
-    const timer = setInterval(() => {
-      void loadProject(projectId);
-    }, PROJECT_POLL_MS);
+    const target: string = projectId;
+    void loadProject(target);
+    // FXCLASS P5: skip the tick when hidden, one fresh read on
+    // visibilitychange, back off 3-6-12-30 s on failure, reset on success.
+    function chain(): void {
+      if (timer !== null) {
+        clearTimeout(timer);
+      }
+      const delay =
+        failures === 0 ? PROJECT_POLL_MS : backoffForFailures(failures);
+      timer = setTimeout(() => {
+        timer = null;
+        if (!alive) {
+          return;
+        }
+        if (isHiddenTick()) {
+          chain();
+          return;
+        }
+        void loadProject(target).then((ok) => {
+          if (!alive) {
+            return;
+          }
+          failures = ok ? 0 : failures + 1;
+          chain();
+        });
+      }, delay);
+    }
+    chain();
+    const stopVisible = onVisible(() => {
+      if (alive && !isHiddenTick()) {
+        void loadProject(target).then((ok) => {
+          if (alive) {
+            failures = ok ? 0 : failures + 1;
+          }
+        });
+      }
+    });
     return () => {
       alive = false;
-      clearInterval(timer);
+      if (timer !== null) {
+        clearTimeout(timer);
+      }
+      stopVisible();
     };
   }, [client, projectId]);
 
@@ -593,6 +638,30 @@ export function Inspector(props: InspectorProps): ReactElement {
 
   const [resultsOpen, setResultsOpen] = useState(false);
   const [backgroundOpen, setBackgroundOpen] = useState(false);
+  // H6: the native open runs only where the sidecar can open; a 409
+  // hides the button, any other refusal names its code quietly.
+  const [openFolderOk, setOpenFolderOk] = useState(true);
+  const [openFolderNote, setOpenFolderNote] = useState<string | null>(null);
+
+  async function openResultFolder(folder: string): Promise<void> {
+    try {
+      await requestResponse("/api/v1/sidecar/open-folder", {
+        method: "POST",
+        kind: "write",
+        body: { path: folder },
+      });
+      setOpenFolderNote(null);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) {
+        setOpenFolderOk(false);
+        return;
+      }
+      setOpenFolderNote(
+        error instanceof ApiError ? error.code : "CONTEXT_MISSING",
+      );
+    }
+  }
+
   const [teamMoreOpen, setTeamMoreOpen] = useState(false);
   const teamMoreLabel = teamMoreOpen
     ? t("shell.cards.showLess")
@@ -800,8 +869,15 @@ export function Inspector(props: InspectorProps): ReactElement {
   const reportsHref =
     projectId === null ? "/projects" : `/projects/${projectId}/reports`;
 
-  const watcherSettings = loadWatcherSettings();
+  const watcherSettings = loadWatcherSettings(projectId);
   const watcherModel = watcherSettings.model;
+  // FXTABS T9: the rail names what is really used. A "local" setting with
+  // no local model served means the cloud fallback does the work.
+  const effectiveWatcherModel =
+    watcherModel === "local" &&
+    (localModels === null || localModels.length === 0)
+      ? "API"
+      : watcherModel;
   const latestJournal = (journal ?? [])[0];
   const watcherActionId =
     latestJournal === undefined
@@ -826,7 +902,7 @@ export function Inspector(props: InspectorProps): ReactElement {
       : `${formatNumber(spent)} / ${formatNumber(hard)}${currency === "" ? "" : ` ${currency}`}`;
 
   const [budgetExpanded, onBudgetToggleInner] = useKitExpanded(
-    budgetCollapsed,
+    budgetCollapsed || budget === null,
     onBudgetToggle,
   );
   // FXTELEM: providers name the connected ids from GET /api/v1/providers;
@@ -851,6 +927,15 @@ export function Inspector(props: InspectorProps): ReactElement {
     apps === null
       ? unknown
       : `${formatNumber(appsCount)} ${t("shell.cards.apps.connected")}, ${t(apps.paused ? "shell.cards.apps.paused" : "shell.cards.apps.active")}`;
+  // FXTABS J7: metric cards with served data render before empty ones
+  // (flex order below); an empty card collapses to one line. Numbers are
+  // untouched: only order plus the collapsed flag change here.
+  const tokensHasData = tokensKnown;
+  const testsHasData = testRuns !== null;
+  const budgetHasData = budget !== null;
+  const providersHasData = (providers ?? []).length > 0;
+  const localAiHasData = (localModels ?? []).length > 0;
+  const appsHasData = appsCount > 0;
 
   return (
     <aside
@@ -1077,14 +1162,23 @@ export function Inspector(props: InspectorProps): ReactElement {
             // rows plus the per-role slices. With no live tokens yet there
             // is one quiet line and no empty bar.
             liveTokenTotal > 0 ? (
+              // FXTABS T9: used of window when the window is served; just
+              // the used count when it is not. No percent is rendered off
+              // an unknown window.
               <>
                 <div data-testid="ctx-top" className="fx-ctx-top">
-                  <p data-testid="ctx-percent">
-                    {t("shell.cards.context.percentValue", { value: percentText })}
-                  </p>
-                  <p data-testid="ctx-window">
-                    {usedText} / {windowText}
-                  </p>
+                  {windowCount !== null && windowCount > 0 ? (
+                    <>
+                      <p data-testid="ctx-percent">
+                        {t("shell.cards.context.percentValue", { value: percentText })}
+                      </p>
+                      <p data-testid="ctx-window">
+                        {usedText} / {windowText}
+                      </p>
+                    </>
+                  ) : (
+                    <p data-testid="ctx-window">{usedText}</p>
+                  )}
                 </div>
                 <p data-testid="ctx-source" className="fx-quiet">
                   {t("shell.cards.context.source")}{" "}
@@ -1137,6 +1231,9 @@ export function Inspector(props: InspectorProps): ReactElement {
                   >
                     <span
                       className="fx-legend-dot"
+                      role="img"
+                      aria-label={slice.label}
+                      title={slice.label}
                       style={{
                         backgroundColor:
                           LEGEND_COLORS[index % LEGEND_COLORS.length] ??
@@ -1206,6 +1303,9 @@ export function Inspector(props: InspectorProps): ReactElement {
                     >
                       <span
                         className="fx-legend-dot"
+                        role="img"
+                        aria-label={slice.model}
+                        title={slice.model}
                         style={{
                           backgroundColor:
                             LEGEND_COLORS[index % LEGEND_COLORS.length] ??
@@ -1254,6 +1354,7 @@ export function Inspector(props: InspectorProps): ReactElement {
               {/* FXDESIGN8: the last run's verdict plus its files, read from
                   the runs key of the ledger route; served facts only. */}
               {lastRun === null ? null : (
+                <>
                 <div data-testid="result-last" className="fx-result-row">
                   <Icon name="file" />
                   <span
@@ -1281,6 +1382,37 @@ export function Inspector(props: InspectorProps): ReactElement {
                     {t("shell.cards.results.open")}
                   </Link>
                 </div>
+                {/* H6: the run record's folder plus its produced files;
+                    Open folder shows only where the sidecar can open. */}
+                {lastRun.folder ? (
+                  <p
+                    data-testid="result-last-folder"
+                    className="fx-quiet fx-truncate"
+                    title={lastRun.folder}
+                  >
+                    {lastRun.folder}
+                  </p>
+                ) : null}
+                {lastRun.folder && openFolderOk ? (
+                  <button
+                    type="button"
+                    data-testid="result-open-folder"
+                    className="fx-btn-quiet"
+                    onClick={() => {
+                      if (lastRun.folder) {
+                        void openResultFolder(lastRun.folder);
+                      }
+                    }}
+                  >
+                    {t("shell.cards.results.openFolder")}
+                  </button>
+                ) : null}
+                {openFolderNote !== null ? (
+                  <p data-testid="result-open-folder-note" className="fx-quiet">
+                    {openFolderNote}
+                  </p>
+                ) : null}
+                </>
               )}
               {lastRunFiles.length === 0 ? null : (
                 <ul data-testid="result-last-files" className="fx-bg-list">
@@ -1418,18 +1550,59 @@ export function Inspector(props: InspectorProps): ReactElement {
                   ? t("shell.cards.watcher.ok")
                   : t("shell.cards.watcher.failed")}
               </p>
-              <p data-testid="watcher-model">
-                {t("watcher.tab.model")}: {watcherModelName(watcherModel)}
-                {" \u00b7 "}
-                {t("watcher.tab.cloudFallback")}{" "}
-                {watcherSettings.cloudFallback
-                  ? t("projects.tests.local.on")
-                  : t("projects.tests.local.off")}
+              <p data-testid="watcher-watches">
+                {t("shell.cards.watcher.watches")}{": "}
+                {typeof watcherStatus.watched_runs === "number"
+                  ? formatNumber(watcherStatus.watched_runs)
+                  : t("watcher.tab.notKnown")}{" "}
+                runs ·{" "}
+                {typeof watcherStatus.watched_agents === "number"
+                  ? formatNumber(watcherStatus.watched_agents)
+                  : t("watcher.tab.notKnown")}{" "}
+                agents
               </p>
-              <p data-testid="watcher-action">
-                {t("shell.cards.team.lastAction")}: {watcherActionId}
+              <p data-testid="watcher-checks">
+                {t("shell.cards.watcher.checks")}{": "}
+                {typeof watcherStatus.checks_done === "number"
+                  ? formatNumber(watcherStatus.checks_done)
+                  : t("watcher.tab.notKnown")}{" "}
+                · {t("shell.cards.watcher.alerts")}{": "}
+                {typeof watcherStatus.alerts_raised === "number"
+                  ? formatNumber(watcherStatus.alerts_raised)
+                  : t("watcher.tab.notKnown")}{" "}
+                · {t("shell.cards.watcher.lastCheck")}{": "}
+                {watcherStatus.last_check_at
+                  ? formatDateTime(watcherStatus.last_check_at)
+                  : t("watcher.tab.notKnown")}
+              </p>
+              <p data-testid="watcher-model">
+                {t("watcher.tab.model")}:{" "}
+                {watcherModelName(effectiveWatcherModel)}
                 {" \u00b7 "}
-                {formatDateTime(watcherActionAt)}
+                {t("shell.cards.watcher.calls")}{": "}
+                {typeof watcherStatus.watcher_calls === "number"
+                  ? formatNumber(watcherStatus.watcher_calls)
+                  : t("watcher.tab.notKnown")}{" "}
+                ·{" "}
+                {typeof watcherStatus.watcher_tokens === "number"
+                  ? formatNumber(watcherStatus.watcher_tokens)
+                  : t("watcher.tab.notKnown")}{" "}
+                tokens
+              </p>
+              {/* FXTABS T9: the last action reads as plain words plus the
+                  local time; the raw journal id rides the tooltip only. */}
+              <p
+                data-testid="watcher-action"
+                title={watcherActionId === DASH ? undefined : watcherActionId}
+              >
+                {t("shell.cards.team.lastAction")}:{" "}
+                {describeLastAction(watcherStatus.last_action)}
+                {watcherActionAt === "" ? null : (
+                  <>
+                    {" \u00b7 "}
+                    {formatDateTime(watcherActionAt)}
+                  </>
+                )}
               </p>
               <Link data-testid="watcher-open" to="/watcher">
                 {t("shell.cards.watcher.open")}
@@ -1438,6 +1611,9 @@ export function Inspector(props: InspectorProps): ReactElement {
           )}
         </section>
 
+        {/* FXTABS J7: metric cards with data render first (flex order);
+            empty ones collapse to one line. Team above never collapses. */}
+        <div style={{ order: tokensHasData ? 0 : 1 }}>
         {tokensKnown ? (
           <>
             <MetricCard
@@ -1468,7 +1644,7 @@ export function Inspector(props: InspectorProps): ReactElement {
                     }
                   : undefined
               }
-              collapsed={tokensCollapsed}
+              collapsed={tokensCollapsed || !tokensHasData}
               onToggle={onTokensToggle}
             />
             {runLive || modelSlices.length === 0 ? null : (
@@ -1518,7 +1694,7 @@ export function Inspector(props: InspectorProps): ReactElement {
               totalKey="shell.cards.tokens.total"
               totalText={unknown}
               segments={[]}
-              collapsed={tokensCollapsed}
+              collapsed={tokensCollapsed || !tokensHasData}
               onToggle={onTokensToggle}
             />
             <p data-testid="tokens-unknown" className="fx-quiet-line">
@@ -1526,6 +1702,8 @@ export function Inspector(props: InspectorProps): ReactElement {
             </p>
           </>
         )}
+        </div>
+        <div style={{ order: testsHasData ? 0 : 1 }}>
         <MetricCard
           cardId="fx-tests"
           titleKey="shell.cards.tests.title"
@@ -1533,9 +1711,11 @@ export function Inspector(props: InspectorProps): ReactElement {
           totalKey="shell.cards.tests.total"
           totalText={testsTotal}
           segments={[]}
-          collapsed={testsCollapsed}
+          collapsed={testsCollapsed || !testsHasData}
           onToggle={onTestsToggle}
         />
+        </div>
+        <div style={{ order: budgetHasData ? 0 : 1 }}>
         {/* FXTELEM: one budget block only: limit, spent, reserved and
             remaining as a single spaced list, never legend plus a repeated
             list, never glued. Spent reads the unknown-price line when no
@@ -1599,6 +1779,8 @@ export function Inspector(props: InspectorProps): ReactElement {
             </span>
           )}
         </section>
+        </div>
+        <div style={{ order: providersHasData ? 0 : 1 }}>
         <MetricCard
           cardId="fx-providers"
           titleKey="shell.cards.providers.title"
@@ -1606,9 +1788,11 @@ export function Inspector(props: InspectorProps): ReactElement {
           totalKey="shell.cards.providers.total"
           totalText={providersTotal}
           segments={[]}
-          collapsed={providersCollapsed}
+          collapsed={providersCollapsed || !providersHasData}
           onToggle={onProvidersToggle}
         />
+        </div>
+        <div style={{ order: localAiHasData ? 0 : 1 }}>
         <MetricCard
           cardId="fx-localai"
           titleKey="shell.cards.localai.title"
@@ -1616,9 +1800,11 @@ export function Inspector(props: InspectorProps): ReactElement {
           totalKey="shell.cards.localai.total"
           totalText={localAiTotal}
           segments={[]}
-          collapsed={localAiCollapsed}
+          collapsed={localAiCollapsed || !localAiHasData}
           onToggle={onLocalAiToggle}
         />
+        </div>
+        <div style={{ order: appsHasData ? 0 : 1 }}>
         <MetricCard
           cardId="fx-apps"
           titleKey="shell.cards.apps.title"
@@ -1626,9 +1812,10 @@ export function Inspector(props: InspectorProps): ReactElement {
           totalKey="shell.cards.apps.total"
           totalText={appsTotal}
           segments={[]}
-          collapsed={appsCollapsed}
+          collapsed={appsCollapsed || !appsHasData}
           onToggle={onAppsToggle}
         />
+        </div>
       </div>
     </aside>
   );

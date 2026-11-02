@@ -357,7 +357,9 @@ def test_s1a_stored_absolute_folder_used(tmp_path):
     deltas = _delta_texts(events)
     assert deltas, events[:2]
     assert deltas[0].startswith("Working folder: "), deltas[0]
-    assert str(folder) in deltas[0], deltas[0]
+    # FXOPEN O4: chat names the folder, never the host absolute path.
+    assert deltas[0] == "Working folder: %s\n" % (os.path.basename(str(folder)),), deltas[0]
+    assert str(folder) not in _all_text(events), deltas[0]
     assert factory.spy, "engine ran against the stored folder"
     record = _run_record(app, pid)
     assert record is not None
@@ -381,7 +383,9 @@ def test_s1b_absolute_missing_folder_honest(tmp_path):
     assert missing.lower() in text, text
     assert "choose in projects" in text, text
     assert factory.spy == [], "engine never ran for a missing folder"
-    assert _types(events)[-1] == "done", events[-2:]
+    # FXOPEN O6 (SH-05): the send refuses with the reason, never green.
+    assert _types(events)[-1] == "error", events[-2:]
+    assert events[-1].get("code") == "PROJECT_FOLDER_MISSING", events[-1]
 
 
 # -- S1c: non-absolute folder_ref uses the managed folder ---------------
@@ -400,7 +404,9 @@ def test_s1c_relative_folder_uses_managed(tmp_path):
     assert deltas[0].startswith("Working folder: "), deltas[0]
     managed = os.path.join(str(app.state.data_dir), "workspaces", pid)
     assert os.path.isdir(managed), managed
-    assert managed in deltas[0], deltas[0]
+    # FXOPEN O4: chat names the managed folder, never the host path.
+    assert deltas[0] == "Working folder: %s\n" % (pid,), deltas[0]
+    assert managed not in _all_text(events), deltas[0]
     assert factory.spy, "engine ran inside the managed folder"
     record = _run_record(app, pid)
     assert record is not None
@@ -438,8 +444,11 @@ def test_s2_first_message_one_project_task_stream(tmp_path):
     assert tasks.status_code == 200, tasks.text
     assert len(tasks.json()["tasks"]) == 1, tasks.json()
     text = _all_text(events)
+    # FXCLASS CA-1/CA-3/CA-4: a first run with no provider ends with the
+    # one plain line (same words on chat + Tasks), not a plan/success.
     assert ("plan" in text.lower() or "success" in text.lower()
-            or "The " in text or "run " in text), text
+            or "The " in text or "run " in text
+            or "Connect a provider first" in text), text
 
 
 # -- S3: run text is visible and newline-terminated ----------------------
@@ -820,4 +829,52 @@ def test_s9_telemetry_row_per_call(tmp_path):
         assert spent > 0, "telemetry evidence settled a real charge"
     finally:
         _kb.bind_catalog(previous)
+
+
+# -- U8: repeats stay quiet across turns; J4: no bare UNKNOWN ----------
+
+def _u8_two_turns(tmp_path):
+    project = "fxdw-u8"
+    folder = _project_dir(tmp_path, project)
+    factory = _green_factory()
+    app = _served_app(tmp_path, project, factory)
+    client = TestClient(app, raise_server_exceptions=False)
+    pid = _make_project(app, client, "u8 build it", str(folder))
+    first = _delta_texts(_parse_sse(
+        _post_chat(client, pid, "build it").text))
+    assert any(d.startswith("Working folder: ") for d in first), first
+    assert any(d.startswith("Team:") for d in first), first
+    assert any("Director: plan of" in d for d in first), first
+    second = _delta_texts(_parse_sse(
+        _post_chat(client, pid, "again").text))
+    assert second, "second turn still answers"
+    return first, second
+
+
+def test_u8_second_turn_hides_folder_and_team(tmp_path):
+    first, second = _u8_two_turns(tmp_path)
+    assert not any(
+        d.startswith("Working folder: ") for d in second), second
+    assert not any(d.startswith("Team:") for d in second), second
+    assert any("Director: plan of" in d for d in second), second
+
+
+def test_u8_check_line_names_tool_not_path(tmp_path):
+    first, _second = _u8_two_turns(tmp_path)
+    checks = [d for d in first if d.startswith("Check p1 $")]
+    assert checks, first
+    for line in checks:
+        assert ":\\" not in line, line
+        assert "findstr" not in line.lower(), line
+
+
+def test_j4_total_line_no_bare_unknown(tmp_path):
+    first, _second = _u8_two_turns(tmp_path)
+    totals = [d for d in first if "tokens; cost:" in d]
+    assert totals, first
+    assert totals == [
+        "Total: 0 input + 0 output = 0 tokens; "
+        "cost: cost not known (no price)\n"], totals
+    joined = "\n".join(first)
+    assert "UNKNOWN" not in joined, joined
 

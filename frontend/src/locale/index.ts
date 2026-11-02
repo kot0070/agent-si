@@ -1,4 +1,4 @@
-import { createContext, createElement, useContext, useEffect } from 'react';
+import { createContext, createElement, useContext, useEffect, useRef } from 'react';
 import type { ReactElement, ReactNode } from 'react';
 import en from './en.json';
 import uk from './uk.json';
@@ -88,9 +88,27 @@ export interface LocaleProviderProps {
 
 export function LocaleProvider(props: LocaleProviderProps): ReactElement {
   const locale = props.initialLocale ?? readStoredLocale() ?? DEFAULT_LOCALE;
+  // FXSAVED item 4: storage-sourced mode only (no explicit
+  // initialLocale) applies the stored locale to the module during the
+  // first render, before children render, so t() already reads it on
+  // first paint (the production main.tsx outer provider; no TopBar
+  // mounted yet). An explicit initialLocale is scoped mode: context
+  // plus persistence only, never disturbs module t (laneB.step2
+  // contract: provider with a prop must not switch the module locale).
+  const appliedRef = useRef<SupportedLocale | null>(null);
+  if (props.initialLocale === undefined && appliedRef.current !== locale) {
+    appliedRef.current = locale;
+    setLocale(locale);
+  }
   useEffect(() => {
-    persistLocale(locale);
-  }, [locale]);
+    if (props.initialLocale === undefined) {
+      setLocale(locale);
+    } else {
+      // Scoped mode: the prop persists (remounts restore it) but never
+      // switches the module t (laneB.step2 contract).
+      persistLocale(locale);
+    }
+  }, [locale, props.initialLocale]);
   return createElement(LocaleContext.Provider, { value: { locale } }, props.children);
 }
 

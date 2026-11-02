@@ -109,6 +109,14 @@ def _strict_urlopen(spy, state):
     def _fake(request, timeout=None):
         url = getattr(request, "full_url", str(request))
         try:
+            method = request.get_method()
+        except Exception:
+            method = "GET"
+        if method == "GET" and url.rstrip("/").endswith("/models"):
+            return _FakeResp({"data": [{"id": CONNECT_MODEL},
+                                        {"id": "openai/gpt-4o-mini"},
+                                        {"id": "m-golden"}]})
+        try:
             raw = request.data or b""
         except Exception:
             raw = b""
@@ -124,7 +132,7 @@ def _strict_urlopen(spy, state):
         if not isinstance(payload, dict) or not payload.get("model"):
             raise _urlreq.URLError("golden strict: bad body, no model")
         if payload.get("model") not in (CONNECT_MODEL, "openai/gpt-4o-mini",
-                                         "m-golden"):
+                                         "m-golden", "golden-model"):
             raise _urlreq.URLError("golden strict: unknown model %r"
                                    % (payload.get("model"),))
         if "messages" in payload and not payload.get("messages"):
@@ -790,8 +798,12 @@ def test_golden_04c_force_args_ask(golden):
 
 def test_golden_04d_other_project_asks(golden):
     P2 = golden.use(PROJECT2, "dock-golden-2")
+    folder = golden.folder(PROJECT2)
+    checks = os.path.join(folder, "checks")
+    os.makedirs(checks, exist_ok=True)
+    _seed(os.path.join(checks, "ping.mjs"), "process.exit(0);\n")
     other_chat = golden.chat(P2, "Install dependencies with npm install",
-                             folder=golden.folder(PROJECT2),
+                             folder=folder,
                              task="task-npm-other")
     assert other_chat.status_code == 200, other_chat.text
     assert "approval" in _types(_parse_sse(other_chat.text)), (

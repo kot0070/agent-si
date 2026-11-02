@@ -218,7 +218,10 @@ describe('G2 locale parity gate', () => {
   });
 
   it('contains no Cyrillic in en and Cyrillic copy in uk', () => {
-    expect(/[\u0400-\u04FF]/.test(JSON.stringify(en))).toBe(false);
+    // FXTABS T11: language names render natively (Українська in the en
+    // table too); the gate allowlists exactly those two name values.
+    const enText = JSON.stringify(en).replace(/Українська/g, '');
+    expect(enText).not.toMatch(/[\u0400-\u04FF]/);
     expect(/[\u0400-\u04FF]/.test(JSON.stringify(uk))).toBe(true);
     for (const value of leafValues(uk as unknown as Nested)) {
       expect(value.length).toBeGreaterThan(0);

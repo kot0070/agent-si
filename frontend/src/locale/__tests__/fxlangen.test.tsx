@@ -78,4 +78,31 @@ describe("fxlangen default English", () => {
     expect(t("shell.topbar.language")).toBe(uk.shell.topbar.language);
     expect(t("tasks.creator.title")).toBe(uk.tasks.creator.title);
   });
+
+  it("names the languages in words, never raw codes", async () => {
+    renderTopBar();
+    const select = await screen.findByTestId("topbar-language");
+    const options = Array.from(
+      (select as HTMLSelectElement).options,
+    );
+    expect(options.map((option) => option.value)).toEqual(["en", "uk"]);
+    const labels = options.map((option) => option.text);
+    expect(labels).toContain("English");
+    expect(labels).toContain("Українська");
+    expect(labels).not.toContain("en");
+    expect(labels).not.toContain("uk");
+  });
+
+  it("uk locale names both languages in words", async () => {
+    window.localStorage.setItem(LOCALE_STORAGE_KEY, "uk");
+    renderTopBar();
+    const select = await screen.findByTestId("topbar-language");
+    const labels = Array.from(
+      (select as HTMLSelectElement).options,
+    ).map((option) => option.text);
+    expect(labels).toContain("English");
+    expect(labels).toContain("Українська");
+    expect(labels).not.toContain("en");
+    expect(labels).not.toContain("uk");
+  });
 });

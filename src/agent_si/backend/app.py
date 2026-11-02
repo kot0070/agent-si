@@ -519,6 +519,33 @@ def create_app(settings: Any = None,
 
     app.state.ledger_for = ledger_for
 
+    # FXLOG: rotating data-dir file log (logs/agent-si.log) plus the
+    # FastAPI 500 handler. Unhandled route failures are logged with a
+    # redacted traceback and answered as generic JSON (never a leak).
+    try:
+        from agent_si import file_log as _file_log
+
+        _file_log.install(_k10_data_dir, version="agent-si")
+    except Exception:
+        pass
+
+    @app.exception_handler(Exception)
+    async def _filelog_unhandled(request: Request, exc: Exception):
+        try:
+            from agent_si import file_log as _file_log
+
+            _file_log.log_exception(
+                "request %s %s" % (request.method,
+                                   getattr(request.url, "path", "?")),
+                "-", exc)
+        except Exception:
+            pass
+        return _K04JSONResponse(
+            status_code=500,
+            content={"code": "INTERNAL",
+                     "message": "Something went wrong. Try again."})
+
+
     @app.get("/api/v1/agents/live")
     def agents_live() -> dict[str, Any]:
         from agent_si.backend.agents_live import live_rows as _live_rows
@@ -777,10 +804,13 @@ def create_app(settings: Any = None,
         return isinstance(token, str) and bool(token) and token == app_token
 
     if _k08_auth is not None:
-        _k08_automation_routes.configure(_k08_auth, _k08_rate, _k08_factory)
+        _k08_automation_routes.configure(
+            _k08_auth, _k08_rate, _k08_factory,
+            budget_hook=_k08_automation_routes.real_budget_check)
     else:
         _k08_automation_routes.configure(
-            lambda token: token == app_token, _k08_rate, _k08_factory
+            lambda token: token == app_token, _k08_rate, _k08_factory,
+            budget_hook=_k08_automation_routes.real_budget_check
         )
 
     def _k08_drop_token(fn):
@@ -946,6 +976,19 @@ def create_app(settings: Any = None,
     _localbench_routes.register_localbench_routes(app)
     _stage_runner.register_stage_routes(app)
 
+    # FXR2E-4: mount the k05next_a + k05next_b proof routers (10 POST
+    # routes, pure verdicts over the request payload, no clash with any
+    # served path). k05rest_a is NOT mounted: its
+    # POST /api/v1/local/mvp-accept-50/serve and
+    # POST /api/v1/local/mvp-accept-53/serve duplicate k05next_b's
+    # same-path handlers (k05rest-a-1 vs k05next-b-1), so mounting the
+    # router would double-register two paths; it stays test-mounted.
+    from agent_si.local import k05next_a as _fxr2e_k05next_a
+    from agent_si.local import k05next_b as _fxr2e_k05next_b
+
+    app.include_router(_fxr2e_k05next_a.router)
+    app.include_router(_fxr2e_k05next_b.router)
+
     from agent_si.backend import assurance_mount as _k03mnt1_assurance_mount
 
     _k03mnt1_assurance_mount.register_assurance_routes(app)
@@ -1051,6 +1094,13 @@ def create_app(settings: Any = None,
     from agent_si.backend import parallelparts_routes as _fxpar_parallel
 
     _fxpar_parallel.register_parallelparts_routes(app)
+
+    # FXTEAM M2 team switch (additions-only): per-project "Team: on/off",
+    # default on, GET+PUT surface plus devrun_team.json persistence owned
+    # by teammode_routes; no existing surface above changes.
+    from agent_si.backend import teammode_routes as _fxteam_mode
+
+    _fxteam_mode.register_teammode_routes(app)
 
     # OC-K02 R-302/R-333 (additions-only): hierarchy run + control-plane
     # map and the routine-offload switch surface; no existing line above
@@ -1430,6 +1480,26 @@ def create_app(settings: Any = None,
                         continue
             except Exception:
                 pass
+    # RC5 reopen proof: log the resolved data dir plus the rebound
+    # provider count at every start, so a "key gone after reopen"
+    # report names the dir and the count in the file log.
+    try:
+        from agent_si import file_log as _boot_log
+
+        import logging as _boot_logging
+
+        _boot_bound = []
+        try:
+            _boot_api = getattr(_k04_ctx, "provider_facade", None)
+            _boot_bound = [str(_pid) for _pid in (
+                getattr(_boot_api, "_providers", None) or {})]
+        except Exception:
+            _boot_bound = []
+        _boot_logging.getLogger("agent_si.boot").info(
+            "start: data_dir=%s connections=%d providers=%s",
+            _k04_dir, len(_boot_bound), ",".join(sorted(_boot_bound)))
+    except Exception:
+        pass
     app.state.k04_ctx = _k04_ctx
     app.state.k04_config_error = _k04_config_error
     # M-WIRE L0B-12: bind the routed provider adapter at app start via
@@ -1651,7 +1721,7 @@ def create_app(settings: Any = None,
                     "code": _PROVCK2_CODES["store-read"],
                     "store_attempts": _store_attempts,
                 })
-                return (False, _PROVCK2_STORE_REASON)
+                return (False, _PROVCK2_STORE_REASON, "store-read", None)
             _real = _cs._gateway_transport(base_url, _store, secret_map)
             _seen: dict = {}
 
@@ -1766,7 +1836,8 @@ def create_app(settings: Any = None,
                         "code": _PROVCK2_CODES["probe-timeout"],
                         "store_attempts": _store_attempts,
                     })
-                    return (False, "evidence probe timed out after 10s")
+                    return (False, "evidence probe timed out after 10s",
+                            "probe-timeout", None)
             _state = ""
             try:
                 _state = str((_cap or {}).get("state", "") or "")
@@ -1781,7 +1852,7 @@ def create_app(settings: Any = None,
                     "code": _PROVCK2_CODES["ok"],
                     "store_attempts": _store_attempts,
                 })
-                return (True, "")
+                return (True, "", "ok", None)
             # PROVCK2 classification: fixed codes only, never exception
             # text (KEYECHO1). HTTP carries the int status; the store-read
             # class carries its own surfaced reason; network and unknown
@@ -1826,7 +1897,7 @@ def create_app(settings: Any = None,
                    if _http_status is not None else {}),
                 "store_attempts": _store_attempts,
             })
-            return (False, _k04bind_scrub(_reason))
+            return (False, _k04bind_scrub(_reason), _cls, _http_status)
         except Exception:
             try:
                 _provck2_audit({
@@ -1839,7 +1910,7 @@ def create_app(settings: Any = None,
                 })
             except Exception:
                 pass
-            return (False, "provider check failed")
+            return (False, "provider check failed", "unknown", None)
 
     def _k04bind_rebind(force_clear: bool = False,
                         only_provider: str | None = None) -> None:
@@ -1991,10 +2062,84 @@ def create_app(settings: Any = None,
                         except Exception:
                             pass
                         if _burl and _smap:
-                            _ok, _reason = _k04bind_evidence(
+                            _ok, _reason, _cls, _hstatus = _k04bind_evidence(
                                 _pid, _inst, _model, _burl, _smap)
-                            try:
-                                if _ok:
+                            if not _ok:
+                                # Refused evidence: never Connected. Drop the
+                                # just-registered provider plus its saved key
+                                # (facade remove clears both; a missing entry
+                                # still drops the in-memory record), persist,
+                                # and answer the mapped refusal (never 200).
+                                try:
+                                    _api.remove_provider(_pid)
+                                except ValueError as _drop_exc:
+                                    try:
+                                        from agent_si.providers.registry import (
+                                            provider_api as _drop_api)
+                                        if (_drop_api.CREDENTIAL_ENTRY_MISSING
+                                                in str(_drop_exc)):
+                                            _drop_providers = getattr(
+                                                _api, "_providers", None)
+                                            try:
+                                                if isinstance(
+                                                        _drop_providers,
+                                                        dict):
+                                                    _drop_providers.pop(
+                                                        _pid, None)
+                                            except Exception:
+                                                pass
+                                            try:
+                                                _drop_errors = getattr(
+                                                    _api, "_errors", None)
+                                                if isinstance(
+                                                        _drop_errors, dict):
+                                                    for _key in [
+                                                            key for key in
+                                                            _drop_errors
+                                                            if key[0] == _pid
+                                                    ]:
+                                                        del _drop_errors[_key]
+                                            except Exception:
+                                                pass
+                                    except Exception:
+                                        pass
+                                except Exception:
+                                    pass
+                                try:
+                                    _k04bind_save()
+                                except Exception:
+                                    pass
+                                try:
+                                    _k04bind_rebind(force_clear=True,
+                                                    only_provider=_pid)
+                                except Exception:
+                                    pass
+                                if _hstatus in (401, 403):
+                                    _status = 401
+                                    _payload = {
+                                        "code": "PROVIDER_KEY_REFUSED",
+                                        "message": ("The provider refused "
+                                                    "this key. Paste the "
+                                                    "full key again.")}
+                                elif _cls in ("network", "probe-timeout"):
+                                    _status = 503
+                                    _payload = {
+                                        "code": "EVIDENCE_PROBE_NETWORK",
+                                        "message": ("Could not reach "
+                                                    "the provider.")}
+                                elif _cls == "store-read":
+                                    _status = 503
+                                    _payload = {
+                                        "code": ("CREDENTIAL_STORE_"
+                                                 "UNAVAILABLE"),
+                                        "message": str(_reason)}
+                                else:
+                                    _status = 400
+                                    _payload = {
+                                        "code": "PROVIDER_CHECK_FAILED",
+                                        "message": str(_reason)}
+                            else:
+                                try:
                                     import datetime as _dt
                                     _eref = "connect-probe:%s/%s:%s" % (
                                         _pid, _inst,
@@ -2014,36 +2159,33 @@ def create_app(settings: Any = None,
                                                            "ONLINE")
                                     except Exception:
                                         pass
-                                else:
-                                    try:
-                                        _api.set_provider_error(
-                                            _pid, _inst, _reason)
-                                    except Exception:
-                                        pass
-                            except Exception:
-                                pass
-                            try:
-                                _fresh = _api.get_provider(_pid)
-                                if _fresh is not None:
-                                    _payload = {"provider": _fresh.describe()}
-                                    try:
-                                        _err2 = _api.get_provider_error(_pid)
-                                        if _err2:
-                                            _payload["error"] = _err2
-                                    except Exception:
-                                        pass
-                            except Exception:
-                                pass
-                            try:
-                                _k04bind_save()
-                            except Exception:
-                                pass
-                            try:
-                                if _fresh is not None and getattr(
-                                        _fresh, "evidenced", False):
-                                    _k04bind_rebind()
-                            except Exception:
-                                pass
+                                except Exception:
+                                    pass
+                                try:
+                                    _fresh = _api.get_provider(_pid)
+                                    if _fresh is not None:
+                                        _payload = {"provider":
+                                                    _fresh.describe()}
+                                        try:
+                                            _err2 = _api.get_provider_error(
+                                                _pid)
+                                            if _err2:
+                                                _payload["error"] = _err2
+                                        except Exception:
+                                            pass
+                                except Exception:
+                                    pass
+                                try:
+                                    _k04bind_save()
+                                except Exception:
+                                    pass
+                                try:
+                                    _fresh_ok = _api.get_provider(_pid)
+                                    if _fresh_ok is not None and getattr(
+                                            _fresh_ok, "evidenced", False):
+                                        _k04bind_rebind()
+                                except Exception:
+                                    pass
                         else:
                             try:
                                 _k04bind_save()
@@ -2097,6 +2239,11 @@ def create_app(settings: Any = None,
             _k04_make_endpoint(_k04_keys.save_key, True, "save_key"),
             methods=["POST"],
             name="k04_save_key")
+        app.add_api_route(
+            "/api/v1/providers/keys/check",
+            _k04_make_endpoint(_k04_keys.check_key, True, "check_key"),
+            methods=["POST"],
+            name="k04_check_key")
     except Exception:
         pass
 
@@ -2450,8 +2597,9 @@ def create_app(settings: Any = None,
                 "approved_by_user") is not True:
             raise HTTPException(
                 status_code=400,
-                detail="KB update needs explicit approval with body "
-                       + _FXKB_UPDATE_APPROVAL_SHAPE)
+                detail={"code": "KB_PROPOSAL_NOT_APPROVED",
+                        "message": "KB update needs explicit approval "
+                        "with body " + _FXKB_UPDATE_APPROVAL_SHAPE})
         try:
             from agent_si.backend import routing_auto as _fxkb_auto
             from agent_si.model_kb import kb as _fxkb_kb
@@ -2467,7 +2615,9 @@ def create_app(settings: Any = None,
         if not _online:
             raise HTTPException(
                 status_code=409,
-                detail="KB update refused: no ONLINE provider connected")
+                detail={"code": "KB_VALIDATION_FAILED",
+                        "message": "KB update refused: no ONLINE "
+                        "provider connected"})
         try:
             _records = _fxkb_store.load_connections(_k04_dir)
         except Exception:
@@ -2488,8 +2638,9 @@ def create_app(settings: Any = None,
         if not _pairs:
             raise HTTPException(
                 status_code=409,
-                detail="KB update refused: connected providers carry "
-                       "no model to source")
+                detail={"code": "KB_VALIDATION_FAILED",
+                        "message": "KB update refused: connected "
+                        "providers carry no model to source"})
         _staged = _fxkb_loader.staged_section_rows()
         _envelopes = _fxkb_loader.STAGED_PROVIDER_ENVELOPES
         _retrieved = _fxkb_loader.STAGED_SECTIONS_RETRIEVED_AT
@@ -2518,8 +2669,9 @@ def create_app(settings: Any = None,
         if not _entries:
             raise HTTPException(
                 status_code=409,
-                detail="KB update refused: no staged source on file "
-                       "for the connected providers")
+                detail={"code": "KB_VALIDATION_FAILED",
+                        "message": "KB update refused: no staged source "
+                        "on file for the connected providers"})
         _envelope = _envelopes.get(sorted(_have)[0]) or (
             _fxkb_updater.KB_SOURCE_ALLOWLIST[0])
         import datetime as _fxkb_datetime
@@ -2531,8 +2683,9 @@ def create_app(settings: Any = None,
         _errors = _fxkb_updater.validate_proposal(_catalog, _proposal)
         if _errors:
             raise HTTPException(status_code=400,
-                                detail="KB update rejected: %s"
-                                % ("; ".join(_errors),))
+                                detail={"code": "KB_VALIDATION_FAILED",
+                                        "message": "KB update rejected: %s"
+                                        % ("; ".join(_errors),)})
         if not _proposal["changes"] and not _proposal.get("added"):
             return {"applied": False,
                     "kb_version": _catalog["version"].get("kb_version"),

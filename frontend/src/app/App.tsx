@@ -54,6 +54,7 @@ import { ThemeToggle } from "../shell/ThemeToggle";
 import { ContractDefaultsBar } from "../settings/ContractDefaultsBar";
 import { Inspector } from "../shell/Inspector";
 import { ClosingGuard } from "../shell/ClosingGuard";
+import { useLivePumpActive } from "../chat/index";
 import type { ProjectViewName } from "../projects/ProjectView";
 import { LocaleCoverage } from "../k07next/LocaleCoverage";
 import { TelemetryThemes } from "../k07next/TelemetryThemes";
@@ -179,8 +180,6 @@ function LocalAiStoredPanel(): ReactElement {
           ))}
         </ul>
       )}
-      <p data-testid="localai-endpoint-label">{t("settings.localAi.title")}</p>
-      <p data-testid="localai-endpoint">{ENDPOINTS.agentsLive}</p>
       <LocalBenchDecisionList decisions={stored.decisions} />
     </div>
   );
@@ -281,6 +280,7 @@ function ChatStartBox(props: {
           {t("chat.composer.prompt")}
           <input
             data-testid="chat-prompt"
+            id="chat-prompt"
             type="text"
             placeholder={t("chat.composer.prompt")}
             aria-label={t("chat.composer.prompt")}
@@ -692,6 +692,8 @@ function FirstRunRoute(props: {
 function AppShellInner(): ReactElement {
   const current = useCurrentProject();
   const projectId = current.projectId;
+  // FXSAVED item 5: arm the close warning while any chat pump streams.
+  const livePump = useLivePumpActive();
   const [chatPrefill, setChatPrefill] = useState<string | null>(null);
   const [chatOneShot, setChatOneShot] = useState<{
     projectId: string;
@@ -702,10 +704,17 @@ function AppShellInner(): ReactElement {
       {/* FXKITUI-FIRSTRUN-BEGIN */}
       <FirstRunGate />
       {/* FXKITUI-FIRSTRUN-END */}
+      {/* J11: skip link first in tab order; the composer input carries
+          the matching id on every route. */}
+      <a data-testid="skip-to-composer" href="#chat-prompt">
+        {t("shell.skipToComposer")}
+      </a>
       <TopBar projectId={projectId} />
-      <Sidebar projectId={projectId} />
+      {/* J11: the centre column sits before either rail in DOM order, so
+          keyboard tabbing reads the working area before the rails. The
+          grid areas keep the visuals unchanged. */}
       <main data-testid="app-main">
-        <ClosingGuard armed={false} confirmKey="shell.closing.confirm">
+        <ClosingGuard armed={livePump} confirmKey="shell.closing.confirm">
           <Suspense
             fallback={<LoadingState loadingKey="ui.loading.more" />}
           >
@@ -814,6 +823,7 @@ function AppShellInner(): ReactElement {
           </Suspense>
         </ClosingGuard>
       </main>
+      <Sidebar projectId={projectId} />
       <Inspector
         projectId={projectId}
         // W9: single agents-live source. The route view owns the one
@@ -831,15 +841,25 @@ function AppShell(): ReactElement {
   // FXPROJ J1: first selection rides the shared list load in the same
   // tick (no extra fetch, no extra render hop). Later loads never
   // reselect: the ref guards the null case at call time.
+  // FXSAVED item 3: a stored pick restores as-is (ApiClientProvider
+  // inits from the same localStorage); a stored id of a deleted
+  // project is a ghost: fall back to rows[0] and rewrite the store
+  // through select. No second clear here: FXOPEN owns
+  // CurrentProject.clear() (SH-04) and reuses this same key.
   const selectionRef = useRef(current.projectId);
   selectionRef.current = current.projectId;
   const selectFirst = useCallback(
     (rows: ProjectRecord[]) => {
-      if (selectionRef.current !== null) {
+      const first = rows[0];
+      if (first === undefined) {
         return;
       }
-      const first = rows[0];
-      if (first !== undefined) {
+      const stored = selectionRef.current;
+      if (stored === null) {
+        current.select(first.project_id);
+        return;
+      }
+      if (!rows.some((row) => row.project_id === stored)) {
         current.select(first.project_id);
       }
     },

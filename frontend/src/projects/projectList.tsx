@@ -45,6 +45,12 @@ function useOptionalPathname(): string {
 // as the standalone fallback so area tests and embeds that mount
 // Sidebar/ProjectsPage without the shell provider keep working with
 // their own fetch instead of throwing.
+// CRAWL-8: the first load is bounded — a fetch that never settles
+// (live poll starving in-page fetch) must not spin the rail forever.
+// After FIRST_LOAD_TIMEOUT_MS the pending first load reports a
+// retryable failure instead of an endless loader.
+const FIRST_LOAD_TIMEOUT_MS = 10000;
+
 function useProjectListState(
   enabled: boolean,
   onLoad?: (rows: ProjectRecord[]) => void,
@@ -57,6 +63,10 @@ function useProjectListState(
   // Latest callback without refetching when the parent re-renders.
   const onLoadRef = useRef(onLoad);
   onLoadRef.current = onLoad;
+  // Current rows for the load timeout: a hanging refresh must never
+  // wipe already-served rows, only a hanging first load errors.
+  const projectsRef = useRef(projects);
+  projectsRef.current = projects;
 
   const refresh = useCallback(() => {
     setNonce((value) => value + 1);
@@ -67,23 +77,35 @@ function useProjectListState(
       return;
     }
     let alive = true;
+    let settled = false;
     async function load(): Promise<void> {
       try {
         const next = await client.listProjects();
         if (alive) {
+          settled = true;
           setProjects(next);
           setFailure(null);
           onLoadRef.current?.(next);
         }
       } catch (error) {
         if (alive) {
+          settled = true;
           setFailure(toFailure(error));
         }
       }
     }
     void load();
+    // Bound the first load: a hanging fetch resolves the rail to a
+    // retryable failure instead of an endless spinner.
+    const timeout = setTimeout(() => {
+      if (alive && !settled && projectsRef.current === null) {
+        settled = true;
+        setFailure({ errorKey: "errors.generic", code: "CONTEXT_MISSING" });
+      }
+    }, FIRST_LOAD_TIMEOUT_MS);
     return () => {
       alive = false;
+      clearTimeout(timeout);
     };
   }, [client, pathname, nonce, enabled]);
 

@@ -122,6 +122,13 @@ def test_smoke_committed_all_pass():
         assert check["exit_code"] == 0, check["name"]
 
 
+NEEDS_EXE = pytest.mark.skip(
+    reason="needs-exe: proves the shipped bundle layout (exe/manifest/"
+    "portable zip are lane outputs); runs in the PRE-RC harness against "
+    "the built exe, not in the source suite")
+
+
+@NEEDS_EXE
 def test_hash_chain_x4_exe_manifest_hash_canonical():
     """Exe sha matches across file, MANIFEST entry, HASH, canonical."""
     manifest = load_json(MANIFEST_PATH)
@@ -173,6 +180,7 @@ def test_notices_name_frozen_bundle_components():
         assert component in text, f"notices miss {component}"
 
 
+@NEEDS_EXE
 def test_portable_bundle_layout():
     """Portable zip plus hidden-window launcher plus staged copies."""
     assert PORTABLE_ZIP.is_file() and PORTABLE_ZIP.stat().st_size > 0
@@ -267,6 +275,7 @@ def _scan_store_for_secrets(store_dir):
     return hits
 
 
+@NEEDS_EXE
 @pytest.mark.timeout(290)
 def test_live_frozen_exe_clean_profile_fresh_store(tmp_path):
     """Frozen exe boots clean, serves, keeps a secret-free store."""
@@ -308,6 +317,7 @@ def test_live_frozen_exe_clean_profile_fresh_store(tmp_path):
     assert proc.returncode is not None
 
 
+@NEEDS_EXE
 def test_portable_launcher_dryrun_clean_install(tmp_path):
     """Held launcher DryRun on real bundle bytes: empty data, marker."""
     if POWERSHELL is None:

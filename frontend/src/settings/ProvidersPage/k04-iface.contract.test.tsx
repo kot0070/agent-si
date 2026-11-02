@@ -134,8 +134,11 @@ describe("k04-iface ConnectDialog contract", () => {
         />,
       );
       fireEvent.change(screen.getByLabelText("API key"), { target: { value: "sk-test" } });
+      // FXR2E two-step (416ddaa, merged 0661228): Check before Save.
+      fireEvent.click(screen.getByText("Check"));
+      expect(await screen.findByText("Key checked. Save to connect.")).toBeTruthy();
       fireEvent.click(screen.getByText("Save"));
-      expect(await screen.findByText(/Reference saved/)).toBeTruthy();
+      expect(await screen.findByText("Connected OpenAI.")).toBeTruthy();
       expect(onConnected).toHaveBeenCalledTimes(1);
       expect(onConnected.mock.calls[0][0]).toBe("openai");
     } finally {
@@ -158,7 +161,8 @@ describe("k04-iface ConnectDialog contract", () => {
       />,
     );
     fireEvent.change(screen.getByLabelText("API key"), { target: { value: "sk-test" } });
-    fireEvent.click(screen.getByText("Save"));
+    // FXR2E two-step: the mismatch refuses at Check (Save never enables).
+    fireEvent.click(screen.getByText("Check"));
     expect(await screen.findByText(/Refused: preset mismatch/)).toBeTruthy();
     expect(saveSpy).not.toHaveBeenCalled();
     expect(onConnected).not.toHaveBeenCalled();

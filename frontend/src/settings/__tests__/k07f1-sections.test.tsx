@@ -5,17 +5,8 @@ import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { ApiClientProvider } from "../../app/ApiClientProvider";
 import { HttpApiClient } from "../../api/client";
 import { FakeApiClient } from "../../api/__tests__/fakeApiClient";
-import { ENDPOINTS } from "../../api/endpoints";
 import { App } from "../../app/App";
 import { resetLocaleForTests, setLocale, t } from "../../locale/index";
-import en from "../../locale/en.json";
-import uk from "../../locale/uk.json";
-
-type LocalAiTable = { settings: { localAi: { title: string } } };
-const EN_ENDPOINT_LABEL = (en as unknown as LocalAiTable).settings.localAi
-  .title;
-const UK_ENDPOINT_LABEL = (uk as unknown as LocalAiTable).settings.localAi
-  .title;
 
 beforeEach(() => {
   resetLocaleForTests();
@@ -78,31 +69,20 @@ describe("settings project section keeps its editors", () => {
   });
 });
 
-describe("settings localAI section labels the endpoint", () => {
-  it("shows a locale label while the endpoint value stays exact", async () => {
+describe("settings localAI section shows no raw route", () => {
+  it("shows stored config with no endpoint paragraph", async () => {
     renderAppAt("/settings/localAI");
     expect(await screen.findByTestId("localai-stored")).toBeTruthy();
-    expect(screen.getByTestId("localai-endpoint-label").textContent).toBe(
-      EN_ENDPOINT_LABEL,
-    );
-    expect(screen.getByTestId("localai-endpoint").textContent).toBe(
-      ENDPOINTS.agentsLive,
-    );
-    expect(screen.getByTestId("localai-endpoint-label").textContent).not.toBe(
-      ENDPOINTS.agentsLive,
-    );
+    expect(screen.queryByTestId("localai-endpoint-label")).toBeNull();
+    expect(screen.queryByTestId("localai-endpoint")).toBeNull();
   });
 
-  it("renders the uk endpoint label through the locale", async () => {
+  it("renders the uk section with no endpoint paragraph", async () => {
     setLocale("uk");
     renderAppAt("/settings/localAI");
     expect(await screen.findByTestId("localai-stored")).toBeTruthy();
-    expect(screen.getByTestId("localai-endpoint-label").textContent).toBe(
-      UK_ENDPOINT_LABEL,
-    );
-    expect(screen.getByTestId("localai-endpoint").textContent).toBe(
-      ENDPOINTS.agentsLive,
-    );
+    expect(screen.queryByTestId("localai-endpoint-label")).toBeNull();
+    expect(screen.queryByTestId("localai-endpoint")).toBeNull();
   });
 });
 

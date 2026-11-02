@@ -3,6 +3,7 @@
    custom props; base.css and shell.css consume var(--fx-*) only. */
 :root,
 [data-theme="dark"] {
+  color-scheme: dark;
   --agent-si-surface: #14161a;
   --agent-si-ink: #f2f4f8;
   --agent-si-accent: #6aa8ff;
@@ -23,14 +24,19 @@
   --fx-link: #6aa8ff;
   --fx-btn-primary-bg: #2f6fed;
   --fx-btn-primary-ink: #ffffff;
+  /* Y1: hover/active stay >=4.5:1 against white ink in the dark theme. */
+  --fx-btn-primary-hover: #2052c8;
   --fx-btn-quiet-ink: #f2f4f8;
   --fx-focus-ring: #6aa8ff;
   --fx-danger: #ff8a80;
   --fx-danger-ink: #ffffff;
   --fx-danger-fill: #b3261e;
+  /* J12: placeholder text clears 4.5:1 on the dark input surface. */
+  --fx-placeholder: #a9b4c2;
 }
 
 [data-theme="light"] {
+  color-scheme: light;
   --agent-si-surface: #ffffff;
   --agent-si-ink: #16181d;
   --agent-si-accent: #2456c6;
@@ -48,9 +54,23 @@
   --fx-link: #2456c6;
   --fx-btn-primary-bg: #2456c6;
   --fx-btn-primary-ink: #ffffff;
+  /* Y1: hover/active stay >=4.5:1 against white ink in the light theme. */
+  --fx-btn-primary-hover: #1a44a6;
   --fx-btn-quiet-ink: #16181d;
   --fx-focus-ring: #2456c6;
   --fx-danger: #b3261e;
   --fx-danger-ink: #ffffff;
   --fx-danger-fill: #b3261e;
+  /* J12: placeholder text clears 4.5:1 on the light input surface. */
+  --fx-placeholder: #57606e;
+}
+
+/* U12: native select popups ignore control styling and follow
+   color-scheme + option colors. One token rule covers every native
+   select (language, project, mode, model, strategy, watcher) so the
+   hovered and selected option text stays readable in dark + light. */
+select option,
+select optgroup {
+  background-color: var(--fx-input-bg);
+  color: var(--fx-ink);
 }

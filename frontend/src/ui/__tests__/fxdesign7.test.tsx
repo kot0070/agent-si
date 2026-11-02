@@ -110,11 +110,40 @@ afterEach(() => {
 });
 
 describe("fxdesign7 top bar", () => {
-  it("stop-all keeps its scope label and danger wiring", async () => {
+  it("stop-all is quiet and disabled with a reason when nothing runs", async () => {
     renderAppAt("/");
     const stop = await screen.findByTestId("topbar-stop-all");
+    await waitFor(() => {
+      expect((stop as HTMLButtonElement).disabled).toBe(true);
+    });
     expect(stop.textContent).toBe(t("shell.topbar.stop_all"));
-    expect(stop.className).toContain("fx-stop-danger");
+    expect(stop.getAttribute("title")).toBe(t("shell.topbar.stop_all_idle"));
+    expect(stop.className).toContain("fx-btn-quiet");
+  });
+
+  it("stop-all turns red with a live run", async () => {
+    vi.unstubAllGlobals();
+    vi.stubGlobal("fetch", async (input: unknown) => {
+      const url = String(input);
+      if (url === "/api/v1/agents/live") {
+        return jsonBody({
+          agents: [
+            {
+              agent: "a-1",
+              scope: "s-1",
+              deliverable: "d-1",
+              status: "RUNNING",
+            },
+          ],
+        });
+      }
+      return jsonBody({ code: "FXDESIGN7_UNEXPECTED_API" }, 404);
+    });
+    renderAppAt("/");
+    const stop = await screen.findByTestId("topbar-stop-all");
+    await waitFor(() => {
+      expect(stop.className).toContain("fx-stop-danger");
+    });
   });
 
   it("project and language selects stay labelled", async () => {
@@ -173,12 +202,11 @@ describe("fxdesign7 role profile", () => {
 });
 
 describe("fxdesign7 providers", () => {
-  it("every card carries a cap line and the key-only note", async () => {
+  it("cards carry no lone dash line, only the key-only note", async () => {
     render(<ProvidersPage project_id="p1" />);
     const cards = await screen.findAllByTestId("provider-card");
     expect(cards.length).toBeGreaterThan(0);
-    const caps = document.querySelector('[data-testid^="provider-caps-"]');
-    expect(caps?.textContent?.length).toBeGreaterThan(0);
+    expect(document.querySelector('[data-testid^="provider-caps-"]')).toBeNull();
     const keynote = document.querySelector(
       '[data-testid^="provider-keynote-"]',
     );
@@ -309,6 +337,9 @@ describe("fxdesign7 inspector deferred", () => {
             integrity_ok: true,
             journal_head: "jh-1",
             generated_at: "t-0",
+            last_action:
+              "rule-tamper BLOCK model=fx-local-1 action=scripts/tamper_check.py",
+            last_check_at: "2026-02-11T06:42:44Z",
           });
         }
         if (
@@ -388,18 +419,22 @@ describe("fxdesign7 inspector deferred", () => {
     expect(screen.queryByTestId("ctx-percent")).toBeNull();
   });
 
-  it("watcher model is human with fallback state; action is local time", async () => {
+  it("watcher model is human with fallback state; action is plain words", async () => {
     stubInspector(LIVE_KNOWN);
     const { router } = renderInspectorAt();
     await openProject(router);
     const model = await screen.findByTestId("watcher-model");
-    expect(model.textContent).toContain(t("watcher.tab.modelLocal"));
-    expect(model.textContent).not.toContain("local");
-    expect(model.textContent).not.toContain("Configured model");
+    // FXTABS T9: settings say local but no local model is served, so the
+    // rail names what is really used (API/cloud fallback doing the work).
+    expect(model.textContent).toContain(t("watcher.tab.modelApi"));
+    expect(model.textContent).not.toContain(t("watcher.tab.modelLocal"));
     const action = await screen.findByTestId("watcher-action");
-    expect(action.textContent).toContain("e-1");
-    expect(action.textContent).toContain("2026");
-    expect(action.textContent).not.toContain("T06:42:44Z");
+    expect(action.getAttribute("title")).toBe("e-1");
+    expect(action.textContent).toContain(t("watcher.tab.actionBlocked"));
+    expect(action.textContent).not.toContain("e-1");
+    const checks = await screen.findByTestId("watcher-checks");
+    expect(checks.textContent).toContain("2026");
+    expect(checks.textContent).not.toContain("T06:42:44Z");
   });
 
   it("metric cards keep a heading toggle", async () => {

@@ -269,9 +269,11 @@ describe("FXTESTSUI row b: TestsTab counters, rows, output, empty, refresh", () 
   it("shows an empty state naming how a run starts when no run exists", async () => {
     render(<TestsTab projectId="p-empty" />);
     expect(await screen.findByTestId("tests-empty")).toBeTruthy();
-    expect(
-      (await screen.findByTestId("tests-empty-how")).textContent ?? "",
-    ).toContain("runs/start");
+    // FXOPEN O5: plain words, never the raw route.
+    const how =
+      (await screen.findByTestId("tests-empty-how")).textContent ?? "";
+    expect(how).toContain("Start a run for the latest plan");
+    expect(how).not.toMatch(/[A-Za-z]:[\\/]|\/api\//);
   });
 
   it("holds no setting control", async () => {

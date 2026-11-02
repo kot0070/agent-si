@@ -58,6 +58,9 @@ function stubServed(routes: MutableRoutes): void {
     if (match !== null) {
       return json({ provider_id: match[1], models: routes.models[match[1] as string] ?? [] });
     }
+    if (url === "/api/v1/providers/keys/check") {
+      return json({ ok: true }, 200);
+    }
     if (url === "/api/v1/providers/keys") {
       return json({ key_ref: { secret_id: "fx", provider_id: "fx" } }, 201);
     }
@@ -114,20 +117,22 @@ describe("FXPROV P1 save moves to step 2 in the same dialog", () => {
     fireEvent.change(within(dialog).getByLabelText("API key"), {
       target: { value: "sk-fxprov" },
     });
+    fireEvent.click(within(dialog).getByText("Check"));
+    await within(dialog).findByText("Key checked. Save to connect.");
     fireEvent.click(within(dialog).getByText("Save"));
     // Step 2 in the same dialog: Connected line, tickable list, key gone.
-    expect(await within(dialog).findByText("Connected OpenAI. Reference saved.")).toBeTruthy();
+    expect(await within(dialog).findByText("Connected OpenAI.")).toBeTruthy();
     expect(screen.queryByLabelText("API key")).toBeNull();
     // Fresh connect ticks only the default model, never everything.
     const ticks = within(dialog).getAllByRole("checkbox") as HTMLInputElement[];
     expect(ticks.length).toBeGreaterThan(1);
     expect(ticks.filter((box) => box.checked).map((box) => box.getAttribute("aria-label"))).toEqual([
-      "OpenAI Standard",
+      "openai/gpt-4o-mini",
     ]);
     fireEvent.click(within(dialog).getByText("Done"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(screen.getByLabelText("Disconnect OpenAI")).toBeTruthy();
-    expect(screen.getByText("Connected OpenAI. Reference saved.")).toBeTruthy();
+    expect(screen.getByText("Connected OpenAI.")).toBeTruthy();
     expect(screen.getByText("1 enabled")).toBeTruthy();
   });
 });
@@ -301,7 +306,7 @@ describe("FXPROV P3 merged model list", () => {
 });
 
 describe("FXPROV P4 modal shape", () => {
-  it("quiet X/Cancel, one primary Save, one quiet id line, narrow opaque overlay", () => {
+  it("quiet X/Cancel, one primary Save, one quiet id line, narrow translucent overlay", () => {
     stubServed(emptyRoutes());
     render(<ProvidersPage project_id="local" />);
     fireEvent.click(screen.getByLabelText("Connect OpenAI"));
@@ -309,7 +314,7 @@ describe("FXPROV P4 modal shape", () => {
     expect(dialog.getAttribute("aria-modal")).toBe("true");
     const backdrop = screen.getByTestId("connect-backdrop");
     expect(backdrop.contains(dialog)).toBe(true);
-    expect(getComputedStyle(backdrop).backgroundColor).toBe("rgb(0, 0, 0)");
+    expect(getComputedStyle(backdrop).backgroundColor).toBe("rgba(0, 0, 0, 0.5)");
     const dialogBox = dialog as HTMLElement;
     expect(dialogBox.style.maxWidth).toBe("480px");
     expect(Number.parseInt(dialogBox.style.maxWidth, 10)).toBeLessThanOrEqual(560);

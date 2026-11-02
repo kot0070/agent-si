@@ -125,6 +125,9 @@ function stubServed(): void {
         integrity_ok: true,
         journal_head: "jh-1",
         generated_at: "t-0",
+        last_action:
+          "rule-tamper BLOCK model=fx-local-1 action=scripts/tamper_check.py",
+        last_check_at: "2026-02-11T06:42:44Z",
       });
     }
     if (url === "/api/v1/watcher/journal?project_id=p-1") {
@@ -262,13 +265,12 @@ describe("fxlayout shell over the real app", () => {
       "/agents/live",
     );
 
-    expect(await screen.findByTestId("ctx-percent")).toBeTruthy();
-    expect(screen.getByTestId("ctx-percent").textContent).toContain(
-      t("shell.common.unknown"),
-    );
-    expect(screen.getByTestId("ctx-window").textContent).toContain(
-      t("shell.common.unknown"),
-    );
+    // FXTABS T9: with no window served the rail shows just the used
+    // count, never "Unknown / Unknown" and no percent off thin air.
+    expect(screen.queryByTestId("ctx-percent")).toBeNull();
+    const ctxWindow = screen.getByTestId("ctx-window");
+    expect(ctxWindow.textContent).toContain(t("shell.common.unknown"));
+    expect(ctxWindow.textContent).not.toContain("/");
     expect(screen.getByTestId("ctx-source").textContent).toContain(
       t("shell.cards.context.sourceLive"),
     );
@@ -297,8 +299,15 @@ describe("fxlayout shell over the real app", () => {
     expect(screen.getByTestId("watcher-state").textContent).toContain(
       t("shell.cards.watcher.ok"),
     );
-    expect(screen.getByTestId("watcher-model").textContent).toContain("local");
-    expect(screen.getByTestId("watcher-action").textContent).toContain("e-1");
+    expect(screen.getByTestId("watcher-model").textContent).toContain(
+      t("watcher.tab.modelApi"),
+    );
+    const action = screen.getByTestId("watcher-action");
+    expect(action.textContent).toContain(
+      t("watcher.tab.actionBlocked"),
+    );
+    expect(action.textContent).not.toContain("e-1");
+    expect(action.getAttribute("title")).toBe("e-1");
     expect(screen.getByTestId("watcher-open").getAttribute("href")).toBe(
       "/watcher",
     );

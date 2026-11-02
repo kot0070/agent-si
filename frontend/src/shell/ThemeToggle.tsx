@@ -28,7 +28,8 @@ export function ThemeToggle(): ReactElement {
       title={t("settings.appearance.needItNow")}
       onClick={toggle}
     >
-      {t("settings.appearance.title")}: {theme}
+      {t("settings.appearance.title")}:{" "}
+      {t(theme === "dark" ? "settings.appearance.dark" : "settings.appearance.light")}
     </button>
   );
 }

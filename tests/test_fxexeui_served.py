@@ -36,6 +36,8 @@ ABOUT_JSON = {
     "license": "MIT",
     "license_file": "LICENSE",
     "notices": "docs/third_party_notices/NOTICES.md",
+    # FXR2E 45718f7 (merged 0661228): stable sidecar port in data dir adds logs_dir.
+    "logs_dir": None,
 }
 
 

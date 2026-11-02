@@ -3,7 +3,7 @@
  */
 // FXFIRSTRUN L1/L2/L3 + Row F08: the Connect dialog is a real centred
 // modal (backdrop, initial focus in the key field, Esc/backdrop close);
-// the "Connected {label}. Reference saved." line appears ONLY after a
+// the "Connected {label}." line appears ONLY after a
 // real route round-trip (never on an empty/unreachable store); model
 // rows name the real model id and explain the disabled checkbox.
 // Network is the only fake (global fetch); no component doubles.
@@ -120,6 +120,9 @@ describe("F08 connect opens a real centred modal", () => {
     fireEvent.change(within(dialog).getByLabelText("API key"), {
       target: { value: "sk-test" },
     });
+    // FXR2E two-step (416ddaa, merged 0661228): Check before Save.
+    fireEvent.click(within(dialog).getByText("Check"));
+    expect(await within(dialog).findByText("Key checked. Save to connect.")).toBeTruthy();
     fireEvent.click(within(dialog).getByText("Save"));
     expect(await screen.findByLabelText("Disconnect Meta")).toBeTruthy();
     // Step 2 stays open: Done closes it before opening the disconnect modal.
@@ -142,7 +145,7 @@ describe("L2 success only after a real save", () => {
     expect(
       (within(dialog).getByText("Save") as HTMLButtonElement).disabled,
     ).toBe(true);
-    expect(screen.queryByText(/Reference saved/)).toBeNull();
+    expect(screen.queryByText("Connected Meta.")).toBeNull();
   });
 
   it("unreachable routes never show Connected: honest error, card stays put", async () => {
@@ -152,8 +155,10 @@ describe("L2 success only after a real save", () => {
     fireEvent.change(within(dialog).getByLabelText("API key"), {
       target: { value: "sk-test" },
     });
-    fireEvent.click(within(dialog).getByText("Save"));
-    expect(await within(dialog).findByText(/Connect failed/)).toBeTruthy();
+    // FXR2E two-step: the unreachable store fails at Check (Save never
+    // enables), with the same honest error and nothing stored.
+    fireEvent.click(within(dialog).getByText("Check"));
+    expect(await within(dialog).findByText("Could not reach the provider.")).toBeTruthy();
     expect(screen.queryByText(/Reference saved/)).toBeNull();
     // Nothing was saved: the Meta card still offers Connect, never
     // Disconnect (the open dialog shares the accessible name, so the
@@ -179,16 +184,21 @@ describe("L2 success only after a real save", () => {
     fireEvent.change(within(dialog).getByLabelText("API key"), {
       target: { value: "sk-test" },
     });
+    // FXR2E two-step (416ddaa, merged 0661228): Check before Save.
+    fireEvent.click(within(dialog).getByText("Check"));
+    expect(
+      await within(dialog).findByText("Key checked. Save to connect."),
+    ).toBeTruthy();
     fireEvent.click(within(dialog).getByText("Save"));
     // Step 2 in the same dialog: Connected line plus the tickable list.
     // Done closes it; the card keeps the quiet Connected line.
     expect(
-      await within(dialog).findByText("Connected Meta. Reference saved."),
+      await within(dialog).findByText("Connected Meta."),
     ).toBeTruthy();
     expect(await screen.findByLabelText("Disconnect Meta")).toBeTruthy();
     fireEvent.click(within(dialog).getByText("Done"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(screen.getByText("Connected Meta. Reference saved.")).toBeTruthy();
+    expect(screen.getByText("Connected Meta.")).toBeTruthy();
   });
 });
 

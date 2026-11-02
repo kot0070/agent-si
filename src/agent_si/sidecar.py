@@ -40,6 +40,7 @@ import os
 import posixpath
 import signal
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -73,6 +74,16 @@ _UNSTAGED_TEXT = (
 #: folder dialog (headless or browser context). The answer body keeps
 #: the repo {code, message} refusal shape.
 _PICK_FOLDER_UNAVAILABLE_CODE = "NATIVE_DIALOG_UNAVAILABLE"
+
+#: Machine-readable code carried by the 409 answer of POST
+#: /api/v1/sidecar/open-folder when no native open runs on this
+#: machine. The answer body keeps the repo {code, message} refusal shape.
+_OPEN_FOLDER_UNAVAILABLE_CODE = "NATIVE_OPEN_UNAVAILABLE"
+
+#: Machine-readable code carried by the 409 answer of POST
+#: /api/v1/sidecar/open-logs when the OS cannot reveal the log folder
+#: (non-Windows or a failed open). The UI falls back to the path only.
+_OPEN_LOGS_UNAVAILABLE_CODE = "LOGS_REVEAL_UNAVAILABLE"
 
 
 #: Default native window size (F3): pywebview opens 800x600 without
@@ -108,6 +119,85 @@ _WEBVIEW2_DOWNLOAD_URL = (
 #: (``<port>\n<token>``) still parse with an unknown pid.
 _PORT_FILE_NAME = "sidecar.port"
 
+#: Stable-port record under the product data dir: the port of the last
+#: clean start. The next start tries it first so the webview origin
+#: (and its localStorage) survives restarts; a taken port falls back
+#: to a free one with a log line. The UI token is never reused: every
+#: start mints a fresh one.
+_LAST_PORT_FILE_NAME = "sidecar.lastport"
+
+
+def _last_port_file_path(root: str) -> str:
+    """Stable-port record path under the product data dir."""
+    return os.path.join(os.path.abspath(str(root)), _LAST_PORT_FILE_NAME)
+
+
+def _read_last_port(path: str) -> int | None:
+    """Parse the stable-port record; None when absent or malformed."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read().strip().split()[0]
+        port = int(text)
+    except (OSError, ValueError, IndexError):
+        return None
+    if not 1 <= port <= 65535:
+        return None
+    return port
+
+
+def _write_last_port(path: str, port: int) -> None:
+    """Record the stable port; failures never break start."""
+    try:
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(path, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write("%d\n" % int(port))
+    except OSError:
+        return
+
+
+def _port_is_free(port: int) -> bool:
+    """True when nothing listens on the loopback port right now."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind((HOST, int(port)))
+        return True
+    except (OSError, ValueError, OverflowError):
+        return False
+    finally:
+        sock.close()
+
+
+def resolve_start_port(data_root: str | None = None) -> int:
+    """Pick the start port: saved first, free fallback with a log line.
+
+    Reads the stable-port record under the data dir and reuses it when
+    it is free (and no other instance runs on it). A taken, live or
+    malformed record falls back to a free port; the fallback logs both
+    ports. The choice is persisted to the record (best effort) so the
+    next start tries it first; main() rewrites it once the server is
+    up. No record (or no data dir) picks a free port silently.
+    """
+    saved: int | None = None
+    if data_root:
+        try:
+            saved = _read_last_port(_last_port_file_path(data_root))
+        except Exception:
+            saved = None
+    if saved is not None and not _port_is_live(saved) \
+            and _port_is_free(saved):
+        _log(f"agent-si-sidecar: reusing saved port {saved}")
+        return saved
+    port = pick_free_port()
+    if saved is not None and saved != port:
+        _log(f"agent-si-sidecar: saved port {saved} taken, "
+             f"using free port {port}")
+    if data_root:
+        with contextlib.suppress(Exception):
+            _write_last_port(_last_port_file_path(data_root), port)
+    return port
+
 #: Startup mutex under the product data dir. Taken atomically with
 #: O_CREAT|O_EXCL BEFORE the port pick and the window, so launches
 #: during the 8-10 s boot cannot each start their own server: exactly
@@ -130,6 +220,7 @@ _LOSER_WAIT_S = 10.0
 _END_WAIT_S = 5.0
 
 
+
 def pick_free_port() -> int:
     """Return a free loopback port (bound briefly, then released)."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -141,7 +232,17 @@ def pick_free_port() -> int:
 
 
 def _log(message: str) -> None:
-    """Write one line to stderr; silent when streams are unavailable."""
+    """Write one line to stderr and the data-dir file log.
+
+    Silent when streams are unavailable; the file log (installed at
+    start) keeps the line even though the frozen exe has no console.
+    """
+    try:
+        import logging as _logging
+
+        _logging.getLogger("agent_si.sidecar").info("%s", str(message))
+    except Exception:
+        pass
     try:
         stream = sys.stderr
         if stream is None:
@@ -182,6 +283,20 @@ def _notices_ref() -> str:
     return "docs/third_party_notices/NOTICES.md"
 
 
+#: Mark-asset destination name inside the frozen bundle
+#: (packaging/sidecar spec ships src/agent_si/assets there).
+_ASSETS_DEST = "assets"
+
+
+def _asset_ref(name: str) -> str:
+    """Mark-asset ref: bundle-absolute when frozen, repo-relative otherwise."""
+    meipass = getattr(sys, "_MEIPASS", None)
+    if getattr(sys, "frozen", False) and meipass:
+        return os.path.join(str(meipass), _ASSETS_DEST, str(name))
+    return os.path.join(
+        _here_root(), "src", "agent_si", "assets", str(name))
+
+
 def _index_path(web_dir: str) -> str | None:
     """Return the tree index.html path, or None when it is absent."""
     candidate = os.path.join(web_dir, "index.html")
@@ -219,7 +334,13 @@ def _make_config(app, port: int):
     """Build the uvicorn config without touching logging streams."""
     import uvicorn
 
-    return uvicorn.Config(app, host=HOST, port=port, log_config=None)
+    config = uvicorn.Config(app, host=HOST, port=port, log_config=None)
+    # Access log stays off: per-request lines never reach the file log.
+    try:
+        config.access_log = False
+    except Exception:
+        pass
+    return config
 
 
 def _open_in_browser(url: str) -> bool:
@@ -497,6 +618,32 @@ def _post_focus_request(port: int, token: str,
         return False
 
 
+def _reattach_running() -> bool:
+    """Open the already-running instance; True when one was live.
+
+    A second start while one server runs opens the same URL in the
+    default browser and ends at once: no second server, no second
+    window. A stale record (port dead) is cleared and start proceeds.
+    """
+    root = _sidecar_data_dir()
+    if not root:
+        return False
+    path = _port_file_path(root)
+    record = _read_port_file(path)
+    if record is None:
+        return False
+    port, token = record
+    if not _port_is_live(port):
+        _clear_port_file(path)
+        return False
+    url = f"http://{HOST}:{port}/?token={token}" if token else (
+        f"http://{HOST}:{port}/")
+    _open_in_browser(url)
+    _log(f"agent-si-sidecar: already running on {HOST}:{port}; "
+         "opened in browser, no second server started")
+    return True
+
+
 def _bring_window_to_front() -> bool:
     """Show + restore + focus the native window; False when headless.
 
@@ -758,6 +905,18 @@ def webview_storage_dir() -> str:
     return path
 
 
+def _open_native_folder(path: str) -> None:
+    """Open a directory in the platform file manager; raises OSError
+    when no native open runs on this machine."""
+    if sys.platform == "win32":
+        os.startfile(path)  # noqa: S606 - local folder path only
+        return
+    if sys.platform == "darwin":
+        subprocess.run(["open", path], check=True)
+        return
+    subprocess.run(["xdg-open", path], check=True)
+
+
 def build_app():
     """Create the product app and attach the sidecar web endpoints."""
     from fastapi.responses import (
@@ -781,7 +940,15 @@ def build_app():
     }
 
     async def sidecar_about() -> dict:
-        return dict(about)
+        answer = dict(about)
+        try:
+            from agent_si import file_log as _about_log
+
+            answer["logs_dir"] = _about_log.log_dir_for(
+                _sidecar_data_dir())
+        except Exception:
+            answer["logs_dir"] = None
+        return answer
 
     async def sidecar_index():
         index = _index_path(_resolve_web_dir())
@@ -865,6 +1032,107 @@ def build_app():
             return {"path": None}
         return {"path": path}
 
+    async def sidecar_open_folder(request: Request):
+        """Open an existing directory in the platform file manager.
+
+        Guarded exactly like the pick-folder write route: 401 without
+        an x-actor header, 403 with a bad x-ui-session-token. A missing
+        body path or a non-directory answers 400/404; a machine with no
+        native open answers 409 carrying the
+        ``_OPEN_FOLDER_UNAVAILABLE_CODE`` machine code. Answers
+        ``{"ok": true, "path": ...}`` when the open runs.
+        """
+        actor = (request.headers.get("x-actor") or "").strip()
+        if not actor:
+            raise HTTPException(
+                status_code=401, detail="missing x-actor header")
+        token = request.headers.get("x-ui-session-token")
+        check = getattr(app.state, "auth_hook", None)
+        allowed = False
+        if callable(check):
+            try:
+                allowed = bool(check(token, actor, "USER_WRITE"))
+            except Exception:
+                allowed = False
+        else:
+            expected = getattr(app.state, "ui_session_token", None)
+            allowed = expected is not None and token == expected
+        if not allowed:
+            raise HTTPException(status_code=403, detail="forbidden")
+        body = None
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
+        path = body.get("path") if isinstance(body, dict) else None
+        if not isinstance(path, str) or not path:
+            raise HTTPException(
+                status_code=400, detail="open-folder needs a path")
+        if not os.path.isdir(path):
+            raise HTTPException(
+                status_code=404, detail="no such folder: %r" % (path,))
+        try:
+            _open_native_folder(path)
+        except Exception:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "code": _OPEN_FOLDER_UNAVAILABLE_CODE,
+                    "message": (
+                        "native folder open is unavailable: "
+                        "no native open"
+                    ),
+                },
+            )
+        return {"ok": True, "path": path}
+
+    async def sidecar_open_logs(request: Request):
+        """Reveal the data-dir log folder in the OS file manager.
+
+        Guarded exactly like the other write routes: 401 without an
+        x-actor header, 403 with a bad x-ui-session-token. Windows
+        opens the folder via os.startfile and answers
+        ``{"opened": true}``; anywhere else (or on failure) answers
+        409 carrying the ``_PICK_FOLDER_UNAVAILABLE_CODE`` machine
+        code, so the UI falls back to showing the path only.
+        """
+        actor = (request.headers.get("x-actor") or "").strip()
+        if not actor:
+            raise HTTPException(
+                status_code=401, detail="missing x-actor header")
+        token = request.headers.get("x-ui-session-token")
+        check = getattr(app.state, "auth_hook", None)
+        allowed = False
+        if callable(check):
+            try:
+                allowed = bool(check(token, actor, "USER_WRITE"))
+            except Exception:
+                allowed = False
+        else:
+            expected = getattr(app.state, "ui_session_token", None)
+            allowed = expected is not None and token == expected
+        if not allowed:
+            raise HTTPException(status_code=403, detail="forbidden")
+        try:
+            from agent_si import file_log as _open_log
+
+            logs_dir = _open_log.log_dir_for(_sidecar_data_dir())
+            if not logs_dir:
+                raise OSError("no data dir")
+            os.makedirs(logs_dir, exist_ok=True)
+            if os.name != "nt":
+                raise OSError("no OS reveal here")
+            os.startfile(str(logs_dir))  # type: ignore[attr-defined]
+        except Exception:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "code": _OPEN_LOGS_UNAVAILABLE_CODE,
+                    "message": "the log folder cannot be revealed here",
+                },
+            )
+        return {"opened": True, "code": "LOGS_OPENED"}
+
     async def sidecar_focus(request: Request):
         """Bring the first instance window to the front.
 
@@ -898,6 +1166,12 @@ def build_app():
     app.get("/api/v1/sidecar/about", include_in_schema=False)(sidecar_about)
     app.post("/api/v1/sidecar/pick-folder", include_in_schema=False)(
         sidecar_pick_folder
+    )
+    app.post("/api/v1/sidecar/open-folder", include_in_schema=False)(
+        sidecar_open_folder
+    )
+    app.post("/api/v1/sidecar/open-logs", include_in_schema=False)(
+        sidecar_open_logs
     )
     app.post("/api/v1/sidecar/focus", include_in_schema=False)(
         sidecar_focus
@@ -1038,6 +1312,215 @@ def run_qa_runner(runner_ref: str) -> int:
         return 0
 
 
+#: Splash window + page background: the reference dark (#0d1117). The
+#: native window is created with this background_color so nothing white
+#: flashes before the splash paints, and the app's first paint
+#: (frontend/index.html inline style) uses the same colour.
+_SPLASH_BG = "#0d1117"
+
+#: Inline SI mark (mirrors src/agent_si/assets/mark.svg, 256 viewBox).
+#: No network, no file path: inlined so the splash paints instantly.
+_MARK_SVG = (
+    "<svg viewBox=\"0 0 256 256\" width=\"72\" height=\"72\" role=\"img\" "
+    "aria-label=\"Agent SI mark\">"
+    "<rect x=\"8\" y=\"8\" width=\"240\" height=\"240\" rx=\"54\" "
+    "fill=\"#161b22\" stroke=\"#30363d\" stroke-width=\"4\"/>"
+    "<rect x=\"46\" y=\"46\" width=\"164\" height=\"164\" rx=\"38\" "
+    "fill=\"#0d1117\"/>"
+    "<g fill=\"none\" stroke=\"#2f81f7\" stroke-width=\"24\" "
+    "stroke-linecap=\"round\">"
+    "<path d=\"M 148 62 C 120 62 98 76 98 102 C 98 130 148 120 "
+    "148 148 C 148 170 128 182 102 182 C 92 182 84 178 78 172\"/>"
+    "<path d=\"M 178 62 L 178 182\"/>"
+    "</g>"
+    "<rect x=\"104\" y=\"196\" width=\"48\" height=\"10\" rx=\"5\" "
+    "fill=\"#2f81f7\"/>"
+    "</svg>"
+)
+
+_SPLASH_CSS = (
+    "html,body{margin:0;padding:0;height:100%;"
+    "background:" + _SPLASH_BG + ";color:#e6edf3;"
+    "font-family:\"Segoe UI\",system-ui,sans-serif;"
+    "display:flex;align-items:center;justify-content:center;}"
+    ".card{text-align:center;}"
+    ".mark{width:72px;height:72px;margin:0 auto 16px;}"
+    "h1{font-size:22px;margin:0 0 8px;letter-spacing:2px;}"
+    "p{font-size:13px;color:#8b949e;margin:0 0 16px;}"
+    ".bar{width:220px;height:4px;margin:0 auto;border-radius:2px;"
+    "background:#21262d;overflow:hidden;}"
+    ".bar>div{height:100%;width:40%;border-radius:2px;"
+    "background:#2f81f7;animation:slide 1.2s infinite ease-in-out;}"
+    "@keyframes slide{0%{margin-left:-40%;}100%{margin-left:100%;}}"
+    "@media (prefers-reduced-motion:reduce){.bar>div{animation:none;}}"
+)
+
+_SPLASH_STRINGS = {
+    "en": {
+        "starting": "Starting&hellip;",
+        "first": "First start can take up to a minute.",
+    },
+    "uk": {
+        "starting": "Запуск&hellip;",
+        "first": "Перший запуск може тривати до хвилини.",
+    },
+}
+
+_FAILURE_STRINGS = {
+    "en": {
+        "title": "Agent SI did not start",
+        "reason": "Reason",
+        "logs": "Log files",
+        "no_logs": "No log folder resolved.",
+        "next": ("Next step: open the log folder above, keep the newest "
+                 "log, and start Agent SI again."),
+    },
+    "uk": {
+        "title": "Agent SI не запустився",
+        "reason": "Причина",
+        "logs": "Файли журналів",
+        "no_logs": "Теку журналів не знайдено.",
+        "next": ("Наступний крок: відкрийте теку журналів вище, збережіть "
+                 "найновіший журнал і запустіть Agent SI знову."),  # noqa: RUF001 -- legitimate Ukrainian text
+    },
+}
+
+
+def _resolve_splash_lang(data_root: str | None = None) -> str:
+    """UI language for the local pages: stored value else OS, en + uk.
+
+    The browser localStorage value (agentsi.locale) is not reachable
+    from this process before the backend serves, so the stored value is
+    read only when it is available without the backend: the
+    AGENT_SI_LOCALE override (exported by a launcher that remembers the
+    choice). Otherwise the OS language decides (uk when it starts with
+    "uk"), defaulting to en. Backend-free, no network, no secrets.
+    """
+    _ = data_root
+    try:
+        override = (os.environ.get("AGENT_SI_LOCALE") or "").strip().lower()
+    except Exception:
+        override = ""
+    if override in ("en", "uk"):
+        return override
+    try:
+        import locale as _locale
+
+        for probe in (_locale.getdefaultlocale()[0] or "",
+                      _locale.getlocale()[0] or ""):
+            tag = str(probe).strip().lower()
+            if tag.startswith("uk"):
+                return "uk"
+            if tag.startswith("en"):
+                return "en"
+    except Exception:
+        pass
+    return "en"
+
+
+def _is_first_start(data_root: str | None) -> bool:
+    """True when the data folder is new (absent or empty).
+
+    Read BEFORE the file log / install create the folder, so the splash
+    can carry the long-wait line only on a genuinely first start.
+    Failures resolve to False (normal start wording).
+    """
+    try:
+        if not data_root:
+            return False
+        path = os.path.abspath(str(data_root))
+        if not os.path.isdir(path):
+            return True
+        with os.scandir(path) as entries:
+            for _ in entries:
+                return False
+        return True
+    except Exception:
+        return False
+
+
+def _splash_html(first_start: bool = False,
+                 lang: str | None = None) -> str:
+    """Local splash page: instant window while the backend starts.
+
+    Dark reference page with the inline SI mark, "Agent SI", one status
+    line and a CSS-only indeterminate bar (honours
+    prefers-reduced-motion). The long-wait line appears only when
+    first_start is true (data folder is new). Static HTML only (no
+    network, no token, no secret, no absolute path): the window appears
+    at once and main() navigates it to the app once the server is up.
+    """
+    code = (lang or _resolve_splash_lang()).lower()
+    if code not in _SPLASH_STRINGS:
+        code = "en"
+    text = _SPLASH_STRINGS[code]
+    status = text["starting"]
+    if first_start:
+        status += "<br>" + text["first"]
+    return (
+        "<!doctype html><html lang=\"" + code + "\">"
+        "<head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        "<title>Agent SI</title>"
+        "<style>" + _SPLASH_CSS + "</style></head>"
+        "<body><div class=\"card\">"
+        "<div class=\"mark\">" + _MARK_SVG + "</div>"
+        "<h1>Agent SI</h1>"
+        "<p>" + status + "</p>"
+        "<div class=\"bar\"><div></div></div>"
+        "</div></body></html>"
+    )
+
+
+def _failure_html(reason: str, logs_dir: str | None,
+                  lang: str | None = None) -> str:
+    """Local failure page in the splash style: reason + log folder.
+
+    Keeps every field it has now (reason, log-folder line) plus one next
+    step; all interpolated values stay HTML-escaped, no secrets.
+    """
+    code = (lang or _resolve_splash_lang()).lower()
+    if code not in _FAILURE_STRINGS:
+        code = "en"
+    text = _FAILURE_STRINGS[code]
+    where = ("%s: %s" % (text["logs"], logs_dir)
+             if logs_dir else text["no_logs"])
+    return (
+        "<!doctype html><html lang=\"" + code + "\">"
+        "<head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        "<title>" + _escape_html(text["title"]) + "</title>"
+        "<style>" + _SPLASH_CSS + "</style></head>"
+        "<body><div class=\"card\">"
+        "<div class=\"mark\">" + _MARK_SVG + "</div>"
+        "<h1>" + _escape_html(text["title"]) + "</h1>"
+        "<p>%s: %s</p>"
+        "<p>%s</p>"
+        "<p>%s</p>"
+        "</div></body></html>" % (
+            _escape_html(text["reason"]),
+            _escape_html(reason),
+            _escape_html(where),
+            _escape_html(text["next"]))
+    )
+
+
+def _escape_html(text: str) -> str:
+    """Minimal HTML escape for failure-page interpolation."""
+    return (str(text).replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace('"', "&quot;"))
+
+
+def _logs_dir_for_failure(data_root: str | None) -> str | None:
+    """Log folder for the failure page; None when unresolvable."""
+    try:
+        from agent_si import file_log as _failure_log
+
+        return _failure_log.log_dir_for(data_root)
+    except Exception:
+        return None
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the sidecar: serve on loopback, open the native window."""
     args = list(sys.argv[1:] if argv is None else argv)
@@ -1066,7 +1549,46 @@ def main(argv: list[str] | None = None) -> int:
             lock_path = _lock_file_path(first_root)
     app = build_app()
     token = getattr(app.state, "ui_session_token", "")
-    port = pick_free_port()
+    data_root = _sidecar_data_dir()
+    # First-start wording is decided BEFORE the file log / install create
+    # the data folder, so a new folder still reads as new.
+    first_start = _is_first_start(data_root)
+    splash_lang = _resolve_splash_lang(data_root)
+    try:
+        from agent_si import file_log as _file_log
+
+        _file_log.install(data_root, version=VERSION)
+    except Exception:
+        pass
+    _log(f"agent-si-sidecar: starting {version_text()} "
+         f"on http://{HOST}:<port>/ (port picked at bind)")
+
+    # The window opens at once on a local splash page; the backend
+    # starts behind it. No window (headless) keeps the old path:
+    # serve, then open the browser. background_color matches the splash
+    # so no white flash paints before it.
+    try:
+        import webview as _webview
+    except Exception:
+        _webview = None
+    window = None
+    # pywebview 6.2.1 create_window takes no icon: the exe resource
+    # (_ICON in the spec) owns the window + taskbar icon on Windows.
+    if _webview is not None:
+        width, height = resolve_window_size(data_root)
+        try:
+            window = _webview.create_window(
+                "Agent SI", None,
+                html=_splash_html(first_start=first_start,
+                                  lang=splash_lang),
+                width=width, height=height, text_select=True,
+                background_color=_SPLASH_BG)
+        except Exception as exc:
+            _log("agent-si-sidecar: window unavailable "
+                 f"({exc}); continuing headless")
+            window = None
+
+    port = resolve_start_port(data_root)
 
     config = _make_config(app, port)
     import uvicorn
@@ -1081,16 +1603,34 @@ def main(argv: list[str] | None = None) -> int:
                 break
             thread.join(timeout=0.1)
     if not server.started:
-        _log("agent-si-sidecar: server did not start")
+        reason = "server did not start"
+        _log("agent-si-sidecar: " + reason)
+        if window is not None and _webview is not None:
+            try:
+                window.load_url(_failure_html(
+                    reason, _logs_dir_for_failure(data_root),
+                    lang=splash_lang))
+            except Exception:
+                pass
+            try:
+                _webview.start(private_mode=False,
+                               storage_path=webview_storage_dir())
+            except Exception:
+                pass
+            server.should_exit = True
+            thread.join(timeout=10)
+            return 1
         return 1
     _log(f"agent-si-sidecar: listening on http://{HOST}:{port}/")
 
     url = f"http://{HOST}:{port}/?token={token}"
     port_path: str | None = None
-    data_root = _sidecar_data_dir()
+    last_path: str | None = None
     if data_root:
         port_path = _port_file_path(data_root)
         _write_port_file(port_path, port, str(token))
+        last_path = _last_port_file_path(data_root)
+        _write_last_port(last_path, port)
     stop = threading.Event()
 
     def request_stop(*_args: object) -> None:
@@ -1102,23 +1642,25 @@ def main(argv: list[str] | None = None) -> int:
             signal.signal(sig, request_stop)
 
     try:
-        import webview
-
-        width, height = resolve_window_size(data_root)
-        window = webview.create_window(
-            "Agent SI", url, width=width, height=height,
-            text_select=True)
-        _ = window
-        webview.start(private_mode=False, storage_path=webview_storage_dir())
-        if data_root is not None:
+        if window is not None and _webview is not None:
             try:
-                end_w = int(getattr(window, "width", width))
-                end_h = int(getattr(window, "height", height))
-            except (TypeError, ValueError):
-                end_w, end_h = width, height
-            if end_w > 0 and end_h > 0:
-                _write_window_size(
-                    _window_size_file_path(data_root), end_w, end_h)
+                window.load_url(url)
+            except Exception as exc:
+                _log("agent-si-sidecar: window navigation failed "
+                     f"({exc})")
+            _webview.start(private_mode=False,
+                           storage_path=webview_storage_dir())
+            if data_root is not None:
+                try:
+                    end_w = int(getattr(window, "width", width))
+                    end_h = int(getattr(window, "height", height))
+                except (TypeError, ValueError):
+                    end_w, end_h = width, height
+                if end_w > 0 and end_h > 0:
+                    _write_window_size(
+                        _window_size_file_path(data_root), end_w, end_h)
+        else:
+            raise RuntimeError("no native window")
     except Exception as exc:
         _log(
             "agent-si-sidecar: webview unavailable "
@@ -1129,6 +1671,7 @@ def main(argv: list[str] | None = None) -> int:
         stop.wait()
     finally:
         server.should_exit = True
+        _log(f"agent-si-sidecar: stopping {version_text()}")
         if port_path is not None:
             _clear_port_file(port_path)
         if hold_lock and lock_path is not None:

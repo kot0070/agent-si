@@ -90,10 +90,22 @@ describe("k07f1b session token behaviour", () => {
           headers: { "content-type": "application/json" },
         });
       }
-      return new Response(JSON.stringify({ projects: created }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
+      if (url === "/api/v1/projects" && init.method === "GET") {
+        return new Response(JSON.stringify({ projects: created }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      // Incidental reads fail fast: a 4xx never retries, so background
+      // loads settle at once instead of bleeding retry fetches into
+      // later tests' stubs.
+      return new Response(
+        JSON.stringify({ code: "FXK07F1B_UNEXPECTED_API" }),
+        {
+          status: 404,
+          headers: { "content-type": "application/json" },
+        },
+      );
     });
     const router = createMemoryRouter([{ path: "*", element: <App /> }], {
       initialEntries: ["/projects"],
@@ -110,6 +122,10 @@ describe("k07f1b session token behaviour", () => {
       target: { value: "f-new" },
     });
     fireEvent.click(await screen.findByTestId("project-add-submit"));
+    // U13: create opens the new project at once; the row is visible
+    // back on /projects after the shared-list refresh.
+    await screen.findByTestId("chat-area");
+    await router.navigate("/projects");
     await screen.findByTestId("project-row-p-9");
 
     const posts = seen.filter(

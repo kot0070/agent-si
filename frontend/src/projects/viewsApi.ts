@@ -18,7 +18,7 @@ import type {
 import { placementForRow } from "../agents/agentsApi";
 import type { Placement } from "../agents/agentsApi";
 import type { SupportedLocale } from "../locale/index";
-import { formatDate } from "../locale/index";
+import { formatDate, t } from "../locale/index";
 
 export interface ShortRef {
   text: string;
@@ -150,21 +150,30 @@ export interface DedupedRow {
   scopes: string[];
 }
 
-// Attempts of the same agent+role+model+placement+status fold into one row
-// with an attempt count; different statuses stay separate rows so a
-// BLOCKED end never hides behind an earlier RUNNING attempt.
+// FXTABS T6: attempts of one agent fold into ONE row with an attempt
+// count and the agent's last status. A terminal end (BLOCKED, REJECTED,
+// RETURNED, ACCEPTED) wins over a stale RUNNING attempt served beside
+// it, so at run end nothing stays Running; otherwise the last served
+// status wins. Tokens add up, files unite.
+function statusRank(status: PartRow["status"]): number {
+  switch (status) {
+    case "BLOCKED":
+    case "REJECTED":
+    case "RETURNED":
+    case "ACCEPTED":
+      return 3;
+    case "RUNNING":
+      return 2;
+    default:
+      return 1;
+  }
+}
+
 export function dedupeLiveRows(rows: PartRow[]): DedupedRow[] {
   const byKey = new Map<string, DedupedRow>();
   for (const row of rows) {
     const extras = readLiveExtras(row);
-    const key = [
-      row.agent,
-      extras.role ?? "",
-      extras.model ?? "",
-      extras.provider ?? "",
-      placementForRow(row),
-      row.status,
-    ].join("\u0000");
+    const key = row.agent;
     const seen = byKey.get(key);
     if (seen === undefined) {
       byKey.set(key, {
@@ -183,6 +192,21 @@ export function dedupeLiveRows(rows: PartRow[]): DedupedRow[] {
       continue;
     }
     seen.attempts += 1;
+    const nextRank = statusRank(row.status);
+    const seenRank = statusRank(seen.status);
+    if (nextRank > seenRank || nextRank === seenRank) {
+      seen.status = row.status;
+      if (extras.role !== undefined) {
+        seen.role = extras.role;
+      }
+      if (extras.model !== undefined) {
+        seen.model = extras.model;
+      }
+      if (extras.provider !== undefined) {
+        seen.provider = extras.provider;
+      }
+      seen.placement = placementForRow(row);
+    }
     if (extras.tokensTotal !== null) {
       seen.tokensTotal = (seen.tokensTotal ?? 0) + extras.tokensTotal;
     }
@@ -290,7 +314,14 @@ export function buildTokenRows(
   telemetry: TelemetrySummary | null,
 ): TokenRow[] {
   const roles = telemetry?.roles ?? [];
-  if (roles.length > 0) {
+  // FXTABS (b): role rows count only when at least one serves a number.
+  // All-UNKNOWN roles beside a counted model aggregate used to render as
+  // "Unknown" rows plus a counted "Other calls" row; now the legacy path
+  // below gives the one honest total instead.
+  if (
+    roles.length > 0 &&
+    roles.some((row) => typeof row.tokens === "number")
+  ) {
     return roles
       .map((row) => ({
         role: row.role === "" ? undefined : row.role,
@@ -428,6 +459,7 @@ export type DevrunPart = z.infer<typeof DevrunPartSchema>;
 
 const DevrunRunSchema = z.object({
   run_id: z.string(),
+  folder: z.string().optional(),
   start: z.string(),
   end: z.string(),
   // FXR2B: short per-run title (first 80 chars of the user task),
@@ -440,6 +472,17 @@ const DevrunRunSchema = z.object({
   files: z.array(z.string()),
   success: z.boolean(),
   summary: z.string(),
+  manager_why: z.string().optional(),
+  manager_count: z.number().int().optional(),
+  managers: z
+    .array(
+      z.object({
+        manager_id: z.string(),
+        goal: z.string().optional(),
+        parts: z.array(z.string()),
+      }),
+    )
+    .optional(),
 });
 
 export type DevrunRun = z.infer<typeof DevrunRunSchema>;
@@ -530,7 +573,66 @@ export function humanDuration(totalS: number | null): string | null {
   return restMin === 0 ? `${hours} h` : `${hours} h ${restMin} min`;
 }
 
-// Plain run status from the served success cell.
+// Plain run status from the served cells: any FAIL part forces "failed"
+// even when a legacy success cell says true, so `done` never sits beside
+// a FAIL verdict on any surface (served run row, header, final card).
+// One shared map: every surface reads this word for the same run.
+export const RUN_WORD_DONE = "done" as const;
+export const RUN_WORD_FAILED = "failed" as const;
+
+export type RunWord = typeof RUN_WORD_DONE | typeof RUN_WORD_FAILED;
+
+export function runStatusWord(input: {
+  success: boolean;
+  parts: Array<{ verdict?: string | null; part_id?: string; reason?: string }>;
+  verdicts?: Record<string, string | null>;
+}): RunWord {
+  const seen: Array<string | null | undefined> = [
+    ...input.parts.map((part) => part.verdict),
+    ...Object.values(input.verdicts ?? {}),
+  ];
+  for (const verdict of seen) {
+    if (verdict !== undefined && verdict !== null && verdict !== "" && verdict !== "PASS") {
+      return RUN_WORD_FAILED;
+    }
+  }
+  if (input.parts.length > 0) {
+    const allPass =
+      input.parts.length > 0 &&
+      input.parts.every((part) => part.verdict === "PASS");
+    if (!allPass) {
+      return RUN_WORD_FAILED;
+    }
+  }
+  return input.success ? RUN_WORD_DONE : RUN_WORD_FAILED;
+}
+
+// Plain run status from the served cells, in the active locale
+// (FXTABS U5b: no raw English "done"/"failed" in the uk build).
 export function runStatusText(run: DevrunRun): string {
-  return run.success ? "done" : "failed";
+  return runStatusWord(run) === RUN_WORD_DONE
+    ? t("projectView.runs.done")
+    : t("projectView.runs.failed");
+}
+
+// FXTABS U5b: served part verdicts read as localized status words in the
+// tabs that judge rows (audits, errors). The runs-tab card keeps the raw
+// served code as provenance. Parts that never started read "not run".
+export function partVerdictText(part: {
+  verdict?: string | null;
+  attempts?: number;
+}): string {
+  const verdict = part.verdict ?? null;
+  if (verdict === "PASS") {
+    return t("projectView.runs.verdictPass");
+  }
+  if (verdict === "PENDING") {
+    return t("projectView.runs.verdictPending");
+  }
+  if (verdict !== null && verdict !== "") {
+    return verdict;
+  }
+  return (part.attempts ?? 0) > 0
+    ? t("shell.common.unknown")
+    : t("projectView.runs.notRun");
 }

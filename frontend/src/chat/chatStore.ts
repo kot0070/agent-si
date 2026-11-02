@@ -208,8 +208,31 @@ export function clearChatQueue(projectId: string): void {
   emit(projectId);
 }
 
+// FXUIB-B4: per-slice composer drafts. Typed text survives page change
+// and remount on the same slice; a send clears it. Deliberately outside
+// ProjectChatState (the store shape stays frozen) next to the other
+// per-slice module maps in chat/index.tsx.
+const drafts = new Map<string, string>();
+
+export function getChatDraft(key: string): string {
+  return drafts.get(key) ?? "";
+}
+
+export function setChatDraft(key: string, text: string): void {
+  if (text === "") {
+    drafts.delete(key);
+  } else {
+    drafts.set(key, text);
+  }
+}
+
+export function clearChatDraft(key: string): void {
+  drafts.delete(key);
+}
+
 export function resetChatStore(): void {
   states.clear();
+  drafts.clear();
   messageSeq = 0;
 }
 

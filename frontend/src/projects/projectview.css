@@ -1,16 +1,16 @@
-/* FXVIEWS project tab styles: one compact scrollable tab row with a
-   selected state, and real fact rows with a gap between label and value.
-   Layout only; every string stays in the locale tables. */
+/* FXVIEWS project tab styles: quiet text tabs that wrap to more lines
+   (U1: no boxed scroll row, no thick scrollbar, no solid repaint on
+   hover/selected). Selected is bold + underline in ink, readable in
+   both themes. Every string stays in the locale tables. */
 
-/* FXVIEWS3 rework + V7: the tab row never wraps (wrap made 3 rows in the
-   narrow main column); it stays ONE horizontal line and scrolls, so tabs
-   never slide under the inspector rail. */
+/* U1: the tab row wraps; hover underlines without repainting the
+   button (base button:hover would paint solid accent under ink text). */
 .fxpv-tabs {
   display: flex;
   flex-direction: row;
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  gap: 0.25rem;
+  flex-wrap: wrap;
+  overflow-x: visible;
+  gap: 0.25rem 0.75rem;
   padding: 0.25rem 0;
 }
 
@@ -19,15 +19,47 @@
   padding: 0.375rem 0.75rem;
   border: 1px solid transparent;
   border-radius: 0.375rem;
-  background: transparent;
+  background-color: transparent;
+  color: var(--fx-ink, var(--agent-si-ink));
   cursor: pointer;
-  white-space: nowrap;
+  white-space: normal;
 }
 
-.fxpv-tab-selected {
-  border-color: currentColor;
-  font-weight: 600;
+.fxpv-tabs .fxpv-tab:hover:not(:disabled) {
+  background: transparent;
+  border-color: transparent;
+  color: var(--fx-ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
+
+/* FXTABS T1: hover, keyboard focus and the active press never hide the
+   label and never drop contrast: the ink stays the theme ink on the
+   card background (>=4.5:1 both themes); only an accent underline plus
+   an accent border mark the state. Specificity beats the global
+   button:hover fill so no theme can paint a solid block over the text. */
+.fxpv-tabs .fxpv-tab:hover:not(:disabled),
+.fxpv-tabs .fxpv-tab:focus-visible,
+.fxpv-tabs .fxpv-tab:active {
+  background-color: var(--fx-card-bg, transparent);
+  color: var(--fx-ink, var(--agent-si-ink));
+  border-color: var(--fx-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* FXTABS T2: the active tab is unmistakable without colour alone:
+   card fill plus bold plus an accent underline; same ink, same ratio. */
+.fxpv-tabs .fxpv-tab-selected {
+  background-color: var(--fx-card-bg, transparent);
+  color: var(--fx-ink, var(--agent-si-ink));
+  border-color: var(--fx-accent);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* FXTABS T3: short cells never break inside a word. Long refs scroll
 
 .fxpv-fact {
   display: flex;
@@ -57,6 +89,18 @@
   opacity: 0.85;
 }
 
+/* U2: placement rows wrap onto more lines instead of squeezing one line;
+   long agent names may break at word bounds but never mid-word. */
+.fxpv-place {
+  flex-wrap: wrap;
+}
+
+.fxpv-place-name,
+.fxpv-place-cell {
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
 /* FXVIEWS3 rework: one run is one stacked card, never a squeezed table
    row. The run id rides last and quiet, never first. */
 .fxpv-run {
@@ -71,10 +115,42 @@
   padding-left: 1.25rem;
 }
 
+/* FXTABS T3: short cells never break inside a word. Long refs scroll
+   inside their own row (never the page); the only wrapping allowed is
+   between words. */
+.fxpv-row,
+.fxpv-fact,
+.fxpv-task-row,
+.fxpv-run {
+  overflow-wrap: normal;
+  word-break: normal;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
 .fxpv-quiet {
   opacity: 0.65;
   font-size: 0.85em;
-  word-break: break-all;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+/* FXTABS T3: the copy affordance for shortened ids; quiet, keyboard
+   reachable, never a second primary. */
+.fxpv-copy {
+  background: none;
+  border: 1px solid transparent;
+  padding: 0 0.25rem;
+  margin-left: 0.25rem;
+  cursor: pointer;
+  font-size: 0.85em;
+  line-height: 1;
+}
+
+.fxpv-tabs .fxpv-copy:hover:not(:disabled),
+.fxpv-copy:focus-visible {
+  background: none;
+  border-color: var(--fx-accent);
 }
 
 /* FXVIEWS-10: task rows stack title, status chip and date on their own
