@@ -11,6 +11,7 @@ import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import type { ProjectRecord } from "../api/iface";
 import type { SidebarProps } from "../app/iface";
 import { useApiClient, useCurrentProject } from "../app/ApiClientProvider";
+import { hasChatUnseen, useUnseenVersion } from "../chat/index";
 import { t } from "../locale/index";
 import { Icon } from "../ui/icons";
 import type { IconName } from "../ui/icons";
@@ -110,9 +111,15 @@ export function Sidebar(props: SidebarProps): ReactElement {
   ];
 
   function openProject(projectId: string): void {
+    // FXCHATHIST Part 2 (H3): opening a project lands on its chat with
+    // its history (the Chat tab), not the overview.
     current.select(projectId);
-    navigate(`/projects/${projectId}/overview`);
+    navigate(`/projects/${projectId}/chat`);
   }
+
+  // H4 quiet dot: re-renders rows when any slice flags unseen activity.
+  const unseenTick = useUnseenVersion();
+  void unseenTick;
 
   return (
     <nav data-testid="sidebar" aria-label={t("shell.sidebar.projects")}>
@@ -163,6 +170,17 @@ export function Sidebar(props: SidebarProps): ReactElement {
           >
             <Icon name="folder" />
             <span className="fx-truncate">{project.name}</span>
+            {/* FXCHATHIST Part 2 (H4): quiet dot while this project's
+                chat holds unseen activity; opening the chat clears it. */}
+            {hasChatUnseen(client, project.project_id) ? (
+              <span
+                data-testid={`project-chat-dot-${project.project_id}`}
+                className="fx-quiet"
+                aria-hidden="true"
+              >
+                {"\u2022"}
+              </span>
+            ) : null}
           </button>
         ))}
       </div>

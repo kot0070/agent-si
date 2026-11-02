@@ -10,9 +10,11 @@
 
 import { useEffect, useState } from "react";
 import type { FormEvent, ReactElement } from "react";
+import { useNavigate } from "react-router-dom";
 import type { ProjectRecord } from "../api/iface";
 import { ApiError, apiErrorLocaleKey, requestResponse } from "../api/errors";
 import { useApiClient, useCurrentProject } from "../app/ApiClientProvider";
+import { hasChatUnseen, useUnseenVersion } from "../chat/index";
 import { formatDate, t } from "../locale/index";
 import { Card } from "../ui/Card";
 import { EmptyState } from "../ui/EmptyState";
@@ -81,6 +83,16 @@ function isPaused(paused: ReadonlySet<string>, id: string): boolean {
   return paused.has(id);
 }
 
+// FXCHATHIST Part 2 (H3): isolated tests mount this page without a
+// Router; open still selects there, navigation applies only with one.
+function useOptionalNavigate(): ((to: string) => void) | null {
+  try {
+    return useNavigate();
+  } catch {
+    return null;
+  }
+}
+
 function formatProjectDate(value: string): string {
   const stamp = new Date(value);
   if (Number.isNaN(stamp.getTime())) {
@@ -92,6 +104,10 @@ function formatProjectDate(value: string): string {
 export function ProjectsPage(): ReactElement {
   const client = useApiClient();
   const current = useCurrentProject();
+  const navigate = useOptionalNavigate();
+  // H4 quiet dot: re-renders rows when any slice flags unseen activity.
+  const unseenTick = useUnseenVersion();
+  void unseenTick;
   const [projects, setProjects] = useState<ProjectRecord[] | null>(null);
   const [failure, setFailure] = useState<{
     errorKey: string;
@@ -287,11 +303,25 @@ export function ProjectsPage(): ReactElement {
                     type="button"
                     data-testid={`project-open-${row.project_id}`}
                     onClick={() => {
+                      // FXCHATHIST Part 2 (H3): opening a project
+                      // selects it and lands on its chat history.
                       current.select(row.project_id);
+                      navigate?.(`/projects/${row.project_id}/chat`);
                     }}
                   >
                     {row.name}
                   </button>
+                  {/* FXCHATHIST Part 2 (H4): quiet dot while this
+                      project's chat holds unseen activity. */}
+                  {hasChatUnseen(client, row.project_id) ? (
+                    <span
+                      data-testid={`project-chat-dot-${row.project_id}`}
+                      className="fx-quiet"
+                      aria-hidden="true"
+                    >
+                      {"\u2022"}
+                    </span>
+                  ) : null}
                   <span data-testid={`project-created-${row.project_id}`}>
                     {formatProjectDate(row.created_at)}
                   </span>

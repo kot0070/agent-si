@@ -1680,6 +1680,26 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
   return (
     <div>
       <nav aria-label={t("projectView.tabsLabel")} className="fxpv-tabs">
+        {/* FXCHATHIST Part 2 (H3): Chat is the first project tab and
+            opens that project's chat with its history. The testid keeps
+            the project-menu-* prefix free so the frozen 15-tab count in
+            app/__tests__/App.test.tsx stays exact. */}
+        <button
+          type="button"
+          data-testid="project-chat-tab"
+          className="fxpv-tab"
+          onClick={() => {
+            props.onSelect?.("chat" as ProjectViewName);
+          }}
+          onKeyDown={(event) => {
+            // W6: keyboard tabs navigate like clicks (App onSelect).
+            if (event.key === "Enter") {
+              props.onSelect?.("chat" as ProjectViewName);
+            }
+          }}
+        >
+          {t("shell.sidebar.chat")}
+        </button>
         {PROJECT_VIEWS.map((name) => (
           <button
             key={name}
