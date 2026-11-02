@@ -504,6 +504,12 @@ export function ConnectDialog({
         {saving ? t("providers.connect.saving") : t("providers.connect.save")}
       </button>
       </div>
+      {/* FXC2 advisor: a disabled Save needs its reason on screen. */}
+      {preset.kind !== "local" && !checked && apiKey.length > 0 ? (
+        <p data-testid="connect-check-first" data-variant="quiet">
+          <small>{t("providers.connect.checkFirst")}</small>
+        </p>
+      ) : null}
       </>
       ) : (
       <>
