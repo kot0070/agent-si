@@ -144,6 +144,18 @@ def project_view(record: Any) -> dict:
     }
 
 
+def project_view_with_health(app: Any, record: Any) -> dict:
+    """project_view plus the SH-05 working-folder health (SH-01 shape
+    parity: create/list/read/refresh carry the identical fields;
+    folder_path is "" when no path resolves)."""
+    view = project_view(record)
+    folder_ok, folder_path = _folder_health(
+        app, record.get("project_id"), record.get("folder_ref"))
+    view["folder_ok"] = folder_ok
+    view["folder_path"] = folder_path
+    return view
+
+
 def task_view(record: Any) -> dict:
     """UI-parsable task shape (matches TaskRecord zod schema)."""
     return {
@@ -188,7 +200,7 @@ def register_read_routes(app: Any) -> Any:
     def list_projects() -> dict:
         projects, _tasks = repos_for(app)
         rows = [
-            project_view(record)
+            project_view_with_health(app, record)
             for record in projects.list_by({})
             if not record.get("archived")
         ]
@@ -203,12 +215,7 @@ def register_read_routes(app: Any) -> Any:
                 status_code=404,
                 detail=f"unknown project {project_id!r}",
             )
-        view = project_view(stored)
-        folder_ok, folder_path = _folder_health(
-            app, project_id, stored.get("folder_ref"))
-        view["folder_ok"] = folder_ok
-        if folder_path:
-            view["folder_path"] = folder_path
+        view = project_view_with_health(app, stored)
         return {"project": view}
 
     @app.get("/api/v1/tasks")

@@ -28,7 +28,7 @@ from fastapi import HTTPException, Request
 
 from agent_si.backend.read_routes import (
     persist_k02r3_store,
-    project_view,
+    project_view_with_health,
     repos_for,
     task_view,
 )
@@ -309,7 +309,7 @@ def register_console_projects_write_routes(app: Any) -> Any:
         from agent_si.backend import project_defaults as _project_defaults
 
         _project_defaults.ensure_project_defaults(request.app, project_id)
-        return {"project": project_view(stored)}
+        return {"project": project_view_with_health(request.app, stored)}
 
     @app.put("/api/v1/projects/{project_id}")
     async def update_project(project_id: str, request: Request) -> dict:
@@ -340,7 +340,7 @@ def register_console_projects_write_routes(app: Any) -> Any:
                 status_code=409, detail="project changed; re-read"
             ) from None
         persist_k02r3_store(request.app)
-        return {"project": project_view(saved)}
+        return {"project": project_view_with_health(request.app, saved)}
 
     @app.delete("/api/v1/projects/{project_id}")
     async def delete_project(project_id: str, request: Request) -> dict:
