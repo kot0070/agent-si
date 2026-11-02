@@ -43,7 +43,7 @@ def test_fxopen_locale_language_and_theme_names():
     en = _load("en.json")
     uk = _load("uk.json")
     assert en["shell"]["topbar"]["langEn"] == "English"
-    assert en["shell"]["topbar"]["langUk"] == "Ukrainian"
+    assert en["shell"]["topbar"]["langUk"] == "Українська"
     assert uk["shell"]["topbar"]["langEn"] == "English"
     assert uk["shell"]["topbar"]["langUk"] == "Українська"
     assert en["settings"]["appearance"]["dark"] == "dark"

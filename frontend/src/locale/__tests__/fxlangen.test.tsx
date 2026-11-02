@@ -88,7 +88,7 @@ describe("fxlangen default English", () => {
     expect(options.map((option) => option.value)).toEqual(["en", "uk"]);
     const labels = options.map((option) => option.text);
     expect(labels).toContain("English");
-    expect(labels).toContain("Ukrainian");
+    expect(labels).toContain("Українська");
     expect(labels).not.toContain("en");
     expect(labels).not.toContain("uk");
   });
