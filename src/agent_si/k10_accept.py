@@ -65,6 +65,8 @@ def _probe_docker() -> dict:
             [_exe, "--version"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=_DOCKER_TIMEOUT_S,
         )
     except (OSError, subprocess.TimeoutExpired) as _exc:
@@ -104,6 +106,8 @@ def _probe_powershell() -> dict:
              "$PSVersionTable.PSVersion.ToString()"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=_POWERSHELL_TIMEOUT_S,
         )
     except (OSError, subprocess.TimeoutExpired) as _exc:
