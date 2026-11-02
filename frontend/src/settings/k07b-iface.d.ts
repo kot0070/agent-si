@@ -67,6 +67,7 @@ export type LocaleKey =
   | 'chat.empty.line'
   | 'chat.empty.sample1'
   | 'chat.empty.sample2'
+  | 'chat.error.noProvider'
   | 'chat.error.retry'
   | 'chat.hierarchy.auditorSplit'
   | 'chat.hierarchy.auto'

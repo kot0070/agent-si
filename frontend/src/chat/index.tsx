@@ -756,10 +756,19 @@ let streamSeq = 0;
 action. The code never reaches the screen. The task rides on the
 blocking error when the failing turn is known (history reload), else
 the last sent prompt of this slice. */
+/** FXR3B J5: one human error line — what failed, which step, next
+action. The code never reaches the screen (it rides only the tooltip
+for diagnostics). The no-model case names the exact next step. */
 function chatErrorText(
   blocking: BlockingError,
   prompt: string | null,
 ): string {
+  if (
+    blocking.code === "NO_PROVIDER_BOUND" ||
+    blocking.errorKey === "firstrun.steps.connectProvider"
+  ) {
+    return t("chat.error.noProvider");
+  }
   const raw = blocking.task ?? prompt ?? "";
   const step =
     raw.trim() !== "" ? ` — task "${raw.trim().slice(0, 140)}"` : "";
@@ -874,6 +883,7 @@ function handleRunError(
   const current = getChatState(key).messages.find(
     (message) => message.id === assistantId,
   );
+  const failedCode = runErrorCode(error);
   if (record !== undefined) {
     // Failed runs are stored too (holds are not terminal: Allow replays
     // the same run id, so the held running turn upserts into one turn).
@@ -881,8 +891,14 @@ function handleRunError(
     void recordTurnBestEffort(record.projectId, record.prompt, partial, {
       status: "failed",
       run_id: record.runId,
-      error_code: runErrorCode(error),
+      error_code: failedCode,
     });
+    if (failedCode === "NO_PROVIDER_BOUND") {
+      // No model bound: the draft text stays so the user can connect a
+      // provider and send the same task again. The restore itself runs
+      // in the component (see the blocking effect below): this module
+      // function never touches component state.
+    }
   }
   if (current !== undefined && current.text === "") {
     // Failed before any token: prune the empty placeholder (render
@@ -1092,6 +1108,20 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
   const [blocking, setBlocking] = useState<BlockingError | null>(() =>
     consumeBlockingStash(key),
   );
+  // No model bound: the draft text stays so the user can connect a
+  // provider and send the same task again. Never clobbers text the
+  // user typed after the send.
+  useEffect(() => {
+    if (
+      blocking !== null &&
+      blocking.code === "NO_PROVIDER_BOUND" &&
+      blocking.task !== undefined &&
+      blocking.task.trim() !== "" &&
+      draft.trim() === ""
+    ) {
+      setDraft(blocking.task);
+    }
+  }, [blocking, draft]);
   const [toast, setToast] = useState<string | null>(null);
   const [flooded, setFlooded] = useState(false);
   const offlineRef = useRef(!readOnline());
@@ -1856,7 +1886,9 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
             inside, the send as an icon button inside right; a small status
             line under it (model | route | working state). */}
         <div data-testid="chat-composer" className="fx-composer">
-          {boundModels !== null && boundModels.length === 0 ? (
+          {boundModels !== null &&
+          boundModels.length === 0 &&
+          blocking?.code !== "NO_PROVIDER_BOUND" ? (
             <div className="fx-composer-hint">
               <p data-testid="chat-no-model-hint" className="fx-quiet">{t("chat.composer.noModel")}</p>
               <a data-testid="chat-no-model-connect" href="/settings/models" className="fx-btn-quiet">
@@ -1951,6 +1983,7 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
               data-testid="chat-error-line"
               role="alert"
               className="fx-quiet"
+              title={blocking.code}
             >
               <p>
                 {chatErrorText(

@@ -247,6 +247,47 @@ describe("J3 fresh project empty state", () => {
   });
 });
 
+describe("no-model single line", () => {
+  it("names the exact next step, keeps the draft, hides the duplicate hint", async () => {
+    historyTurns = [];
+    streamReplies.push(() =>
+      sseBody([
+        `data: {"type":"start","stream_id":"srv-n","run_id":"r-n"}`,
+        `data: {"type":"error","stream_id":"srv-n","run_id":"r-n","code":"NO_PROVIDER_BOUND","message":"wire"}`,
+        "",
+      ]),
+    );
+    renderChat();
+    fireEvent.change(screen.getByTestId("chat-prompt"), {
+      target: { value: "do the thing" },
+    });
+    fireEvent.click(screen.getByTestId("chat-send"));
+    const line = await screen.findByTestId("chat-error-line");
+    expect(line.querySelector("p")?.textContent).toBe(
+      "Connect a provider first, then send your task again.",
+    );
+    expect(
+      (screen.getByTestId("chat-prompt") as HTMLTextAreaElement).value,
+    ).toBe("do the thing");
+    expect(screen.queryByTestId("chat-no-model-hint")).toBeNull();
+    const page = document.body.textContent ?? "";
+    expect(page).not.toContain("NO_PROVIDER_BOUND");
+    expect(page).not.toContain("Something went wrong");
+    expect(screen.queryAllByTestId("chat-error-line")).toHaveLength(1);
+    expect(await screen.findByTestId("kit-error-retry")).toBeTruthy();
+    streamReplies.push(() =>
+      sseBody([
+        `data: {"type":"start","stream_id":"srv-r","run_id":"r-r"}`,
+        `data: {"type":"delta","stream_id":"srv-r","run_id":"r-r","text":"back"}`,
+        `data: {"type":"done","stream_id":"srv-r","run_id":"r-r","text":"back"}`,
+        "",
+      ]),
+    );
+    fireEvent.click(screen.getByTestId("kit-error-retry"));
+    expect(await screen.findByText("back")).toBeTruthy();
+  });
+});
+
 describe("J5 single error line", () => {
   it("shows what failed plus retry, never the bare code", async () => {
     streamReplies.push(() =>
