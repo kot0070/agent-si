@@ -54,6 +54,7 @@ import { ThemeToggle } from "../shell/ThemeToggle";
 import { ContractDefaultsBar } from "../settings/ContractDefaultsBar";
 import { Inspector } from "../shell/Inspector";
 import { ClosingGuard } from "../shell/ClosingGuard";
+import { useLivePumpActive } from "../chat/index";
 import type { ProjectViewName } from "../projects/ProjectView";
 import { LocaleCoverage } from "../k07next/LocaleCoverage";
 import { TelemetryThemes } from "../k07next/TelemetryThemes";
@@ -692,6 +693,8 @@ function FirstRunRoute(props: {
 function AppShellInner(): ReactElement {
   const current = useCurrentProject();
   const projectId = current.projectId;
+  // FXSAVED item 5: arm the close warning while any chat pump streams.
+  const livePump = useLivePumpActive();
   const [chatPrefill, setChatPrefill] = useState<string | null>(null);
   const [chatOneShot, setChatOneShot] = useState<{
     projectId: string;
@@ -705,7 +708,7 @@ function AppShellInner(): ReactElement {
       <TopBar projectId={projectId} />
       <Sidebar projectId={projectId} />
       <main data-testid="app-main">
-        <ClosingGuard armed={false} confirmKey="shell.closing.confirm">
+        <ClosingGuard armed={livePump} confirmKey="shell.closing.confirm">
           <Suspense
             fallback={<LoadingState loadingKey="ui.loading.more" />}
           >
