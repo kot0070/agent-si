@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import uuid
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
@@ -402,7 +403,8 @@ class ManagerSdkBridge:
             )
         stream_id = uuid.uuid4().hex
         run_id = uuid.uuid4().hex
-        state: dict[str, Any] = {"cancelled": False}
+        state: dict[str, Any] = {"cancelled": False,
+                                 "project_id": request.project}
         self._live[stream_id] = state
         # FXDEVRUN entry: project+folder+bound provider drives the
         # autonomous dev engine through the same manager-events path
@@ -438,7 +440,8 @@ class ManagerSdkBridge:
         """
         stream_id = uuid.uuid4().hex
         run_id = uuid.uuid4().hex
-        state: dict[str, Any] = {"cancelled": False}
+        state: dict[str, Any] = {"cancelled": False,
+                                 "project_id": request.project}
         self._live[stream_id] = state
         if isinstance(reason, str) and reason.strip():
             state["no_provider_reason"] = reason.strip()
@@ -474,20 +477,73 @@ class ManagerSdkBridge:
             "message": base,
         })
 
+    def _devrun_folder(
+        self, app: Any, project: str, folder: str
+    ) -> tuple:
+        """Resolve the devrun working folder: (folder, honest).
+
+        An explicit body folder wins: an existing dir is used, an
+        absolute missing path ends the stream with one honest line.
+        A non-absolute ref (the first-message box stores its text as
+        the project folder_ref) uses the managed folder
+        <data-dir>/workspaces/<project_id>, created on demand through
+        the app data dir. honest is None when the engine may run.
+        """
+        candidate = str(folder or "")
+        if not candidate:
+            try:
+                from agent_si.backend import (
+                    console_projects_write as _write,
+                )
+                from agent_si.backend import read_routes as _reads
+
+                projects, _tasks = _reads.repos_for(app)
+                stored = _write._stored_project(projects, project)
+                if stored is not None:
+                    candidate = str(stored.get("folder_ref") or "")
+            except Exception:
+                candidate = ""
+        if not candidate:
+            return "", None
+        if os.path.isabs(candidate):
+            if os.path.isdir(candidate):
+                return candidate, None
+            return "", ("project folder not found: %s; "
+                        "choose in Projects" % (candidate,))
+        data_dir = getattr(getattr(app, "state", None), "data_dir", None)
+        if not data_dir:
+            return "", ("project folder not found: %s; "
+                        "choose in Projects" % (candidate,))
+        managed = os.path.join(
+            str(data_dir), "workspaces", str(project))
+        try:
+            os.makedirs(managed, exist_ok=True)
+        except Exception:
+            return "", ("project folder not found: %s; "
+                        "choose in Projects" % (candidate,))
+        if not os.path.isdir(managed):
+            return "", ("project folder not found: %s; "
+                        "choose in Projects" % (candidate,))
+        return managed, None
+
     def _devrun_entry(
         self, request: ChatStreamRequest, state: dict[str, Any]
     ) -> Any | None:
         """FXDEVRUN entry: run_dev_task when project+folder bound.
 
         Returns the run-task-streamed-shaped entry the manager path
-        consumes, or None to keep today's path. Never raises.
+        consumes, or None to keep today's path. Never raises. The
+        folder resolves from the stored project row when the body
+        carries none; the first stream delta names the working
+        folder, and a missing absolute path ends the stream with
+        one honest line (the engine never runs for it).
         """
         try:
             folder = str(getattr(request, "folder", "") or "")
             project = str(getattr(request, "project", "") or "")
         except Exception:
             return None
-        if not folder or not project:
+        if not project:
             return None
         bound = self._provider_adapter
         if bound is None:
@@ -500,19 +556,43 @@ class ManagerSdkBridge:
         app = getattr(self, "_app", None)
         if app is None:
             return None
+        resolved, honest = self._devrun_folder(app, project, folder)
         try:
             from agent_si.runtime import devrun as _devrun
         except ImportError:
             return None
+        if honest is not None:
+            text = str(honest)
+            if not text.endswith("\n"):
+                text = text + "\n"
+
+            def _honest_entry(
+                dev_request: ChatStreamRequest, **kwargs: Any
+            ) -> Any:
+                yield {"type": "delta", "text": text}
+                yield {"type": "done", "text": text}
+
+            return _honest_entry
+        if not resolved:
+            return None
+        effective = request
+        if resolved != folder:
+            try:
+                effective = dataclasses.replace(
+                    request, folder=resolved)
+            except Exception:
+                return None
         try:
-            if not _devrun.wants_devrun(request, bound, app):
+            if not _devrun.wants_devrun(effective, bound, app):
                 return None
         except Exception:
             return None
+        working = "Working folder: %s\n" % (resolved,)
 
         def _entry(dev_request: ChatStreamRequest, **kwargs: Any) -> Any:
-            return _devrun.run_dev_task(
-                dev_request, stream_state=state, app=app, **kwargs)
+            yield {"type": "delta", "text": working}
+            yield from _devrun.run_dev_task(
+                effective, stream_state=state, app=app, **kwargs)
 
         return _entry
 
@@ -523,6 +603,35 @@ class ManagerSdkBridge:
             return False
         state["cancelled"] = True
         return True
+
+    def cancel_project(self, project_id: str) -> bool:
+        """End every live stream of one project (same effect as cancel)."""
+        target = str(project_id or "")
+        if not target:
+            return False
+        hit = False
+        for stream_id, state in list(self._live.items()):
+            try:
+                same = str(state.get("project_id") or "") == target
+            except Exception:
+                continue
+            if not same:
+                continue
+            state = self._live.pop(stream_id, None)
+            if isinstance(state, dict):
+                state["cancelled"] = True
+            hit = True
+        return hit
+
+    def cancel_all(self) -> bool:
+        """End every live stream (same effect as cancel)."""
+        hit = False
+        for stream_id, state in list(self._live.items()):
+            state = self._live.pop(stream_id, None)
+            if isinstance(state, dict):
+                state["cancelled"] = True
+            hit = True
+        return hit
 
     # -- internals ------------------------------------------------------
 

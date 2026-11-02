@@ -237,7 +237,10 @@ function useEnsureProjectSelection(): void {
 // creates the first project and starts a task in it, then selects it so the
 // route continues in the regular chat surface. Reuses the chat composer
 // testids so the route stays chat-first before any project exists.
-function ChatStartBox(props: { initialDraft?: string }): ReactElement {
+function ChatStartBox(props: {
+  initialDraft?: string;
+  onFirstMessage?: (projectId: string, message: string) => void;
+}): ReactElement {
   const client = useApiClient();
   const current = useCurrentProject();
   const [draft, setDraft] = useState(props.initialDraft ?? "");
@@ -266,6 +269,7 @@ function ChatStartBox(props: { initialDraft?: string }): ReactElement {
         scope: [],
       });
       setDraft("");
+      props.onFirstMessage?.(project.project_id, message);
     } catch (error) {
       if (error instanceof ApiError) {
         setBlocking({
@@ -331,10 +335,33 @@ function ChatStartBox(props: { initialDraft?: string }): ReactElement {
   );
 }
 
-function ChatRoute(props: { initialDraft: string | null }): ReactElement {
+function ChatRoute(props: {
+  initialDraft: string | null;
+  oneShot: { projectId: string; text: string } | null;
+  onFirstMessage?: (projectId: string, message: string) => void;
+  onOneShotConsumed?: () => void;
+}): ReactElement {
   const current = useCurrentProject();
   if (current.projectId === null) {
-    return <ChatStartBox initialDraft={props.initialDraft ?? undefined} />;
+    return (
+      <ChatStartBox
+        initialDraft={props.initialDraft ?? undefined}
+        onFirstMessage={props.onFirstMessage}
+      />
+    );
+  }
+  if (
+    props.oneShot !== null &&
+    props.oneShot.projectId === current.projectId
+  ) {
+    return (
+      <ChatAreaView
+        projectId={current.projectId}
+        initialDraft={props.initialDraft ?? undefined}
+        initialSend={props.oneShot.text}
+        onSendConsumed={props.onOneShotConsumed}
+      />
+    );
   }
   return (
     <ChatAreaView
@@ -645,6 +672,10 @@ function AppShell(): ReactElement {
   const current = useCurrentProject();
   const projectId = current.projectId;
   const [chatPrefill, setChatPrefill] = useState<string | null>(null);
+  const [chatOneShot, setChatOneShot] = useState<{
+    projectId: string;
+    text: string;
+  } | null>(null);
   useEnsureProjectSelection();
   return (
     <div data-testid="app-shell">
@@ -661,7 +692,18 @@ function AppShell(): ReactElement {
             <Routes>
               <Route
                 path={ROUTES.chat}
-                element={<ChatRoute initialDraft={chatPrefill} />}
+                element={
+                  <ChatRoute
+                    initialDraft={chatPrefill}
+                    oneShot={chatOneShot}
+                    onFirstMessage={(nextProjectId, text) => {
+                      setChatOneShot({ projectId: nextProjectId, text });
+                    }}
+                    onOneShotConsumed={() => {
+                      setChatOneShot(null);
+                    }}
+                  />
+                }
               />
               <Route path={ROUTES.agentsLive} element={<AgentsRoute />} />
               <Route path="/watcher" element={<WatcherRoute />} />

@@ -531,6 +531,19 @@ async def route_post_stop_all(request: Request) -> Any:
     data = await _body(request)
     token = _guard_post(request, data)
     project_id = str(data.get("project_id", "") or data.get("project", ""))
+    try:
+        bridge = getattr(request.app.state, "chat_stream_bridge", None)
+        if bridge is not None:
+            if project_id:
+                cancel = getattr(bridge, "cancel_project", None)
+                if callable(cancel):
+                    cancel(project_id)
+            else:
+                cancel = getattr(bridge, "cancel_all", None)
+                if callable(cancel):
+                    cancel()
+    except Exception:
+        pass
     if not project_id:
         return _serve_owned(
             _stop_home.request_stop_all,

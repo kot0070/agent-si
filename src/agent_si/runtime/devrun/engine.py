@@ -52,14 +52,80 @@ def _run_event(event: str, turn: int, subtask: str, detail: str,
     """One chat-consumable RunEvent (the manager's own class).
 
     The human detail rides both the record field and ``data.text``,
-    the key the chat SSE mapper forwards as the event text.
+    the key the chat SSE mapper forwards as the event text. Status
+    lines always end with a newline so the chat renders them whole;
+    every terminal event repeats its delta text exactly.
     """
     from agent_si.runtime.manager import RunEvent
 
+    text = str(detail)
+    if text and not text.endswith("\n"):
+        text = text + "\n"
     body = dict(data or {})
-    body.setdefault("text", str(detail))
+    body.setdefault("text", text)
     return RunEvent(event=event, turn=turn, subtask_id=str(subtask),
-                    detail=str(detail), data=body)
+                    detail=text, data=body)
+
+
+def _journal_event(project: str, kind: str, summary: str) -> None:
+    """One devrun journal row; a journal failure never breaks the run."""
+    try:
+        from agent_si.watcher import journal as _journal_store
+
+        _journal_store.append_event(
+            str(project), "devrun", str(kind), str(summary),
+            (str(project),))
+    except Exception:
+        pass
+
+
+def _ledger_total_line(record: Any) -> str:
+    """Total tokens plus cost from the record ledger.
+
+    The cost is UNKNOWN when any call has no price, never 0.
+    """
+    try:
+        from decimal import Decimal as _Dec
+
+        rows = record.get("ledger", []) if isinstance(
+            record, dict) else []
+    except Exception:
+        rows = []
+    total_in = 0
+    total_out = 0
+    unknown = not rows
+    priced = None
+    try:
+        from decimal import Decimal as _Dec
+
+        for row in rows or []:
+            tokens = row.get("tokens") or {}
+            for key, name in (("input", "in"), ("output", "out")):
+                try:
+                    value = tokens.get(key)
+                except Exception:
+                    value = None
+                if isinstance(value, int) and not isinstance(value, bool):
+                    if name == "in":
+                        total_in += value
+                    else:
+                        total_out += value
+            cost = row.get("cost")
+            if cost is None or (isinstance(cost, str) and cost in (
+                    "UNKNOWN", "UNAVAILABLE")):
+                unknown = True
+                continue
+            try:
+                amount = _Dec(str(cost))
+            except Exception:
+                unknown = True
+                continue
+            priced = amount if priced is None else priced + amount
+    except Exception:
+        unknown = True
+    cost_text = "UNKNOWN" if unknown or priced is None else str(priced)
+    return ("Total: %d input + %d output = %d tokens; cost: %s"
+            % (total_in, total_out, total_in + total_out, cost_text))
 
 
 def _run_end_tests(*, project_id: str, run_id: str,
@@ -119,6 +185,9 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
             store[str(project)] = record
         except Exception:
             pass
+
+    def _journal(kind: str, summary: str) -> None:
+        _journal_event(project, kind, summary)
 
     def _stop_seen() -> bool:
         try:
@@ -194,10 +263,13 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
               messages: list, part: Any, attempt: int,
               waits: list) -> Any:
         _check_stop()
-        response, over = _roles.invoke(
-            app, adapter, resolution, messages, record=record,
-            project_id=project, run_id=run_id, part=part,
-            attempt=attempt)
+        try:
+            response, over = _roles.invoke(
+                app, adapter, resolution, messages, record=record,
+                project_id=project, run_id=run_id, part=part,
+                attempt=attempt)
+        except _roles._BudgetOut as exc:
+            raise _BudgetOut(str(exc)) from None
         usage = getattr(response, "usage", {}) or {}
         tokens = dict(usage) if isinstance(usage, dict) else {}
         ledger = (record.get("ledger", []) or [])[-1] if record.get(
@@ -222,6 +294,9 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                 "run failed: project folder %r is not a directory"
                 % (folder,))
             record["success"] = False
+            yield _run_event("delta", turn, task_id, record["summary"],
+                             {"run_id": run_id, "success": False})
+            turn += 1
             yield _run_event("done", turn, task_id, record["summary"],
                              {"run_id": run_id, "success": False})
             return
@@ -249,6 +324,9 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         except _roles.RoleUnbound as exc:
             record["summary"] = "run failed: %s" % (exc,)
             record["success"] = False
+            yield _run_event("delta", turn, task_id, record["summary"],
+                             {"run_id": run_id, "success": False})
+            turn += 1
             yield _run_event("done", turn, task_id, record["summary"],
                              {"run_id": run_id, "success": False})
             return
@@ -259,9 +337,28 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         except _roles.RoleUnbound as exc:
             record["summary"] = "run failed: %s" % (exc,)
             record["success"] = False
+            yield _run_event("delta", turn, task_id, record["summary"],
+                             {"run_id": run_id, "success": False})
+            turn += 1
             yield _run_event("done", turn, task_id, record["summary"],
                              {"run_id": run_id, "success": False})
             return
+        for role_name, resolution in (
+                ("director", director), ("manager", manager),
+                ("worker", worker), ("auditor", auditor)):
+            try:
+                why = json.dumps(resolution.get("why", {}),
+                                 sort_keys=True, default=str)
+            except Exception:
+                why = "{}"
+            yield _run_event(
+                "delta", turn, task_id,
+                "Role %s: %s/%s (%s why: %s)"
+                % (role_name, resolution.get("provider"),
+                   resolution.get("model"),
+                   resolution.get("mode"), why),
+                {"run_id": run_id, "part_id": None})
+            turn += 1
         _check_stop()
         director_text = _call(
             "director", director, director_adapter,
@@ -290,6 +387,10 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                 record["summary"] = (
                     "run failed: director plan invalid: %s" % (exc2,))
                 record["success"] = False
+                yield _run_event("delta", turn, task_id,
+                                 record["summary"],
+                                 {"run_id": run_id, "success": False})
+                turn += 1
                 yield _run_event("done", turn, task_id,
                                  record["summary"],
                                  {"run_id": run_id, "success": False})
@@ -308,11 +409,31 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
             record["contract_hash"] = hashlib.sha256(
                 json.dumps(parts, sort_keys=True).encode(
                     "utf-8")).hexdigest()
+            try:
+                plan_why = json.dumps(director.get("why", {}),
+                                      sort_keys=True, default=str)
+            except Exception:
+                plan_why = "{}"
+            _journal("DEVRUN_PLAN", "plan of %d parts: %s "
+                     "(director %s/%s why %s)"
+                     % (len(parts), ", ".join(
+                         str(part["part_id"]) for part in parts),
+                         director.get("provider"),
+                         director.get("model"), plan_why))
             yield _run_event(
                 "delta", turn, task_id,
                 "Director: plan of %d parts" % (len(parts),),
                 {"run_id": run_id, "parts": len(parts)})
             turn += 1
+            for part in parts:
+                yield _run_event(
+                    "delta", turn, task_id,
+                    "Part %s: %s [files: %s]"
+                    % (part["part_id"], part["goal"],
+                       ", ".join(part["files"])),
+                    {"run_id": run_id,
+                     "part_id": part["part_id"]})
+                turn += 1
             order = _manager_order(
                 record, manager, manager_adapter, parts, project,
                 run_id, _call)
@@ -336,6 +457,11 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         if not record.get("stopped"):
             record["run_end"] = _run_end_tests(
                 project_id=project, run_id=run_id, task_id=task_id)
+        _journal("DEVRUN_END", record.get("summary") or "run ended")
+        yield _run_event("delta", turn, task_id,
+                         _ledger_total_line(record),
+                         {"run_id": run_id})
+        turn += 1
         yield _run_event("delta", turn, task_id, record["summary"],
                          {"run_id": run_id,
                           "success": bool(record.get("success"))})
@@ -348,14 +474,22 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         record["success"] = False
         record["summary"] = "run stopped: user stop"
         _publish()
+        _journal("DEVRUN_END", record.get("summary") or "run ended")
+        yield _run_event("delta", turn, task_id, record["summary"],
+                         {"run_id": run_id})
+        turn += 1
         yield _run_event("cancelled", turn, task_id, record["summary"],
                          {"run_id": run_id})
     except _BudgetOut as exc:
         record["success"] = False
         record["summary"] = "run failed: %s" % (exc,)
         _publish()
-        yield _run_event("budget_stop", turn, task_id,
-                         "budget stop: %s" % (exc,),
+        _journal("DEVRUN_END", record.get("summary") or "run ended")
+        stop_text = "budget stop: %s" % (exc,)
+        yield _run_event("delta", turn, task_id, stop_text,
+                         {"run_id": run_id})
+        turn += 1
+        yield _run_event("budget_stop", turn, task_id, stop_text,
                          {"run_id": run_id})
     except GeneratorExit:
         for proc in procs:
@@ -467,6 +601,10 @@ def _run_parts(*, record: Any, app: Any, parts: list, order: list,
                     failed, rows[failed]["verdict"]))
                 settled.add(part_id)
                 publish()
+                _journal_event(
+                    project, "DEVRUN_PART",
+                    "part %s: BLOCKED (%s)" % (
+                        part_id, rows[part_id]["reason"]))
                 turn += 1
                 yield _run_event(
                     "delta", turn, part_id,
@@ -493,6 +631,11 @@ def _run_parts(*, record: Any, app: Any, parts: list, order: list,
                 live=live, call=call)
             settled.add(part_id)
             publish()
+            _journal_event(
+                project, "DEVRUN_PART",
+                "part %s: %s (%s)" % (
+                    part_id, rows[part_id]["verdict"],
+                    rows[part_id].get("reason", "")))
             progressed = True
         if not progressed:
             for part_id in pending:
@@ -500,11 +643,19 @@ def _run_parts(*, record: Any, app: Any, parts: list, order: list,
                     _blocked(part_id,
                              "blocked: prerequisites never passed")
                     settled.add(part_id)
+                    _journal_event(
+                        project, "DEVRUN_PART",
+                        "part %s: BLOCKED (%s)" % (
+                            part_id, rows[part_id]["reason"]))
             publish()
     for part_id in pending:
         if part_id not in settled:
             _blocked(part_id, "blocked: prerequisites never passed")
             settled.add(part_id)
+            _journal_event(
+                project, "DEVRUN_PART",
+                "part %s: BLOCKED (%s)" % (
+                    part_id, rows[part_id]["reason"]))
     publish()
     return turn
 
@@ -551,20 +702,38 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
             procs=procs, publish=publish, check_stop=check_stop,
             stop_seen=stop_seen)
         turn, check_rows, checks_ok = checks
+        for check in check_rows:
+            command = " ".join(
+                str(word) for word in (check.get("argv") or []))
+            line = "Check %s $ %s -> exit %s" % (
+                part_id, command, check.get("exit_code"))
+            log_path = os.path.join(
+                str(folder), str(check.get("output_file") or ""))
+            if not os.path.exists(log_path):
+                line += " (no log file)"
+            elif not str(check.get("output_tail") or "").strip():
+                line += " (no output)"
+            turn += 1
+            yield _run_event(
+                "delta", turn, part_id, line,
+                {"run_id": run_id, "part_id": part_id})
         after = _audit.snapshot_files(folder, spec["files"])
         files_diff = _audit.diff_text(before, after)
         entry = None
         if spec["check_commands"]:
-            entry = _audit.judge(
-                app, _audit.fresh_coordinator(), auditor_adapter,
-                auditor_spec, record=record, project_id=project,
-                run_id=run_id, task_id=task_id, part_id=part_id,
-                attempt=attempt, producer_ref=producer_ref,
-                auditor_ref=auditor_ref, contract_hash=contract_hash,
-                goal=spec["goal"], files_diff=files_diff,
-                checks=check_rows,
-                artifact_refs=["%s/%s" % (part_id, path)
-                               for path in spec["files"]])
+            try:
+                entry = _audit.judge(
+                    app, _audit.fresh_coordinator(), auditor_adapter,
+                    auditor_spec, record=record, project_id=project,
+                    run_id=run_id, task_id=task_id, part_id=part_id,
+                    attempt=attempt, producer_ref=producer_ref,
+                    auditor_ref=auditor_ref, contract_hash=contract_hash,
+                    goal=spec["goal"], files_diff=files_diff,
+                    checks=check_rows,
+                    artifact_refs=["%s/%s" % (part_id, path)
+                                   for path in spec["files"]])
+            except _roles._BudgetOut as exc:
+                raise _BudgetOut(str(exc)) from None
             record.setdefault("audits", []).append({
                 "producer_ref": entry["producer_ref"],
                 "audit_ref": entry["audit_id"],
@@ -574,6 +743,21 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
                 "part_id": part_id,
                 "attempt": attempt,
             })
+            first_reason = ((entry or {}).get("reasons", [])
+                            or ["auditor gave no reason"])[0]
+            turn += 1
+            yield _run_event(
+                "delta", turn, part_id,
+                "Auditor for %s: %s (%s) [%s]"
+                % (part_id, entry["result"], first_reason,
+                   auditor_ref),
+                {"run_id": run_id, "part_id": part_id})
+            _journal_event(
+                project, "DEVRUN_AUDIT",
+                "audit %s attempt %d: %s (%s)"
+                % (part_id, attempt, entry["result"],
+                   "; ".join((entry or {}).get("reasons", [])
+                             or ["auditor gave no reason"])))
             if entry.get("over_cap"):
                 raise _BudgetOut(
                     "budget stop: auditor call spent past the cap")
@@ -631,6 +815,11 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
             "Part %s: FAILED (%s)" % (part_id, row["reason"]),
             {"run_id": run_id, "part_id": part_id})
         publish()
+        turn += 1
+        yield _run_event(
+            "delta", turn, part_id,
+            "Needs you: %s: %s" % (part_id, row["reason"]),
+            {"run_id": run_id, "part_id": part_id})
         return "FAIL", turn
     row["verdict"] = "FAIL"
     row["reason"] = "attempt budget exhausted"
