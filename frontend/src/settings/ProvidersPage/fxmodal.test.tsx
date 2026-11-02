@@ -8,7 +8,7 @@
 // rows name the real model id and explain the disabled checkbox.
 // Network is the only fake (global fetch); no component doubles.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { ProvidersPage } from "./ProvidersPage";
 import { createMemorySecretStore } from "./secretStore";
 import { resetLocaleForTests, setLocale } from "../../locale/index";
@@ -122,9 +122,8 @@ describe("F08 connect opens a real centred modal", () => {
     });
     fireEvent.click(within(dialog).getByText("Save"));
     expect(await screen.findByLabelText("Disconnect Meta")).toBeTruthy();
-    // The connect dialog stays open on success: close it before opening
-    // the disconnect modal, so a single dialog is on screen.
-    fireEvent.click(within(dialog).getByText("Cancel"));
+    // Step 2 stays open: Done closes it before opening the disconnect modal.
+    fireEvent.click(within(screen.getByRole("dialog")).getByText("Done"));
     expect(screen.queryByRole("dialog")).toBeNull();
     fireEvent.click(screen.getByLabelText("Disconnect Meta"));
     const disc = screen.getByRole("dialog");
@@ -181,10 +180,15 @@ describe("L2 success only after a real save", () => {
       target: { value: "sk-test" },
     });
     fireEvent.click(within(dialog).getByText("Save"));
+    // Step 2 in the same dialog: Connected line plus the tickable list.
+    // Done closes it; the card keeps the quiet Connected line.
     expect(
       await within(dialog).findByText("Connected Meta. Reference saved."),
     ).toBeTruthy();
     expect(await screen.findByLabelText("Disconnect Meta")).toBeTruthy();
+    fireEvent.click(within(dialog).getByText("Done"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByText("Connected Meta. Reference saved.")).toBeTruthy();
   });
 });
 

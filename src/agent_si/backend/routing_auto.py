@@ -121,8 +121,31 @@ def _cheapest_first(candidates: list) -> list:
     return [cand for _idx, cand in sorted(indexed, key=key)]
 
 
+def _enabled_hit(enabled: dict, provider: str, model: str) -> bool:
+    """True when a candidate survives the server tick list (one reader).
+
+    Canonical compare (``meta/x`` and ``x`` are one model), plus the
+    dated/tag base so a capability gate never drops a model only
+    because its id is dated.
+    """
+    from agent_si.providers.registry import provider_model_lists as _lists
+
+    try:
+        ticks = enabled.get(provider)
+    except AttributeError:
+        return True
+    if ticks is None:
+        return True
+    candidate = _lists.canonical_model_id(provider, model)
+    wanted = {_lists.canonical_model_id(provider, i) for i in ticks or []}
+    if candidate in wanted:
+        return True
+    bases = {_lists.dated_base_id(w) for w in wanted}
+    return candidate in bases
+
+
 def pick_auto(catalog: dict, connected: list,
-              task_type: str) -> dict:
+              task_type: str, enabled: dict | None = None) -> dict:
     """Resolve the AUTO manager choice through the frozen seams.
 
     Unknown task_type raises UnknownTask; an empty shortlist (or no
@@ -142,6 +165,11 @@ def pick_auto(catalog: dict, connected: list,
             "unknown task_type %r (known: %s)"
             % (task_type, ", ".join(KNOWN_TASK_TYPES)))
     auto = _loader.candidates_for_auto(catalog, list(connected or []))
+    if enabled is not None:
+        auto = dict(auto)
+        auto["candidates"] = [c for c in auto.get("candidates", [])
+                              if _enabled_hit(enabled, c.get("provider_id"),
+                                             c.get("model_id"))]
     ranked = _cheapest_first(auto.get("candidates", []))
     compared = [{"provider": c.get("provider_id"), "model": c.get("model_id"),
                  "price_in_plus_out": _row_price(c.get("row"))} for c in ranked]
@@ -154,6 +182,9 @@ def pick_auto(catalog: dict, connected: list,
             continue
         profile = _roles.make_default_manager_profile(provider, model)
         _, bound = _roles.resolve_manager(profile)
+        if enabled is not None and not _enabled_hit(
+                enabled, str(bound.provider), str(bound.model)):
+            continue
         return {"manager": str(bound.provider),
                 "model": str(bound.model),
                 "why": {"connected": list(connected or []),
@@ -163,6 +194,24 @@ def pick_auto(catalog: dict, connected: list,
                         "compared": compared}}
     raise AutoBlocked(
         "AUTO BLOCKED: %s" % (auto.get("reason") or "no candidate"))
+
+
+def _route_enabled(request: Request, connected: list) -> dict | None:
+    """Stored tick lists for the route (one reader); None keeps legacy."""
+    try:
+        ctx = getattr(getattr(request, "app", None), "state", None)
+        ctx = getattr(ctx, "k04_ctx", None)
+        state_dir = getattr(ctx, "model_state_dir", None)
+    except Exception:
+        return None
+    if not state_dir:
+        return None
+    try:
+        from agent_si.providers.registry import (
+            provider_model_lists as _lists)
+        return _lists.enabled_map(state_dir, connected)
+    except Exception:
+        return None
 
 
 def register_routing_auto_routes(app: Any) -> Any:
@@ -186,7 +235,8 @@ def register_routing_auto_routes(app: Any) -> Any:
             connected = list(online)
             explicit = False
         try:
-            pick = pick_auto(_kb.bound_catalog(), connected, task_type)
+            pick = pick_auto(_kb.bound_catalog(), connected, task_type,
+                             _route_enabled(request, connected))
         except (UnknownTask, AutoBlocked) as err:
             raise HTTPException(
                 status_code=422, detail=str(err)) from None

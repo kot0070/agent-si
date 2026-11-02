@@ -14,7 +14,7 @@ type PresetConfig = {
   modelLabels: string[];
   // Proven model ids from src/agent_si/model_kb/loader.py, full
   // "pid/model" form; the first entry is the connect id. Presets without
-  // a KB source keep the legacy model-N ids (openai-compatible has no KB
+  // a KB source keep the legacy model-N ids (any-openai-compatible has no KB
   // rows; local presets send no model key on connect).
   modelIds?: string[];
 };
@@ -70,7 +70,7 @@ const BASE_PRESETS: PresetConfig[] = [
     modelIds: ["anthropic/claude-haiku-4-5", "anthropic/claude-haiku-5-5"],
   },
   {
-    id: "openai-compatible",
+    id: "any-openai-compatible",
     label: "OpenAI-compatible",
     kind: "compatible",
     group: "Compatible",
@@ -90,7 +90,7 @@ const BASE_PRESETS: PresetConfig[] = [
     modelLabels: ["Chat", "Embeddings"],
   },
   {
-    id: "lmstudio",
+    id: "lm-studio",
     label: "LM Studio",
     kind: "local",
     group: "Local",
