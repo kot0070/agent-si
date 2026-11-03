@@ -4,6 +4,7 @@
 // reads are kind "read", writes are kind "write" with the UI token attached
 // by requestJson/requestVoid.
 
+import { z } from "zod";
 import {
   BenchEstimateWireSchema,
   BenchRunIdSchema,
@@ -25,9 +26,19 @@ import type {
   LocalBenchScanResult,
 } from "./LocalBenchTypes";
 import { requestJson, requestVoid } from "../api/errors";
+import { parseModelsPayload } from "./ProvidersPage/modelsApi";
+
+// Wire: the R2 provider model route answers {provider_id, models,
+// source, enabled}; the scan reads the served rows only.
+const ProviderModelsWireSchema = z.object({
+  models: z.array(z.unknown()),
+});
 
 export interface LocalBenchClient {
   scanModels(path: string): Promise<LocalBenchScanResult>;
+  /** R5: scan the attached local runtime's real models (no folder).
+  Optional: folder-only clients keep working. */
+  scanRuntimeModels?(presetId: string): Promise<LocalBenchScanResult>;
   readEstimate(
     modelId: string,
     level: BenchmarkLevel,
@@ -122,9 +133,39 @@ export async function readLocalBenchResults(
   );
 }
 
+// R5: scan one attached local runtime's real model names (no
+// folder). Reads the provider model route the R2 lane serves for the
+// preset (GET /api/v1/providers/{id}/models); the rows are the
+// runtime's own listing, never placeholders.
+export async function scanLocalBenchRuntimeModels(
+  presetId: string,
+): Promise<LocalBenchScanResult> {
+  const data = await requestJson(
+    `/api/v1/providers/${encodeURIComponent(presetId)}/models`,
+    { method: "GET", kind: "read" },
+    ProviderModelsWireSchema,
+  );
+  const outcome = parseModelsPayload(data, [], presetId);
+  const rows = outcome?.rows ?? [];
+  return {
+    path: `runtime:${presetId}`,
+    models: rows.map(
+      (row): LocalBenchModel => ({
+        model_id: row.id,
+        display_name: row.label !== "" ? row.label : row.id,
+        evidence: "UNKNOWN",
+      }),
+    ),
+  };
+}
+
 export class HttpLocalBenchClient implements LocalBenchClient {
   scanModels(path: string): Promise<LocalBenchScanResult> {
     return scanLocalBenchModels(path);
+  }
+
+  scanRuntimeModels(presetId: string): Promise<LocalBenchScanResult> {
+    return scanLocalBenchRuntimeModels(presetId);
   }
 
   readEstimate(
