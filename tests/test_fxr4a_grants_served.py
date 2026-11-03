@@ -273,8 +273,11 @@ def test_fxr4a_force_args_ask_with_real_words(rig):
     assert "--force" in str(held), held
 
 
-# D6: deny replay closes the part FAILED with a plain line, no loop.
-def test_fxr4a_deny_replay_fails_plain(rig):
+# FXASK A4 (supersedes D6): a deny covers that run only. A new task
+# asks again (approval, never a silent refusal); allowing that ask
+# runs the install on. The old D6 FAILED-without-card shape is gone on
+# purpose: a denied run that is asked again is never a refusal.
+def test_fxr4a_deny_next_run_asks_again(rig):
     first = _chat(rig, "Install dependencies with npm install",
                   task="t-deny")
     assert first.status_code == 200, first.text
@@ -283,13 +286,13 @@ def test_fxr4a_deny_replay_fails_plain(rig):
     replay = _chat(rig, "Install dependencies with npm install",
                    task="t-deny2")
     assert replay.status_code == 200, replay.text
-    text = _all_text(_parse_sse(replay.text))
-    assert "FAILED" in text, text[:900]
+    events = _parse_sse(replay.text)
+    assert _types(events)[-1] == "approval", _types(events)[-3:]
     assert "internal" not in replay.text.lower(), replay.text[:600]
-    assert "approval" not in _types(_parse_sse(replay.text))
-    assert _types(_parse_sse(replay.text))[-1] in ("done", "error")
-    record = (getattr(rig["app"].state, "devrun_runs", None) or {}).get(
-        rig["pid"], {})
-    assert record.get("success") is False, record.get("summary")
-    assert "denied" in str(record.get("summary", "")).lower(), (
-        record.get("summary"))
+    assert _decide(rig, tool_id, "allow").status_code == 200
+    again = _chat(rig, "Install dependencies with npm install",
+                  task="t-deny3")
+    assert again.status_code == 200, again.text
+    assert "approval" not in _types(_parse_sse(again.text))
+    assert _types(_parse_sse(again.text))[-1] == "done"
+    assert "exit 0" in _all_text(_parse_sse(again.text))

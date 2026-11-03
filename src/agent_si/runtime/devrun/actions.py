@@ -977,17 +977,35 @@ def spawn_checked(
                 _ask_permissions.record_install_request(
                     tool_id=_ask_tool_id,
                     argv=list(words),
-                    project_id=str(project_id))
+                    project_id=str(project_id),
+                    run_id=_ask_scope)
             raise InstallAskNeeded(
                 _ask_tool_id,
                 f"refused: install-class command {_ask_name!r} needs "
                 "install permission (ungranted runs continue without "
                 "the install)")
         if not _ask_project_grant and _ask_decision == "deny":
-            raise PermissionError(
+            if _ask_permissions.decision_denies_run(
+                    tool_id=_ask_tool_id, run_id=_ask_scope):
+                # FXASK A4: the deny covers this run (the run it was
+                # decided in): it closes refused with the plain line.
+                raise PermissionError(
+                    f"refused: install-class command {_ask_name!r} needs "
+                    "install permission (ungranted runs continue without "
+                    "the install)")
+            # FXASK A4: a previous run's deny never refuses this run:
+            # drop the stale decision, pin this run's words, ask again.
+            with contextlib.suppress(Exception):
+                _ask_permissions.reset_decision_for_run(
+                    tool_id=_ask_tool_id,
+                    argv=list(words),
+                    project_id=str(project_id),
+                    run_id=_ask_scope)
+            raise InstallAskNeeded(
+                _ask_tool_id,
                 f"refused: install-class command {_ask_name!r} needs "
-                "install permission (ungranted runs continue without "
-                "the install)")
+                "install permission (an earlier run denied it; "
+                "ungranted runs continue without the install)")
         if not _ask_project_grant and not _ask_run_allow:
             # FXR4A D4: the once-allow is spent by an earlier run; the
             # next run asks again, never silently refuses.
@@ -995,7 +1013,8 @@ def spawn_checked(
                 _ask_permissions.record_install_request(
                     tool_id=_ask_tool_id,
                     argv=list(words),
-                    project_id=str(project_id))
+                    project_id=str(project_id),
+                    run_id=_ask_scope)
             raise InstallAskNeeded(
                 _ask_tool_id,
                 f"refused: install-class command {words[0]!r} needs "

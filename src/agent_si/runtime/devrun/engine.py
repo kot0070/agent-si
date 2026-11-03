@@ -1843,7 +1843,8 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                     "delta", turn, task_id,
                     "Part %s: %s [files: %s]"
                     % (part["part_id"], part["goal"],
-                       ", ".join(part["files"])),
+                       ", ".join(_existing_plan_files(
+                           folder, part.get("files")))),
                     {"run_id": run_id,
                      "part_id": part["part_id"]})
                 turn += 1
@@ -2082,9 +2083,13 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
     except _InstallHeld as exc:
         record["success"] = False
         record["held"] = True
-        record["summary"] = ("run held: install permission needed for %s"
-                             % (exc.tool_id,))
+        # FXASK A6: the held text is the same plain words as the
+        # _InstallHeld message (engine.py:63); the raw tool id rides
+        # its own field, never the summary or hold reason.
+        record["summary"] = ("run held: waiting for your permission to "
+                             "run %s" % (exc.command,))
         record["hold_reason"] = record["summary"]
+        record["hold_tool_id"] = str(exc.tool_id)
         _finish_task()
         _publish()
         if not record.get("stopped"):
@@ -3852,6 +3857,33 @@ def _apply_actions(*, record: Any, row: Any, folder: str, project: str,
     return text, stop_note
 
 
+def _existing_plan_files(folder: Any, files: Any) -> list[str]:
+    """Plan files that exist under the project folder (FXASK A5).
+
+    The verdict text parses ``[files: ...]`` markers as evidence, so a
+    marker must never list an absent file (a hallucinated path such as
+    ``node_modules/...`` is dropped, never announced). Only paths that
+    stay inside the folder and exist on disk are kept, in plan order,
+    duplicates dropped. Never raises.
+    """
+    try:
+        base = os.path.realpath(str(folder or ""))
+        if not base or not isinstance(files, (list, tuple)):
+            return []
+        kept: list[str] = []
+        for item in files:
+            name = str(item or "")
+            if not name or name in kept:
+                continue
+            path = os.path.normpath(os.path.join(base, name))
+            if path != base and path.startswith(base + os.sep) \
+                    and os.path.exists(path):
+                kept.append(name)
+        return kept
+    except Exception:
+        return []
+
+
 def _deny_tool_id(project: Any, argv: Any) -> str:
     """Tool id for deny-terminal bookkeeping; never raises."""
     try:
@@ -3865,12 +3897,15 @@ def _deny_tool_id(project: Any, argv: Any) -> str:
         return ""
 
 
-def _install_denied(project: Any, folder: Any, argv: Any) -> str:
+def _install_denied(project: Any, folder: Any, argv: Any,
+                    scope: Any = None) -> str:
     """Plain deny line for denied install words, else empty (FXR4A D6).
 
     Mirrors the spawn ladder: direct install class plus scripts whose
     body invokes an installer, minus project grants, with a recorded
-    deny. Never raises; unreadable state reads as not-denied.
+    deny. FXASK A4: the deny covers that run only — a deny pinned to a
+    different run reads as not-denied, so the next run asks again.
+    Never raises; unreadable state reads as not-denied.
     """
     try:
         from agent_si.runtime.devrun import actions as _deny_actions
@@ -3887,9 +3922,10 @@ def _install_denied(project: Any, folder: Any, argv: Any) -> str:
             return ""
         if _deny_perm.install_grant_allows(str(project), words):
             return ""
-        if _deny_perm.get_decision(
+        if not _deny_perm.decision_denies_run(
                 tool_id=_deny_perm.install_tool_id(
-                    str(project), words[0])) != "deny":
+                    str(project), words[0]),
+                run_id=scope):
             return ""
         return "install permission denied for %s" % (" ".join(words),)
     except Exception:
@@ -3968,7 +4004,9 @@ def _run_agent_command(*, record: Any, folder: str, project: str,
     except _actions.InstallAskNeeded as exc:
         raise _InstallHeld(exc.tool_id, " ".join(argv)) from None
     except (PermissionError, ValueError) as exc:
-        _denied_line = _install_denied(project, folder, argv)
+        _denied_line = _install_denied(
+            project, folder, argv,
+            scope=str(grant_run_id or run_id))
         if _denied_line and raise_denied:
             # FXR4A D6: the refusal is raised (never a swallowed note)
             # so the part closes FAILED with the plain line; the note
