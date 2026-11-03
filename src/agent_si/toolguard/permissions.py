@@ -753,10 +753,21 @@ def require_grant_word(value: Any, field: str) -> str:
 
 
 def _install_subcommand(words: list[str]) -> str:
-    """Subcommand word of one install argv, or empty when flag-led."""
+    """Subcommand word of one install argv, or empty when flag-led.
+
+    Manager path flags (`--prefix`, `--cwd`, `--dir`, `-C`) plus their
+    values are skipped first, so a flag-led install still resolves its
+    verb and a project grant covers it; a flag-led run resolves no
+    verb and stays empty.
+    """
     if len(words) < 2:
         return ""
-    second = str(words[1])
+    from agent_si.toolguard import guard as _guard
+
+    rest = _guard._skip_manager_path_flags([str(word) for word in words[1:]])
+    if not rest:
+        return ""
+    second = rest[0]
     if not second or second.startswith("-"):
         return ""
     return second

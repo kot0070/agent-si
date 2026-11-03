@@ -79,11 +79,43 @@ _MANAGER_INSTALL_VERBS = frozenset({
 })
 
 
+#: Manager path flags that carry a directory value, before the verb:
+#: skipped (both `--flag value` and `--flag=value`) so the verb is read
+#: by name, never by position. A project in a subfolder (`npm
+#: --prefix node-add test`) is a script run, not an installer refusal.
+_MANAGER_PATH_FLAGS = frozenset({"--prefix", "--cwd", "--dir", "-C"})
+
+
+def _skip_manager_path_flags(words: list[str]) -> list[str]:
+    """Words minus manager path flags plus their values.
+
+    Long flags drop their `--flag=value` form whole; a bare long flag
+    or ``-C`` drops the next word too (its directory). Anything else
+    (verbs, script names, install flags) passes through untouched.
+    """
+    kept: list[str] = []
+    skip_next = False
+    for word in words:
+        text = str(word)
+        if skip_next:
+            skip_next = False
+            continue
+        if text in _MANAGER_PATH_FLAGS:
+            skip_next = True
+            continue
+        if text.startswith("--") and "=" in text:
+            flag = text.split("=", 1)[0]
+            if flag in _MANAGER_PATH_FLAGS:
+                continue
+        kept.append(text)
+    return kept
+
+
 def _is_script_run(name: str, words: list[str]) -> bool:
     """True when argv runs a project script through a manager."""
     if name not in _SCRIPT_RUN_MANAGERS or len(words) < 2:
         return False
-    rest = [str(word) for word in words[1:]]
+    rest = _skip_manager_path_flags([str(word) for word in words[1:]])
     if not rest:
         return False
     first = rest[0]

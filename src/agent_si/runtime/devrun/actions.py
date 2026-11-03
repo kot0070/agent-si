@@ -422,12 +422,18 @@ def _run_script_name(head: str, words: list[str]) -> str:
     npm runs scripts via run/run-script plus the test/start shorthands;
     yarn/pnpm/bun run a bare script name (their run verb included).
     Anything else (flags, install verbs, unknown shapes) is empty.
+    Manager path flags (`--prefix`, `--cwd`, `--dir`, `-C`) plus their
+    values are skipped first, so a subfolder run still resolves its
+    script name.
     """
-    if not words:
+    from agent_si.toolguard import guard as _verb_guard
+
+    verbs = _verb_guard._skip_manager_path_flags([str(word) for word in words])
+    if not verbs:
         return ""
-    first = str(words[0])
+    first = verbs[0]
     if first in ("run", "run-script"):
-        return str(words[1]) if len(words) > 1 else ""
+        return str(verbs[1]) if len(verbs) > 1 else ""
     if head == "npm" and first in ("test", "start"):
         return first
     if head in ("yarn", "pnpm", "bun"):
@@ -504,8 +510,11 @@ def classify_argv(argv: list[str]) -> str:
             effective = module.strip().lower().rsplit("/", 1)[-1]
     if effective in _ALWAYS_INSTALL_HEADS:
         return "install"
-    if effective in ("yarn", "pnpm", "npm") and words[:1] \
-            and words[0].lower() in _FETCH_VERBS:
+    from agent_si.toolguard import guard as _class_guard
+
+    _verb_words = _class_guard._skip_manager_path_flags(words)
+    if effective in ("yarn", "pnpm", "npm") and _verb_words \
+            and _verb_words[0].lower() in _FETCH_VERBS:
         return "install"
     if effective in _INSTALL_PROGRAMS and any(
             word.lower() in _INSTALL_VERBS for word in words):
