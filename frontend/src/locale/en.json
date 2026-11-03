@@ -239,7 +239,8 @@
     "localAi": {
       "needItNow": "Only when you want work to stay on this machine.",
       "purpose": "Run models on this PC.",
-      "title": "Local AI"
+      "title": "Local LLM",
+      "empty": "There are no local presets. Add Ollama or LM Studio to connect on this machine."
     },
     "localbench": {
       "title": "Local benchmark",
@@ -423,7 +424,7 @@
       "firstTask": "Run your first task"
     },
     "optional": {
-      "localAI": "Local AI",
+      "localAI": "Local LLM",
       "watcherPreset": "Watcher preset",
       "automations": "Automations",
       "kbs": "Knowledge bases"
@@ -573,7 +574,7 @@
         "emptyLine": "No providers connected"
       },
       "localai": {
-        "title": "Local AI",
+        "title": "Local LLM",
         "subtitle": "On-machine models.",
         "total": "On-machine models",
         "emptyLine": "Not set up"
@@ -707,7 +708,7 @@
       "title": "Cost"
     },
     "local_ai": {
-      "title": "Local AI"
+      "title": "Local LLM"
     },
     "cloud_ai": {
       "title": "Cloud AI"

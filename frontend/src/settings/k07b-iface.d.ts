@@ -430,6 +430,7 @@ export type LocaleKey =
   | 'settings.grants.remove'
   | 'settings.grants.title'
   | 'settings.index.subtitle'
+  | 'settings.localAi.empty'
   | 'settings.localAi.needItNow'
   | 'settings.localAi.purpose'
   | 'settings.localAi.title'

@@ -75,7 +75,7 @@ The app opens a first-run guide with four steps. The guide reads its state from 
 3. Project and folder. Enter a folder value, optionally use Choose folder to pick it with the system dialog, then Create. The app creates the project through the real project service.
 4. First task. Enter a task title and Create. The app creates the task through the real task service and shows the created task. The Continue control finishes the guide and opens the chat with the task title ready.
 
-The last step also shows an optional quiet list: local AI, watcher preset, automations, and knowledge bases. Each can be skipped.
+The last step also shows an optional quiet list: local LLM, watcher preset, automations, and knowledge bases. Each can be skipped.
 
 To open the guide again, go to `/firstrun`.
 
