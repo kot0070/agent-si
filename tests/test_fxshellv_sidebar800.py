@@ -74,8 +74,16 @@ def _build_frontend():
             text=True,
             timeout=600,
         )
-    tail = (completed.stdout + completed.stderr)[-4000:]
-    assert completed.returncode == 0, "frontend build failed:\n" + tail
+    tail = (completed.stdout + completed.stderr)[-8000:]
+    assert completed.returncode == 0, (
+        "frontend build failed rc=%d npm=%r node=%r:\n%s"
+        % (
+            completed.returncode,
+            shutil.which("npm"),
+            shutil.which("node") or shutil.which("nodejs"),
+            tail,
+        )
+    )
     assert os.path.isfile(os.path.join(DIST, "index.html")), "dist/index.html missing after build"
 
 
