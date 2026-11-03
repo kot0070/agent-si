@@ -90,6 +90,7 @@ export type LocaleKey =
   | 'chat.permission.denied'
   | 'chat.permission.deny'
   | 'chat.permission.title'
+  | 'chat.permission.waiting'
   | 'chat.permission.why'
   | 'chat.run.emptyPlan'
   | 'chat.run.emptyPlanExample'

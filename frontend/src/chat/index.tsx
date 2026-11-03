@@ -73,6 +73,7 @@ import {
 import { readRoleProfiles } from "../settings/index";
 import { readTeamMode, saveTeamMode } from "../settings/projectLimitsApi";
 import { Icon } from "../ui/icons";
+import { Spinner } from "../ui/Spinner";
 import {
   askPermission,
   installDisplayCommand,
@@ -2734,16 +2735,17 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
             <span>
               {/* FXCHATV (c): with no provider bound the status names
                   the blocked state, never Ready. */}
+              {/* FXFACTS F9: a run waiting for a permission click shows
+                  "Waiting for your answer" with no spin. */}
               {blocking?.code === "NO_PROVIDER_BOUND" ? (
                 pt("chat.composer.statusBlocked", "Blocked")
+              ) : pendingAsk !== null ? (
+                <span data-testid="chat-waiting" role="status">
+                  {t("chat.permission.waiting")}
+                </span>
               ) : streaming ? (
                 <>
-                  <span
-                    data-testid="chat-spinner"
-                    role="status"
-                    aria-label={t("chat.stream.spinner")}
-                    className="fx-spin"
-                  />
+                  <Spinner testId="chat-spinner" />
                   <span>{t("chat.composer.statusWorking")}</span>
                 </>
               ) : (
@@ -2766,7 +2768,7 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
               className="fx-btn-quiet"
               onClick={handleAbort}
             >
-              <span className="fx-spin" aria-hidden="true" />
+              {pendingAsk === null ? <Spinner /> : null}
               {t("chat.abort.cancel")}
             </button>
           ) : null}

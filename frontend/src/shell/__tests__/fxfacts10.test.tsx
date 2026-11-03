@@ -301,6 +301,10 @@ describe("fxfacts10 rail one-line cards", () => {
       ),
     ).toBe("true");
     expect(await screen.findByTestId("team-rows")).toBeTruthy();
+    // FXFACTS F9: the running row carries the shared spinner.
+    expect(
+      screen.getByTestId("team-line-agent-1").querySelector('[data-testid="fx-spinner"]'),
+    ).not.toBeNull();
     fireEvent.click(await screen.findByTestId("rail-toggle-team"));
     expect(await screen.findByTestId("team-rows")).toBeTruthy();
     expect(
