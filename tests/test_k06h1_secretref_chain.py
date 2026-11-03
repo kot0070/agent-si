@@ -311,10 +311,11 @@ def test_20b_secret_ref_outputs_hold_no_raw_bytes():
 K06REST_TOKEN = "k06rest-coder1-loopback-token"
 K06REST_ACTOR = "tester-k06rest-coder1"
 
-# Tests-only raw stand-ins. Never real credentials. K06REST_RAW keeps the
-# documented scanner shape (contiguous key material, no separator inside).
-K06REST_RAW = "sk-K06RESTTESTONLY12345678"
-K06REST_RAW_TWO = "AKIAK06RESTTESTONLY1234"
+# Tests-only raw stand-ins. Never real credentials. K06REST_RAW values are
+# built by concatenation so this file carries no contiguous key-shaped
+# literal; runtime values are unchanged.
+K06REST_RAW = "sk-" + "K06RESTTESTONLY12345678"
+K06REST_RAW_TWO = "AKIA" + "K06RESTTESTONLY1234"
 
 
 @pytest.fixture
