@@ -406,7 +406,27 @@
       "looksTamper": "Looks for tampered files",
       "actionBlocked": "Blocked a problem",
       "actionEscalated": "Escalated for review",
-      "actionAllowed": "Checked, all quiet"
+      "actionAllowed": "Checked, all quiet",
+      "lastEvent": "Last event",
+      "sinceStart": "Journal since this start",
+      "minutes": "Minutes",
+      "journalEmpty": "No journal rows yet",
+      "structuredNote": "structured detail",
+      "kind": {
+        "WATCH_DECISION": "Decision",
+        "TAMPER_ATTEMPT": "Tamper attempt",
+        "GUARD_BLOCK": "Guard block",
+        "STOP_ALL": "Stop all",
+        "SERVICE_STATE": "Heartbeat",
+        "AUTOMATION_RUN": "Automation run",
+        "CONTEXT_CHECKPOINT": "Checkpoint",
+        "CONTEXT_RECOVERY": "Recovery",
+        "OUTAGE_SIGNAL": "Outage",
+        "DEVRUN_PLAN": "Run plan",
+        "DEVRUN_PART": "Run part",
+        "DEVRUN_AUDIT": "Run audit",
+        "DEVRUN_END": "Run end"
+      }
     }
   },
   "firstrun": {
@@ -463,7 +483,14 @@
       "langUk": "Українська",
       "stop_all_idle": "No runs active",
       "inspector": "Panel",
-      "inspectorClose": "Close panel"
+      "inspectorClose": "Close panel",
+      "stoppedLine": "Stopped {count} {unit}",
+      "stoppedAgents": {
+        "one": "agent",
+        "few": "agents",
+        "many": "agents",
+        "other": "agents"
+      }
     },
     "sidebar": {
       "chat": "Chat",

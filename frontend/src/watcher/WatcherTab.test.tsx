@@ -51,6 +51,114 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+const JOURNAL_RICH = [
+  {
+    entry_id: "evt-0227",
+    timestamp: "2026-11-03T03:11:42Z",
+    hash: "h27",
+    kind: "DEVRUN_END",
+    source: "runner",
+    summary: "run success: all 1 parts PASS",
+    refs: ["r-1"],
+  },
+  {
+    entry_id: "evt-0228",
+    timestamp: "2026-11-03T03:11:43Z",
+    hash: "h28",
+    kind: "DEVRUN_END",
+    source: "runner",
+    summary: "run success: all 1 parts PASS",
+    refs: ["r-1"],
+  },
+  {
+    entry_id: "evt-0229",
+    timestamp: "2026-11-03T03:12:00Z",
+    hash: "h29",
+    kind: "WATCH_DECISION",
+    source: "watcher",
+    summary: "rule-tamper ESCALATE no watcher model: default action",
+    refs: ["rule-tamper"],
+  },
+];
+
+function journalRow(id: string): string {
+  const row = screen.getByTestId(`journal-row-${id}`).textContent ?? "";
+  return row;
+}
+
+describe("WatcherTab F6a journal rows read as plain facts", () => {
+  it("renders newest first with local time, kind and summary; id plus hash in details", async () => {
+    const seen: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      fakeFetchByRoute(STATUS_BODY, JOURNAL_RICH, seen),
+    );
+    render(<WatcherTab projectId="proj-w" />);
+    expect(await screen.findByTestId("watcher-tab")).toBeTruthy();
+    const list = await screen.findByTestId("watcher-journal");
+    const text = list.textContent ?? "";
+    // Newest first: evt-0229 before evt-0228.
+    expect(text.indexOf("evt-0229")).toBeLessThan(text.indexOf("evt-0228"));
+    // Local time through the shared helper, never the raw stamp.
+    expect(journalRow("evt-0229")).toContain(
+      formatScreenTime("2026-11-03T03:12:00Z", "en"),
+    );
+    expect(journalRow("evt-0229")).not.toContain("2026-11-03T03:12:00Z");
+    // Plain kind label and short summary.
+    expect(journalRow("evt-0229")).toContain("Decision");
+    expect(journalRow("evt-0229")).toContain("rule-tamper");
+    expect(journalRow("evt-0227")).toContain("Run end");
+    // Hash and id ride the details.
+    expect(journalRow("evt-0227")).toContain("h27");
+  });
+
+  it("lists five rows with Show more for longer journals", async () => {
+    const seen: string[] = [];
+    const long = Array.from({ length: 7 }, (_, index) => ({
+      entry_id: `evt-00${30 + index}`,
+      timestamp: "2026-11-03T03:12:00Z",
+      hash: `h${30 + index}`,
+      kind: "SERVICE_STATE",
+      source: "watcher",
+      summary: `beat ${index}`,
+      refs: [],
+    }));
+    vi.stubGlobal("fetch", fakeFetchByRoute(STATUS_BODY, long, seen));
+    render(<WatcherTab projectId="proj-w" />);
+    expect(await screen.findByTestId("watcher-tab")).toBeTruthy();
+    await screen.findByTestId("watcher-journal");
+    expect(screen.queryByTestId("journal-row-evt-0030")).toBeNull();
+    expect(screen.getByTestId("journal-row-evt-0036")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("journal-show-more"));
+    expect(screen.getByTestId("journal-row-evt-0030")).toBeTruthy();
+  });
+
+  it("saves per-card check minutes through local settings, range-checked", async () => {
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", fakeFetchByRoute(STATUS_BODY, JOURNAL_BODY, seen));
+    render(<WatcherTab projectId="proj-w" />);
+    expect(await screen.findByTestId("watcher-tab")).toBeTruthy();
+    const input = screen.getByTestId(
+      "rule-card-card-hang-hang",
+    ) as HTMLInputElement;
+    expect(input.value).toBe("20");
+    fireEvent.change(input, { target: { value: "5" } });
+    expect(
+      localStorage.getItem("agent_si.watcher.proj-w.card.card-hang.hang"),
+    ).toBe("5");
+    fireEvent.change(input, { target: { value: "9999" } });
+    expect(
+      localStorage.getItem("agent_si.watcher.proj-w.card.card-hang.hang"),
+    ).toBe("1440");
+    for (const url of seen) {
+      // Header name read beside the two frozen watcher routes.
+      expect(url.startsWith("/api/v1/watcher/") || url === "/api/v1/projects").toBe(
+        true,
+      );
+    }
+  });
+});
+
 describe("WatcherTab (fetch-level fake only)", () => {
   it("renders live status plus journal head from the two frozen GET routes", async () => {
     const seen: string[] = [];
@@ -140,9 +248,12 @@ describe("WatcherTab (fetch-level fake only)", () => {
     ).toBe(true);
 
     for (const url of seen) {
+      // FXFACTS F6a: the header reads the stored project name (one
+      // projects read beside the two frozen watcher routes).
       expect(
         url === "/api/v1/watcher/status?project_id=proj-w" ||
-          url === "/api/v1/watcher/journal?project_id=proj-w",
+          url === "/api/v1/watcher/journal?project_id=proj-w" ||
+          url === "/api/v1/projects",
       ).toBe(true);
     }
   });
@@ -162,9 +273,12 @@ describe("WatcherTab (fetch-level fake only)", () => {
         .textContent;
       expect(area).toBe(card.area);
       areas.add(String(area));
+      // FXFACTS F6a: the hang window is a number input saved through the
+      // same local settings as the model select, range-checked.
       expect(
-        screen.getByTestId(`rule-card-${card.cardId}-hang`).textContent,
-      ).toBe("20 min");
+        (screen.getByTestId(`rule-card-${card.cardId}-hang`) as HTMLInputElement)
+          .value,
+      ).toBe("20");
       const select = screen.getByTestId(
         `rule-card-${card.cardId}-model`,
       ) as HTMLSelectElement;
@@ -191,10 +305,19 @@ describe("WatcherTab (fetch-level fake only)", () => {
       "OFF",
     );
     for (const url of seen) {
-      expect(url.startsWith("/api/v1/watcher/")).toBe(true);
+      // FXFACTS F6a: the header reads the stored project name (one
+      // projects read beside the two frozen watcher routes).
+      expect(
+        url.startsWith("/api/v1/watcher/") || url === "/api/v1/projects",
+      ).toBe(true);
     }
     expect(
-      seen.every((url) => url.includes("/api/v1/watcher/status") || url.includes("/api/v1/watcher/journal")),
+      seen.every(
+        (url) =>
+          url.includes("/api/v1/watcher/status") ||
+          url.includes("/api/v1/watcher/journal") ||
+          url === "/api/v1/projects",
+      ),
     ).toBe(true);
   });
 

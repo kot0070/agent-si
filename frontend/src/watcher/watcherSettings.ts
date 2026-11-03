@@ -35,6 +35,18 @@ export const WATCHER_CARD_MODEL_PREFIX = `${WATCHER_SETTINGS_NAMESPACE}card.`;
 /** Storage key suffix for one rule card's model choice. */
 export const WATCHER_CARD_MODEL_SUFFIX = ".model";
 
+/** Default hang window in minutes carried by every rule card. */
+export const DEFAULT_HANG_MINUTES = 20;
+
+/** Lowest settable hang window in minutes (backend HANG_MIN_MINUTES). */
+export const MIN_HANG_MINUTES = 1;
+
+/** Highest settable hang window in minutes (backend HANG_MAX_MINUTES). */
+export const MAX_HANG_MINUTES = 1440;
+
+/** Storage key suffix for one rule card's hang window. */
+export const WATCHER_CARD_HANG_SUFFIX = ".hang";
+
 /** R-336 defaults: local AI, cloud fallback OFF. */
 export const DEFAULT_WATCHER_SETTINGS: WatcherSettings = {
   model: "local",
@@ -156,6 +168,60 @@ export function cardModelKey(cardId: string, projectId?: string | null): string 
   return `${WATCHER_CARD_MODEL_PREFIX}${cardId}${WATCHER_CARD_MODEL_SUFFIX}`;
 }
 
+/** Storage key for one rule card's hang window (per project when given). */
+export function cardHangKey(cardId: string, projectId?: string | null): string {
+  if (projectId) {
+    return `${WATCHER_SETTINGS_NAMESPACE}${projectId}.card.${cardId}.hang`;
+  }
+  return `${WATCHER_CARD_MODEL_PREFIX}${cardId}${WATCHER_CARD_HANG_SUFFIX}`;
+}
+
+/** Clamp any value into the settable hang window (default on garbage). */
+export function clampHangMinutes(value: unknown): number {
+  let minutes = DEFAULT_HANG_MINUTES;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    minutes = Math.floor(value);
+  } else if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      minutes = Math.floor(parsed);
+    }
+  }
+  if (minutes < MIN_HANG_MINUTES) {
+    return MIN_HANG_MINUTES;
+  }
+  if (minutes > MAX_HANG_MINUTES) {
+    return MAX_HANG_MINUTES;
+  }
+  return minutes;
+}
+
+/** Load one rule card's hang window; defaults to the 20-minute card. */
+export function loadCardHangMinutes(
+  cardId: string,
+  projectId?: string | null,
+): number {
+  const key = projectId ? cardHangKey(cardId, projectId) : cardHangKey(cardId);
+  let raw = readStored(key);
+  if (raw === null && projectId) {
+    raw = readStored(cardHangKey(cardId));
+  }
+  return clampHangMinutes(raw === null ? DEFAULT_HANG_MINUTES : raw);
+}
+
+/** Persist one rule card's hang window locally (range-checked). */
+export function saveCardHangMinutes(
+  cardId: string,
+  minutes: unknown,
+  projectId?: string | null,
+): number {
+  const clamped = clampHangMinutes(minutes);
+  writeStored(
+    projectId ? cardHangKey(cardId, projectId) : cardHangKey(cardId),
+    String(clamped),
+  );
+  return clamped;
+}
 /** Load one rule card's model choice; defaults to the local model. */
 export function loadCardModel(
   cardId: string,
