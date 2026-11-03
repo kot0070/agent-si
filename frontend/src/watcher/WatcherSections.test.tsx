@@ -28,4 +28,21 @@ describe("WatcherSections (RED: aggregator missing)", () => {
     expect(screen.getByTestId("watcher-apps")).toBeTruthy();
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("renders the uk copy with no raw English section titles", () => {
+    setLocale("uk");
+    render(<WatcherSections projectId="proj-s" />);
+    expect(screen.getByTestId("watcher-fxrules-title").textContent).toBe(
+      "Картки правил",
+    );
+    expect(screen.getByTestId("watcher-presets-title").textContent).toBe(
+      "Пресети",
+    );
+    expect(screen.getByTestId("watcher-alerts-title").textContent).toBe(
+      "Сповіщення, таймери і цілісність",
+    );
+    expect(screen.getByTestId("watcher-apps-title").textContent).toBe(
+      "Застосунки і служби",
+    );
+  });
 });
