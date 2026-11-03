@@ -409,7 +409,8 @@
       "looksTamper": "Looks for tampered files",
       "actionBlocked": "Blocked a problem",
       "actionEscalated": "Escalated for review",
-      "actionAllowed": "Checked, all quiet"
+      "actionAllowed": "Checked, all quiet",
+      "notUsedYet": "not used yet"
     }
   },
   "firstrun": {
@@ -480,7 +481,8 @@
     "closing": {
       "confirm": "Close anyway?",
       "stay": "Stay",
-      "leave": "Leave"
+      "leave": "Leave",
+      "runWorking": "Run still working. Leave this page?"
     },
     "cards": {
       "team": {
@@ -788,7 +790,8 @@
     "live": {
       "title": "Live agents",
       "subtitle": "Who works on what right now, updating live.",
-      "empty": "No agents running right now."
+      "empty": "No agents running right now.",
+      "openChat": "Ask in Chat"
     },
     "badge": {
       "local": "Local",
@@ -798,7 +801,8 @@
     "row": {
       "scope": "Scope",
       "deliverable": "Result",
-      "tokens": "Tokens"
+      "tokens": "Tokens",
+      "agent": "Agent"
     }
   },
   "ui": {

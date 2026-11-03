@@ -763,7 +763,9 @@ function AppShellInner(): ReactElement {
           keyboard tabbing reads the working area before the rails. The
           grid areas keep the visuals unchanged. */}
       <main data-testid="app-main">
-        <ClosingGuard armed={livePump} confirmKey="shell.closing.confirm">
+        {/* FXLOOK D5: the guard names the live run, never a bare
+            "Close anyway?". */}
+        <ClosingGuard armed={livePump} confirmKey="shell.closing.runWorking">
           <Suspense
             fallback={<LoadingState loadingKey="ui.loading.more" />}
           >

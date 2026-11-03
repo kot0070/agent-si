@@ -14,7 +14,7 @@
 import { readFileSync } from "fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { createMemoryRouter, RouterProvider } from "react-router-dom";
+import { createMemoryRouter, MemoryRouter, RouterProvider } from "react-router-dom";
 import { HttpApiClient } from "../../api/client";
 import { ApiClientProvider } from "../../app/ApiClientProvider";
 import { FakeApiClient } from "../../api/__tests__/fakeApiClient";
@@ -321,13 +321,19 @@ describe("fxdesign5 S6 served codes read as human labels with empty-only text", 
 
   it("shows exactly the locale empty text with no glued counts", async () => {
     render(
-      <ApiClientProvider client={new FakeApiClient({ liveRows: [] })}>
-        <AgentsLive projectId="p-1" />
-      </ApiClientProvider>,
+      <MemoryRouter initialEntries={["/agents/live"]}>
+        <ApiClientProvider client={new FakeApiClient({ liveRows: [] })}>
+          <AgentsLive projectId="p-1" />
+        </ApiClientProvider>
+      </MemoryRouter>,
     );
     const card = await screen.findByTestId("kit-card-agents-live");
     const empty = within(card).getByTestId("kit-empty-state");
-    expect(empty.textContent).toBe(t("agents.live.empty"));
+    // FXLOOK D5: the empty line keeps the locale sentence and points at
+    // Chat with a real link.
+    expect(empty.textContent).toContain(t("agents.live.empty"));
+    const link = within(empty).getByTestId("agents-live-open-chat");
+    expect(link.getAttribute("href")).toBe("/projects/p-1/chat");
   });
 });
 

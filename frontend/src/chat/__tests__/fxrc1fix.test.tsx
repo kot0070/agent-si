@@ -137,7 +137,15 @@ describe("fxrc1fix P3 messages scroll inside the card", () => {
         /overflow-y\s*:\s*(auto|scroll)/.test(body),
       ),
     ).toBe(true);
-    expect(layout.style.maxHeight).not.toBe("");
+    // FXLOOK D2: the height cap moved from inline style to the
+    // stylesheet (route column + lane cap), so the composer stays below
+    // the scrolling lane instead of overlaying text.
+    const layoutBodies = ruleBodies(shellCss, 'div[data-testid="chat-layout"]');
+    expect(
+      layoutBodies.some((body) =>
+        /max-height\s*:\s*calc\(100vh - 200px\)/.test(body),
+      ),
+    ).toBe(true);
   });
 
   it("auto-scrolls to newest unless the user scrolled up", async () => {

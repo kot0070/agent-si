@@ -4,6 +4,7 @@
 // HANDOFF stay visible with their state.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { ApiClientProvider } from "../../app/ApiClientProvider";
 import { FakeApiClient } from "../../api/__tests__/fakeApiClient";
 import { resetLocaleForTests, setLocale } from "../../locale/index";
@@ -63,10 +64,14 @@ describe("fxrc1fix N1 agents live ended rows", () => {
         ["RETURNED", "ACCEPTED", "REJECTED", "BLOCKED"].includes(row.status),
       ).map((row) => ({ ...row })),
     });
+    // FXLOOK D5: the empty line links at Chat, so it renders under a
+    // Router (the live branch above needs none).
     render(
-      <ApiClientProvider client={client}>
-        <AgentsLive projectId="p-1" />
-      </ApiClientProvider>,
+      <MemoryRouter initialEntries={["/agents/live"]}>
+        <ApiClientProvider client={client}>
+          <AgentsLive projectId="p-1" />
+        </ApiClientProvider>
+      </MemoryRouter>,
     );
     expect(await screen.findByTestId("kit-card-agents-live")).toBeTruthy();
     expect(screen.queryByTestId("agents-live-rows")).toBeNull();

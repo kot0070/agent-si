@@ -54,7 +54,6 @@ import { RunId } from "./RunId";
 import "./projectview.css";
 import {
   PROJECT_VIEWS,
-  buildDerivedSplit,
   computeAgeDays,
   contextUsage,
   exportProjectReport,
@@ -1716,8 +1715,10 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
               ) : (
                 <div data-testid="report-task-counts">
                   <div className="fxpv-fact">
+                    {/* FXLOOK D5: the header always carries the total, never
+                        a blank "Tasks:" row. */}
                     <span>{t("tasks.list.title")}:</span>
-                    {tasks.length === 0 ? <span>0</span> : null}
+                    <span>{formatNumber(tasks.length, locale)}</span>
                   </div>
                   {statusCounts(tasks).map(({ status, count }) => (
                     <div
@@ -1819,10 +1820,9 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
                             ? formatNumber(runsWall, locale)
                             : null,
                       ],
-                      [
-                        "projectView.reports.spent",
-                        `${formatNumber(budget.spent, locale)} ${budget.currency}`,
-                      ],
+                      // FXLOOK D5: no duplicate Money spent under Calculated
+                      // value (the budget block above owns it); reserved and
+                      // remaining stay.
                       [
                         "projectView.reports.reserved",
                         `${formatNumber(budget.reserved, locale)} ${budget.currency}`,
@@ -1844,32 +1844,9 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
                 </>
               )}
             </div>
-            <div data-testid="project-report-derived-split">
-              {tasksError !== null ? (
-                panelError(tasksError)
-              ) : ledgerError !== null ? (
-                panelError(ledgerError)
-              ) : budgetError !== null ? (
-                panelError(budgetError)
-              ) : ledger === null || budget === null ? (
-                <LoadingState loadingKey="ui.loading.more" />
-              ) : buildDerivedSplit({ ledger, budget }).length === 0 ? null : (
-                buildDerivedSplit({ ledger, budget }).map((allocation) => (
-                  <div
-                    key={allocation.packageId}
-                    data-testid={`derived-split-${allocation.packageId}`}
-                    className="fxpv-row"
-                  >
-                    <span>{t(allocation.labelKey)}</span>
-                    <span>{humanRunRef(allocation.packageId).text}</span>
-                    <span>
-                      {formatNumber(allocation.derivedCost, locale)}{" "}
-                      {allocation.currency}
-                    </span>
-                  </div>
-                ))
-              )}
-            </div>
+            {/* FXLOOK D5: the engine allocation rows no longer render under
+                Calculated value (buildDerivedSplit stays exported for the
+                contract tests, but the view stops rendering it). */}
             <div data-testid="project-report-files" className="fxpv-fact">
               <span>{t("projectView.reports.changedFiles")}:</span>
               {liveError !== null ? (
