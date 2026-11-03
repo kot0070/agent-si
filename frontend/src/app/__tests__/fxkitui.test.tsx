@@ -248,11 +248,11 @@ describe("fxkitui fresh profile opens the guided first run", () => {
     expect(await screen.findByTestId("firstrun-team-result")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: en.firstrun.next }));
     fireEvent.change(
-      screen.getByRole("textbox", { name: en.settings.localbench.pathLabel }),
+      screen.getByRole("textbox", { name: en.firstrun.folder.label }),
       { target: { value: "alpha-folder" } },
     );
     fireEvent.click(
-      screen.getByRole("button", { name: en.tasks.creator.create }),
+      screen.getByRole("button", { name: en.projects.list.create }),
     );
     expect(await screen.findByTestId("firstrun-project-result")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: en.firstrun.next }));

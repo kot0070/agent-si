@@ -229,10 +229,10 @@ describe('FXFIRSTRUN2 focused first-run page', () => {
     fireEvent.click(screen.getByTestId('firstrun-folder-choose'));
     await waitFor(() => {
       expect(
-        (screen.getByRole('textbox', { name: en.settings.localbench.pathLabel }) as HTMLInputElement).value,
+        (screen.getByRole('textbox', { name: en.firstrun.folder.label }) as HTMLInputElement).value,
       ).toBe('/fake/picked-folder');
     });
-    fireEvent.click(screen.getByRole('button', { name: en.tasks.creator.create }));
+    fireEvent.click(screen.getByRole('button', { name: en.projects.list.create }));
     expect((await screen.findByTestId('firstrun-project-result')).textContent).toContain('p-');
     fireEvent.click(screen.getByRole('button', { name: en.firstrun.next }));
 

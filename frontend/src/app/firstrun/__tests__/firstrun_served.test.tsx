@@ -196,10 +196,10 @@ describe('K10FIRSTRUN served first run at the real /firstrun route', () => {
 
     // projectFolder: the folder input creates the project through the real API.
     fireEvent.change(
-      screen.getByRole('textbox', { name: en.settings.localbench.pathLabel }),
+      screen.getByRole('textbox', { name: en.firstrun.folder.label }),
       { target: { value: 'alpha-folder' } },
     );
-    fireEvent.click(screen.getByRole('button', { name: en.tasks.creator.create }));
+    fireEvent.click(screen.getByRole('button', { name: en.projects.list.create }));
     const projectResult = await screen.findByTestId('firstrun-project-result');
     expect(projectResult.textContent).toContain('p-2');
     const projectPosts = seen.filter(
