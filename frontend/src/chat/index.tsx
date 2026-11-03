@@ -2212,6 +2212,8 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
         {messages.length === 0 ? (
           <div data-testid="chat-empty-state">
             <p>{t("chat.empty.line")}</p>
+            {/* FXBTN: one spaced sample row; both read quiet. */}
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
             <button
               type="button"
               data-testid="chat-sample-1"
@@ -2232,6 +2234,7 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
             >
               {t("chat.empty.sample2")}
             </button>
+            </div>
           </div>
         ) : null}
         {visibleTags.length > 0 ? (
@@ -2283,9 +2286,14 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
                 askArgv,
               )}
             </p>
+            {/* FXBTN: one spaced action row like other dialogs: allow once
+                is the single primary, the project grant and deny read as
+                quiet secondaries, never touching. */}
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
             <button
               type="button"
               data-testid="permission-allow"
+              data-variant="primary"
               onClick={() => {
                 answerAsk("once");
               }}
@@ -2296,6 +2304,7 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
               <button
                 type="button"
                 data-testid="permission-allow-project"
+                data-variant="quiet"
                 onClick={() => {
                   answerAsk("project");
                 }}
@@ -2306,12 +2315,14 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
             <button
               type="button"
               data-testid="permission-deny"
+              data-variant="quiet"
               onClick={() => {
                 answerAsk("deny");
               }}
             >
               {pt("chat.permission.deny", "Deny")}
             </button>
+            </div>
           </div>
         ) : null}
         {/* FXDESIGN6: one rounded box docked at the bottom: the field
@@ -2323,7 +2334,10 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
             <button
               type="button"
               data-testid="composer-team-toggle"
+              className="fx-btn-quiet"
               aria-label={t("settings.project.team")}
+              aria-pressed={teamMode === "on"}
+              data-state={teamMode}
               title={t("settings.project.team")}
               onClick={() => {
                 const next = teamMode === "on" ? "off" : "on";
@@ -2467,6 +2481,8 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
                   lastSentBySlice.get(key) ?? null,
                 )}
               </p>
+              {/* FXBTN: retry + connect share one spaced action row. */}
+              <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
               <button
                 type="button"
                 data-testid="kit-error-retry"
@@ -2488,6 +2504,7 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
                   {t("chat.hierarchy.connect")}
                 </a>
               ) : null}
+              </div>
             </div>
           ) : null}
           {blocking === null && health === "degraded" && !streaming ? (

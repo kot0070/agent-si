@@ -53,6 +53,9 @@ export function TeamModelQuickFix(props: TeamModelQuickFixProps): ReactElement {
         </span>
         <span data-testid="quickfix-model">{props.model}</span>
         <span data-testid="quickfix-mode">{t(MODE_KEYS[mode])}</span>
+        {/* FXBTN: one spaced action row: apply is the single primary,
+            dismiss reads quiet. */}
+        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
         <button
           type="button"
           data-testid="quickfix-accept"
@@ -66,11 +69,13 @@ export function TeamModelQuickFix(props: TeamModelQuickFixProps): ReactElement {
           <button
             type="button"
             data-testid="quickfix-dismiss"
+            data-variant="quiet"
             onClick={props.onDismiss}
           >
             {t("chat.approval.reject")}
           </button>
         )}
+        </div>
       </div>
     </Card>
   );

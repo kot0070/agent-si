@@ -36,12 +36,16 @@ export function LocaleSwitch(): ReactElement {
         <>
           <p data-testid="k07next-locale-options">{doc.locales.join(",")}</p>
           <p data-testid="k07next-locale-persist">{doc.persisted_via}</p>
-          <button type="button" onClick={() => choose("en")}>
+          {/* FXBTN: one spaced toggle row; both options read quiet,
+              the choice is shown in k07next-locale-current below. */}
+          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          <button type="button" data-variant="quiet" onClick={() => choose("en")}>
             English
           </button>
-          <button type="button" onClick={() => choose("uk")}>
+          <button type="button" data-variant="quiet" onClick={() => choose("uk")}>
             Українська
           </button>
+          </div>
           <p data-testid="k07next-locale-current">{selected}</p>
         </>
       )}

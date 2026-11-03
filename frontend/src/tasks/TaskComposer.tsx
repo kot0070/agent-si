@@ -253,6 +253,9 @@ export function TaskComposer(props: TaskComposerProps): ReactElement {
           }}
         />
       </label>
+      {/* FXBTN: one spaced action row: create is the single primary,
+          cancel reads quiet. */}
+      <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
       <button
         type="button"
         data-testid="composer-create"
@@ -264,11 +267,13 @@ export function TaskComposer(props: TaskComposerProps): ReactElement {
       <button
         type="button"
         data-testid="composer-cancel"
+        data-variant="quiet"
         disabled={!posting}
         onClick={handleCancel}
       >
         {t("tasks.creator.cancel")}
       </button>
+      </div>
       {created !== null ? (
         <div data-testid="composer-result" key={created.task_id}>
           <span data-testid="composer-title-result">{created.title}</span>

@@ -170,11 +170,12 @@ export function RunHistory(props: RunHistoryProps): ReactElement {
                   Tokens{" "}
                   {run.tokens === "UNKNOWN"
                     ? "not known"
-                    : formatNumber(run.tokens, locale)}{" "}
-                  · Cost{" "}
+                    : formatNumber(run.tokens, locale)}{" "}·{" "}
+                  {/* FXBTN: the unknown-price phrase renders once, never
+                      "Cost cost ..."; the priced path keeps its label. */}
                   {run.cost === "UNKNOWN"
                     ? t("projectView.cost.notKnown")
-                    : run.cost}
+                    : `Cost ${run.cost}`}
                 </div>
                 {run.manager_why == null || run.manager_why === "" ? null : (
                   <div>
