@@ -184,7 +184,7 @@ def frozen_python() -> str:
         except OSError:
             return False
 
-    def _is_stub(path: str) -> bool:
+    def _is_alias_shim(path: str) -> bool:
         try:
             text = str(path or "")
         except Exception:
@@ -201,11 +201,11 @@ def frozen_python() -> str:
         return False
 
     env = os.environ.get("AGENT_SI_PYTHON", "")
-    if env and not _is_exe(env) and os.path.isfile(env) and not _is_stub(env):
+    if env and not _is_exe(env) and os.path.isfile(env) and not _is_alias_shim(env):
         return env
     for _name in ("python", "python3"):
         _hit = shutil.which(_name)
-        if _hit and not _is_exe(_hit) and not _is_stub(_hit):
+        if _hit and not _is_exe(_hit) and not _is_alias_shim(_hit):
             return _hit
     raise RuntimeError(
         "no python interpreter for frozen runs: set AGENT_SI_PYTHON "
