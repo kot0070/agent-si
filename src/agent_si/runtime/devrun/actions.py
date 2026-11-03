@@ -1008,9 +1008,12 @@ def spawn_checked(
                 "ungranted runs continue without the install)")
         if not _ask_project_grant and not _ask_run_allow:
             # FXR4A D4: the once-allow is spent by an earlier run; the
-            # next run asks again, never silently refuses.
+            # next run asks again, never silently refuses. The pin is
+            # re-pointed at this run (a spent allow's pin would route a
+            # later deny at the wrong run), so a fresh ask covers this
+            # run's exact words.
             with contextlib.suppress(Exception):
-                _ask_permissions.record_install_request(
+                _ask_permissions.reset_decision_for_run(
                     tool_id=_ask_tool_id,
                     argv=list(words),
                     project_id=str(project_id),

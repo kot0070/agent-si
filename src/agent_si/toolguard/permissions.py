@@ -445,12 +445,15 @@ def reset_decision_for_run(store_dir: Any = None, memory: Any = None,
                            tool_id: str = "", argv: Any = None,
                            project_id: str = "",
                            run_id: Any = None) -> dict[str, Any] | None:
-    """Drop a previous run's deny so this run asks again (FXASK A4).
+    """Drop a stale decision so this run asks again (FXASK A4).
 
-    Only a deny pinned to a DIFFERENT run is replaced by a fresh pin
-    (this run's words, this run); a deny for this run, a non-deny, or
-    a run-less deny is never touched (None). The next allow then covers
-    exactly the words asked about, never a stale pin.
+    Replaced by a fresh pin (this run's words, this run): a deny pinned
+    to a DIFFERENT run, or an allow spent by a DIFFERENT run (a spent
+    once-allow never covers a new run, and keeping its pin would route
+    a later deny at the wrong run). A decision for this run, an
+    unconsumed allow, a run-less deny, or a non-decision is never
+    touched (None). The next allow or deny then lands on this run's
+    words, never a stale pin.
     """
     argv_words = _valid_decision_argv(argv)
     if argv_words is None:
@@ -469,12 +472,19 @@ def reset_decision_for_run(store_dir: Any = None, memory: Any = None,
     prior = merged.get(key)
     if not isinstance(prior, dict):
         return None
-    if prior.get("decision") != DECISION_DENY:
-        return None
-    pinned = prior.get("run")
-    if not isinstance(pinned, str) or not pinned:
-        return None
-    if pinned == str(run_id):
+    if prior.get("decision") == DECISION_DENY:
+        pinned = prior.get("run")
+        if not isinstance(pinned, str) or not pinned:
+            return None
+        if pinned == str(run_id):
+            return None
+    elif prior.get("decision") == DECISION_ALLOW:
+        spent = prior.get("consumed_by_run")
+        if not isinstance(spent, str) or not spent:
+            return None
+        if spent == str(run_id):
+            return None
+    else:
         return None
     record: dict[str, Any] = {
         "time": _decision_now(),

@@ -88,6 +88,37 @@ def test_denied_run_closes_refused(tmp_path):
         permissions._BOUND_DECISIONS.pop(TOOL, None)
 
 
+def test_spent_allow_repin_covers_deny_for_new_run(tmp_path):
+    project = "fxask-a4-spent"
+    tool = "install:%s:npm" % project
+    permissions.record_install_request(
+        tool_id=tool, argv=list(ARGV), project_id=project, run_id="run-1")
+    permissions.record_decision(
+        tool_id=tool, decision="allow", project_id=project)
+    assert permissions.decision_allows_run(
+        tool_id=tool, run_id="run-1") is True
+    # run-1 spends the once-allow.
+    assert permissions.note_decision_consumed(
+        tool_id=tool, run_id="run-1") is not None
+    assert permissions.decision_allows_run(
+        tool_id=tool, run_id="run-2") is False
+    # run-2 sees the spent allow: ask again, pin re-pointed at run-2.
+    with pytest.raises(InstallAskNeeded):
+        actions.spawn_checked(
+            project, "run-2x", _folder(tmp_path), list(ARGV),
+            str(tmp_path / "run2.log"), "run2.log",
+            grant_run_id="run-2")
+    assert permissions.get_decision(tool_id=tool) is None
+    # A deny now lands on run-2 (not on run-1's stale pin).
+    permissions.record_decision(
+        tool_id=tool, decision="deny", project_id=project)
+    assert permissions.decision_denies_run(
+        tool_id=tool, run_id="run-2") is True
+    assert permissions.decision_denies_run(
+        tool_id=tool, run_id="run-1") is False
+    permissions._BOUND_DECISIONS.pop(tool, None)
+
+
 def test_install_denied_line_is_run_scoped(tmp_path):
     _deny_for_run("run-1")
     try:

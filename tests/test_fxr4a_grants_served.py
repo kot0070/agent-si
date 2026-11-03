@@ -288,13 +288,13 @@ def test_fxr4a_once_allow_consumed_next_run_asks(rig):
     thread2, box2 = _chat_thread(
         rig, "Install dependencies with npm install", task="t-again")
     try:
-        # The next run parks on the spent once-allow (no silent
-        # refusal, no FAILED): a fresh allow covers it and the same
-        # run goes on. The pin keeps the old decision, so there is no
-        # decision-less pin to wait for — deciding is safe either way:
-        # before the park it covers the spawn, after it the wait.
-        time.sleep(8.0)
+        # The spent once-allow does not cover the next run: the spawn
+        # re-points the pin at this run with no decision, so it parks
+        # and asks again (no silent refusal, no FAILED).
+        pin = _wait_pin(rig, thread2, tool_id)
         assert thread2.is_alive()
+        assert pin.get("decision") is None
+        assert pin.get("run"), pin
         assert _decide(rig, tool_id, "allow").status_code == 200
         thread2.join(timeout=240.0)
         assert not thread2.is_alive()
