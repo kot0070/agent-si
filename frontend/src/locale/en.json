@@ -685,7 +685,9 @@
       "empty": "No projects yet.",
       "create": "Create project",
       "created": "Created",
-      "duplicate": "A project with this name already exists."
+      "duplicate": "A project with this name already exists.",
+      "open": "Open",
+      "newProject": "New project"
     },
     "overview": {
       "title": "Overview"
@@ -773,6 +775,10 @@
     },
     "details": {
       "open": "Project details"
+    },
+    "row": {
+      "stopTitle": "Stop: pause this project here only; the server keeps no record of it",
+      "leaveTitle": "Leave: archive this project and remove it from the list"
     }
   },
   "agents": {

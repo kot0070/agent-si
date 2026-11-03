@@ -210,6 +210,9 @@ describe("fxdesign3 S3 single Watcher entry", () => {
 describe("fxdesign3 S4 one primary per form", () => {
   it("keeps a single submit with a quiet folder-choose and the kit chevron", async () => {
     renderAppAt("/projects");
+    // FXLOOK D3: the stub seeds one project, so the form folds behind
+    // New project before the submit can be counted.
+    fireEvent.click(await screen.findByTestId("project-add-open"));
     const form = await screen.findByTestId("project-add-form");
     const submits = form.querySelectorAll('button[type="submit"]');
     expect(submits.length).toBe(1);

@@ -13,7 +13,7 @@
 // @ts-ignore: node builtin types are not installed in this workspace; vitest resolves "fs" at runtime.
 import { readFileSync } from "fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { HttpApiClient } from "../../api/client";
 import { ApiClientProvider } from "../../app/ApiClientProvider";
@@ -248,6 +248,9 @@ describe("fxdesign5 S3 one thin top strip", () => {
 describe("fxdesign5 S4 one primary per form and card", () => {
   it("keeps a single submit with quiet secondaries on the project form", async () => {
     renderAppAt("/projects");
+    // FXLOOK D3: the stub seeds one project, so the form folds behind
+    // New project before the submit can be counted.
+    fireEvent.click(await screen.findByTestId("project-add-open"));
     const form = await screen.findByTestId("project-add-form");
     expect(form.querySelectorAll('button[type="submit"]')).toHaveLength(1);
     expect(
@@ -344,6 +347,9 @@ describe("fxdesign5 S7 every option control in the owned regions is named", () =
 
   it("names the project form controls", async () => {
     renderAppAt("/projects");
+    // FXLOOK D3: the stub seeds one project, so the form folds behind
+    // New project before the controls can be named.
+    fireEvent.click(await screen.findByTestId("project-add-open"));
     await screen.findByTestId("project-add-form");
     for (const testId of ["project-add-name", "project-add-folder"]) {
       expect(named(screen.getByTestId(testId))).toBe(true);
