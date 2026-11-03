@@ -17,6 +17,7 @@ from typing import Dict, Tuple
 
 from agent_si.watcher import journal as journal_store
 from agent_si.watcher import presets as preset_store
+from agent_si.watcher import stats as stats_home
 from agent_si.watcher.journal import ERROR_CODES, WatcherError, append_event
 
 __all__ = (
@@ -479,12 +480,10 @@ def evaluate(project_id: str, rule_id: str) -> WatchDecision:
         script, _params, _usage, note, answered = _metered_model_call(
             key, decision_id, model_name, str(rule_id), allowed)
         if answered:
-            try:
-                from agent_si.watcher import stats as _stats_home
-
-                _stats_home.record_model_call(key, _usage)
-            except Exception:
-                pass
+            # FXCARDS C4: an answered watcher-model call is always counted
+            # in stats: every decision row naming model= has its counted
+            # call, so the card can never read a model name beside 0 calls.
+            stats_home.record_model_call(key, _usage)
         if not note:
             summary = "%s %s model=%s action=%s" % (
                 str(rule_id), verdict.value, model_name, script)
