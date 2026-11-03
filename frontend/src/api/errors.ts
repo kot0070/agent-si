@@ -65,6 +65,7 @@ const ERROR_CODES: ReadonlyArray<ApiErrorCode> = [
   "PROJECT_FOLDER_IN_USE",
   "PROJECT_FOLDER_MISSING",
   "NO_PROVIDER_BOUND",
+  "GENERIC_ERROR",
 ];
 
 export const API_ERROR_CODES: ReadonlyArray<ApiErrorCode> = ERROR_CODES;
@@ -90,7 +91,10 @@ export function apiErrorFromCode(code: unknown, status: number): ApiError {
   if (typeof code === "string" && code.length > 0) {
     return errorFromStatus(code as ApiErrorCode, status);
   }
-  return errorFromStatus("CONTEXT_WRONG_CONTRACT_VERSION", status);
+  // FXANSWER S1: an error body with no usable code is a generic failure,
+  // never the contract-version sentence (that code reads only when the
+  // server actually sent it).
+  return errorFromStatus("GENERIC_ERROR", status);
 }
 
 function missingWhenNotFound(code: string, status: number): ApiError | null {
@@ -167,7 +171,8 @@ export function parseErrorBody(data: unknown, status: number): ApiError {
   if (status === 0) {
     return wrap(errorFromStatus("CONTEXT_MISSING", status));
   }
-  return wrap(errorFromStatus("CONTEXT_WRONG_CONTRACT_VERSION", status));
+  // FXANSWER S1: same generic fallback (see apiErrorFromCode).
+  return wrap(errorFromStatus("GENERIC_ERROR", status));
 }
 
 export function parseOrThrow<T>(
@@ -179,7 +184,9 @@ export function parseOrThrow<T>(
   if (checked.success) {
     return checked.data;
   }
-  throw errorFromStatus("CONTEXT_WRONG_CONTRACT_VERSION", status);
+  // FXANSWER S1: an unparsable body is a generic failure, never the
+  // contract-version sentence.
+  throw errorFromStatus("GENERIC_ERROR", status);
 }
 
 const UI_TOKEN_STORAGE_KEY = "agent-si.ui-token";
@@ -277,6 +284,9 @@ export interface RequestOptions {
   body?: unknown;
   kind?: RequestKind;
   actor?: string;
+  // FXANSWER S2: an abort signal for streams (the chat cancel aborts the
+  // local reader at once; the signal only rides fetch, never the wire).
+  signal?: AbortSignal;
 }
 
 const UI_TOKEN_HEADER = "x-ui-session-token";
@@ -305,6 +315,7 @@ export async function requestResponse(
       method,
       headers,
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
   } catch {
     throw errorFromStatus("CONTEXT_MISSING", 0);
@@ -401,6 +412,8 @@ export function apiErrorLocaleKey(code: string): string {
       return "api.error.project_folder_missing";
     case "NO_PROVIDER_BOUND":
       return "firstrun.steps.connectProvider";
+    case "GENERIC_ERROR":
+      return "errors.generic";
     default:
       return "errors.generic";
   }

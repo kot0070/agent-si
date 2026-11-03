@@ -616,6 +616,9 @@ export interface EngineSummary {
   /** FXOPEN O4: one plain line when the text announces a second plan
   ("Director: plan of 2 parts" then "of 3 parts"); null otherwise. */
   planChanged: string | null;
+  /** FXANSWER: the plain answer text when the run ended as an answer
+  (server marker below); null when the run answered nothing. */
+  answer: string | null;
 }
 
 const PLAN_OF_RE = /Director:\s*plan of (\d+)\s*parts?/i;
@@ -646,6 +649,36 @@ export function planChangedLine(text: string): string | null {
     `Plan changed: the director announced a new plan ` +
     `(was ${first} ${word(first)}, now ${last} ${word(last)})`
   );
+}
+
+/** FXANSWER: the server marker for a run that ended as a plain answer
+(no parts, no build). The visible reply is the answer text itself. */
+export const PLAIN_ANSWER_MARKER = "run answered: plain answer, no parts";
+
+/** FXANSWER: the answer text of a plain-answer run: the run text minus
+engine-log lines and the marker itself. Null when the run answered
+nothing. A marker with no extractable answer falls back to the text
+minus the marker only, so an answer never reads as "Nothing was built". */
+export function extractPlainAnswer(text: string): string | null {
+  if (!text.includes(PLAIN_ANSWER_MARKER)) {
+    return null;
+  }
+  const lines = text.split("\n").map((line) => line.trim());
+  const stripped = lines.filter(
+    (line) =>
+      line !== "" &&
+      line !== PLAIN_ANSWER_MARKER &&
+      !ENGINE_LOG_MARKERS.test(line),
+  );
+  const kept = stripped.length > 0
+    ? stripped
+    : lines.filter(
+      (line) => line !== "" && line !== PLAIN_ANSWER_MARKER,
+    );
+  if (kept.length === 0) {
+    return null;
+  }
+  return kept.join("\n");
 }
 
 export function summarizeEngineTurn(
@@ -687,6 +720,9 @@ export function summarizeEngineTurn(
   // ("run success: all N parts PASS"), its announced plan
   // ("Director: plan of N parts"), or the team-off solo marker
   // ("Done, not audited."). A hollow run never says Done.
+  // FXANSWER: a plain-answer run (server marker) is never hollow: it
+  // answered with no parts, and its visible reply is the answer text.
+  const plainAnswer = extractPlainAnswer(text);
   const soloDone = /Done, not audited\./.test(text);
   let wholeParts = parts;
   let wholePassed = passed;
@@ -710,7 +746,7 @@ export function summarizeEngineTurn(
     }
   }
   const hollow =
-    wholeParts === 0 && files.length === 0 && !soloDone;
+    wholeParts === 0 && files.length === 0 && !soloDone && plainAnswer === null;
   const failed =
     status !== "ok" ||
     hollow ||
@@ -722,6 +758,7 @@ export function summarizeEngineTurn(
     files,
     lines,
     planChanged: planChangedLine(text),
+    answer: plainAnswer,
   };
 }
 
@@ -741,11 +778,16 @@ function emptyPlanLine(costNote = ""): string {
   return `${sentence}${costNote}.`;
 }
 
-/** One plain verdict line for a finished engine turn. */
+/** One plain verdict line for a finished engine turn. FXANSWER: a
+plain-answer run reads as the answer text itself, never Done/Failed,
+never the nothing-built sentence. */
 export function engineVerdictLine(
   summary: EngineSummary,
   costNote = "",
 ): string {
+  if (summary.answer !== null && summary.answer !== "") {
+    return summary.answer;
+  }
   if (summary.parts === 0) {
     return emptyPlanLine(costNote);
   }
@@ -777,6 +819,13 @@ export function EngineTurnView(props: {
 }): ReactElement {
   const summary = summarizeEngineTurn(props.text, props.status);
   const costNote = costKnown(props.text) ? "" : ", cost not known";
+  // FXANSWER item 4: a stopped run says Stopped, never Failed, never a
+  // parts verdict. The Details disclosure below stays as it is.
+  const stoppedLine = pt("chat.run.stopped", "Stopped.");
+  const verdict =
+    props.status === "stopped"
+      ? stoppedLine
+      : engineVerdictLine(summary, costNote);
   // R05: the disclosure collapses only recognised engine logs. Plain
   // output (no engine markers) opens on the assistant message text, so
   // live and return-to-chat rows render the identical visible text.
@@ -786,7 +835,7 @@ export function EngineTurnView(props: {
   return (
     <>
       <p data-testid="run-verdict" style={{ whiteSpace: "pre-wrap" }}>
-        {shortProgramLine(engineVerdictLine(summary, costNote))}
+        {shortProgramLine(verdict)}
       </p>
       {summary.planChanged !== null ? (
         <>
@@ -862,6 +911,27 @@ function buildHistoryBatch(
     known.add(assistantId);
     const parsed = Date.parse(turn.time);
     const at = Number.isNaN(parsed) ? Date.now() : parsed;
+    if (turn.status === "interrupted") {
+      // FXANSWER item 4: only a restart-reconciled row carries the
+      // app-closed banner. Same shape as a leftover running row used
+      // to render: stored text plus a resend, never a card.
+      batch.push({
+        id: userId,
+        role: "user",
+        text: turn.user_text,
+        at,
+        final: true,
+      });
+      batch.push({
+        id: assistantId,
+        role: "assistant",
+        text: interruptedText(turn.assistant_text),
+        at,
+        final: true,
+        resendPrompt: turn.user_text,
+      });
+      continue;
+    }
     if (turn.status === "running") {
       batch.push({
         id: userId,
@@ -873,12 +943,16 @@ function buildHistoryBatch(
       const closedByWindow =
         typeof turn.run_end_reason === "string" &&
         turn.run_end_reason.includes("client disconnect");
+      // FXANSWER item 4: a running row the startup reconcile did not
+      // mark is still live (or its terminal write is still in flight):
+      // no app-closed banner, no error card. Only a recorded client
+      // disconnect names the window-closed line.
       batch.push({
         id: assistantId,
         role: "assistant",
         text: closedByWindow
           ? `${turn.assistant_text !== "" ? `${turn.assistant_text}\n` : ""}${disconnectClosedText()}`
-          : interruptedText(turn.assistant_text),
+          : turn.assistant_text,
         at,
         final: true,
         resendPrompt: turn.user_text,
@@ -930,7 +1004,9 @@ function buildHistoryBatch(
         stoppedAssistants.add(assistantId);
       }
     }
-    if (turn.status === "failed" || turn.status === "stopped") {
+    if (turn.status === "failed") {
+      // FXANSWER item 4: a stopped run is not an error: no error card,
+      // no degraded health, no Retry. Failed turns keep the card.
       sawTerminal = true;
       emitBlocking(key, {
         errorKey: apiErrorLocaleKey(turn.error_code || "UNKNOWN"),
