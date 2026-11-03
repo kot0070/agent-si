@@ -62,7 +62,29 @@ def test_prefix_test_passes_guard_not_installer_denied():
     assert "installer and fetch" not in str(verdict.get("reason", ""))
 
 
-def test_prefix_outside_root_still_refused(tmp_path):
+def test_prefix_ls_is_readonly_run():
+    assert guard._is_script_run(
+        "npm", ["npm", "--prefix", "node-add", "ls", "is-odd"]) is True
+    assert guard._is_script_run(
+        "npm", ["npm", "list", "is-odd"]) is True
+
+
+def test_prefix_ls_passes_guard():
+    verdict = guard.evaluate(
+        ["npm", "--prefix", "node-add", "ls", "is-odd"],
+        "R0", dict(TASK_AUTH))
+    assert verdict["decision"] == "allow", verdict
+
+
+def test_prefix_list_outside_root_still_refused():
+    verdict = guard.evaluate(
+        ["npm", "--prefix", "../out", "ls"], "R0", dict(TASK_AUTH))
+    assert verdict["decision"] == "deny", verdict
+    assert "outside the workspace root" in str(
+        verdict.get("reason", "")), verdict
+
+
+def test_prefix_outside_root_still_refused():
     # Location-independent: the outside dir lives in the system temp
     # area, never under the workspace root (in-clone pytest basetemp
     # puts tmp_path itself under cwd, where an absolute prefix is
