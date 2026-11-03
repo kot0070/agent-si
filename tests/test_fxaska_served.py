@@ -272,5 +272,6 @@ def test_a3_engine_run_continues_on_ask(tmp_path):
             run_id="run-eng", argv=["cargo", "install", "fake-pkg"],
             state=None, procs=[], attached=set(), stop_seen=None)
     assert excinfo.value.tool_id == "install:proj-a3-eng:cargo"
-    assert "install permission needed" in str(excinfo.value)
-    assert "install:proj-a3-eng:cargo" in str(excinfo.value)
+    assert str(excinfo.value) == (
+        "run held: waiting for your permission to run cargo install fake-pkg")
+    assert "install:proj-a3-eng:cargo" not in str(excinfo.value)
