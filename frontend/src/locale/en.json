@@ -461,7 +461,9 @@
       "noProject": "No project yet",
       "langEn": "English",
       "langUk": "Українська",
-      "stop_all_idle": "No runs active"
+      "stop_all_idle": "No runs active",
+      "inspector": "Panel",
+      "inspectorClose": "Close panel"
     },
     "sidebar": {
       "chat": "Chat",
@@ -555,7 +557,8 @@
         "title": "Tests",
         "subtitle": "Project test results.",
         "total": "Recorded test results",
-        "emptyLine": "No test runs yet"
+        "emptyLine": "No test runs yet",
+        "planOne": "1 plan"
       },
       "budget": {
         "title": "Budget",
@@ -587,7 +590,10 @@
         "paused": "Paused"
       },
       "showMore": "Show more",
-      "showLess": "Show less"
+      "showLess": "Show less",
+      "more": {
+        "title": "More"
+      }
     },
     "common": {
       "unknown": "Unknown"

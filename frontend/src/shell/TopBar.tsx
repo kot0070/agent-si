@@ -27,6 +27,12 @@ import {
   t,
 } from "../locale/index";
 import type { SupportedLocale } from "../locale/index";
+import {
+  INSPECTOR_TOGGLE_EVENT,
+  inspectorEventOpen,
+  readInspectorOpen,
+  toggleInspector,
+} from "./inspectorDrawer";
 import { ThemeToggle } from "./ThemeToggle";
 
 export const TOPBAR_LOCALE_EVENT = "agentsi:locale-changed";
@@ -70,6 +76,11 @@ export function TopBar(props: TopBarProps): ReactElement {
   const { projects, refresh: refreshProjects } = useProjectList();
   const [stopArmed, setStopArmed] = useState(false);
   const [stopText, setStopText] = useState<string | null>(null);
+  // FXFACTS F8: drawer toggle mirrors the shell class through the shared
+  // drawer event, so aria-expanded never lies.
+  const [inspectorOpen, setInspectorOpen] = useState<boolean>(() =>
+    readInspectorOpen(),
+  );
   // FXDESIGN8: the shared agents-live store owns the single poller;
   // the top bar only subscribes.
   const live = useLiveRows(client);
@@ -80,6 +91,16 @@ export function TopBar(props: TopBarProps): ReactElement {
   // chrome matches the language select on first paint.
   useEffect(() => {
     setLocale(readStoredLocale());
+  }, []);
+
+  useEffect(() => {
+    function onInspectorToggle(event: Event): void {
+      setInspectorOpen(inspectorEventOpen(event));
+    }
+    window.addEventListener(INSPECTOR_TOGGLE_EVENT, onInspectorToggle);
+    return () => {
+      window.removeEventListener(INSPECTOR_TOGGLE_EVENT, onInspectorToggle);
+    };
   }, []);
 
   // W2: Escape disarms the inline stop confirm; any route change disarms
@@ -306,6 +327,17 @@ export function TopBar(props: TopBarProps): ReactElement {
         onClick={togglePanels}
       >
         {t("shell.topbar.panels")}
+      </button>
+      <button
+        type="button"
+        data-testid="inspector-toggle"
+        className="fx-inspector-btn"
+        aria-label={t("shell.topbar.inspector")}
+        aria-expanded={inspectorOpen}
+        aria-controls="inspector"
+        onClick={toggleInspector}
+      >
+        {t("shell.topbar.inspector")}
       </button>
       <span data-testid="k07open10-shell" aria-hidden="true" />
       {/* FXDESIGN6: the project name reads as the ref title dropdown. The
