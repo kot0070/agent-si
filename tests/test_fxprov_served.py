@@ -120,16 +120,27 @@ def test_cloud_roundtrip_serves_truth_for_page_remount(tmp_path, monkeypatch):
 
 def test_restart_keeps_connected_brand_new_dir_lists_nothing(tmp_path,
                                                             monkeypatch):
-    """Restart truth: same data dir keeps the provider; a fresh dir is empty.
-    The served registry persists under the app data dir, so after a restart
-    the page still shows Disconnect (and a Connect button only when the
-    registry is genuinely empty)."""
+    """Restart truth (FXSTORE): the registry persists, but a memory-store
+    key dies with the window. After a restart without a re-save the
+    served list drops the provider (the page shows Connect, never a
+    stale Disconnect); a re-save brings it back. A fresh dir is empty."""
     calls = []
     _patch_network(monkeypatch, calls)
     first = _make_client(tmp_path)
     conn = _connect(first, "openai", "openai/gpt-4o-mini")
     assert conn.status_code == 200, conn.text
     restarted = _make_client(tmp_path)
+    listed = restarted.get("/api/v1/providers", headers=HEADERS)
+    assert listed.status_code == 200, listed.text
+    rows = {r["provider_id"] for r in listed.json()["providers"]}
+    assert rows == set(), listed.text
+    resaved = restarted.post(
+        "/api/v1/providers/keys",
+        json={"preset_id": "openai", "key_value": BAIT},
+        headers=HEADERS)
+    assert resaved.status_code == 201, resaved.text
+    # The registry entry survives the restart (no re-connect needed):
+    # the re-saved value alone brings the row back.
     listed = restarted.get("/api/v1/providers", headers=HEADERS)
     assert listed.status_code == 200, listed.text
     rows = {r["provider_id"] for r in listed.json()["providers"]}
