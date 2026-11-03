@@ -43,6 +43,11 @@ export async function saveChatModel(
 
 type ProvidersPageProps = {
   project_id?: string;
+  /** FXFACTS F7: the settings tab this page serves. "models" is the
+      connected providers plus their models; "routing" is who is used
+      for what (role pools, chat model). Undefined renders everything
+      (the optimization embed and legacy mounts). */
+  mode?: "models" | "routing";
 };
 
 function initialStates(catalog: ProviderPreset[]): Record<string, ProviderState> {
@@ -53,7 +58,9 @@ function initialStates(catalog: ProviderPreset[]): Record<string, ProviderState>
   return out;
 }
 
-export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
+export function ProvidersPage({ project_id = "local", mode }: ProvidersPageProps) {
+  const showModels = mode === undefined || mode === "models";
+  const showRouting = mode === undefined || mode === "routing";
   // Locale-current catalog: display strings (group, keyHint, model labels)
   // resolve through t() for the active locale on every render.
   const catalog = useMemo(() => getProviderCatalog(), []);
@@ -345,6 +352,8 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
   return (
     <div>
       <h1>{t("providers.page.title")}</h1>
+      {showModels ? (
+        <>
       <label>
         {t("providers.page.searchLabel")}
         <input
@@ -472,6 +481,11 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
           </div>
         ) : null}
       </section>
+
+      </>
+      ) : null}
+      {showRouting ? (
+      <>
       <section aria-label={t("providers.page.rolePoolsTitle")}>
         <h2>{t("providers.page.rolePoolsTitle")}</h2>
         {ROLE_KEYS.map((role) => (
@@ -495,6 +509,10 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
         />
         {chatSaveMessage ? <p role="status">{chatSaveMessage}</p> : null}
       </section>
+      </>
+      ) : null}
+      {showModels ? (
+      <>
       <section aria-label={t("providers.page.leftoverTitle")}>
         <h2>{t("providers.page.leftoverTitle")}</h2>
         <LeftoverKeyFinder
@@ -532,6 +550,8 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
         onClose={() => setDisconnectId(null)}
         onDisconnected={handleDisconnected}
       />
+      </>
+      ) : null}
     </div>
   );
 }

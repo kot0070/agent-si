@@ -694,7 +694,10 @@ function SettingsSectionRoute(): ReactElement {
         </span>
       ) : route.path === "models" || route.path === "routing" ? (
         <span data-testid="settings-section-body">
-          <ProvidersPage project_id={projectId ?? "local"} />
+          <ProvidersPage
+            project_id={projectId ?? "local"}
+            mode={route.path === "routing" ? "routing" : "models"}
+          />
         </span>
       ) : route.path === "capabilityDB" ? (
         <span data-testid="settings-section-body">
