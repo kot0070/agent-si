@@ -5048,15 +5048,20 @@ def create_app(settings: Any = None,
         _fxauto_stop = False
 
         async def _fxauto_tick_loop():
-            while not _fxauto_stop:
-                await _fxauto_asyncio.sleep(30.0)
-                try:
-                    _fxauto_rules.tick()
-                except Exception:
-                    logging.getLogger(__name__).exception(
-                        "fxauto tick failed")
-                finally:
-                    _fxauto_save()
+            # ORDER 56: CancelledError is BaseException, never swallowed
+            # by `except Exception`: exit the loop quietly on shutdown.
+            try:
+                while not _fxauto_stop:
+                    await _fxauto_asyncio.sleep(30.0)
+                    try:
+                        _fxauto_rules.tick()
+                    except Exception:
+                        logging.getLogger(__name__).exception(
+                            "fxauto tick failed")
+                    finally:
+                        _fxauto_save()
+            except _fxauto_asyncio.CancelledError:
+                pass
 
         _fxauto_task = _fxauto_asyncio.ensure_future(_fxauto_tick_loop())
         try:
@@ -5070,8 +5075,11 @@ def create_app(settings: Any = None,
             _fxauto_task.cancel()
             try:
                 await _fxauto_task
-            except Exception:
+            except _fxauto_asyncio.CancelledError:
                 pass
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "fxauto tick stop failed")
             _fxauto_save()
 
     app.router.lifespan_context = _fxauto_lifespan
