@@ -1,11 +1,13 @@
-"""FXSHELLV focused test: sidebar stays visible at 800x600 (gate red fix).
+"""FXSHELLV focused test: sidebar opens behind the panels button at 800x600.
 
-RED->GREEN: on the unpatched tree this test FAILS at 800x600
-(`wait_for_selector(sidebar)` times out — the nav resolves to hidden
-because `@media (max-width: 800px)` sets `display: none` on the sidebar).
-After the FXSHELLV fix (collapse narrowed to 799px) it PASSES: the
-three-column layout persists at 800px, the nav is one column left of the
-content, and the first rail link keeps the accent token with no underline.
+History: the first version of this test pinned the FXSHELLV order
+(collapse narrowed to 799px) so the three-column layout persisted at
+800px with the nav always visible. The advisor reversed that order:
+FXLAYOUT design is the contract (shell.css `@media (max-width: 800px)`),
+so at 800x600 the panels button is visible, the sidebar starts
+collapsed behind it, and clicking the button opens it. This test now
+proves that contract: toggle visible, sidebar width 0, click, sidebar
+visible with the token link look, and a nav click navigates.
 
 Method (same as frozen F6 in test_fxshell1_visual.py): build the real
 production frontend, serve frontend/dist on a local port, drive it with
@@ -177,20 +179,39 @@ def test_sidebar_visible_at_800x600(served_base, edge, theme, width, height):
         page.reload(wait_until="networkidle")
 
         assert page.evaluate("document.documentElement.dataset.theme") == theme
-        # Gate red: at 800x600 the sidebar resolved to hidden. Visible now.
-        for testid in ("topbar", "sidebar", "app-main", "menu-new-task"):
-            page.wait_for_selector('[data-testid="%s"]' % testid)
+        # FXLAYOUT design is the contract: at 800x600 the nav and cards
+        # collapse behind the top-bar panels button (shell.css
+        # max-width: 800px). The sidebar starts hidden and opens on click.
+        page.wait_for_selector('[data-testid="topbar"]')
+        page.wait_for_selector('[data-testid="app-main"]')
+        page.wait_for_selector('[data-testid="sidebar"]', state="attached")
+        page.wait_for_selector('[data-testid="menu-new-task"]', state="attached")
+
+        toggle = _box(page, '[data-testid="topbar-panels"]')
+        assert toggle is not None and toggle["width"] > 0, (
+            "panels button missing at %dpx" % width
+        )
+        before = _box(page, '[data-testid="sidebar"]')
+        assert before is not None and before["width"] == 0, (
+            "sidebar is not collapsed behind the button: %r" % (before,)
+        )
+        page.click('[data-testid="topbar-panels"]')
+        page.wait_for_function(
+            """() => {
+              const el = document.querySelector('nav[data-testid="sidebar"]');
+              return el !== null && el.getBoundingClientRect().width > 0;
+            }"""
+        )
 
         nav = _box(page, '[data-testid="sidebar"]')
-        main = _box(page, '[data-testid="app-main"]')
-        assert nav is not None and main is not None, "app shell regions missing"
-        assert nav["width"] > 0 and nav["height"] > 0, "sidebar has no size: %r" % (nav,)
-        assert nav["x"] + nav["width"] <= main["x"] + 1, (
-            "nav is not one column left of content: nav=%r main=%r" % (nav, main)
+        assert nav is not None and nav["width"] > 0 and nav["height"] > 0, (
+            "sidebar has no size after opening: %r" % (nav,)
         )
 
         scroll_wide = page.evaluate("document.documentElement.scrollWidth")
-        assert scroll_wide <= width, "horizontal page scroll at %dpx: scrollWidth %d" % (width, scroll_wide)
+        assert scroll_wide <= width, (
+            "horizontal page scroll at %dpx after opening panels: %d" % (width, scroll_wide)
+        )
 
         link_look = page.evaluate(
             """() => {
@@ -207,6 +228,16 @@ def test_sidebar_visible_at_800x600(served_base, edge, theme, width, height):
         assert link_look["deco"] == "none", "nav link is underlined: %r" % (link_look,)
         assert link_look["color"] == _hex_to_rgb(link_look["accent"]), (
             "nav link is not the token colour: %r" % (link_look,)
+        )
+
+        # A nav click works: the projects entry navigates and selects.
+        page.click('[data-testid="menu-projects"]')
+        page.wait_for_url("**/projects")
+        page.wait_for_function(
+            """() => {
+              const el = document.querySelector('[data-testid="menu-projects"]');
+              return el !== null && el.getAttribute('aria-current') === 'page';
+            }"""
         )
 
         assert errors == [], "page errors: %r" % (errors,)
