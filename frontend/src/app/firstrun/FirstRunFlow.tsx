@@ -493,6 +493,8 @@ export function FirstRunFlow(props: FirstRunFlowProps): ReactElement {
           </form>
         ) : (
           <>
+          {/* FXBTN: back/next/skip share one spaced action row. */}
+          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
             {previous === undefined ? null : (
               <button type="button" className="fx-btn-quiet" onClick={goBack}>
                 {t(`firstrun.steps.${previous}`)}
@@ -513,6 +515,7 @@ export function FirstRunFlow(props: FirstRunFlowProps): ReactElement {
                 {t('firstrun.skip')}
               </button>
             ) : null}
+          </div>
           </>
         )}
       </section>

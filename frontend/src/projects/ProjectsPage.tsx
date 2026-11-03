@@ -362,6 +362,8 @@ export function ProjectsPage(): ReactElement {
                   <span data-testid={`project-created-${row.project_id}`}>
                     {t("projects.list.created")} {formatProjectDate(row.created_at)}
                   </span>
+                  {/* FXBTN: pause/resume + archive share one spaced row. */}
+                  <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
                   {isPaused(paused, row.project_id) ? (
                     <button
                       type="button"
@@ -395,6 +397,7 @@ export function ProjectsPage(): ReactElement {
                   >
                     {t("shell.closing.leave")}
                   </button>
+                  </span>
                 </li>
               ))}
             </ul>

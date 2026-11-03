@@ -100,7 +100,8 @@ export function LeftoverFinder({
                 {linked ? (
                   <span title={t("providers.leftover.inUseTitle")}>{t("providers.leftover.inUse")}</span>
                 ) : (
-                  <span>
+                  {/* FXBTN: one spaced action row; cancel reads quiet. */}
+                  <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
                     <button
                       type="button"
                       aria-label={t("providers.leftover.deleteAria", { id: entry.secret_id })}
@@ -112,7 +113,7 @@ export function LeftoverFinder({
                       {armed ? t("providers.leftover.confirmDelete") : t("providers.leftover.delete")}
                     </button>
                     {armed ? (
-                      <button type="button" onClick={() => setArmedId(null)}>
+                      <button type="button" data-variant="quiet" onClick={() => setArmedId(null)}>
                         {t("providers.leftover.cancel")}
                       </button>
                     ) : null}
