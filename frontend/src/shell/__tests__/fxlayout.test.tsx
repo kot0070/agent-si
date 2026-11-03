@@ -267,6 +267,9 @@ describe("fxlayout shell over the real app", () => {
 
     // FXTABS T9: with no window served the rail shows just the used
     // count, never "Unknown / Unknown" and no percent off thin air.
+    // FXFACTS F10/F8 rail contract: cards render closed by default, so
+    // the card under test is opened first.
+    fireEvent.click(screen.getByTestId("rail-toggle-context"));
     expect(screen.queryByTestId("ctx-percent")).toBeNull();
     const ctxWindow = screen.getByTestId("ctx-window");
     expect(ctxWindow.textContent).toContain(t("shell.common.unknown"));
@@ -280,12 +283,16 @@ describe("fxlayout shell over the real app", () => {
       formatNumber(400),
     );
 
+    // FXFACTS F10/F8 rail contract: Results, Background and Watcher
+    // render closed by default, so each card under test is opened first.
+    fireEvent.click(screen.getByTestId("rail-toggle-results"));
     expect(await screen.findByTestId("result-row-pkg-2")).toBeTruthy();
     expect(screen.getByTestId("result-nudge").textContent).toContain("next-up");
     expect(screen.getByTestId("result-open-pkg-2").getAttribute("href")).toBe(
       "/projects/p-1/reports",
     );
 
+    fireEvent.click(screen.getByTestId("rail-toggle-background"));
     expect(await screen.findByTestId("bg-row-t-9")).toBeTruthy();
     expect(screen.getByTestId("bg-row-t-9").textContent).toContain(
       t("tasks.status.running"),
@@ -295,6 +302,7 @@ describe("fxlayout shell over the real app", () => {
     );
     expect(screen.queryByTestId("bg-row-t-11")).toBeNull();
 
+    fireEvent.click(screen.getByTestId("rail-toggle-watcher"));
     expect(await screen.findByTestId("watcher-state")).toBeTruthy();
     expect(screen.getByTestId("watcher-state").textContent).toContain(
       t("shell.cards.watcher.ok"),
@@ -319,6 +327,9 @@ describe("fxlayout shell over the real app", () => {
     stubServed();
     renderAppAt("/");
     expect(await screen.findByTestId("chat-prompt")).toBeTruthy();
+    // FXFACTS F10 rail contract: Tokens, Tests, Providers, Local AI and
+    // Apps live in the More disclosure; Budget stays a direct card.
+    fireEvent.click(await screen.findByTestId("rail-more-toggle"));
     for (const card of METRIC_IDS) {
       expect(await screen.findByTestId(`kit-metric-${card}`)).toBeTruthy();
     }
@@ -368,22 +379,31 @@ describe("fxlayout shell over the real app", () => {
     renderAppAt("/");
     expect(await screen.findByTestId("chat-prompt")).toBeTruthy();
     expect(await screen.findByTestId("inspector-card-team")).toBeTruthy();
-    expect(screen.getByTestId("team-empty").textContent).toBe(
-      t("agents.live.empty"),
-    );
-    expect(screen.getByTestId("results-empty").textContent).toBe(
-      t("empty.generic"),
-    );
-    expect(screen.getByTestId("background-empty").textContent).toBe(
-      t("empty.generic"),
-    );
-    expect(screen.getByTestId("watcher-empty").textContent).toBe(
-      t("empty.generic"),
-    );
-    expect(
-      screen.getByTestId("kit-metric-fx-budget").textContent,
-    ).toContain(t("shell.common.unknown"));
+    // FXFACTS F10/F8 rail contract: no-data cards stay closed with a
+    // quiet dash and no toggle.
+    for (const card of [
+      "inspector-card-team",
+      "inspector-card-results",
+      "inspector-card-background",
+      "inspector-card-watcher",
+      "inspector-card-context",
+    ]) {
+      const section = screen.getByTestId(card);
+      expect(section.textContent).toContain("—");
+    }
+    expect(screen.queryByTestId("rail-toggle-team")).toBeNull();
+    expect(screen.queryByTestId("rail-toggle-results")).toBeNull();
+    expect(screen.queryByTestId("rail-toggle-background")).toBeNull();
+    expect(screen.queryByTestId("rail-toggle-watcher")).toBeNull();
+    expect(screen.queryByTestId("rail-toggle-context")).toBeNull();
+    expect(screen.queryByTestId("team-empty")).toBeNull();
+    expect(screen.queryByTestId("results-empty")).toBeNull();
+    expect(screen.queryByTestId("background-empty")).toBeNull();
+    expect(screen.queryByTestId("watcher-empty")).toBeNull();
     expect(screen.queryByTestId("watcher-state")).toBeNull();
+    expect(screen.getByTestId("kit-metric-fx-budget").textContent).toContain(
+      "—",
+    );
     expect(screen.getByTestId("menu-results-hint")).toBeTruthy();
   });
 });

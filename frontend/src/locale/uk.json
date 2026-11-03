@@ -438,7 +438,33 @@
       "actionBlocked": "Заблоковано проблему",
       "actionEscalated": "Ескальовано на розгляд",
       "actionAllowed": "Перевірено, все спокійно",
-      "notUsedYet": "ще не задіяно"
+      "notUsedYet": "ще не задіяно",
+      "lastEvent": "Остання подія",
+      "sinceStart": "Журнал з цього запуску",
+      "minutes": "Хвилини",
+      "journalEmpty": "Записів журналу поки що немає",
+      "structuredNote": "структуровані деталі",
+      "kind": {
+        "WATCH_DECISION": "Рішення",
+        "TAMPER_ATTEMPT": "Спроба підміни",
+        "GUARD_BLOCK": "Блокування захисту",
+        "STOP_ALL": "Зупинити все",
+        "SERVICE_STATE": "Пульс",
+        "AUTOMATION_RUN": "Автозапуск",
+        "CONTEXT_CHECKPOINT": "Контрольна точка",
+        "CONTEXT_RECOVERY": "Відновлення",
+        "OUTAGE_SIGNAL": "Збій",
+        "DEVRUN_PLAN": "План запуску",
+        "DEVRUN_PART": "Частина запуску",
+        "DEVRUN_AUDIT": "Аудит запуску",
+        "DEVRUN_END": "Кінець запуску"
+      },
+      "minutesValue": "{count} хв",
+      "area": {
+        "hang": "Зависання",
+        "guard": "Захист",
+        "tamper": "Підміна"
+      }
     }
   },
   "firstrun": {
@@ -493,7 +519,16 @@
       "noProject": "Проєкту поки що немає.",
       "langEn": "English",
       "langUk": "Українська",
-      "stop_all_idle": "Немає активних запусків"
+      "stop_all_idle": "Немає активних запусків",
+      "inspector": "Панель",
+      "inspectorClose": "Закрити панель",
+      "stoppedLine": "Зупинено {count} {unit}",
+      "stoppedAgents": {
+        "one": "агент",
+        "few": "агенти",
+        "many": "агентів",
+        "other": "агентів"
+      }
     },
     "sidebar": {
       "chat": "Чат",
@@ -559,7 +594,7 @@
         "state": "Стан",
         "ok": "Спостерігає",
         "failed": "Потрібна увага",
-        "open": "Відкрити спостерігач",
+        "open": "Відкрити журнал",
         "lastCheck": "Остання перевірка",
         "watches": "Спостерігає",
         "checks": "Перевірки",
@@ -577,7 +612,9 @@
           "few": "агенти",
           "many": "агентів",
           "other": "агентів"
-        }
+        },
+        "online": "Онлайн",
+        "offline": "Офлайн"
       },
       "tokens": {
         "title": "Токени",
@@ -588,7 +625,8 @@
         "title": "Тести",
         "subtitle": "Результати тестів проєкту.",
         "total": "Записані результати тестів",
-        "emptyLine": "Запусків тестів поки що немає"
+        "emptyLine": "Запусків тестів поки що немає",
+        "planOne": "1 план"
       },
       "budget": {
         "title": "Бюджет",
@@ -620,7 +658,10 @@
         "paused": "Призупинено"
       },
       "showMore": "Показати більше",
-      "showLess": "Показати менше"
+      "showLess": "Показати менше",
+      "more": {
+        "title": "Ще"
+      }
     },
     "common": {
       "unknown": "НЕВІДОМО"
@@ -931,7 +972,8 @@
       "role": "Роль",
       "model": "Модель",
       "used": "Використано токенів",
-      "calls": "Виклики"
+      "calls": "Виклики",
+      "otherCalls": "Інші виклики"
     },
     "cost": {
       "spent": "Витрачено коштів",
@@ -944,7 +986,25 @@
     "time": {
       "package": "Пакунок",
       "seconds": "Секунди",
-      "run": "Запуск"
+      "run": "Запуск",
+      "second": {
+        "one": "с",
+        "few": "с",
+        "many": "с",
+        "other": "с"
+      },
+      "minute": {
+        "one": "хв",
+        "few": "хв",
+        "many": "хв",
+        "other": "хв"
+      },
+      "hour": {
+        "one": "год",
+        "few": "год",
+        "many": "год",
+        "other": "год"
+      }
     },
     "runs": {
       "package": "Пакунок",
@@ -957,7 +1017,24 @@
       "done": "виконано",
       "failed": "не вдався",
       "verdictPass": "пройдено",
-      "verdictPending": "очікує"
+      "verdictPending": "очікує",
+      "tokensLabel": "Токени",
+      "costLabel": "Вартість",
+      "teamTitle": "Команда",
+      "manager": {
+        "one": "Менеджер",
+        "few": "Менеджери",
+        "many": "Менеджерів",
+        "other": "Менеджерів"
+      },
+      "parts": {
+        "one": "частина",
+        "few": "частини",
+        "many": "частин",
+        "other": "частин"
+      },
+      "allPassed": "Пройдено: {count} {unit}",
+      "keyMissing": "Ключ для '{provider}' недоступний. Підʼєднайте його знову."
     },
     "reports": {
       "changedFiles": "Змінені файли",

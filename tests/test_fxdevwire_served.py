@@ -590,6 +590,10 @@ def test_s5_journal_kinds_and_reasons(tmp_path):
     audits = by_kind["DEVRUN_AUDIT"]
     assert any("checks green" in row.summary for row in audits), (
         [row.summary for row in audits])
+    # FXFACTS F6a: the success path journals exactly one DEVRUN_END row
+    # (the duplicate record-summary emit was removed).
+    assert len(by_kind["DEVRUN_END"]) == 1, (
+        [row.summary for row in by_kind["DEVRUN_END"]])
 
 
 # -- S4: stop-all cancels a live stream and stops the run ----------------

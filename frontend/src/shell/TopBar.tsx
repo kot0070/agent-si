@@ -4,7 +4,7 @@
 // locale surface: setLocale updates the module plus persistence, then a
 // window event carries the new locale to App for a full re-render.
 
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import type { PartRow } from "../api/iface";
@@ -23,10 +23,18 @@ import { useProjectList } from "../projects/projectList";
 import {
   DEFAULT_LOCALE,
   LOCALE_STORAGE_KEY,
+  formatNumber,
+  pluralUnit,
   setLocale,
   t,
 } from "../locale/index";
 import type { SupportedLocale } from "../locale/index";
+import {
+  INSPECTOR_TOGGLE_EVENT,
+  inspectorEventOpen,
+  readInspectorOpen,
+  toggleInspector,
+} from "./inspectorDrawer";
 import { ThemeToggle } from "./ThemeToggle";
 
 export const TOPBAR_LOCALE_EVENT = "agentsi:locale-changed";
@@ -68,8 +76,14 @@ export function TopBar(props: TopBarProps): ReactElement {
   // J8: the one project-name source is the shared project list (the same
   // store Sidebar and ProjectsPage read); the top bar keeps no own copy.
   const { projects, refresh: refreshProjects } = useProjectList();
-  const [stopArmed, setStopArmed] = useState(false);
+  // FXFACTS F12: one click stops at once, no confirmation dialog. The
+  // quiet status line names what was stopped and fades on its own.
   const [stopText, setStopText] = useState<string | null>(null);
+  // FXFACTS F8: drawer toggle mirrors the shell class through the shared
+  // drawer event, so aria-expanded never lies.
+  const [inspectorOpen, setInspectorOpen] = useState<boolean>(() =>
+    readInspectorOpen(),
+  );
   // FXDESIGN8: the shared agents-live store owns the single poller;
   // the top bar only subscribes.
   const live = useLiveRows(client);
@@ -82,23 +96,41 @@ export function TopBar(props: TopBarProps): ReactElement {
     setLocale(readStoredLocale());
   }, []);
 
-  // W2: Escape disarms the inline stop confirm; any route change disarms
-  // it too so the armed state never persists across screens.
   useEffect(() => {
-    setStopArmed(false);
-  }, [location.pathname]);
-
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent): void {
-      if (event.key === "Escape") {
-        setStopArmed(false);
-      }
+    function onInspectorToggle(event: Event): void {
+      setInspectorOpen(inspectorEventOpen(event));
     }
-    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener(INSPECTOR_TOGGLE_EVENT, onInspectorToggle);
     return () => {
-      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener(INSPECTOR_TOGGLE_EVENT, onInspectorToggle);
     };
   }, []);
+
+  // FXFACTS F12/F15: the quiet stop status fades on its own; no extra
+  // button. The timer restarts with every new status.
+  const stopFadeRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (stopText === null) {
+      return;
+    }
+    if (stopFadeRef.current !== null) {
+      window.clearTimeout(stopFadeRef.current);
+    }
+    stopFadeRef.current = window.setTimeout(() => {
+      setStopText(null);
+    }, 6000);
+    return () => {
+      if (stopFadeRef.current !== null) {
+        window.clearTimeout(stopFadeRef.current);
+        stopFadeRef.current = null;
+      }
+    };
+  }, [stopText]);
+
+  // W2: any route change clears the stop status line.
+  useEffect(() => {
+    setStopText(null);
+  }, [location.pathname]);
 
   useEffect(() => {
     let alive = true;
@@ -207,11 +239,6 @@ export function TopBar(props: TopBarProps): ReactElement {
 
   async function stopAll(): Promise<void> {
     window.dispatchEvent(new Event(TOPBAR_STOP_EVENT));
-    if (!stopArmed) {
-      setStopArmed(true);
-      return;
-    }
-    setStopArmed(false);
     // The stop button acts as the user, in both branches.
     const body =
       effective === null
@@ -238,8 +265,12 @@ export function TopBar(props: TopBarProps): ReactElement {
           typeof receipt.stopped_count === "number"
             ? receipt.stopped_count
             : 0;
+        // FXFACTS F12/F15: one quiet locale status line, no extra button.
         setStopText(
-          t("shell.topbar.stop_result", { status: `Stopped ${count}` }),
+          t("shell.topbar.stoppedLine", {
+            count: formatNumber(count),
+            unit: pluralUnit("shell.topbar.stoppedAgents", count),
+          }),
         );
       } else {
         const reason =
@@ -307,6 +338,17 @@ export function TopBar(props: TopBarProps): ReactElement {
       >
         {t("shell.topbar.panels")}
       </button>
+      <button
+        type="button"
+        data-testid="inspector-toggle"
+        className="fx-inspector-btn"
+        aria-label={t("shell.topbar.inspector")}
+        aria-expanded={inspectorOpen}
+        aria-controls="inspector"
+        onClick={toggleInspector}
+      >
+        {t("shell.topbar.inspector")}
+      </button>
       <span data-testid="k07open10-shell" aria-hidden="true" />
       {/* FXDESIGN6: the project name reads as the ref title dropdown. The
           visible label text is visually hidden (aria-label carries it) so
@@ -353,15 +395,8 @@ export function TopBar(props: TopBarProps): ReactElement {
       </label>
       <div data-testid="topbar-right" className="fx-topbar-right">
         <div data-testid="pairing-strip">
-          <span data-testid="pairing-label">
-            <Link
-              data-testid="topbar-watcher"
-              to="/watcher"
-              className="fx-topbar-watcher"
-            >
-              {t("shell.topbar.watcher")}
-            </Link>
-          </span>{" "}
+          {/* FXFACTS F15: the watcher word lives in the rail Watcher card
+              only; the top bar keeps the placement badge. */}
           {badge === null ? (
             <span data-testid="pairing-badge" hidden />
           ) : (
@@ -380,23 +415,12 @@ export function TopBar(props: TopBarProps): ReactElement {
             void stopAll();
           }}
         >
-          {stopArmed ? t("shell.closing.confirm") : t("shell.topbar.stop_all")}
+          {t("shell.topbar.stop_all")}
         </button>
       {stopText === null ? null : (
-        <>
-          <span data-testid="stop-all-result">{stopText}</span>
-          <button
-            type="button"
-            data-testid="stop-all-clear"
-            className="fx-btn-quiet"
-            aria-label={t("shell.topbar.stop_clear")}
-            onClick={() => {
-              setStopText(null);
-            }}
-          >
-            {t("shell.topbar.stop_clear")}
-          </button>
-        </>
+        <span data-testid="stop-all-result" className="fx-fade-note">
+          {stopText}
+        </span>
       )}
         <label className="fx-topbar-language">
           <span className="fx-vh">{t("shell.topbar.language")}</span>

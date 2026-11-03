@@ -438,7 +438,33 @@
       "actionBlocked": "Blocked a problem",
       "actionEscalated": "Escalated for review",
       "actionAllowed": "Checked, all quiet",
-      "notUsedYet": "not used yet"
+      "notUsedYet": "not used yet",
+      "lastEvent": "Last event",
+      "sinceStart": "Journal since this start",
+      "minutes": "Minutes",
+      "journalEmpty": "No journal rows yet",
+      "structuredNote": "structured detail",
+      "kind": {
+        "WATCH_DECISION": "Decision",
+        "TAMPER_ATTEMPT": "Tamper attempt",
+        "GUARD_BLOCK": "Guard block",
+        "STOP_ALL": "Stop all",
+        "SERVICE_STATE": "Heartbeat",
+        "AUTOMATION_RUN": "Automation run",
+        "CONTEXT_CHECKPOINT": "Checkpoint",
+        "CONTEXT_RECOVERY": "Recovery",
+        "OUTAGE_SIGNAL": "Outage",
+        "DEVRUN_PLAN": "Run plan",
+        "DEVRUN_PART": "Run part",
+        "DEVRUN_AUDIT": "Run audit",
+        "DEVRUN_END": "Run end"
+      },
+      "minutesValue": "{count} min",
+      "area": {
+        "hang": "Hang",
+        "guard": "Guard",
+        "tamper": "Tamper"
+      }
     }
   },
   "firstrun": {
@@ -493,7 +519,16 @@
       "noProject": "No project yet",
       "langEn": "English",
       "langUk": "Українська",
-      "stop_all_idle": "No runs active"
+      "stop_all_idle": "No runs active",
+      "inspector": "Panel",
+      "inspectorClose": "Close panel",
+      "stoppedLine": "Stopped {count} {unit}",
+      "stoppedAgents": {
+        "one": "agent",
+        "few": "agents",
+        "many": "agents",
+        "other": "agents"
+      }
     },
     "sidebar": {
       "chat": "Chat",
@@ -559,7 +594,7 @@
         "state": "State",
         "ok": "Watching",
         "failed": "Attention needed",
-        "open": "Open watcher",
+        "open": "Open journal",
         "lastCheck": "Last check",
         "watches": "Watches",
         "checks": "Checks",
@@ -577,7 +612,9 @@
           "few": "agents",
           "many": "agents",
           "other": "agents"
-        }
+        },
+        "online": "Online",
+        "offline": "Offline"
       },
       "tokens": {
         "title": "Tokens",
@@ -588,7 +625,8 @@
         "title": "Tests",
         "subtitle": "Project test results.",
         "total": "Recorded test results",
-        "emptyLine": "No test runs yet"
+        "emptyLine": "No test runs yet",
+        "planOne": "1 plan"
       },
       "budget": {
         "title": "Budget",
@@ -620,7 +658,10 @@
         "paused": "Paused"
       },
       "showMore": "Show more",
-      "showLess": "Show less"
+      "showLess": "Show less",
+      "more": {
+        "title": "More"
+      }
     },
     "common": {
       "unknown": "Unknown"
@@ -931,7 +972,8 @@
       "role": "Role",
       "model": "Model",
       "used": "Tokens used",
-      "calls": "Calls"
+      "calls": "Calls",
+      "otherCalls": "Other calls"
     },
     "cost": {
       "spent": "Money spent",
@@ -944,7 +986,25 @@
     "time": {
       "package": "Package",
       "seconds": "Seconds",
-      "run": "Run"
+      "run": "Run",
+      "second": {
+        "one": "s",
+        "few": "s",
+        "many": "s",
+        "other": "s"
+      },
+      "minute": {
+        "one": "min",
+        "few": "min",
+        "many": "min",
+        "other": "min"
+      },
+      "hour": {
+        "one": "h",
+        "few": "h",
+        "many": "h",
+        "other": "h"
+      }
     },
     "runs": {
       "package": "Package",
@@ -957,7 +1017,24 @@
       "done": "done",
       "failed": "failed",
       "verdictPass": "passed",
-      "verdictPending": "pending"
+      "verdictPending": "pending",
+      "tokensLabel": "Tokens",
+      "costLabel": "Cost",
+      "teamTitle": "Team",
+      "manager": {
+        "one": "Manager",
+        "few": "Managers",
+        "many": "Managers",
+        "other": "Managers"
+      },
+      "parts": {
+        "one": "part",
+        "few": "parts",
+        "many": "parts",
+        "other": "parts"
+      },
+      "allPassed": "All {count} {unit} passed",
+      "keyMissing": "The key for '{provider}' is not available. Connect it again."
     },
     "reports": {
       "changedFiles": "Changed files",
