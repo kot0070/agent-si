@@ -267,9 +267,20 @@ nav [data-testid^="project-menu-"] {
   cursor: pointer;
 }
 
-nav [data-testid^="project-menu-"]:hover {
-  border-color: var(--fx-accent);
-  color: var(--fx-accent);
+/* FXSMALL W13: one shared hover for every project tab (chat + 15 views).
+   The chat route never loads projectview.css, so the always-loaded shell
+   owns the hover: the fill repaints to the primary-hover token with the
+   primary ink (>=4.5:1 both themes, tokens only, no one-off colours), so
+   rest and hover never compute the same on any route. Specificity beats
+   both the global button:hover fill and the projectview quiet hover, so
+   every tab computes the same restyle on every route. */
+nav.fxpv-tabs button[data-testid="project-chat-tab"]:hover:not(:disabled),
+nav.fxpv-tabs button[data-testid^="project-menu-"]:hover:not(:disabled) {
+  background-color: var(--fx-btn-primary-hover);
+  border-color: var(--fx-btn-primary-hover);
+  color: var(--fx-btn-primary-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 nav [data-testid^="project-menu-"]:focus-visible {
