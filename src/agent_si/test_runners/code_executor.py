@@ -24,6 +24,8 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
+from agent_si.backend.proc_tree import quiet_flags
+
 #: Default per-test timeout; the caller may narrow it per call.
 EXECUTOR_DEFAULT_TIMEOUT_S = 60.0
 
@@ -437,6 +439,7 @@ def execute_code_test(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             timeout=limit,
+            creationflags=quiet_flags(),
         )
     except FileNotFoundError as exc:
         raise ExecutorBlocked(
