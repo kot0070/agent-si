@@ -128,8 +128,18 @@ def test_unsourced_fields_are_literal_unknown():
 
 
 def test_seed_catalog_is_honest_unknown():
+    # FXFACTS F1 (owner-ordered): the shipped meta contributor price is the
+    # one priced seed row; every other seed field stays literal UNKNOWN.
     for row in kb.SEED_CATALOG["models"]:
+        priced = (
+            row.get("provider_id") == "meta"
+            and row.get("model_id") == "muse-spark-1.3-contributor"
+        )
         for name, field in row["fields"].items():
+            if priced and name in ("currency", "input_token_price",
+                                   "output_token_price"):
+                assert field["value"] != "UNKNOWN", (row["model_id"], name)
+                continue
             assert field["value"] == "UNKNOWN", (row["model_id"], name)
     assert kb.validate_catalog(kb.SEED_CATALOG) == []
 

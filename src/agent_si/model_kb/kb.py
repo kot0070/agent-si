@@ -286,16 +286,42 @@ def _seed_row(provider_id, model_id):
     return make_model_row(provider_id, model_id)
 
 
+#: Shipped preset price: the meta preset row carries the sourced
+#: catalog price (FXFACTS F1), so the FIRST run on a fresh install charges
+#: a number instead of UNAVAILABLE. Values mirror the staged meta section
+#: in the loader; every other seed row stays all-UNKNOWN, and a model
+#: with no priced row stays plainly unknown downstream.
+_SEED_PRICE_SOURCE = "https://dev.meta.ai/docs/pricing-rate-limits"
+_SEED_PRICE_RETRIEVED_AT = "2026-10-11"
+
+
+def _seed_priced_row(provider_id, model_id, currency, input_price,
+                     output_price):
+    fields = {
+        "currency": sourced(currency, _SEED_PRICE_SOURCE,
+                            _SEED_PRICE_RETRIEVED_AT),
+        "input_token_price": sourced(input_price, _SEED_PRICE_SOURCE,
+                                     _SEED_PRICE_RETRIEVED_AT),
+        "output_token_price": sourced(output_price, _SEED_PRICE_SOURCE,
+                                      _SEED_PRICE_RETRIEVED_AT),
+    }
+    return make_model_row(provider_id, model_id, fields)
+
+
 SEED_CATALOG = make_catalog(
     [_seed_row("openai", "gpt-4o"),
      _seed_row("openai", "gpt-4o-mini"),
-     _seed_row("meta", "muse-spark-1.3-contributor"),
+     _seed_priced_row("meta", "muse-spark-1.3-contributor",
+                      "USD", 0.1, 0.2),
      _seed_row("anthropic", "claude-haiku-4-5")],
     kb_version=1,
     updated_at="2026-10-26",
     change_log=[{"version": 1, "at": "2026-10-26",
-                 "summary": "shipped seed; spec fields UNKNOWN until a "
-                            "sourced in-app update enriches them",
+                 "summary": "shipped seed; meta contributor row carries "
+                            "the shipped sourced price, every other spec "
+                            "field UNKNOWN until a sourced in-app update "
+                            "enriches them; cost UNAVAILABLE only without "
+                            "a priced row",
                  "source": "shipped-seed",
                  "providers": ["openai", "meta", "anthropic"],
                  "changes": [], "cost_state": "UNAVAILABLE"}],
