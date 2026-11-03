@@ -926,7 +926,8 @@
       "role": "Role",
       "model": "Model",
       "used": "Tokens used",
-      "calls": "Calls"
+      "calls": "Calls",
+      "otherCalls": "Other calls"
     },
     "cost": {
       "spent": "Money spent",
@@ -939,7 +940,25 @@
     "time": {
       "package": "Package",
       "seconds": "Seconds",
-      "run": "Run"
+      "run": "Run",
+      "second": {
+        "one": "s",
+        "few": "s",
+        "many": "s",
+        "other": "s"
+      },
+      "minute": {
+        "one": "min",
+        "few": "min",
+        "many": "min",
+        "other": "min"
+      },
+      "hour": {
+        "one": "h",
+        "few": "h",
+        "many": "h",
+        "other": "h"
+      }
     },
     "runs": {
       "package": "Package",
@@ -952,7 +971,24 @@
       "done": "done",
       "failed": "failed",
       "verdictPass": "passed",
-      "verdictPending": "pending"
+      "verdictPending": "pending",
+      "tokensLabel": "Tokens",
+      "costLabel": "Cost",
+      "teamTitle": "Team",
+      "manager": {
+        "one": "Manager",
+        "few": "Managers",
+        "many": "Managers",
+        "other": "Managers"
+      },
+      "parts": {
+        "one": "part",
+        "few": "parts",
+        "many": "parts",
+        "other": "parts"
+      },
+      "allPassed": "All {count} {unit} passed",
+      "keyMissing": "The key for '{provider}' is not available. Connect it again."
     },
     "reports": {
       "changedFiles": "Changed files",

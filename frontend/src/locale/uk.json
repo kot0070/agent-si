@@ -926,7 +926,8 @@
       "role": "Роль",
       "model": "Модель",
       "used": "Використано токенів",
-      "calls": "Виклики"
+      "calls": "Виклики",
+      "otherCalls": "Інші виклики"
     },
     "cost": {
       "spent": "Витрачено коштів",
@@ -939,7 +940,25 @@
     "time": {
       "package": "Пакунок",
       "seconds": "Секунди",
-      "run": "Запуск"
+      "run": "Запуск",
+      "second": {
+        "one": "с",
+        "few": "с",
+        "many": "с",
+        "other": "с"
+      },
+      "minute": {
+        "one": "хв",
+        "few": "хв",
+        "many": "хв",
+        "other": "хв"
+      },
+      "hour": {
+        "one": "год",
+        "few": "год",
+        "many": "год",
+        "other": "год"
+      }
     },
     "runs": {
       "package": "Пакунок",
@@ -952,7 +971,24 @@
       "done": "виконано",
       "failed": "не вдався",
       "verdictPass": "пройдено",
-      "verdictPending": "очікує"
+      "verdictPending": "очікує",
+      "tokensLabel": "Токени",
+      "costLabel": "Вартість",
+      "teamTitle": "Команда",
+      "manager": {
+        "one": "Менеджер",
+        "few": "Менеджери",
+        "many": "Менеджерів",
+        "other": "Менеджерів"
+      },
+      "parts": {
+        "one": "частина",
+        "few": "частини",
+        "many": "частин",
+        "other": "частин"
+      },
+      "allPassed": "Пройдено: {count} {unit}",
+      "keyMissing": "Ключ для '{provider}' недоступний. Підʼєднайте його знову."
     },
     "reports": {
       "changedFiles": "Змінені файли",

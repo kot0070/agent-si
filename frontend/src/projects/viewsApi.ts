@@ -18,7 +18,7 @@ import type {
 import { placementForRow } from "../agents/agentsApi";
 import type { Placement } from "../agents/agentsApi";
 import type { SupportedLocale } from "../locale/index";
-import { formatDate, formatScreenTime, t } from "../locale/index";
+import { formatDate, formatScreenTime, pluralUnit, t } from "../locale/index";
 
 export interface ShortRef {
   text: string;
@@ -87,6 +87,7 @@ export interface LiveExtras {
   tokensTotal: number | null;
   costText: string | null;
   file?: string;
+  errors: string[];
 }
 
 type LiveRowLoose = PartRow & {
@@ -96,6 +97,8 @@ type LiveRowLoose = PartRow & {
   tokens?: unknown;
   cost?: unknown;
   file?: unknown;
+  errors?: unknown;
+  context?: unknown;
 };
 
 function readText(value: unknown): string | undefined {
@@ -126,6 +129,11 @@ export function readLiveExtras(row: PartRow): LiveExtras {
   const loose = row as LiveRowLoose;
   const tokensTotal = readTokensTotal(loose.tokens);
   const costRaw = readText(loose.cost);
+  const errorsRaw = loose.errors;
+  const errors =
+    Array.isArray(errorsRaw)
+      ? errorsRaw.map((item) => String(item)).filter((item) => item !== "")
+      : [];
   return {
     role: readText(loose.role),
     model: readText(loose.model),
@@ -133,7 +141,69 @@ export function readLiveExtras(row: PartRow): LiveExtras {
     tokensTotal,
     costText: costRaw ?? null,
     file: readText(loose.file),
+    errors,
   };
+}
+
+// FXFACTS F2: the run id a live row belongs to, read from the served
+// deliverable ("artifact://run/<run_id>/...") or context
+// ("artifact:run/<run_id>/...") the engine writes. Rows without either
+// (older register rows) read null: unattributed, never guessed.
+export function liveRowRunId(row: PartRow): string | null {
+  const loose = row as LiveRowLoose;
+  const deliverable =
+    typeof row.deliverable === "string" ? row.deliverable : "";
+  const context =
+    typeof loose.context === "string" ? loose.context : "";
+  const fromDeliverable =
+    /^artifact:\/\/run\/([^/]+)\//.exec(deliverable)?.[1] ?? null;
+  if (fromDeliverable !== null) {
+    return fromDeliverable;
+  }
+  const fromContext =
+    /^artifact:run\/([^/]+)\//.exec(context)?.[1] ?? null;
+  return fromContext;
+}
+
+// FXFACTS F2: rows of the latest run only. Runs ride newest-first
+// (FXCARDS C1), so runs[0] is the latest; rows parsing to an older run
+// id drop out, so an earlier failed run never marks current state.
+// Unattributed rows stay: only evidence filters, never a guess. With no
+// served runs the live rows pass through unchanged.
+export function latestRunRows(
+  live: PartRow[],
+  runs: Array<{ run_id: string }> | null,
+): PartRow[] {
+  if (runs === null || runs.length === 0) {
+    return live;
+  }
+  const latest = runs[0]?.run_id;
+  if (typeof latest !== "string" || latest === "") {
+    return live;
+  }
+  return live.filter((row) => {
+    const runId = liveRowRunId(row);
+    return runId === null || runId === latest;
+  });
+}
+
+// FXFACTS F3: served role names read through the locale, never raw.
+// Unknown role strings read null (UNKNOWN in the view).
+export function translateRoleName(role: unknown): string | null {
+  if (typeof role !== "string") {
+    return null;
+  }
+  const key = role.toLowerCase();
+  if (
+    key === "director" ||
+    key === "manager" ||
+    key === "worker" ||
+    key === "auditor" ||
+    key === "watcher"
+  ) {
+    return t(`providers.role.${key}`);
+  }
+  return null;
 }
 
 export interface DedupedRow {
@@ -148,6 +218,7 @@ export interface DedupedRow {
   costText: string | null;
   files: string[];
   scopes: string[];
+  errors: string[];
 }
 
 // FXTABS T6: attempts of one agent fold into ONE row with an attempt
@@ -188,6 +259,7 @@ export function dedupeLiveRows(rows: PartRow[]): DedupedRow[] {
         costText: extras.costText,
         files: extras.file === undefined ? [] : [extras.file],
         scopes: [row.scope],
+        errors: [...extras.errors],
       });
       continue;
     }
@@ -215,6 +287,11 @@ export function dedupeLiveRows(rows: PartRow[]): DedupedRow[] {
     }
     if (extras.file !== undefined && !seen.files.includes(extras.file)) {
       seen.files.push(extras.file);
+    }
+    for (const error of extras.errors) {
+      if (!seen.errors.includes(error)) {
+        seen.errors.push(error);
+      }
     }
     if (!seen.scopes.includes(row.scope)) {
       seen.scopes.push(row.scope);
@@ -546,24 +623,32 @@ export function formatRunMoment(
   return formatScreenTime(new Date(parsed), locale);
 }
 
-// Human wall-clock units from served seconds (rounded): "45 s",
-// "1 min 30 s", "2 h 5 min". Served cells only; null stays null.
+// Human wall-clock units from served seconds (rounded), in the active
+// locale (FXFACTS F4: uk reads хв and с, never raw min/s). Served cells
+// only; null stays null.
 export function humanDuration(totalS: number | null): string | null {
   if (totalS === null) {
     return null;
   }
   const total = Math.max(0, Math.round(totalS));
+  const second = pluralUnit("projectView.time.second", total);
   if (total < 60) {
-    return `${total} s`;
+    return `${total} ${second}`;
   }
   const minutes = Math.floor(total / 60);
   const rest = total % 60;
+  const minute = pluralUnit("projectView.time.minute", minutes);
   if (minutes < 60) {
-    return rest === 0 ? `${minutes} min` : `${minutes} min ${rest} s`;
+    return rest === 0
+      ? `${minutes} ${minute}`
+      : `${minutes} ${minute} ${rest} ${pluralUnit("projectView.time.second", rest)}`;
   }
   const hours = Math.floor(minutes / 60);
   const restMin = minutes % 60;
-  return restMin === 0 ? `${hours} h` : `${hours} h ${restMin} min`;
+  const hour = pluralUnit("projectView.time.hour", hours);
+  return restMin === 0
+    ? `${hours} ${hour}`
+    : `${hours} ${hour} ${restMin} ${pluralUnit("projectView.time.minute", restMin)}`;
 }
 
 // Plain run status from the served cells: any FAIL part forces "failed"
