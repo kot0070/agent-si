@@ -159,12 +159,17 @@ def test_transport_failure_error_and_no_provider(tmp_path, monkeypatch):
                        headers=HEADERS)
     assert conn.status_code == 503, conn.text
     assert conn.json() == {"code": "EVIDENCE_PROBE_NETWORK",
-                           "message": "Could not reach the provider."}, conn.text
+                           "message": ("The provider is slow or unreachable. "
+                                       "Your key is saved. Press Connect "
+                                       "again.")}, conn.text
     assert BAIT2 not in conn.text
     listed = client.get("/api/v1/providers", headers=HEADERS)
     assert listed.status_code == 200, listed.text
     rows = {r["provider_id"]: r for r in listed.json()["providers"]}
-    assert rows == {}, rows
+    # S3: network class keeps the saved key + row (Connect again
+    # retries); the chat still has no bound adapter to answer with.
+    assert "openai" in rows, rows
+    assert key_ref["secret_id"] in app.state.k04_ctx.credential_store, rows
     # KEYECHO1: failure reasons are codes/refs only, never the transport
     # exception text (it may carry key bytes): the simulated message
     # must not surface anywhere.

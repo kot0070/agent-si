@@ -76,6 +76,9 @@ function connectFailure(err: unknown): string {
     }
     if (err.status === 0 || err.status === 503
       || code === "EVIDENCE_PROBE_NETWORK") {
+      // FXSPEED S3: the slow/unreachable sentence is the locale text
+      // (the key is kept, Connect again retries); refused keys never
+      // reach this branch (401/403 above).
       return t("providers.connect.unreachable");
     }
     if (typeof err.details?.message === "string"
@@ -354,8 +357,15 @@ export function ConnectDialog({
       // key never reached a store, so the provider stays disconnected.
       // H3: never a bare generic — always the reason plus what to do.
       setApiKey("");
-      const hint = t("providers.connect.retryHint", { label: activePreset.label });
-      setResult({ kind: "error", text: `${connectFailure(err)} ${hint}` });
+      // FXSPEED S3: a slow/unreachable provider keeps the saved key, so
+      // the result names only what to do (Connect again) without the
+      // re-paste hint, which is reserved for refused keys.
+      const faultCode = err instanceof ApiError ? String(err.code) : "";
+      const base = connectFailure(err);
+      const hint = faultCode === "EVIDENCE_PROBE_NETWORK"
+        ? ""
+        : ` ${t("providers.connect.retryHint", { label: activePreset.label })}`;
+      setResult({ kind: "error", text: `${base}${hint}` });
     } finally {
       setSaving(false);
     }

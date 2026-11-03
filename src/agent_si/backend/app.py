@@ -30,6 +30,12 @@ USER_WRITE = "USER_WRITE"
 #: Stable machine code for a missing report row (M-WIRE L0B-11).
 REPORT_ROW_NOT_FOUND = "REPORT_ROW_NOT_FOUND"
 
+#: Connect evidence-probe wall budget, seconds (FXSPEED S3): a slow or
+#: unreachable provider answers 503 EVIDENCE_PROBE_NETWORK with the
+#: saved key + provider row kept; the pool join never waits past this
+#: budget (shutdown wait=False on the timeout path).
+_PROVCK2_PROBE_BUDGET_S = 45.0
+
 AuthHook = Callable[[str | None, str, str], bool]
 RateHook = Callable[[str], bool]
 
@@ -1726,15 +1732,26 @@ def create_app(settings: Any = None,
             _seen: dict = {}
 
             def _usage_trans(req: dict) -> dict:
+                _probe_req: dict = {
+                    "model": model,
+                    "messages": [{"role": "user",
+                                  "content": "ping"}],
+                    "max_tokens": 1,
+                    "stream": False,
+                    "chat_path": _chat_path,
+                }
                 try:
-                    reply = _real({
-                        "model": model,
-                        "messages": [{"role": "user",
-                                      "content": "ping"}],
-                        "max_tokens": 1,
-                        "stream": False,
-                        "chat_path": _chat_path,
-                    })
+                    # FXSPEED S3: cheap probe on muse models asks for low
+                    # reasoning; a transport that ignores params keeps
+                    # working unchanged (best effort, never required).
+                    _probe_wire = str(model or "")
+                    if (_probe_wire.startswith("muse-spark")
+                            or _probe_wire.startswith("meta/muse-spark")):
+                        _probe_req["params"] = {"reasoning_effort": "low"}
+                except Exception:
+                    pass
+                try:
+                    reply = _real(_probe_req)
                 except Exception as _exc:
                     _seen["exc"] = _exc
                     raise
@@ -1823,21 +1840,35 @@ def create_app(settings: Any = None,
                 return _uprobe.probe_usage(pid, inst or "default",
                                             _trans)
             import concurrent.futures as _fut
-            with _fut.ThreadPoolExecutor(max_workers=1) as _pool:
-                _future = _pool.submit(_run)
+            # FXSPEED S3: budget 45 s with no hidden extra wait: the pool
+            # is shut down without joining on the timeout path, so the
+            # slow call never blocks the 503 answer (the old `with`
+            # join waited for the slow call: 21.6 s seen).
+            _pool = _fut.ThreadPoolExecutor(max_workers=1)
+            _future = _pool.submit(_run)
+            try:
+                _cap = _future.result(timeout=_PROVCK2_PROBE_BUDGET_S)
+            except _fut.TimeoutError:
                 try:
-                    _cap = _future.result(timeout=10.0)
-                except _fut.TimeoutError:
-                    _provck2_audit({
-                        "event": "provck2-evidence",
-                        "provider_id": pid,
-                        "instance_id": _provck2_inst,
-                        "class": "probe-timeout",
-                        "code": _PROVCK2_CODES["probe-timeout"],
-                        "store_attempts": _store_attempts,
-                    })
-                    return (False, "evidence probe timed out after 10s",
-                            "probe-timeout", None)
+                    _pool.shutdown(wait=False, cancel_futures=True)
+                except TypeError:
+                    _pool.shutdown(wait=False)
+                _provck2_audit({
+                    "event": "provck2-evidence",
+                    "provider_id": pid,
+                    "instance_id": _provck2_inst,
+                    "class": "probe-timeout",
+                    "code": _PROVCK2_CODES["probe-timeout"],
+                    "store_attempts": _store_attempts,
+                })
+                return (False,
+                        "evidence probe timed out after %ds"
+                        % (int(_PROVCK2_PROBE_BUDGET_S),),
+                        "probe-timeout", None)
+            try:
+                _pool.shutdown(wait=False, cancel_futures=True)
+            except TypeError:
+                _pool.shutdown(wait=False)
             _state = ""
             try:
                 _state = str((_cap or {}).get("state", "") or "")
@@ -2065,55 +2096,69 @@ def create_app(settings: Any = None,
                             _ok, _reason, _cls, _hstatus = _k04bind_evidence(
                                 _pid, _inst, _model, _burl, _smap)
                             if not _ok:
-                                # Refused evidence: never Connected. Drop the
-                                # just-registered provider plus its saved key
-                                # (facade remove clears both; a missing entry
-                                # still drops the in-memory record), persist,
-                                # and answer the mapped refusal (never 200).
-                                try:
-                                    _api.remove_provider(_pid)
-                                except ValueError as _drop_exc:
+                                # Refused evidence: never Connected. Real
+                                # refusals (401/403, store-read, unknown,
+                                # HTTP) drop the just-registered provider
+                                # plus its saved key (facade remove clears
+                                # both; a missing entry still drops the
+                                # in-memory record), persist, and answer
+                                # the mapped refusal (never 200). FXSPEED
+                                # S3: probe-timeout/network keep the saved
+                                # key + provider row (Connect again
+                                # retries against the kept row); only the
+                                # snapshot is persisted, no removal, no
+                                # rebind.
+                                _keep = _cls in ("network", "probe-timeout")
+                                if not _keep:
                                     try:
-                                        from agent_si.providers.registry import (
-                                            provider_api as _drop_api)
-                                        if (_drop_api.CREDENTIAL_ENTRY_MISSING
-                                                in str(_drop_exc)):
-                                            _drop_providers = getattr(
-                                                _api, "_providers", None)
-                                            try:
-                                                if isinstance(
-                                                        _drop_providers,
-                                                        dict):
-                                                    _drop_providers.pop(
-                                                        _pid, None)
-                                            except Exception:
-                                                pass
-                                            try:
-                                                _drop_errors = getattr(
-                                                    _api, "_errors", None)
-                                                if isinstance(
-                                                        _drop_errors, dict):
-                                                    for _key in [
-                                                            key for key in
-                                                            _drop_errors
-                                                            if key[0] == _pid
-                                                    ]:
-                                                        del _drop_errors[_key]
-                                            except Exception:
-                                                pass
+                                        _api.remove_provider(_pid)
+                                    except ValueError as _drop_exc:
+                                        try:
+                                            from agent_si.providers.registry import (
+                                                provider_api as _drop_api)
+                                            if (_drop_api
+                                                    .CREDENTIAL_ENTRY_MISSING
+                                                    in str(_drop_exc)):
+                                                _drop_providers = getattr(
+                                                    _api, "_providers", None)
+                                                try:
+                                                    if isinstance(
+                                                            _drop_providers,
+                                                            dict):
+                                                        _drop_providers.pop(
+                                                            _pid, None)
+                                                except Exception:
+                                                    pass
+                                                try:
+                                                    _drop_errors = getattr(
+                                                        _api, "_errors", None)
+                                                    if isinstance(
+                                                            _drop_errors,
+                                                            dict):
+                                                        for _key in [
+                                                                key for key in
+                                                                _drop_errors
+                                                                if key[0]
+                                                                == _pid
+                                                        ]:
+                                                            del _drop_errors[
+                                                                _key]
+                                                except Exception:
+                                                    pass
+                                        except Exception:
+                                            pass
                                     except Exception:
                                         pass
-                                except Exception:
-                                    pass
                                 try:
                                     _k04bind_save()
                                 except Exception:
                                     pass
-                                try:
-                                    _k04bind_rebind(force_clear=True,
-                                                    only_provider=_pid)
-                                except Exception:
-                                    pass
+                                if not _keep:
+                                    try:
+                                        _k04bind_rebind(force_clear=True,
+                                                        only_provider=_pid)
+                                    except Exception:
+                                        pass
                                 if _hstatus in (401, 403):
                                     _status = 401
                                     _payload = {
@@ -2125,8 +2170,10 @@ def create_app(settings: Any = None,
                                     _status = 503
                                     _payload = {
                                         "code": "EVIDENCE_PROBE_NETWORK",
-                                        "message": ("Could not reach "
-                                                    "the provider.")}
+                                        "message": ("The provider is slow or "
+                                                    "unreachable. Your key is "
+                                                    "saved. Press Connect "
+                                                    "again.")}
                                 elif _cls == "store-read":
                                     _status = 503
                                     _payload = {

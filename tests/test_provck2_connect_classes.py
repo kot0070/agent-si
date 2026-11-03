@@ -41,6 +41,8 @@ BAIT_NET = "PROVCK2-FAKE-BAIT-3003-not-a-real-key"
 BAIT_HTTP = "PROVCK2-FAKE-BAIT-4004-not-a-real-key"
 BAIT_UNKNOWN = "PROVCK2-FAKE-BAIT-5005-not-a-real-key"
 BAIT_TRUNC = "PROVCK2-FAKE-BAIT-6006-not-a-real-key"
+SLOW_SAVED = ("The provider is slow or unreachable. Your key is saved. "
+              "Press Connect again.")
 
 CANNED_USAGE = {"input_tokens": 3, "output_tokens": 5,
                 "cached_tokens": 0, "reasoning_tokens": 0}
@@ -226,7 +228,9 @@ def test_store_read_failure_class_and_no_leak(tmp_path, monkeypatch):
 
 
 def test_network_failure_class_and_no_leak(tmp_path, monkeypatch):
-    """Status-less transport failure: 503 unreachable, network class."""
+    """Status-less transport failure: 503 slow/unreachable, network class.
+    S3: probe-timeout/network keep the saved key + provider row (the
+    user presses Connect again); only refused keys are dropped."""
     _stub_models_ok(monkeypatch, "m-net")
     client, app = _make_client(tmp_path)
     _create_project(client)
@@ -240,12 +244,12 @@ def test_network_failure_class_and_no_leak(tmp_path, monkeypatch):
     conn = _connect(client, key_ref, "m-net")
     assert conn.status_code == 503, conn.text
     assert conn.json() == {"code": "EVIDENCE_PROBE_NETWORK",
-                           "message": "Could not reach the provider."}, conn.text
+                           "message": SLOW_SAVED}, conn.text
     _assert_no_leak(BAIT_NET, conn.text,
                     "simulated outage carrying")
     rows = _rows(client)
-    assert rows == {}, rows
-    assert key_ref["secret_id"] not in app.state.k04_ctx.credential_store
+    assert "openai" in rows, rows
+    assert key_ref["secret_id"] in app.state.k04_ctx.credential_store, rows
     proof = _evidence(app)
     assert len(proof) == 1, proof
     assert proof[0]["class"] == "network", proof
@@ -350,11 +354,12 @@ def test_truncated_body_maps_to_network_class_and_no_leak(
     assert conn.status_code == 503, conn.text
     assert conn.json() == {
         "code": "EVIDENCE_PROBE_NETWORK",
-        "message": "Could not reach the provider."}, conn.text
+        "message": SLOW_SAVED}, conn.text
     _assert_no_leak(BAIT_TRUNC, conn.text, "garbled", "unreadable")
     rows = _rows(client)
-    assert rows == {}, rows
-    assert key_ref["secret_id"] not in app.state.k04_ctx.credential_store
+    # S3: network class keeps the saved key + provider row (see above).
+    assert "openai" in rows, rows
+    assert key_ref["secret_id"] in app.state.k04_ctx.credential_store, rows
     proof = _evidence(app)
     assert len(proof) == 1, proof
     assert proof[0]["class"] == "network", proof
@@ -380,9 +385,11 @@ def test_truncated_body_maps_to_network_class_and_no_leak(
     assert conn2.status_code == 503, conn2.text
     assert conn2.json() == {
         "code": "EVIDENCE_PROBE_NETWORK",
-        "message": "Could not reach the provider."}, conn2.text
+        "message": SLOW_SAVED}, conn2.text
     rows2 = _rows(client2)
-    assert rows2 == {}, rows2
+    # S3: network class keeps the saved key + provider row (see above).
+    assert "openai" in rows2, rows2
+    assert key_ref2["secret_id"] in app2.state.k04_ctx.credential_store, rows2
     proof2 = [r for r in app2.state.k04_ctx.audit_sink.records
               if isinstance(r, dict) and r.get("event") == "provck2-evidence"
               and r.get("provider_id") == "openai"]
@@ -391,3 +398,34 @@ def test_truncated_body_maps_to_network_class_and_no_leak(
     assert proof2[0]["code"] == "EVIDENCE_PROBE_NETWORK", proof2
     _assert_no_leak(BAIT_TRUNC, str(app2.state.k04_ctx.audit_sink.records),
                     json.dumps(rows2))
+
+
+def test_probe_timeout_keeps_key_and_row_second_connect_200(
+        tmp_path, monkeypatch):
+    """S3: slow provider past a patched budget keeps key+row; retry 200s."""
+    import time
+
+    import agent_si.backend.app as _appmod
+
+    monkeypatch.setattr(_appmod, "_PROVCK2_PROBE_BUDGET_S", 0.2)
+    _stub_models_ok(monkeypatch, "m-slow")
+    client, app = _make_client(tmp_path)
+    _create_project(client)
+    key_ref = _save_key(client, BAIT_NET)
+
+    def _slow(request, timeout=None):
+        time.sleep(3.0)
+        return _FakeResp(_ok_body())
+
+    monkeypatch.setattr(_urlreq, "urlopen", _slow)
+    conn = _connect(client, key_ref, "m-slow")
+    assert conn.status_code == 503, conn.text
+    assert conn.json() == {"code": "EVIDENCE_PROBE_NETWORK",
+                           "message": SLOW_SAVED}, conn.text
+    rows = _rows(client)
+    assert "openai" in rows, rows
+    assert key_ref["secret_id"] in app.state.k04_ctx.credential_store
+    monkeypatch.setattr(_urlreq, "urlopen",
+                        lambda request, timeout=None: _FakeResp(_ok_body()))
+    conn2 = _connect(client, key_ref, "m-slow")
+    assert conn2.status_code == 200, conn2.text

@@ -81,7 +81,7 @@
       "unknownModelsNote": "Some models are not in the capability base.",
       "needOneModel": "Tick at least one model, or Cancel to keep the current list.",
       "refusedKey": "The provider refused this key. Paste the full key again.",
-      "unreachable": "Could not reach the provider.",
+      "unreachable": "The provider is slow or unreachable. Your key is saved. Press Connect again.",
       "check": "Check",
       "checking": "Checking...",
       "checked": "Key checked. Save to connect.",

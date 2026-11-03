@@ -207,7 +207,16 @@ def connect_provider(ctx: ProviderCtx, query, body) -> Tuple[int, Dict]:
     try:
         view = ctx.facade.register_provider(descriptor, key_ref)
     except ValueError as exc:
-        return 400, {"error": str(exc)}
+        # FXSPEED S3: a kept row (slow/unreachable first connect) retries
+        # against the existing registration instead of refusing 400.
+        if "already registered" not in str(exc):
+            return 400, {"error": str(exc)}
+        try:
+            view = ctx.facade.get_provider(preset["provider_id"])
+        except Exception:
+            view = None
+        if view is None:
+            return 400, {"error": str(exc)}
     _refresh_best_effort(ctx, preset["provider_id"], view, model)
     return 200, {"provider": view.describe()}
 
