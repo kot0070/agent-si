@@ -4934,6 +4934,148 @@ def create_app(settings: Any = None,
 
     _demof3_routing_auto.register_routing_auto_routes(app)
 
+    # FXAUTO-BEGIN automations screen (plan 940-951, rows 174/181/186/249):
+    # UI router mount, disk state, journal/metric/tick wiring. Additions-only.
+    from contextlib import asynccontextmanager as _fxauto_cm
+
+    import agent_si.backend.automation_ui_routes as _fxauto_ui_routes
+    import agent_si.automation.interface as _fxauto_iface_module
+    import agent_si.context_keeper.interface as _fxauto_ck_iface
+    from agent_si.automation import pause as _fxauto_pause
+    from agent_si.automation import runner as _fxauto_runner
+    from agent_si.automation import rules as _fxauto_rules
+    from agent_si.automation import scheduler as _fxauto_scheduler
+    from agent_si.automation import triggers as _fxauto_triggers
+    from agent_si.automation import launcher as _fxauto_launcher
+    from agent_si.context_keeper import checkpoints as _fxauto_ckpts
+
+    if _k08_auth is not None:
+        _fxauto_ui_routes.configure(_k08_auth, _k08_rate)
+    else:
+        _fxauto_ui_routes.configure(
+            lambda token: token == app_token, _k08_rate)
+    app.include_router(_fxauto_ui_routes.ui_router)
+
+    _fxauto_dir = (os.path.join(_k10_data_dir, "automation")
+                   if isinstance(_k10_data_dir, str) else None)
+    _fxauto_keeper = (os.path.join(_fxauto_dir, "keeper")
+                      if _fxauto_dir is not None else None)
+    if _fxauto_keeper is not None:
+        os.makedirs(_fxauto_keeper, exist_ok=True)
+    _fxauto_store = _fxauto_ckpts.Checkpoints(store_dir=_fxauto_keeper)
+
+    def _fxauto_journal(project_id, source, kind, summary, refs=()):
+        try:
+            from agent_si.watcher import journal as _fxauto_journal_home
+            _fxauto_journal_home.append_event(
+                project_id, source, kind, summary, tuple(refs))
+        except Exception:
+            logging.getLogger(__name__).exception("fxauto journal failed")
+
+    for _fxauto_lane in (_fxauto_pause, _fxauto_runner, _fxauto_scheduler,
+                         _fxauto_triggers, _fxauto_launcher):
+        try:
+            _fxauto_lane.set_journal_hook(_fxauto_journal)
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "fxauto journal hook failed")
+    _fxauto_runner.set_budget_hook(
+        _k08_automation_routes.real_budget_check)
+    _fxauto_rules.set_context({
+        "checkpoints": _fxauto_store,
+        "journal": _fxauto_journal,
+        "keeper_dir": _fxauto_keeper,
+    })
+    _fxauto_rules.set_metric_source("budget-90",
+                                    _fxauto_rules.budget_fraction)
+    _fxauto_rules.set_metric_source("turns-40", _fxauto_rules.turns_value)
+    if _fxauto_dir is not None:
+        _fxauto_rules.set_state_path(
+            os.path.join(_fxauto_dir, "rules.json"))
+
+    def _fxauto_load(name, lane):
+        if _fxauto_dir is None:
+            return
+        path = os.path.join(_fxauto_dir, name + ".json")
+        if not os.path.exists(path):
+            return
+        try:
+            lane.load_state(path)
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "fxauto load %s failed; starting fresh", name)
+
+    for _fxauto_name, _fxauto_lane in (
+            ("scheduler", _fxauto_scheduler),
+            ("triggers", _fxauto_triggers),
+            ("runner", _fxauto_runner),
+            ("rules", _fxauto_rules)):
+        _fxauto_load(_fxauto_name, _fxauto_lane)
+
+    def _fxauto_save():
+        if _fxauto_dir is None:
+            return
+        for _fxauto_name, _fxauto_lane in (
+                ("scheduler", _fxauto_scheduler),
+                ("triggers", _fxauto_triggers),
+                ("runner", _fxauto_runner),
+                ("rules", _fxauto_rules)):
+            try:
+                _fxauto_lane.save_state(
+                    os.path.join(_fxauto_dir, _fxauto_name + ".json"))
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "fxauto save %s failed", _fxauto_name)
+
+    def _fxauto_boot_events():
+        try:
+            for _fxauto_pid in _fxauto_rules.project_ids():
+                try:
+                    _fxauto_rules.fire_event(_fxauto_pid, "app-started")
+                except Exception:
+                    logging.getLogger(__name__).exception(
+                        "fxauto app-started failed for %s", _fxauto_pid)
+        finally:
+            _fxauto_save()
+
+    _fxauto_prior = app.router.lifespan_context
+
+    @_fxauto_cm
+    async def _fxauto_lifespan(inner):
+        import asyncio as _fxauto_asyncio
+
+        _fxauto_boot_events()
+        _fxauto_stop = False
+
+        async def _fxauto_tick_loop():
+            while not _fxauto_stop:
+                await _fxauto_asyncio.sleep(30.0)
+                try:
+                    _fxauto_rules.tick()
+                except Exception:
+                    logging.getLogger(__name__).exception(
+                        "fxauto tick failed")
+                finally:
+                    _fxauto_save()
+
+        _fxauto_task = _fxauto_asyncio.ensure_future(_fxauto_tick_loop())
+        try:
+            if _fxauto_prior is None:
+                yield
+            else:
+                async with _fxauto_prior(inner):
+                    yield
+        finally:
+            _fxauto_stop = True
+            _fxauto_task.cancel()
+            try:
+                await _fxauto_task
+            except Exception:
+                pass
+            _fxauto_save()
+
+    app.router.lifespan_context = _fxauto_lifespan
+    # FXAUTO-END
     # FXWATCHLOOP-BEGIN
     from contextlib import asynccontextmanager as _fxwatchloop_cm
     from agent_si.watcher import watch_loop as _fxwatchloop_loop
