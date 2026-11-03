@@ -1352,7 +1352,10 @@ export function Inspector(props: InspectorProps): ReactElement {
                 </p>
               )}
               {/* FXDESIGN8: the last run's verdict plus its files, read from
-                  the runs key of the ledger route; served facts only. */}
+                  the runs key of the ledger route; served facts only.
+                  FXZERO R2: the task title (or a short human name) is
+                  the primary text; the raw run id rides the details
+                  (tooltip) only, never as visible text. */}
               {lastRun === null ? null : (
                 <>
                 <div data-testid="result-last" className="fx-result-row">
@@ -1362,11 +1365,14 @@ export function Inspector(props: InspectorProps): ReactElement {
                     className="fx-truncate"
                     title={
                       lastRun.summary !== undefined && lastRun.summary !== ""
-                        ? lastRun.summary
-                        : undefined
+                        ? `${lastRun.run_id}: ${lastRun.summary}`
+                        : lastRun.run_id
                     }
                   >
-                    {lastRun.run_id}
+                    {typeof lastRun.title === "string" &&
+                    lastRun.title.trim() !== ""
+                      ? lastRun.title
+                      : t("shell.cards.results.latestRun")}
                     {lastRun.summary !== undefined && lastRun.summary !== ""
                       ? `: ${lastRun.summary}`
                       : null}
