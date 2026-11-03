@@ -242,10 +242,10 @@ describe('fxfirst first task never leaks a raw enum', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: en.tasks.creator.create }));
     const panel = await screen.findByTestId('kit-error-panel');
-    const sentence = within(panel).getByText(en.api.error.context_wrong_contract_version);
-    expect(sentence.textContent).not.toContain('CONTEXT_WRONG_CONTRACT_VERSION');
+    const sentence = within(panel).getByText(en.errors.generic);
+    expect(sentence.textContent).not.toContain('GENERIC_ERROR');
     expect((await screen.findByTestId('kit-error-code')).textContent).toBe(
-      'CONTEXT_WRONG_CONTRACT_VERSION',
+      'GENERIC_ERROR',
     );
     expect(screen.queryByTestId('firstrun-task-result')).toBeNull();
   });

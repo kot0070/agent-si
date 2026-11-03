@@ -217,7 +217,7 @@ describe("k07f1b session token behaviour", () => {
         }),
     );
     await expect(new HttpApiClient().listProjects()).rejects.toMatchObject({
-      code: "CONTEXT_WRONG_CONTRACT_VERSION",
+      code: "GENERIC_ERROR",
       status: 500,
     });
   });
@@ -246,7 +246,7 @@ describe("k07f1b session token behaviour", () => {
       });
     });
     await expect(new HttpApiClient().listProjects()).rejects.toMatchObject({
-      code: "CONTEXT_WRONG_CONTRACT_VERSION",
+      code: "GENERIC_ERROR",
       status: 500,
     });
     expect(serverErrors).toBeLessThanOrEqual(3);

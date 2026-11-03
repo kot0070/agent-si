@@ -66,6 +66,10 @@ import {
 } from "../agents/agentsApi";
 import type { Placement } from "../agents/agentsApi";
 import { listConnectedProviders } from "../settings/ProvidersPage/connectApi";
+import {
+  getPreset,
+  getProviderCatalog,
+} from "../settings/ProvidersPage/catalog";
 import { readRoleProfiles } from "../settings/index";
 import { readTeamMode, saveTeamMode } from "../settings/projectLimitsApi";
 import { Icon } from "../ui/icons";
@@ -91,6 +95,27 @@ interface BlockingError {
   code: string;
   /** Failed task text for the one-line error ("which step"), if known. */
   task?: string;
+  /** FXSTORE: routed provider id on secret-store terminals (ids only). */
+  providerId?: string;
+}
+
+/** FXSTORE: product label for a provider id (locale-independent names:
+ * "Meta" reads the same in en and uk). Unknown ids pass through, so
+ * the line never hides which key is missing. */
+function providerLabel(providerId: string | undefined): string {
+  const id = (providerId ?? "").trim();
+  if (id === "") {
+    return "provider";
+  }
+  try {
+    const found = getPreset(getProviderCatalog(), id);
+    if (found !== undefined) {
+      return found.label;
+    }
+  } catch {
+    // Catalog unreadable: the raw id still names the key.
+  }
+  return id;
 }
 
 // FXCHATHIST Part 2: the store slice is session-scoped. The store itself
@@ -630,6 +655,13 @@ export interface EngineSummary {
   /** FXOPEN O4: one plain line when the text announces a second plan
   ("Director: plan of 2 parts" then "of 3 parts"); null otherwise. */
   planChanged: string | null;
+  /** FXANSWER: the plain answer text when the run ended as an answer
+  (server marker below); null when the run answered nothing. */
+  answer: string | null;
+  /** FXANSWERb-1: the run is a team-off solo run (its own "Done, not
+  audited." line); solo runs have no Part rows, so the verdict reads
+  the solo line plus the real files instead of the empty-plan line. */
+  solo: boolean;
   /** FXWHERE: the project folder the files went into (resolved from
   the runs ledger by run id); null when unknown, then the verdict
   keeps the pre-FXWHERE shape. */
@@ -664,6 +696,37 @@ export function planChangedLine(text: string): string | null {
     `Plan changed: the director announced a new plan ` +
     `(was ${first} ${word(first)}, now ${last} ${word(last)})`
   );
+}
+
+/** FXANSWER: the server marker for a run that ended as a plain answer
+(no parts, no build). The visible reply is the answer text itself. */
+export const PLAIN_ANSWER_MARKER = "run answered: plain answer, no parts";
+
+/** FXANSWER: the answer text of a plain-answer run: the run text minus
+engine-log lines and the marker itself. Null when the run answered
+nothing. A marker with no extractable answer falls back to the text
+minus the marker only, so an answer never reads as "Nothing was built". */
+export function extractPlainAnswer(text: string): string | null {
+  if (!text.includes(PLAIN_ANSWER_MARKER)) {
+    return null;
+  }
+  const lines = text.split("\n").map((line) => line.trim());
+  const stripped = lines.filter(
+    (line) =>
+      line !== "" &&
+      line !== PLAIN_ANSWER_MARKER &&
+      !line.startsWith("[files:") &&
+      !ENGINE_LOG_MARKERS.test(line),
+  );
+  const kept = stripped.length > 0
+    ? stripped
+    : lines.filter(
+      (line) => line !== "" && line !== PLAIN_ANSWER_MARKER,
+    );
+  if (kept.length === 0) {
+    return null;
+  }
+  return kept.join("\n");
 }
 
 export function summarizeEngineTurn(
@@ -706,6 +769,9 @@ export function summarizeEngineTurn(
   // ("run success: all N parts PASS"), its announced plan
   // ("Director: plan of N parts"), or the team-off solo marker
   // ("Done, not audited."). A hollow run never says Done.
+  // FXANSWER: a plain-answer run (server marker) is never hollow: it
+  // answered with no parts, and its visible reply is the answer text.
+  const plainAnswer = extractPlainAnswer(text);
   const soloDone = /Done, not audited\./.test(text);
   let wholeParts = parts;
   let wholePassed = passed;
@@ -729,7 +795,7 @@ export function summarizeEngineTurn(
     }
   }
   const hollow =
-    wholeParts === 0 && files.length === 0 && !soloDone;
+    wholeParts === 0 && files.length === 0 && !soloDone && plainAnswer === null;
   const failed =
     status !== "ok" ||
     hollow ||
@@ -741,7 +807,9 @@ export function summarizeEngineTurn(
     files,
     lines,
     planChanged: planChangedLine(text),
+    answer: plainAnswer,
     folder,
+    solo: soloDone,
   };
 }
 
@@ -773,11 +841,37 @@ function emptyPlanLine(costNote = ""): string {
   return `${sentence}${costNote}.`;
 }
 
-/** One plain verdict line for a finished engine turn. */
+/** One plain verdict line for a finished engine turn. FXANSWER: a
+plain-answer run reads as the answer text itself, never Done/Failed,
+never the nothing-built sentence. */
 export function engineVerdictLine(
   summary: EngineSummary,
   costNote = "",
 ): string {
+  if (summary.answer !== null && summary.answer !== "") {
+    return summary.answer;
+  }
+  if (summary.solo) {
+    // FXANSWERb-1: a solo run has no Part rows: the verdict reads the
+    // solo line plus the real files, never the empty-plan line while
+    // the files are on disk. A solo run that wrote nothing and
+    // answered nothing stays not Done.
+    const where =
+      summary.folder !== null && summary.folder !== ""
+        ? `, in ${verdictFolderLabel(summary.folder)}`
+        : "";
+    if (summary.done) {
+      const files =
+        summary.files.length > 0
+          ? `, files: ${summary.files.join(", ")}`
+          : "";
+      return `Done, not audited${files}${where}${costNote}.`;
+    }
+    if (summary.files.length === 0) {
+      return emptyPlanLine(costNote);
+    }
+    return `Failed — 0 parts, 0 passed, files: ${summary.files.join(", ")}${where}${costNote}.`;
+  }
   if (summary.parts === 0) {
     return emptyPlanLine(costNote);
   }
@@ -819,6 +913,13 @@ export function EngineTurnView(props: {
     props.folder ?? null,
   );
   const costNote = costKnown(props.text) ? "" : ", cost not known";
+  // FXANSWER item 4: a stopped run says Stopped, never Failed, never a
+  // parts verdict. The Details disclosure below stays as it is.
+  const stoppedLine = pt("chat.run.stopped", "Stopped.");
+  const verdict =
+    props.status === "stopped"
+      ? stoppedLine
+      : engineVerdictLine(summary, costNote);
   // R05: the disclosure collapses only recognised engine logs. Plain
   // output (no engine markers) opens on the assistant message text, so
   // live and return-to-chat rows render the identical visible text.
@@ -828,7 +929,7 @@ export function EngineTurnView(props: {
   return (
     <>
       <p data-testid="run-verdict" style={{ whiteSpace: "pre-wrap" }}>
-        {shortProgramLine(engineVerdictLine(summary, costNote))}
+        {shortProgramLine(verdict)}
       </p>
       {summary.planChanged !== null ? (
         <>
@@ -917,6 +1018,27 @@ function buildHistoryBatch(
     known.add(assistantId);
     const parsed = Date.parse(turn.time);
     const at = Number.isNaN(parsed) ? Date.now() : parsed;
+    if (turn.status === "interrupted") {
+      // FXANSWER item 4: only a restart-reconciled row carries the
+      // app-closed banner. Same shape as a leftover running row used
+      // to render: stored text plus a resend, never a card.
+      batch.push({
+        id: userId,
+        role: "user",
+        text: turn.user_text,
+        at,
+        final: true,
+      });
+      batch.push({
+        id: assistantId,
+        role: "assistant",
+        text: interruptedText(turn.assistant_text),
+        at,
+        final: true,
+        resendPrompt: turn.user_text,
+      });
+      continue;
+    }
     if (turn.status === "running") {
       batch.push({
         id: userId,
@@ -928,12 +1050,16 @@ function buildHistoryBatch(
       const closedByWindow =
         typeof turn.run_end_reason === "string" &&
         turn.run_end_reason.includes("client disconnect");
+      // FXANSWER item 4: a running row the startup reconcile did not
+      // mark is still live (or its terminal write is still in flight):
+      // no app-closed banner, no error card. Only a recorded client
+      // disconnect names the window-closed line.
       batch.push({
         id: assistantId,
         role: "assistant",
         text: closedByWindow
           ? `${turn.assistant_text !== "" ? `${turn.assistant_text}\n` : ""}${disconnectClosedText()}`
-          : interruptedText(turn.assistant_text),
+          : turn.assistant_text,
         at,
         final: true,
         resendPrompt: turn.user_text,
@@ -989,7 +1115,9 @@ function buildHistoryBatch(
         stoppedAssistants.add(assistantId);
       }
     }
-    if (turn.status === "failed" || turn.status === "stopped") {
+    if (turn.status === "failed") {
+      // FXANSWER item 4: a stopped run is not an error: no error card,
+      // no degraded health, no Retry. Failed turns keep the card.
       sawTerminal = true;
       emitBlocking(key, {
         errorKey: apiErrorLocaleKey(turn.error_code || "UNKNOWN"),
@@ -1148,6 +1276,16 @@ function chatErrorText(
   ) {
     return t("chat.error.noProvider");
   }
+  // FXSTORE: a gone key names the provider plainly (with a Settings
+  // link next to Retry); an unreadable store says so, never a missing key.
+  if (blocking.code === "SECRET_VALUE_MISSING") {
+    return t("chat.error.keyMissing", {
+      label: providerLabel(blocking.providerId),
+    });
+  }
+  if (blocking.code === "CREDENTIAL_STORE_UNREADABLE") {
+    return t("chat.error.storeUnreadable");
+  }
   const raw = blocking.task ?? prompt ?? "";
   const step =
     raw.trim() !== "" ? ` — task "${raw.trim().slice(0, 140)}"` : "";
@@ -1292,6 +1430,11 @@ function handleRunError(
       errorKey: apiErrorLocaleKey(error.code),
       code: error.code,
       ...(record === undefined ? {} : { task: record.prompt }),
+      // FXSTORE: the routed provider id rides along so the banner
+      // names the missing key instead of a generic line.
+      ...(error.details?.providerId === undefined
+        ? {}
+        : { providerId: error.details.providerId }),
     });
   } else {
     emitBlocking(key, {
@@ -1591,11 +1734,13 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
   );
   // No model bound: the draft text stays so the user can connect a
   // provider and send the same task again. Never clobbers text the
-  // user typed after the send.
+  // user typed after the send. FXSTORE: a gone key restores the draft
+  // too (reconnect, then send the same task again).
   useEffect(() => {
     if (
       blocking !== null &&
-      blocking.code === "NO_PROVIDER_BOUND" &&
+      (blocking.code === "NO_PROVIDER_BOUND" ||
+        blocking.code === "SECRET_VALUE_MISSING") &&
       blocking.task !== undefined &&
       blocking.task.trim() !== "" &&
       draft.trim() === ""
@@ -2661,8 +2806,9 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
               </button>
               {/* A2: the no-provider notice carries one action that gets
                   the user connected, next to Retry (same target as the
-                  composer hint). */}
+                  composer hint). FXSTORE: a gone key links Settings too. */}
               {blocking.code === "NO_PROVIDER_BOUND" ||
+              blocking.code === "SECRET_VALUE_MISSING" ||
               blocking.errorKey === "firstrun.steps.connectProvider" ? (
                 <a
                   data-testid="kit-error-connect"

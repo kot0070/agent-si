@@ -121,6 +121,39 @@ def _run_start(args, cwd=None, env=None, timeout=120):
     )
 
 
+def _carry_node_modules(port):
+    """Share the real frontend install inputs with the portable copy.
+
+    tools/start.py check_lockfiles needs the pinned frontend tree; without
+    it the copy fails missing-tarball while the direct run passes. A
+    directory junction shares the exact bytes (no copy, no network); a full
+    copy is the fallback when junctions are unavailable.
+    """
+    src = os.path.join(str(ROOT), "frontend", "node_modules")
+    dst = os.path.join(str(port), "frontend", "node_modules")
+    if os.path.isdir(dst) or not os.path.isdir(src):
+        return
+    try:
+        subprocess.run(["cmd", "/c", "mklink", "/J", dst, src],
+                       capture_output=True, timeout=60)
+    except OSError:
+        pass
+    if not os.path.isdir(dst):
+        shutil.copytree(src, dst)
+
+
+def _startup_log_line(text):
+    """The single startup_log=<path> line tools/start.py prints.
+
+    Only this line carries an abs path that differs per copy, so only it is
+    normalised before comparing; every other byte must already match.
+    """
+    lines = [line for line in text.splitlines()
+             if line.startswith("startup_log=")]
+    assert len(lines) == 1, text
+    return lines[0]
+
+
 def test_k10wave_r328_demo_green(tmp_path, monkeypatch):
     """Row R-328 served through POST /api/v1/release/start/demo."""
     entry = _served()["R-328"]
@@ -259,6 +292,7 @@ def test_k10wave_mp389_portable_identical(tmp_path):
         ignore=shutil.ignore_patterns("__pycache__"),
     )
     shutil.copy2(ROOT / "pyproject.toml", port / "pyproject.toml")
+    _carry_node_modules(port)
     other_cwd = tmp_path / "other-cwd"
     other_cwd.mkdir()
     direct_record = tmp_path / "record-direct.json"
@@ -285,6 +319,11 @@ def test_k10wave_mp389_portable_identical(tmp_path):
     copy_rec = json.loads(copy_record.read_text(encoding="utf-8"))
     for key in ("steps", "step_status", "entries", "smoke", "sha256"):
         assert copy_rec[key] == direct_rec[key], (key, copy_rec, direct_rec)
+    direct_line = _startup_log_line(direct.stdout)
+    copy_line = _startup_log_line(copied.stdout)
+    assert direct_line.replace(str(direct_data), "<data>") == \
+        copy_line.replace(str(copy_data), "<data>"), \
+        (direct.stdout, copied.stdout)
 
 
 def _free_port():

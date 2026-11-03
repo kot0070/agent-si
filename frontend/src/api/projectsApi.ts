@@ -188,6 +188,10 @@ export const ChatStreamEventSchema = z.object({
   // D6(b): executed engine turns mark their done event; plain answers
   // and older events omit it.
   executed: z.boolean().optional(),
+  // FXSTORE: secret-store terminals carry the provider id (never the
+  // value) so the UI names the missing key. Optional: older events
+  // parse exactly as before.
+  provider_id: z.string().optional(),
 });
 
 export type ChatStreamEvent = z.infer<typeof ChatStreamEventSchema>;

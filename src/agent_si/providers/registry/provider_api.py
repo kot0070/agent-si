@@ -44,6 +44,11 @@ LIVE_LINKED = "LIVE_LINKED"
 CONFIRM_REQUIRED = "CONFIRM_REQUIRED"
 TOKEN_REQUIRED = "TOKEN_REQUIRED"
 
+#: Re-connect refusal head: the same provider id is already registered with
+#: a different base URL. The connect route maps this head to a 400 carrying
+#: this code, so the dialog names the conflict in its own locale.
+PROVIDER_CONFLICT_CODE = "PROVIDER_CONFLICT"
+
 #: Verbatim leftover-key rule map (M-P4-144 through M-P4-149).
 LEFTOVER_RULES = {
     "M-P4-144": "own-prefix only: refuse with NOT_OWN_PREFIX",
@@ -189,6 +194,37 @@ class ProviderAPI:
         resolved_instance = (
             instance_id or _field(descriptor, "instance_id") or "default"
         )
+        # FXSMALL item 6: re-connect is idempotent. The registry key is
+        # (provider, instance): a second Connect after the key value was
+        # dropped (card back on Connect) must succeed, not 400. Same id +
+        # same base URL refreshes the registered row (new key ref, new
+        # model); a different base URL for the same id stays refused.
+        prior = None
+        try:
+            prior = self._registry.contract_for(provider_id,
+                                               resolved_instance)
+        except ValueError:
+            prior = None
+        if prior is not None:
+            kept = str(getattr(prior, "endpoint", "") or "")
+            if kept != base_url:
+                raise ValueError(
+                    "%s: provider %r is already connected with a "
+                    "different base URL (kept %r, refused %r); "
+                    "disconnect it first, then connect again"
+                    % (PROVIDER_CONFLICT_CODE, provider_id, kept,
+                       base_url))
+            prior.credential_ref = ref
+            models = tuple(getattr(prior, "models", ()) or ())
+            if resolved_model not in models:
+                prior.models = models + (resolved_model,)
+            by_identity = getattr(self._registry, "_by_identity", None)
+            if isinstance(by_identity, dict):
+                by_identity[(provider_id, resolved_model)] = (
+                    provider_id, resolved_instance)
+            return self._track(provider_id, ptype, base_url, ref,
+                               resolved_instance, resolved_model,
+                               evidence_ref, mock)
         self._registry.register_instance({
             "provider": provider_id,
             "provider_type": ptype,
@@ -243,6 +279,13 @@ class ProviderAPI:
                 "mock": bool(mock),
             }
             self._providers[provider_id] = record
+        else:
+            # Re-connect refreshes the row: the newest key ref, type and
+            # base URL win (same-id idempotent path in register_provider).
+            record["type"] = ptype
+            record["base_url"] = base_url
+            record["secret_ref"] = ref
+            record["mock"] = bool(mock)
         record["models"][instance_id] = model
         if evidence_ref is not None:
             if not evidence_ref:

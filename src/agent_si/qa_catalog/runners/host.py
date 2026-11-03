@@ -47,6 +47,13 @@ import subprocess
 import sys
 import time
 
+try:
+    from agent_si.backend.proc_tree import quiet_flags
+except ImportError:  # bare-script run without src on sys.path
+    def quiet_flags() -> int:
+        """CREATE_NO_WINDOW on Windows, else 0 (script-mode fallback)."""
+        return int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
 RUNNER_ID = "host"
 RUNNER_VERSION = "1.0.0"
 RUNNER_TIMEOUT_S = 60
@@ -233,6 +240,7 @@ def _kill_tree(proc: "subprocess.Popen") -> None:
                 ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
                 capture_output=True,
                 timeout=10,
+                creationflags=quiet_flags(),
             )
         else:
             import signal
@@ -252,7 +260,8 @@ def _run_child(argv, stdin_bytes, cwd, env, timeout_s):
             stderr=subprocess.PIPE,
             cwd=cwd,
             env=env,
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
+            | quiet_flags(),
         )
     else:
         proc = subprocess.Popen(
