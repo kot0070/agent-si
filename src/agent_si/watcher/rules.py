@@ -41,6 +41,11 @@ __all__ = (
     "configure_watcher_model",
     "watcher_model_config",
     "evaluate",
+    "effective_hang_minutes",
+    "effective_card",
+    "set_card_hang_minutes",
+    "HANG_MIN_MINUTES",
+    "HANG_MAX_MINUTES",
     "fire_timer",
     "pause_timer",
     "get_watcher_settings",
@@ -102,6 +107,17 @@ RULES: Dict[str, RuleCard] = {
     ),
 }
 
+#: Per-project hang-minute overrides: (project id, rule id) to minutes.
+#: FXFACTS F6a: the Watcher tab minutes input writes here through
+#: set_card_hang_minutes (range-checked); the watch loop reads the
+#: effective value, so the loop really uses the saved minutes. The card
+#: registry (RULES) stays frozen; absent means the card default.
+_HANG_OVERRIDE: Dict[Tuple[str, str], int] = {}
+
+#: Lowest and highest settable hang window in minutes.
+HANG_MIN_MINUTES = 1
+HANG_MAX_MINUTES = 1440
+
 #: Decision sequence; restarted by reset_state for probe isolation.
 _SEQ = 0
 
@@ -132,7 +148,12 @@ def _parse_stamp(stamp: str) -> datetime:
 
 
 def _heartbeat_stale(rows: Tuple, hang_minutes: int, moment: datetime) -> bool:
-    """True when no fresh SERVICE_STATE heartbeat covers the moment."""
+    """True when a fresh SERVICE_STATE heartbeat is overdue at the moment.
+
+    FXFACTS F6b: no beats at all is no evidence of staleness (a run that
+    just started has no beats yet), so it never escalates; only beats
+    that exist and are older than the hang window count as stale.
+    """
     beats = []
     for row in rows:
         if row.kind != "SERVICE_STATE":
@@ -142,7 +163,7 @@ def _heartbeat_stale(rows: Tuple, hang_minutes: int, moment: datetime) -> bool:
         except ValueError:
             continue
     if not beats:
-        return True
+        return False
     return (moment - max(beats)) > timedelta(minutes=hang_minutes)
 
 
@@ -168,12 +189,59 @@ def describe(rule_id: str) -> RuleCard:
         ) from None
 
 
+def effective_hang_minutes(project_id: str, rule_id: str) -> int:
+    """Hang window one evaluation really uses: the project override when
+    set through set_card_hang_minutes, else the card default."""
+    card = describe(rule_id)
+    try:
+        return _HANG_OVERRIDE[(str(project_id), str(rule_id))]
+    except KeyError:
+        return card.hang_minutes
+
+
+def effective_card(project_id: str, rule_id: str) -> RuleCard:
+    """Card record with the effective hang window (registry untouched)."""
+    card = describe(rule_id)
+    minutes = effective_hang_minutes(project_id, rule_id)
+    if minutes == card.hang_minutes:
+        return card
+    from dataclasses import replace as _replace
+    return _replace(card, hang_minutes=minutes)
+
+
+def set_card_hang_minutes(project_id: str, rule_id: str,
+                          minutes: int) -> RuleCard:
+    """Set one project's hang window for one card (additive, range-checked).
+
+    Raises RULE_NOT_FOUND for an unknown card and ValueError outside
+    1..1440 minutes. Returns the effective card the loop will use.
+    """
+    card = describe(rule_id)
+    try:
+        value = int(minutes)
+    except (TypeError, ValueError):
+        raise ValueError(
+            "hang minutes for %r must be %d..%d, got %r"
+            % (rule_id, HANG_MIN_MINUTES, HANG_MAX_MINUTES, minutes)
+        ) from None
+    if not (HANG_MIN_MINUTES <= value <= HANG_MAX_MINUTES):
+        raise ValueError(
+            "hang minutes for %r must be %d..%d, got %r"
+            % (rule_id, HANG_MIN_MINUTES, HANG_MAX_MINUTES, minutes))
+    _HANG_OVERRIDE[(str(project_id), str(rule_id))] = value
+    if value == card.hang_minutes:
+        return card
+    from dataclasses import replace as _replace
+    return _replace(card, hang_minutes=value)
+
+
 def reset_state() -> None:
     """Restart decision ids; the card registry is definitions, not state."""
     global _SEQ
     _SEQ = 0
     _LAST_ALERT.clear()
     _REPEAT.clear()
+    _HANG_OVERRIDE.clear()
     _TIMER_PAUSED.clear()
     _SETTINGS.clear()
     _WATCHER_MODEL.update({
@@ -232,18 +300,22 @@ def watcher_model_config() -> dict:
     return dict(_WATCHER_MODEL)
 
 
-def allowed_actions(rule_id: str) -> Tuple[Tuple[str, Tuple[str, ...]], ...]:
+def allowed_actions(rule_id: str,
+                    hang_minutes: object = None,
+                    ) -> Tuple[Tuple[str, Tuple[str, ...]], ...]:
     """The rule's allowed (script, params) actions, default first.
 
     The own script plus params derive from the card's own fields
     (mirroring engine.resolve_action); the fallback is the
     signal-higher-level default. A model answer outside this list is
-    garbage and the default applies; unknown cards raise.
+    garbage and the default applies; unknown cards raise. An explicit
+    hang window (the effective per-project value) rides the params.
     """
     card = describe(rule_id)
+    minutes = card.hang_minutes if hang_minutes is None else hang_minutes
     own = ("scripts/%s_check.py" % card.area,
            ("--model", card.model, "--hang-minutes",
-            str(card.hang_minutes)))
+            str(minutes)))
     return (own, ("signal-higher-level", ()))
 
 
@@ -439,6 +511,8 @@ def evaluate(project_id: str, rule_id: str) -> WatchDecision:
     """
     card = describe(rule_id)
     key = str(project_id)
+    if card.model != "OFF":
+        card = effective_card(key, rule_id)
     if not journal_store.stored_rows(key):
         preset_store.ensure_seeded(key)
     global _SEQ
@@ -469,7 +543,7 @@ def evaluate(project_id: str, rule_id: str) -> WatchDecision:
             journal_entry_id="",
             decided_at=_utcnow(),
         )
-    allowed = allowed_actions(rule_id)
+    allowed = allowed_actions(rule_id, card.hang_minutes)
     default = allowed[0]
     model_name = _selected_model(key)
     if not model_name:

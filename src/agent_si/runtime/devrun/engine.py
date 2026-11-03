@@ -2193,7 +2193,6 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
             record["run_end"] = _run_end_tests(
                 project_id=project, run_id=run_id, task_id=task_id)
         _journal("DEVRUN_END", _end_summary())
-        _journal("DEVRUN_END", record.get("summary") or "run ended")
         # FXCLASS CB-6: one shared status map. A run with a FAIL part is
         # failed on every surface: the live row closes BLOCKED (never
         # RETURNED beside a FAIL verdict), the served run row carries
