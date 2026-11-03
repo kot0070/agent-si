@@ -4,7 +4,8 @@
 // JSON body. Raw key material travels only in the key-save POST body and
 // never reaches a log, a URL, or lasting state. Reads never send a token.
 
-import { ApiError, requestResponse } from "../../api/errors";
+import { z } from "zod";
+import { ApiError, requestJson, requestResponse } from "../../api/errors";
 import { PROVIDER_CATALOG } from "./catalog";
 import type { SecretRef } from "./types";
 
@@ -99,6 +100,49 @@ export async function connectLocal(runtimeRef: string): Promise<void> {
     kind: "write",
     body: { runtime_ref: runtimeRef },
   });
+}
+
+// FXFIRST: probe one local preset's base URL without attaching (read-only
+// Check half of the local flow). The bench check answers reachability for
+// the URL; the local-models read then counts the listed rows. A count
+// (possibly zero) means the server runs; null means it does not run or
+// is unreadable, so the dialog names that plainly instead of failing on
+// a key the local preset never needed.
+const BenchCheckSchema = z.object({
+  reachable: z.boolean(),
+  reason: z.string(),
+});
+
+export async function probeLocalModels(baseUrl: string): Promise<number | null> {
+  let reachable = false;
+  try {
+    const check = await requestJson(
+      `/api/v1/local/bench/check?endpoint=${encodeURIComponent(baseUrl)}`,
+      { method: "GET", kind: "read" },
+      BenchCheckSchema,
+    );
+    reachable = check.reachable;
+  } catch {
+    return null;
+  }
+  if (!reachable) {
+    return null;
+  }
+  try {
+    const response = await requestResponse("/api/v1/local/models", {
+      method: "GET",
+    });
+    const data: unknown = await response.json();
+    if (isRecord(data) && Array.isArray(data["models"])) {
+      return (data["models"] as unknown[]).length;
+    }
+    if (Array.isArray(data)) {
+      return (data as unknown[]).length;
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 // GET the provider cards state. Served state is the truth: the registry
