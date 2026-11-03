@@ -7,7 +7,7 @@ import { getUiToken } from "../../api/errors";
 import { deleteLeftoverKey, listConnectedProviders, listLeftoverKeys } from "./connectApi";
 import { listServedModels, mergeModelList, modelPriceText } from "./modelsApi";
 import type { ServedModelRow } from "./modelsApi";
-import { PROVIDER_CATALOG } from "./catalog";
+import { getProviderCatalog } from "./catalog";
 import { ChatModelSelector } from "./ChatModelSelector";
 import { enabledChatChoices } from "./ChatSelector";
 import { ConnectDialog } from "./ConnectDialog";
@@ -54,7 +54,9 @@ function initialStates(catalog: ProviderPreset[]): Record<string, ProviderState>
 }
 
 export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
-  const catalog = PROVIDER_CATALOG;
+  // Locale-current catalog: display strings (group, keyHint, model labels)
+  // resolve through t() for the active locale on every render.
+  const catalog = useMemo(() => getProviderCatalog(), []);
   // The window's real session token: this page reads it and never replaces it.
   const sessionToken = getUiToken() ?? "";
   const project = project_id;
@@ -381,15 +383,15 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
                       </button>
                       <button
                         type="button"
-                        aria-label={`Manage ${preset.label} models`}
+                        aria-label={t("providers.page.manageModelsCta", { label: preset.label })}
                         onClick={() => setManageId(preset.id)}
                       >
-                        Manage models
+                        {t("providers.page.manageModels")}
                       </button>
                       <p data-testid={`provider-enabled-${preset.id}`} data-variant="quiet">
                         {state.enabledModels.length === 0
                           ? t("providers.page.noneEnabled")
-                          : `${state.enabledModels.length} enabled`}
+                          : t("providers.page.enabledCount", { count: String(state.enabledModels.length) })}
                       </p>
                       {lastConnectedId === preset.id ? (
                         <p role="status" data-variant="quiet">

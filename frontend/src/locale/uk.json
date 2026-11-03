@@ -42,7 +42,10 @@
       "leftoverTitle": "Зайві ключі",
       "connectLabel": "Під'єднати",
       "disconnectLabel": "Від'єднати",
-      "noneEnabled": "Нічого не ввімкнено — відкрийте «Керування моделями», щоб обрати."
+      "noneEnabled": "Нічого не ввімкнено — відкрийте «Керування моделями», щоб обрати.",
+      "manageModels": "Керувати моделями",
+      "manageModelsCta": "Керувати моделями {label}",
+      "enabledCount": "{count} увімкнено"
     },
     "role": {
       "director": "Директор",
@@ -82,7 +85,18 @@
       "check": "Перевірити",
       "checking": "Перевірка...",
       "checked": "Ключ перевірено. Збережіть, щоб під’єднати.",
-      "checkFirst": "Спершу перевірте ключ."
+      "checkFirst": "Спершу перевірте ключ.",
+      "loadingModels": "Завантаження моделей…",
+      "refreshModels": "Оновити моделі",
+      "refreshingModels": "Оновлення моделей…",
+      "filterModels": "Фільтрувати моделі",
+      "knownListNote": "показано відомий список",
+      "kbIn": "є в базі можливостей",
+      "kbOut": "немає в базі можливостей",
+      "kbUnknown": "невідомо щодо бази можливостей",
+      "refreshFailed": "Не вдалося оновити живий список — лишаю останній.",
+      "done": "Готово",
+      "priceUnknown": "невідомо"
     },
     "disconnect": {
       "title": "Від'єднати {label}",
@@ -142,6 +156,58 @@
       "confirmDelete": "Підтвердити видалення",
       "cancel": "Скасувати",
       "deleteAria": "Видалити {id}"
+    },
+    "group": {
+      "cloud": "Хмарні",
+      "compatible": "Сумісні",
+      "local": "Локальні"
+    },
+    "model": {
+      "standard": "Стандартна",
+      "advanced": "Розширена",
+      "chat": "Чат",
+      "embeddings": "Вкладення"
+    },
+    "preset": {
+      "meta": {
+        "keyHint": "Ключ з вашої панелі Meta."
+      },
+      "openai": {
+        "keyHint": "Починається з \"sk-\"."
+      },
+      "anthropic": {
+        "keyHint": "Починається з \"sk-ant-\"."
+      },
+      "any-openai-compatible": {
+        "keyHint": "Будь-який ключ або токен у стилі OpenAI для вашого сервера."
+      },
+      "ollama": {
+        "keyHint": "Локальний сервер: ключ зазвичай не потрібен."
+      },
+      "lm-studio": {
+        "keyHint": "Локальний сервер: ключ зазвичай не потрібен."
+      },
+      "claude": {
+        "keyHint": "Починається з \"sk-ant-\"."
+      },
+      "gemini": {
+        "keyHint": "Ключ з AI Studio (починається з \"AIza\")."
+      },
+      "mistral": {
+        "keyHint": "Ключ з консолі Mistral."
+      },
+      "groq": {
+        "keyHint": "Починається з \"gsk-\"."
+      },
+      "openrouter": {
+        "keyHint": "Починається з \"sk-or-\"."
+      },
+      "deepseek": {
+        "keyHint": "Починається з \"sk-\"."
+      },
+      "xai": {
+        "keyHint": "Ключ з консолі xAI."
+      }
     }
   },
   "settings": {

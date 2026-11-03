@@ -42,7 +42,10 @@
       "leftoverTitle": "Leftover keys",
       "connectLabel": "Connect",
       "disconnectLabel": "Disconnect",
-      "noneEnabled": "None enabled — open Manage models to choose."
+      "noneEnabled": "None enabled — open Manage models to choose.",
+      "manageModels": "Manage models",
+      "manageModelsCta": "Manage {label} models",
+      "enabledCount": "{count} enabled"
     },
     "role": {
       "director": "Director",
@@ -82,7 +85,18 @@
       "check": "Check",
       "checking": "Checking...",
       "checked": "Key checked. Save to connect.",
-      "checkFirst": "Check the key first."
+      "checkFirst": "Check the key first.",
+      "loadingModels": "Loading models...",
+      "refreshModels": "Refresh models",
+      "refreshingModels": "Refreshing models...",
+      "filterModels": "Filter models",
+      "knownListNote": "showing the known list",
+      "kbIn": "in capability base",
+      "kbOut": "not in capability base",
+      "kbUnknown": "capability unknown",
+      "refreshFailed": "Couldn't refresh the live list — keeping the last list.",
+      "done": "Done",
+      "priceUnknown": "not known"
     },
     "disconnect": {
       "title": "Disconnect {label}",
@@ -142,6 +156,58 @@
       "confirmDelete": "Confirm delete",
       "cancel": "Cancel",
       "deleteAria": "Delete {id}"
+    },
+    "group": {
+      "cloud": "Cloud",
+      "compatible": "Compatible",
+      "local": "Local"
+    },
+    "model": {
+      "standard": "Standard",
+      "advanced": "Advanced",
+      "chat": "Chat",
+      "embeddings": "Embeddings"
+    },
+    "preset": {
+      "meta": {
+        "keyHint": "Key from your Meta dashboard."
+      },
+      "openai": {
+        "keyHint": "Starts with \"sk-\"."
+      },
+      "anthropic": {
+        "keyHint": "Starts with \"sk-ant-\"."
+      },
+      "any-openai-compatible": {
+        "keyHint": "Any OpenAI-style key or token for your server."
+      },
+      "ollama": {
+        "keyHint": "Local server: usually no key is needed."
+      },
+      "lm-studio": {
+        "keyHint": "Local server: usually no key is needed."
+      },
+      "claude": {
+        "keyHint": "Starts with \"sk-ant-\"."
+      },
+      "gemini": {
+        "keyHint": "Key from AI Studio (starts with \"AIza\")."
+      },
+      "mistral": {
+        "keyHint": "Key from the Mistral console."
+      },
+      "groq": {
+        "keyHint": "Starts with \"gsk-\"."
+      },
+      "openrouter": {
+        "keyHint": "Starts with \"sk-or-\"."
+      },
+      "deepseek": {
+        "keyHint": "Starts with \"sk-\"."
+      },
+      "xai": {
+        "keyHint": "Key from the xAI console."
+      }
     }
   },
   "settings": {

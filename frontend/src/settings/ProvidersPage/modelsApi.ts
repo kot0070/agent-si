@@ -21,6 +21,7 @@
 // and stay on the old rows).
 
 import { requestResponse } from "../../api/errors";
+import { t } from "../../locale/index";
 
 // Project chat-model save/read (K04P2-CHATSAVE plus FXSAVED item 1).
 // The PUT persists one project's chat model; the GET reads it back
@@ -139,7 +140,8 @@ function kbField(kb: unknown, name: string): unknown {
 
 // Price cell text for one model row: the served price (a number, or a
 // "a/b" pair string) when the row carries it, else KB input/output prices
-// when carried, else the literal "not known".
+// when carried, else the localized "unknown price" note (currency itself
+// is never translated: only the surrounding note moves to locale keys).
 export function modelPriceText(kb: unknown, price?: unknown): string {
   const direct = numericPrice(price);
   if (direct !== null) {
@@ -155,7 +157,7 @@ export function modelPriceText(kb: unknown, price?: unknown): string {
       value === null ? "?" : String(value);
     return `$${show(input)}/$${show(output)}`;
   }
-  return "not known";
+  return t("providers.connect.priceUnknown");
 }
 
 // Full step-2 listing for one provider: live rows merged over the catalog,
@@ -303,7 +305,7 @@ export async function refreshProviderModels(
   const data: unknown = await response.json().catch(() => null);
   const outcome = parseModelsPayload(data, catalogModels, providerId);
   if (outcome === null) {
-    throw new Error("Couldn't refresh the live list — keeping the last list.");
+    throw new Error(t("providers.connect.refreshFailed"));
   }
   return outcome;
 }
