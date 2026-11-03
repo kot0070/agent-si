@@ -162,8 +162,22 @@ def _chat_live(app: Any) -> bool:
     try:
         from agent_si.backend import agents_live as _live_home
         store = getattr(_live_home, "_LIVE_ROWS", {})
-        if isinstance(store, dict) and len(store) > 0:
-            return True
+        if isinstance(store, dict):
+            # FXZERO R4: an ended run leaves history rows behind; only a
+            # live row keeps the pass live (a finished run is not watched).
+            is_live = getattr(_live_home, "is_live_row", None)
+            for row in store.values():
+                try:
+                    if not isinstance(row, dict):
+                        continue
+                    if callable(is_live):
+                        if is_live(row):
+                            return True
+                    elif str(row.get("status", "")).upper() in (
+                            "RUNNING", "QUEUED", "CREATED", "PENDING"):
+                        return True
+                except Exception:
+                    continue
     except Exception as err:
         log.warning("watch loop live-rows check failed: %s", err)
     return False
