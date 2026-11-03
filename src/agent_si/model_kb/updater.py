@@ -13,6 +13,7 @@ MetricStore port: a plain dict keyed by usage ref for attach semantics.
 """
 import copy
 import json
+import re
 
 from agent_si.model_kb import kb
 
@@ -29,6 +30,43 @@ KB_SOURCE_ALLOWLIST = (
     "https://lmstudio.ai/docs",
     "https://dev.meta.ai/docs",
 )
+
+#: Canonical own-docs base per staged provider (never a foreign URL).
+#: Providers with no own allowlisted docs base have no entry here: their
+#: proposal envelope is the shipped-copy marker below, never a
+#: foreign provider's docs.
+PROVIDER_DOCS = {
+    "anthropic": "https://docs.anthropic.com",
+    "deepseek": "https://docs.deepseek.com",
+    "google": "https://cloud.google.com/vertex-ai/docs",
+    "groq": "https://console.groq.com/docs",
+    "local": "https://ollama.com/docs",
+    "meta": "https://dev.meta.ai/docs",
+    "mistral": "https://docs.mistral.ai",
+    "openai": "https://platform.openai.com/docs",
+    "xai": "https://docs.x.ai",
+}
+
+SHIPPED_COPY_PREFIX = "shipped copy from "
+
+
+def shipped_copy_marker(retrieved_at):
+    """Honest envelope for providers with no own allowlisted docs base."""
+    return "%s%s" % (SHIPPED_COPY_PREFIX, retrieved_at)
+
+
+def is_shipped_copy_source(source_url):
+    """True only for the shipped-copy marker (never a URL)."""
+    return isinstance(source_url, str) and source_url.startswith(
+        SHIPPED_COPY_PREFIX)
+
+
+def provider_source_url(provider_id, retrieved_at):
+    """Envelope for one provider: own docs base or the shipped marker."""
+    base = PROVIDER_DOCS.get(provider_id)
+    if base and _allowlisted(base):
+        return base
+    return shipped_copy_marker(retrieved_at)
 
 
 class KBUpdateError(ValueError):
@@ -57,6 +95,28 @@ class KB_PROPOSAL_NOT_APPROVED(ConfirmationRequiredError):
 
 class MetricWriteError(KBUpdateError):
     """Raised when a MetricRecord breaks the K13 write rules."""
+
+
+#: Instruction-like page text is data, never orders: a fetched string
+#: value carrying one of these markers is dropped from proposals (the
+#: row keeps its filed value). Narrow literal markers only, so filed
+#: KB prose ("suited to ...", "watch out for ...") never trips them.
+_INSTRUCTION_LIKE = (
+    re.compile(r"ignore\s+(all\s+)?(previous|prior|above)\s+instructions",
+               re.IGNORECASE),
+    re.compile(r"disregard\s+.*instructions", re.IGNORECASE),
+    re.compile(r"\byou\s+are\s+now\b", re.IGNORECASE),
+    re.compile(r"<\s*script\b", re.IGNORECASE),
+    re.compile(r"\bjailbreak\b", re.IGNORECASE),
+    re.compile(r"\bexfiltrat\w*\b", re.IGNORECASE),
+)
+
+
+def _looks_instruction_like(value):
+    """True when a string field value reads as instructions, not data."""
+    if not isinstance(value, str):
+        return False
+    return any(mark.search(value) for mark in _INSTRUCTION_LIKE)
 
 
 PRICE_VERSION_MUST_ADVANCE = "PRICE_VERSION_MUST_ADVANCE"
@@ -114,6 +174,9 @@ def _classify_field(known_rows, entry, provider_id, model_id, name,
     if name not in kb.ROW_FIELD_NAMES:
         return ("rejected", {"entry": entry,
                              "reason": "unknown field %r" % (name,)})
+    if _looks_instruction_like(value):
+        return ("rejected", {"entry": entry,
+                              "reason": "instruction-like text dropped"})
     row = known_rows.get((provider_id, model_id))
     if row is None:
         return ("added", {"provider_id": provider_id,
@@ -261,7 +324,8 @@ def validate_proposal(catalog, proposal):
     errors = []
     if not isinstance(proposal, dict):
         return ["proposal is not a dict"]
-    if not _allowlisted(proposal.get("source_url")):
+    if not _allowlisted(proposal.get("source_url")) and not \
+            is_shipped_copy_source(proposal.get("source_url")):
         errors.append("proposal source %r is outside the allowlist"
                       % (proposal.get("source_url"),))
     if not proposal.get("retrieved_at"):
@@ -557,12 +621,13 @@ def apply_proposal(catalog, proposal, user_confirmed=False,
             "added": len(added_rows)}
 
 
-__all__ = ["KB_SOURCE_ALLOWLIST", "KBUpdateError",
+__all__ = ["KB_SOURCE_ALLOWLIST", "PROVIDER_DOCS", "KBUpdateError",
            "SourceNotAllowlistedError", "ProposalRejectedError",
            "ConfirmationRequiredError", "KB_VALIDATION_FAILED",
            "KB_PROPOSAL_NOT_APPROVED", "MetricWriteError", "MetricState",
            "fetch_source", "propose_update", "validate_proposal",
            "write_metric_record", "attach_metric_by_usage_ref",
-           "find_leftover_keys",
+           "find_leftover_keys", "provider_source_url",
+           "shipped_copy_marker", "is_shipped_copy_source",
            "new_snapshot_version", "compute_cost", "apply_proposal",
            "propose_from_field_data"]

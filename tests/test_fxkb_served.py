@@ -255,10 +255,22 @@ def test_fxkb_update_adds_meta_row_served(tmp_path, monkeypatch):
                            headers=HEADERS)
         assert resp.status_code == 200, resp.text
         body = resp.json()
-        assert body["applied"] is True
-        assert body["kb_version"] == v0 + 1
-        assert body["providers"] == [META_PROVIDER]
-        assert body["models"] == ["%s/%s" % (META_PROVIDER, META_MODEL)]
+        assert body["staged"] is True
+        assert body["proposals"], body
+        assert body["proposals"][0]["source"] == ENVELOPE, body
+        for staged in body["proposals"]:
+            done = client.post("/api/v1/kb/proposals/apply",
+                               json={"proposal_id":
+                                     staged["proposal_id"],
+                                     "approved_by_user": True},
+                               headers=HEADERS)
+            assert done.status_code == 200, done.text
+            assert done.json()["applied"] is True
+        applied_version = done.json()["version"]
+        assert applied_version == v0 + 1
+        assert body["proposals"][0]["provider_id"] == META_PROVIDER
+        assert body["proposals"][0]["models"] == [
+            "%s/%s" % (META_PROVIDER, META_MODEL)]
         row = _loader.find_row(
             _kb.bound_catalog(), META_PROVIDER, META_MODEL)
         assert row is not None
@@ -515,7 +527,15 @@ def test_fxkb_cold_restart_auto_spent_served(tmp_path, monkeypatch):
                            json={"approved_by_user": True},
                            headers=HEADERS)
         assert resp.status_code == 200, resp.text
-        assert resp.json()["applied"] is True, resp.text
+        assert resp.json()["staged"] is True, resp.text
+        for staged in resp.json()["proposals"]:
+            done = client.post("/api/v1/kb/proposals/apply",
+                               json={"proposal_id":
+                                     staged["proposal_id"],
+                                     "approved_by_user": True},
+                               headers=HEADERS)
+            assert done.status_code == 200, done.text
+            assert done.json()["applied"] is True, done.text
         persisted = _kb.persist_path()
         assert persisted and os.path.isfile(persisted), persisted
         driver = (_DRIVER.replace("@@WS@@", _WS.replace("\\", "\\\\"))
@@ -613,8 +633,18 @@ def test_fxkb_openai_only_auditor_eligible_served(tmp_path, monkeypatch):
                            json={"approved_by_user": True},
                            headers=HEADERS)
         assert resp.status_code == 200, resp.text
-        assert resp.json()["applied"] is True, resp.text
-        assert OPENAI_PROVIDER in resp.json()["providers"], resp.text
+        assert resp.json()["staged"] is True, resp.text
+        for staged in resp.json()["proposals"]:
+            done = client.post("/api/v1/kb/proposals/apply",
+                               json={"proposal_id":
+                                     staged["proposal_id"],
+                                     "approved_by_user": True},
+                               headers=HEADERS)
+            assert done.status_code == 200, done.text
+            assert done.json()["applied"] is True, done.text
+        assert OPENAI_PROVIDER in [
+            p.get("provider_id")
+            for p in resp.json()["proposals"]], resp.text
         refs = _kbsev.auditor_capability_evidence(
             OPENAI_PROVIDER, OPENAI_MODEL)
         assert len(refs) >= 1, refs

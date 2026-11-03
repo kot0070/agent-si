@@ -226,7 +226,29 @@
       "purpose": "What each model is evidenced to do.",
       "title": "Capability Database",
       "update": "Update",
-      "result": "Result"
+      "result": "Result",
+      "checkOnline": "Check online",
+      "fromFile": "From file",
+      "apply": "Apply",
+      "reject": "Reject",
+      "upToDate": "Already up to date",
+      "updatedFields": "{count} fields updated for {model}",
+      "versionLine": "Version {version}",
+      "updatedLine": "updated {time}",
+      "changes": "Changes",
+      "changeTo": "to",
+      "proposalsLine": "Proposals",
+      "sourcesLine": "Sources",
+      "stale": "stale",
+      "fresh": "fresh",
+      "skipped": "skipped",
+      "busy": {
+        "update": "updating",
+        "check": "checking online",
+        "file": "reading file",
+        "apply": "applying",
+        "reject": "rejecting"
+      }
     },
     "general": {
       "needItNow": "Open this only when the defaults feel wrong.",
