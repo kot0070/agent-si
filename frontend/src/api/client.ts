@@ -223,6 +223,27 @@ export class HttpApiClient implements ApiClient {
           case "error": {
             throw apiErrorFromCode(wire.code, status);
           }
+          case "ask": {
+            // FXASK A8: mid-stream install ask (the run waits in place).
+            // Calls the ask handler and keeps reading the stream: the
+            // stream never closes here. A malformed ask is ignored.
+            const toolName = wire.tool_id;
+            const argv = wire.argv;
+            if (
+              typeof toolName === "string" &&
+              toolName !== "" &&
+              Array.isArray(argv) &&
+              argv.every((word) => typeof word === "string")
+            ) {
+              yield {
+                stream_id: effectiveId,
+                delta: "",
+                done: false,
+                ask: { toolName, argv },
+              };
+            }
+            break;
+          }
           case "approval": {
             // FXASK2: the approval event carries the held tool's id
             // (guard tool_name); it rides the error so the dialog and

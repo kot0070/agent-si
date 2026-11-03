@@ -149,6 +149,10 @@ interface ChatPump {
   runner: ChatRunner;
   prompt: string;
   assistantId: string;
+  // FXASK A8: a parked install ask arrived on this open stream (the run
+  // waits in place). Answering records the decision only, never resends;
+  // the flag clears on answer or when the stream ends.
+  askOpen: boolean;
 }
 
 const pumps = new Map<string, ChatPump>();
@@ -1404,6 +1408,16 @@ function startChatRun(
             });
           }
         },
+        // FXASK A8: mid-stream install ask (the run waits in place).
+        // Marks this open stream as ask-open and shows the card; the
+        // stream itself keeps going.
+        onAsk: (ask) => {
+          const pump = pumps.get(key);
+          if (pump !== undefined) {
+            pump.askOpen = true;
+          }
+          emitAsk(key, { toolName: ask.toolName, messageId: assistantId });
+        },
         isCancelled: () => pumps.get(key)?.cancelled ?? true,
       },
     );
@@ -1424,6 +1438,7 @@ function startChatRun(
     runner,
     prompt: text,
     assistantId,
+    askOpen: false,
   });
   emitPumpsChanged();
   runner.done.then(
@@ -2017,6 +2032,10 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
   // flags, this project only) and replays, "deny" closes the part with
   // a plain FAILED line and never resends. The card and the chat lines
   // name the real command, never the raw tool key.
+  // FXASK A8: when the stream of that run is still open (mid-stream
+  // ask, the run waits in place), answering only records the decision
+  // (routes unchanged) and closes the card: no resend, the run itself
+  // goes on. When no stream is open (fallback hold), as today.
   const answerAsk = (mode: "once" | "project" | "deny"): void => {
     const ask = pendingAskRef.current;
     if (ask === null) {
@@ -2025,6 +2044,12 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
     pendingAskRef.current = null;
     setPendingAsk(null);
     clearProjectAsk(props.projectId);
+    const pump = pumps.get(key);
+    const streamOpen =
+      pump !== undefined && !pump.cancelled && pump.askOpen === true;
+    if (pump !== undefined) {
+      pump.askOpen = false;
+    }
     const command = installDisplayCommand(
       ask.toolName,
       props.projectId,
@@ -2035,7 +2060,9 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
         void recordProjectGrant(props.projectId, ask.toolName).then(
           () => {
             noteInstallAnswer(ask, command, true);
-            replayParkedRun();
+            if (!streamOpen) {
+              replayParkedRun();
+            }
           },
           () => {
             emitBlocking(key, {
@@ -2094,7 +2121,9 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
       }).then(
         () => {
           noteInstallAnswer(ask, command, true);
-          replayParkedRun();
+          if (!streamOpen) {
+            replayParkedRun();
+          }
         },
         () => {
           emitBlocking(key, { errorKey: "errors.generic", code: "UNKNOWN" });

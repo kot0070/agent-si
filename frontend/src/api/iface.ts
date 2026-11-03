@@ -151,6 +151,9 @@ export interface ChatChunk {
   // executed:true; plain answers and legacy chunks omit it. Optional so
   // every existing producer and test still typechecks unchanged.
   executed?: boolean;
+  // FXASK A8: a mid-stream install ask (the run waits in place): the
+  // card shows while the same stream continues. Optional, same reason.
+  ask?: { toolName: string; argv: readonly string[] };
 }
 
 export interface ChatStream {

@@ -1247,8 +1247,10 @@ def _manager_event_payload(
         payload["text"] = str(text)
     # FXASK2: the held tool's id rides the same payload so the window
     # answers the ask per tool; forwarded only when the run names one.
+    # FXASK A8: the parked install ask rides tool_id plus the exact
+    # argv so the card names the real command, never the raw key.
     for key in ("output_ref", "mock", "executed", "approval_requested",
-                "reason", "finish_reason", "tool_id"):
+                "reason", "finish_reason", "tool_id", "argv"):
         value = data.get(key, None)
         if value is not None:
             payload[key] = value

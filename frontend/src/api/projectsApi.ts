@@ -170,6 +170,9 @@ export const ChatChunkSchema: z.ZodType<ChatChunk> = z.object({
   delta: z.string(),
   done: z.boolean(),
   executed: z.boolean().optional(),
+  ask: z
+    .object({ toolName: z.string(), argv: z.array(z.string()) })
+    .optional(),
 });
 
 export const ChatStreamEventSchema = z.object({
@@ -188,6 +191,9 @@ export const ChatStreamEventSchema = z.object({
   // D6(b): executed engine turns mark their done event; plain answers
   // and older events omit it.
   executed: z.boolean().optional(),
+  // FXASK A8: mid-stream install ask argv (exact words); omitted on
+  // every older event.
+  argv: z.array(z.string()).optional(),
 });
 
 export type ChatStreamEvent = z.infer<typeof ChatStreamEventSchema>;

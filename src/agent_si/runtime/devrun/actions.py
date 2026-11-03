@@ -1080,16 +1080,24 @@ def spawn_checked(
         "task": "devrun:%s" % (str(run_id),),
         "scopes": ["tools:exec"],
     }
-    if kind == "install" and _ask_decision == "allow":
-        # The user allowed this installer in the decision ledger: carry
-        # that exact approval to the guard so the installer-name denial
-        # lifts for these exact words only. The carried argv comes from
-        # the ledger pin (ask-time request, or the first allowed spawn),
-        # never rebuilt from the current words, so the guard exact-match
-        # stays live on this path too. Shell-fragment, widening and
-        # path checks still run; nothing else changes.
-        _ask_carry = (_ask_approved if _ask_approved is not None
-                      else list(words))
+    if kind == "install" and (_ask_decision == "allow"
+                               or _ask_project_grant):
+        # The user allowed this installer (once-allow in the decision
+        # ledger, or a project grant for this head and subcommand):
+        # carry that exact approval to the guard so the installer-name
+        # denial lifts for these exact words only. The carried argv
+        # comes from the ledger pin (ask-time request, or the first
+        # allowed spawn) on the allow path and from the current words
+        # on the grant path (a grant covers the head, not exact words),
+        # so the guard exact-match stays live on both paths.
+        # Shell-fragment, widening and path checks still run; nothing
+        # else changes. FXASK A8: without this carry a granted install
+        # dies at the guard and the worker loop never goes on.
+        if _ask_project_grant and _ask_decision != "allow":
+            _ask_carry = list(words)
+        else:
+            _ask_carry = (_ask_approved if _ask_approved is not None
+                          else list(words))
         auth["install_approved"] = True
         auth["install_argv"] = [str(word) for word in _ask_carry]
     result = guarded_dispatch(

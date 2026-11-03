@@ -15,6 +15,8 @@ export { ChatChunkSchema, ChatOpenSchema };
 export interface ChatProgress {
   onChunkText(text: string): void;
   isCancelled(): boolean;
+  // FXASK A8: mid-stream install ask (the run waits in place).
+  onAsk?(ask: { toolName: string; argv: readonly string[] }): void;
 }
 
 export interface ChatRunner {
@@ -60,6 +62,11 @@ export function streamChat(
       }
       if (data.delta !== "") {
         progress.onChunkText(data.delta);
+      }
+      // FXASK A8: a mid-stream install ask shows the card while the
+      // same stream keeps going; the terminal done still closes it.
+      if (data.ask !== undefined) {
+        progress.onAsk?.(data.ask);
       }
       if (data.done) {
         break;
