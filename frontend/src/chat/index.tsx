@@ -97,6 +97,8 @@ interface BlockingError {
   task?: string;
   /** FXSTORE: routed provider id on secret-store terminals (ids only). */
   providerId?: string;
+  /** R8(b): provider display label for a no-model stop. */
+  provider?: string;
 }
 
 /** FXSTORE: product label for a provider id (locale-independent names:
@@ -666,6 +668,12 @@ export interface EngineSummary {
   the runs ledger by run id); null when unknown, then the verdict
   keeps the pre-FXWHERE shape. */
   folder: string | null;
+  /** R8(b): the served stop reason when the run ended before any
+  model call ("no-provider" | "no-model"), else null. The verdict
+  reads this reason as the main line, never the no-parts sentence. */
+  stopReason: "no-provider" | "no-model" | null;
+  /** R8(b): provider display label for a no-model stop. */
+  stopProvider: string | null;
 }
 
 const PLAN_OF_RE = /Director:\s*plan of (\d+)\s*parts?/i;
@@ -800,6 +808,19 @@ export function summarizeEngineTurn(
     status !== "ok" ||
     hollow ||
     (wholeParts > 0 ? wholePassed < wholeParts : /run fail/i.test(text));
+  // R8(b): a run stopped before any model call carries its reason as
+  // the main line (served words), never the no-parts sentence.
+  let stopReason: EngineSummary["stopReason"] = null;
+  let stopProvider: string | null = null;
+  if (text.includes(NO_PROVIDER_LINE)) {
+    stopReason = "no-provider";
+  } else {
+    const noModel = NO_MODEL_RE.exec(text);
+    if (noModel !== null && noModel[1] !== undefined) {
+      stopReason = "no-model";
+      stopProvider = noModel[1].trim();
+    }
+  }
   return {
     done: !failed,
     parts: wholeParts,
@@ -810,6 +831,8 @@ export function summarizeEngineTurn(
     answer: plainAnswer,
     folder,
     solo: soloDone,
+    stopReason,
+    stopProvider,
   };
 }
 
@@ -825,11 +848,16 @@ user profile segment is already ~ above); it is not an executable
 token, so the drive-letter strip below must not basename it. */
 const VERDICT_WHERE_RE = /, in ((?:[A-Za-z]:[\\/]|~[\\/])[^\s"']*)/;
 
+/** R8(b): served stop reasons for a run that ended before any
+model call. These literals are the engine's stable summary words;
+the verdict matches them and renders the localized main line. */
+export const NO_PROVIDER_LINE = "Connect a provider first";
+export const NO_MODEL_RE = /^(.*) has no model chosen$/m;
+
 /** FXZERO R1 plain sentence for a zero-part run: nothing was built,
 the plan had no parts, what to say next plus one example. Localised
 en + uk; never Done, never a raw id. */
-function emptyPlanLine(costNote = ""): string {
-  const example = pt(
+function emptyPlanLine(costNote = ""): string {  const example = pt(
     "chat.run.emptyPlanExample",
     "Add a contact page with a test.",
   );
@@ -848,6 +876,18 @@ export function engineVerdictLine(
   summary: EngineSummary,
   costNote = "",
 ): string {
+  // R8(b): a run stopped before any model call reads its reason as
+  // the main line (localized, en + uk), never the no-parts sentence.
+  if (summary.stopReason === "no-provider") {
+    return pt("chat.run.noProviderLine", "Connect a provider first");
+  }
+  if (summary.stopReason === "no-model") {
+    return pt(
+      "chat.run.noModelLine",
+      "{provider} has no model chosen",
+      { provider: summary.stopProvider ?? "provider" },
+    );
+  }
   if (summary.answer !== null && summary.answer !== "") {
     return summary.answer;
   }
@@ -931,6 +971,13 @@ export function EngineTurnView(props: {
       <p data-testid="run-verdict" style={{ whiteSpace: "pre-wrap" }}>
         {shortProgramLine(verdict)}
       </p>
+      {/* R8(b): a stop before any model call links the fix next to
+          the reason (never hidden behind Details). */}
+      {props.status !== "stopped" && summary.stopReason !== null ? (
+        <a data-testid="run-verdict-connect" href="/settings/models">
+          {t("chat.hierarchy.connect")}
+        </a>
+      ) : null}
       {summary.planChanged !== null ? (
         <>
           {" "}
@@ -1119,10 +1166,19 @@ function buildHistoryBatch(
       // FXANSWER item 4: a stopped run is not an error: no error card,
       // no degraded health, no Retry. Failed turns keep the card.
       sawTerminal = true;
+      const code = turn.error_code !== "" ? turn.error_code : "UNKNOWN";
+      // R8(b): a no-model stop keeps its provider for the banner line.
+      const noModel =
+        code === "PROVIDER_NO_MODEL"
+          ? NO_MODEL_RE.exec(turn.assistant_text ?? "")
+          : null;
       emitBlocking(key, {
-        errorKey: apiErrorLocaleKey(turn.error_code || "UNKNOWN"),
-        code: turn.error_code !== "" ? turn.error_code : "UNKNOWN",
+        errorKey: apiErrorLocaleKey(code),
+        code,
         task: turn.user_text,
+        ...(noModel?.[1] === undefined
+          ? {}
+          : { provider: noModel[1].trim() }),
       });
     }
   }
@@ -1275,6 +1331,16 @@ function chatErrorText(
     blocking.errorKey === "firstrun.steps.connectProvider"
   ) {
     return t("chat.error.noProvider");
+  }
+  // R8(b): a run stopped before any model call names its reason as
+  // the main line (localized, en + uk), never a generic retry line.
+  if (blocking.code === "PROVIDER_NO_MODEL") {
+    return t("chat.run.noModelLine", {
+      provider:
+        blocking.provider !== undefined && blocking.provider !== ""
+          ? blocking.provider
+          : providerLabel(blocking.providerId),
+    });
   }
   // FXSTORE: a gone key names the provider plainly (with a Settings
   // link next to Retry); an unreadable store says so, never a missing key.
@@ -1593,6 +1659,14 @@ function startChatRun(
           ? summarizeEngineTurn(answer, "ok")
           : null;
         const questionPrompt = text.trimEnd().endsWith("?");
+        // R8(b): a stop before any model call keeps its reason and
+        // code; the verdict names it, never the generic retry line.
+        const stopCode =
+          terminalSummary?.stopReason === "no-model"
+            ? "PROVIDER_NO_MODEL"
+            : terminalSummary?.stopReason === "no-provider"
+              ? "NO_PROVIDER_BOUND"
+              : null;
         const emptyPlan =
           opts?.skipUserAppend !== true &&
           terminalSummary !== null &&
@@ -1601,7 +1675,11 @@ function startChatRun(
           !terminalSummary.done;
         const terminalStatus = emptyPlan ? "failed" : "ok";
         if (emptyPlan) {
-          setChatHealth(key, "degraded");
+          if (stopCode === null) {
+            setChatHealth(key, "degraded");
+          } else {
+            setChatHealth(key, "ok");
+          }
         } else {
           setChatHealth(key, "ok");
         }
@@ -1623,6 +1701,7 @@ function startChatRun(
           status: terminalStatus,
           run_id: runId,
           executed: ranEngine,
+          ...(stopCode === null ? {} : { error_code: stopCode }),
         });
       }
       if (!mountedSlices.has(key)) {
@@ -2806,8 +2885,10 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
               </button>
               {/* A2: the no-provider notice carries one action that gets
                   the user connected, next to Retry (same target as the
-                  composer hint). FXSTORE: a gone key links Settings too. */}
+                  composer hint). FXSTORE: a gone key links Settings too.
+                  R8(b): a no-model stop links the same fix. */}
               {blocking.code === "NO_PROVIDER_BOUND" ||
+              blocking.code === "PROVIDER_NO_MODEL" ||
               blocking.code === "SECRET_VALUE_MISSING" ||
               blocking.errorKey === "firstrun.steps.connectProvider" ? (
                 <a

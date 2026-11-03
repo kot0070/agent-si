@@ -293,12 +293,13 @@ describe("ChatSelector", () => {
     };
     const choices = enabledChatChoices(PROVIDER_CATALOG, states);
     expect(choices.map((choice) => choice.modelId)).toEqual(["openai/gpt-4o-mini"]);
+    expect(choices.map((choice) => choice.label)).toEqual(["OpenAI — gpt-4o-mini"]);
     render(<ChatSelector catalog={PROVIDER_CATALOG} states={states} value="" onChange={() => {}} />);
     const text = screen
       .getAllByRole("option")
       .map((option) => option.textContent ?? "")
       .join(" ");
-    expect(text).toContain("Standard");
+    expect(text).toContain("gpt-4o-mini");
     expect(text).not.toContain("model-1");
   });
 });
@@ -360,7 +361,7 @@ describe("ProvidersPage", () => {
     const box = screen.getByLabelText("OpenAI Standard") as HTMLInputElement;
     expect(box.disabled).toBe(false);
     expect(box.checked).toBe(true);
-    expect(screen.getByRole("combobox").textContent ?? "").toContain("Standard");
+    expect(screen.getByRole("combobox").textContent ?? "").toContain("gpt-4o-mini");
     fireEvent.click(screen.getByLabelText("Disconnect OpenAI"));
     const disconnectDialog = screen.getByRole("dialog");
     fireEvent.click(within(disconnectDialog).getByText("Disconnect"));

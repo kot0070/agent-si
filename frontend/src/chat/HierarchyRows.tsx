@@ -20,6 +20,13 @@ import { listConnectedProviders } from "../settings/ProvidersPage/connectApi";
 import { PROVIDER_CATALOG } from "../settings/ProvidersPage/catalog";
 import { AUTO_SENTINEL } from "../settings/ProvidersPage/types";
 import type { ProviderPreset } from "../settings/ProvidersPage/types";
+import { listProviderModels } from "../settings/ProvidersPage/modelsApi";
+import type { ProviderModelRow } from "../settings/ProvidersPage/modelsApi";
+import {
+  chatCapable,
+  choiceLabel,
+  isListableModelId,
+} from "../settings/ProvidersPage/roleChoices";
 import { readRoleProfiles, saveRoleProfile } from "../settings/index";
 import type { RoleModelProfile, RoleProfileMap } from "../settings/index";
 import { pt } from "./permissions";
@@ -73,10 +80,6 @@ function presetFor(providerId: string): ProviderPreset | undefined {
   return PROVIDER_CATALOG.find((preset) => preset.id === providerId);
 }
 
-function providerLabel(providerId: string): string {
-  return presetFor(providerId)?.label ?? providerId;
-}
-
 function autoLabel(): string {
   return pt("chat.hierarchy.auto", "Auto");
 }
@@ -95,23 +98,66 @@ function exactModelText(profile: RoleModelProfile | undefined): string {
   return `${preset?.label ?? provider} \u2014 ${modelLabel ?? model}`;
 }
 
-function resolveModel(
-  providerId: string,
-  current: RoleModelProfile | undefined,
-): string {
-  if (
-    current !== undefined &&
-    current.mode === "PINNED" &&
-    current.provider === providerId &&
-    current.model !== undefined
-  ) {
-    return current.model;
+export type HierarchyModelOption = {
+  value: string;
+  label: string;
+};
+
+/** R8(a): the strip offers real models (provider + model), never
+placeholders. Connected providers, then each provider instance's
+model list: enabled ticks as full `provider/model` ids. */
+export function hierarchyModelOptions(
+  connected: string[],
+  rowsByProvider: Record<string, ProviderModelRow[]>,
+  ticksByProvider: Record<string, string[] | null>,
+): HierarchyModelOption[] {
+  const seen = new Set<string>();
+  const out: HierarchyModelOption[] = [];
+  for (const providerId of connected) {
+    const preset = presetFor(providerId);
+    if (preset === undefined) {
+      continue;
+    }
+    const ticks = ticksByProvider[providerId] ?? null;
+    const rows = rowsByProvider[providerId] ?? [];
+    const enabled = ticks === null ? rows.map((row) => row.id) : ticks;
+    const allowed = new Set<string>();
+    for (const id of enabled) {
+      allowed.add(id);
+      const bare = id.includes("/") ? (id.split("/").pop() ?? id) : id;
+      allowed.add(`${providerId}/${bare}`);
+      allowed.add(bare);
+    }
+    for (const row of rows) {
+      if (!allowed.has(row.id)) {
+        continue;
+      }
+      if (!isListableModelId(canonicalId(providerId, row.id))) {
+        continue;
+      }
+      if (!chatCapable(row.kb)) {
+        continue;
+      }
+      const full = canonicalId(providerId, row.id);
+      if (seen.has(full)) {
+        continue;
+      }
+      seen.add(full);
+      out.push({ value: full, label: choiceLabel(preset.label, full) });
+    }
   }
-  const first = presetFor(providerId)?.models[0];
-  if (first !== undefined) {
-    return first.id;
+  return out;
+}
+
+function canonicalId(providerId: string, modelId: string): string {
+  const prefix = `${providerId}/`;
+  const bare = modelId.startsWith(prefix)
+    ? modelId.slice(prefix.length)
+    : modelId;
+  if (bare === "" || bare.includes("/")) {
+    return bare.includes("/") ? modelId : `${providerId}/${bare}`;
   }
-  return providerId;
+  return `${providerId}/${bare}`;
 }
 
 function isSplitAuditor(
@@ -140,6 +186,8 @@ export function HierarchyRows({
 }): ReactElement | null {
   const [connected, setConnected] = useState<string[] | null>(null);
   const [profiles, setProfiles] = useState<RoleProfileMap | null>(null);
+  const [modelRows, setModelRows] = useState<Record<string, ProviderModelRow[]>>({});
+  const [modelTicks, setModelTicks] = useState<Record<string, string[] | null>>({});
   const [loadFailed, setLoadFailed] = useState(false);
   const [expanded, setExpanded] = useState<boolean>(
     () => !readCollapsed(projectId),
@@ -182,6 +230,41 @@ export function HierarchyRows({
         setConnected([]);
       } else {
         setConnected(ids);
+        // R8(a): real model names per connected provider (served
+        // provider model routes); a failing list degrades to no
+        // options for that provider, never a placeholder.
+        void Promise.all(
+          ids.map(async (id) => {
+            const preset = presetFor(id);
+            try {
+              const outcome = await listProviderModels(
+                id,
+                preset?.models ?? [],
+              );
+              return { id, rows: outcome.rows, ticks: outcome.servedEnabled };
+            } catch {
+              return { id, rows: [], ticks: [] as string[] };
+            }
+          }),
+        ).then((entries) => {
+          if (!alive) {
+            return;
+          }
+          setModelRows((prev) => {
+            const next = { ...prev };
+            for (const entry of entries) {
+              next[entry.id] = entry.rows;
+            }
+            return next;
+          });
+          setModelTicks((prev) => {
+            const next = { ...prev };
+            for (const entry of entries) {
+              next[entry.id] = entry.ticks;
+            }
+            return next;
+          });
+        });
       }
       setProfiles(map);
     });
@@ -228,36 +311,31 @@ export function HierarchyRows({
       }
       return;
     }
+    // R8(a): the strip pins the exact real model (full
+    // `provider/model` id), so a bound local model really runs.
+    const slash = value.indexOf("/");
+    const provider = slash < 0 ? value : value.slice(0, slash);
+    const model = value;
     if (row === "agents") {
-      const agentsModel = resolveModel(
-        value,
-        profiles === null ? undefined : profiles.worker,
-      );
       await saveRoleProfile(projectId, {
         role: "worker",
         mode: "PINNED",
-        provider: value,
-        model: agentsModel,
+        provider,
+        model,
       });
       await saveRoleProfile(projectId, {
         role: "auditor",
         mode: "PINNED",
-        provider: value,
-        model: agentsModel,
+        provider,
+        model,
       });
       return;
     }
-    const current =
-      profiles === null
-        ? undefined
-        : row === "director"
-          ? profiles.director
-          : profiles.manager;
     await saveRoleProfile(projectId, {
       role: row,
       mode: "PINNED",
-      provider: value,
-      model: resolveModel(value, current),
+      provider,
+      model,
     });
   }
 
@@ -335,29 +413,29 @@ export function HierarchyRows({
     row: HierarchyRow,
     label: string,
     profile: RoleModelProfile | undefined,
-    ids: string[],
+    options: HierarchyModelOption[],
     split: boolean,
     /** FXCHATV (b): one Connect CTA per state — only the first empty
         row carries the link, the rest name the empty state quietly. */
     showConnect: boolean,
   ): ReactElement {
-    const selected =
+    // R8(a): the select offers real models; the chosen one shows once
+    // (no separate model text beside the select).
+    const pinnedFull =
       profile !== undefined &&
       profile.mode === "PINNED" &&
-      profile.provider !== undefined
-        ? profile.provider
+      profile.provider !== undefined &&
+      profile.model !== undefined
+        ? `${profile.provider}/${profile.model.startsWith(`${profile.provider}/`) ? profile.model.slice(profile.provider.length + 1) : profile.model}`
+        : null;
+    const selected =
+      pinnedFull !== null && options.some((option) => option.value === pinnedFull)
+        ? pinnedFull
         : AUTO_SENTINEL;
-    const options =
-      selected === AUTO_SENTINEL || ids.includes(selected)
-        ? ids
-        : [...ids, selected];
     return (
       <div data-testid={`hierarchy-row-${row}`}>
-        <span data-testid={`hierarchy-label-${row}`}>{label}</span>
-        <span data-testid={`hierarchy-model-${row}`}>
-          {exactModelText(profile)}
-        </span>
-        {ids.length === 0 ? (
+        <span data-testid={`hierarchy-label-${row}`}>{label}</span>{" "}
+        {options.length === 0 ? (
           showConnect ? (
             <a data-testid="hierarchy-connect-link" href={CONNECT_HREF}>
               {pt("chat.hierarchy.connect", "Connect a provider")}
@@ -371,9 +449,9 @@ export function HierarchyRows({
             onChange={(event) => handleChange(row, event.target.value)}
           >
             <option value={AUTO_SENTINEL}>{autoLabel()}</option>
-            {options.map((providerId) => (
-              <option key={providerId} value={providerId}>
-                {providerLabel(providerId)}
+            {options.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
               </option>
             ))}
           </select>
@@ -402,6 +480,10 @@ export function HierarchyRows({
   // Connect state with its action; the rows below keep their contract
   // (the Director row carries the link, no selects render).
   const connectText = pt("chat.hierarchy.connect", "Connect a provider");
+  const options =
+    connected === null
+      ? []
+      : hierarchyModelOptions(connected, modelRows, modelTicks);
   const rows =
     connected !== null && profiles !== null && connected.length > 0 ? (
       <>
@@ -409,16 +491,16 @@ export function HierarchyRows({
           "director",
           directorLabel,
           profiles.director,
-          connected,
+          options,
           false,
           false,
         )}
-        {renderRow("manager", managerLabel, profiles.manager, connected, false, false)}
+        {renderRow("manager", managerLabel, profiles.manager, options, false, false)}
         {renderRow(
           "agents",
           agentsLabel,
           profiles.worker,
-          connected,
+          options,
           isSplitAuditor(profiles.worker, profiles.auditor),
           false,
         )}
@@ -429,16 +511,16 @@ export function HierarchyRows({
           "director",
           directorLabel,
           profiles.director,
-          connected,
+          options,
           false,
           emptyProviders,
         )}
-        {renderRow("manager", managerLabel, profiles.manager, connected, false, false)}
+        {renderRow("manager", managerLabel, profiles.manager, options, false, false)}
         {renderRow(
           "agents",
           agentsLabel,
           profiles.worker,
-          connected,
+          options,
           isSplitAuditor(profiles.worker, profiles.auditor),
           false,
         )}

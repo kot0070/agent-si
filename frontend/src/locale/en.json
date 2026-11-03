@@ -676,7 +676,9 @@
     "run": {
       "emptyPlan": "Nothing was built — the plan had no parts. Say what you want built, for example: “{example}”",
       "emptyPlanExample": "Add a contact page with a test.",
-      "stopped": "Stopped."
+      "stopped": "Stopped.",
+      "noProviderLine": "Connect a provider first",
+      "noModelLine": "{provider} has no model chosen"
     },
     "stream": {
       "spinner": "Working on it",
