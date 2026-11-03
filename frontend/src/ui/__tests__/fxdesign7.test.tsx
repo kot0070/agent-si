@@ -337,6 +337,11 @@ describe("fxdesign7 inspector deferred", () => {
             integrity_ok: true,
             journal_head: "jh-1",
             generated_at: "t-0",
+            watched_runs: 0,
+            watched_agents: 1,
+            watcher_model: "fx-local-1",
+            watcher_calls: 1,
+            watcher_tokens: 12,
             last_action:
               "rule-tamper BLOCK model=fx-local-1 action=scripts/tamper_check.py",
             last_check_at: "2026-02-11T06:42:44Z",
@@ -424,10 +429,10 @@ describe("fxdesign7 inspector deferred", () => {
     const { router } = renderInspectorAt();
     await openProject(router);
     const model = await screen.findByTestId("watcher-model");
-    // FXTABS T9: settings say local but no local model is served, so the
-    // rail names what is really used (API/cloud fallback doing the work).
-    expect(model.textContent).toContain(t("watcher.tab.modelApi"));
-    expect(model.textContent).not.toContain(t("watcher.tab.modelLocal"));
+    // FXZERO R4 extra gate: the rail names the exact served watcher
+    // model (the one that answered), never a setting label.
+    expect(model.textContent).toContain("fx-local-1");
+    expect(model.textContent).not.toContain(t("watcher.tab.modelApi"));
     const action = await screen.findByTestId("watcher-action");
     expect(action.getAttribute("title")).toBe("e-1");
     expect(action.textContent).toContain(t("watcher.tab.actionBlocked"));
@@ -435,6 +440,10 @@ describe("fxdesign7 inspector deferred", () => {
     const checks = await screen.findByTestId("watcher-checks");
     expect(checks.textContent).toContain("2026");
     expect(checks.textContent).not.toContain("T06:42:44Z");
+    // FXZERO R3: counts render with plural units, never "1 agents".
+    const watches = await screen.findByTestId("watcher-watches");
+    expect(watches.textContent).toContain("1 agent");
+    expect(watches.textContent).not.toContain("1 agents");
   });
 
   it("metric cards keep a heading toggle", async () => {

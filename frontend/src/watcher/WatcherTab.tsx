@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { t } from "../locale/index";
+import { pluralUnit, t } from "../locale/index";
 import { ApiError, apiErrorLocaleKey, parseErrorBody } from "../api/errors";
 import { ErrorPanel } from "../ui/ErrorPanel";
 import {
@@ -28,6 +28,7 @@ export interface WatcherStatusData {
   checks_done?: number;
   alerts_raised?: number;
   last_check_at?: string;
+  watcher_model?: string;
   watcher_calls?: number;
   watcher_tokens?: number;
   watched_runs?: number;
@@ -64,6 +65,8 @@ export async function fetchWatcherStatus(
       typeof body.alerts_raised === "number" ? body.alerts_raised : undefined,
     last_check_at:
       typeof body.last_check_at === "string" ? body.last_check_at : undefined,
+    watcher_model:
+      typeof body.watcher_model === "string" ? body.watcher_model : undefined,
     watcher_calls:
       typeof body.watcher_calls === "number" ? body.watcher_calls : undefined,
     watcher_tokens:
@@ -300,9 +303,15 @@ export function WatcherTab({ projectId }: { projectId: string }) {
       <p data-testid="watcher-watches">
         {t("watcher.tab.watches")}:{" "}
         {typeof status.watched_runs === "number" ? status.watched_runs : notKnown()}{" "}
-        runs ·{" "}
-        {typeof status.watched_agents === "number" ? status.watched_agents : notKnown()}{" "}
-        agents
+        {typeof status.watched_runs === "number"
+          ? pluralUnit("shell.cards.watcher.runs", status.watched_runs)
+          : null}{" · "}
+        {typeof status.watched_agents === "number"
+          ? status.watched_agents
+          : notKnown()}{" "}
+        {typeof status.watched_agents === "number"
+          ? pluralUnit("shell.cards.watcher.agents", status.watched_agents)
+          : null}
       </p>
       <p data-testid="watcher-last-action">
         {t("watcher.tab.lastAction")}: {describeLastAction(status.last_action)}

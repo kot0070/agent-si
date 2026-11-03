@@ -23,7 +23,7 @@ import { dedupeLiveRows, readLiveExtras } from "../projects/viewsApi";
 import { readProjectTelemetry } from "../k07next2/k07next2Api";
 import type { ProjectTelemetry } from "../k07next2/k07next2Api";
 import { ApiError, requestResponse } from "../api/errors";
-import { formatNumber, t } from "../locale/index";
+import { formatNumber, pluralUnit, t } from "../locale/index";
 import { formatDateTime } from "../locale/index";
 import { shortenLiveRef } from "../agents/agentsApi";
 import {
@@ -42,14 +42,12 @@ import {
   describeLastAction,
   fetchWatcherJournal,
   fetchWatcherStatus,
-  watcherModelName,
 } from "../watcher/WatcherTab";
 import { WATCHER_JOURNAL_ROUTE } from "../watcher/WatcherTab";
 import type {
   WatcherJournalEntry,
   WatcherStatusData,
 } from "../watcher/WatcherTab";
-import { loadWatcherSettings } from "../watcher/watcherSettings";
 import { useCollapsedCard } from "./collapsed";
 
 export interface InspectorProps extends InspectorBaseProps {
@@ -869,16 +867,10 @@ export function Inspector(props: InspectorProps): ReactElement {
   const reportsHref =
     projectId === null ? "/projects" : `/projects/${projectId}/reports`;
 
-  const watcherSettings = loadWatcherSettings(projectId);
-  const watcherModel = watcherSettings.model;
-  // FXTABS T9: the rail names what is really used. A "local" setting with
-  // no local model served means the cloud fallback does the work.
-  const effectiveWatcherModel =
-    watcherModel === "local" &&
-    (localModels === null || localModels.length === 0)
-      ? "API"
-      : watcherModel;
-  const latestJournal = (journal ?? [])[0];
+  const latestJournal =
+    journal === null || journal.length === 0
+      ? undefined
+      : journal[journal.length - 1];
   const watcherActionId =
     latestJournal === undefined
       ? (watcherStatus?.journal_head ?? DASH)
@@ -1352,7 +1344,10 @@ export function Inspector(props: InspectorProps): ReactElement {
                 </p>
               )}
               {/* FXDESIGN8: the last run's verdict plus its files, read from
-                  the runs key of the ledger route; served facts only. */}
+                  the runs key of the ledger route; served facts only.
+                  FXZERO R2: the task title (or a short human name) is
+                  the primary text; the raw run id rides the details
+                  (tooltip) only, never as visible text. */}
               {lastRun === null ? null : (
                 <>
                 <div data-testid="result-last" className="fx-result-row">
@@ -1362,11 +1357,14 @@ export function Inspector(props: InspectorProps): ReactElement {
                     className="fx-truncate"
                     title={
                       lastRun.summary !== undefined && lastRun.summary !== ""
-                        ? lastRun.summary
-                        : undefined
+                        ? `${lastRun.run_id}: ${lastRun.summary}`
+                        : lastRun.run_id
                     }
                   >
-                    {lastRun.run_id}
+                    {typeof lastRun.title === "string" &&
+                    lastRun.title.trim() !== ""
+                      ? lastRun.title
+                      : t("shell.cards.results.latestRun")}
                     {lastRun.summary !== undefined && lastRun.summary !== ""
                       ? `: ${lastRun.summary}`
                       : null}
@@ -1553,13 +1551,11 @@ export function Inspector(props: InspectorProps): ReactElement {
               <p data-testid="watcher-watches">
                 {t("shell.cards.watcher.watches")}{": "}
                 {typeof watcherStatus.watched_runs === "number"
-                  ? formatNumber(watcherStatus.watched_runs)
-                  : t("watcher.tab.notKnown")}{" "}
-                runs ·{" "}
+                  ? `${formatNumber(watcherStatus.watched_runs)} ${pluralUnit("shell.cards.watcher.runs", watcherStatus.watched_runs)}`
+                  : t("watcher.tab.notKnown")}{" · "}
                 {typeof watcherStatus.watched_agents === "number"
-                  ? formatNumber(watcherStatus.watched_agents)
-                  : t("watcher.tab.notKnown")}{" "}
-                agents
+                  ? `${formatNumber(watcherStatus.watched_agents)} ${pluralUnit("shell.cards.watcher.agents", watcherStatus.watched_agents)}`
+                  : t("watcher.tab.notKnown")}
               </p>
               <p data-testid="watcher-checks">
                 {t("shell.cards.watcher.checks")}{": "}
@@ -1575,9 +1571,17 @@ export function Inspector(props: InspectorProps): ReactElement {
                   ? formatDateTime(watcherStatus.last_check_at)
                   : t("watcher.tab.notKnown")}
               </p>
+              {/* FXZERO R4 extra gate: the model names the exact served
+                  watcher model (the one that answered), never a setting
+                  label; with no answering model it reads unavailable. */}
               <p data-testid="watcher-model">
                 {t("watcher.tab.model")}:{" "}
-                {watcherModelName(effectiveWatcherModel)}
+                {typeof watcherStatus.watcher_calls === "number" &&
+                watcherStatus.watcher_calls > 0 &&
+                typeof watcherStatus.watcher_model === "string" &&
+                watcherStatus.watcher_model !== ""
+                  ? watcherStatus.watcher_model
+                  : t("telemetry.unavailable")}
                 {" \u00b7 "}
                 {t("shell.cards.watcher.calls")}{": "}
                 {typeof watcherStatus.watcher_calls === "number"

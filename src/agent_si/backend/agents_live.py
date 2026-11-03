@@ -32,6 +32,19 @@ LIVE_EXTRA_FIELDS = ("role", "model", "step", "file", "cost",
 #: owns pricing; the live sink never invents a cost.
 COST_UNAVAILABLE = "UNAVAILABLE"
 
+#: FXZERO R4: row statuses that count as watched. A RETURNED/BLOCKED row
+#: is run history, not a live agent: a finished run is not watched.
+LIVE_WATCH_STATUSES = frozenset({"RUNNING", "QUEUED", "CREATED", "PENDING"})
+
+
+def is_live_row(row: Any) -> bool:
+    """True when a live-store row is still live (not returned/blocked)."""
+    try:
+        status = row.get("status", "") if isinstance(row, Mapping) else ""
+    except Exception:
+        return False
+    return str(status).upper() in LIVE_WATCH_STATUSES
+
 
 def _live_tokens(value: Any) -> dict[str, Any]:
     """Normalize a tokens value to {"input", "output"} (Nones unevidenced)."""
@@ -164,6 +177,7 @@ __all__ = [
     "LIVE_EXTRA_FIELDS",
     "agents_live_payload",
     "clear_live_rows",
+    "is_live_row",
     "live_defaults",
     "live_rows",
     "record_live_row",
