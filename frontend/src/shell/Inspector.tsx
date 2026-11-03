@@ -281,11 +281,8 @@ export function Inspector(props: InspectorProps): ReactElement {
         }
       } catch {
         ok = false;
-        if (alive) {
-          setLedger([]);
-          setRuns([]);
-          setNudge(null);
-        }
+        // FXCARDS C2: a failed refresh keeps last good values for the same
+        // project; only a project change clears (the projectId null branch).
       }
       // FXDESIGN8: the runs key of the same ledger route is already
       // loaded above with the package rows; no second round trip.
@@ -298,9 +295,7 @@ export function Inspector(props: InspectorProps): ReactElement {
           setTelemetry(doc);
         }
       } catch {
-        if (alive) {
-          setTelemetry(null);
-        }
+        // FXCARDS C2: keep last good telemetry on a failed refresh.
       }
       try {
         const next = await client.listTasks(target);
@@ -308,9 +303,7 @@ export function Inspector(props: InspectorProps): ReactElement {
           setTasks(next);
         }
       } catch {
-        if (alive) {
-          setTasks([]);
-        }
+        // FXCARDS C2: keep last good tasks on a failed refresh.
       }
       try {
         const next = await client.readBudget(target);
@@ -318,9 +311,7 @@ export function Inspector(props: InspectorProps): ReactElement {
           setBudget(next);
         }
       } catch {
-        if (alive) {
-          setBudget(null);
-        }
+        // FXCARDS C2: keep last good budget on a failed refresh.
       }
       try {
         const [status, entries] = await Promise.all([
@@ -333,11 +324,7 @@ export function Inspector(props: InspectorProps): ReactElement {
           setWatcherFailed(false);
         }
       } catch {
-        if (alive) {
-          setWatcherStatus(null);
-          setJournal(null);
-          setWatcherFailed(true);
-        }
+        // FXCARDS C2: keep last good watcher/app rows on a failed refresh.
       }
       try {
         const card = await fetchAppsCard(target);
@@ -346,10 +333,7 @@ export function Inspector(props: InspectorProps): ReactElement {
           setAppsFailed(false);
         }
       } catch {
-        if (alive) {
-          setApps(null);
-          setAppsFailed(true);
-        }
+        // FXCARDS C2: keep last good apps card on a failed refresh.
       }
       // FXTELEM: providers name connected ids from GET /api/v1/providers
       // (never an invented Unknown); tests read the latest staged run when
@@ -380,9 +364,7 @@ export function Inspector(props: InspectorProps): ReactElement {
           setProviders(names);
         }
       } catch {
-        if (alive) {
-          setProviders(null);
-        }
+        // FXCARDS C2: keep last good providers on a failed refresh.
       }
       try {
         const planResponse = await fetch(
@@ -414,9 +396,7 @@ export function Inspector(props: InspectorProps): ReactElement {
           );
         }
       } catch {
-        if (alive) {
-          setTestRuns(null);
-        }
+        // FXCARDS C2: keep last good test runs on a failed refresh.
       }
       try {
         const response = await fetch("/api/v1/local/models");
@@ -437,9 +417,7 @@ export function Inspector(props: InspectorProps): ReactElement {
           setLocalModels(names);
         }
       } catch {
-        if (alive) {
-          setLocalModels(null);
-        }
+        // FXCARDS C2: keep last good local models on a failed refresh.
       }
       return ok;
     }
@@ -577,18 +555,19 @@ export function Inspector(props: InspectorProps): ReactElement {
     }
     return 2;
   }
+  // FXCARDS C1: the served runs key is newest-first (records.py sorts
+  // reverse=True and serves as-is), so runs[0] is the latest run.
   const latestTeamRunId =
-    (runs ?? []).length === 0
-      ? null
-      : (runs?.[(runs?.length ?? 0) - 1]?.run_id ?? null);
+    (runs ?? []).length === 0 ? null : (runs?.[0]?.run_id ?? null);
   function teamRunRank(runId: string | null): number {
     // Latest run and unattributed rows stay visible; older listed runs
-    // sort behind Show more, newest run first (higher runs index first).
+    // sort behind Show more, newest run first (lower runs index first).
     if (runId === null || runId === latestTeamRunId) {
       return Number.MAX_SAFE_INTEGER;
     }
     const at = (runs ?? []).findIndex((run) => run.run_id === runId);
-    return at < 0 ? -1 : at;
+    // A run id with no served row sorts after every listed older run.
+    return at < 0 ? Number.MAX_SAFE_INTEGER - 1 : at;
   }
   interface TeamItem {
     entry: (typeof foldedTeam)[number];
@@ -627,7 +606,7 @@ export function Inspector(props: InspectorProps): ReactElement {
       .filter((item) => !item.primary)
       .sort(
         (left, right) =>
-          right.runRank - left.runRank ||
+          left.runRank - right.runRank ||
           left.statusRank - right.statusRank,
       );
     return { primary, secondary };
@@ -757,7 +736,9 @@ export function Inspector(props: InspectorProps): ReactElement {
   const lastPackages = (ledger ?? []).slice(-3);
   // FXDESIGN8: the last run of the runs key carries the verdict plus the
   // produced files; package rows stay as the per-package list below.
-  const lastRun = (runs ?? []).length === 0 ? null : runs?.[(runs?.length ?? 0) - 1] ?? null;
+  // FXCARDS C1: served runs are newest-first, so the last run is
+  // runs[0], never runs[length-1] (length-1 is the oldest run).
+  const lastRun = (runs ?? []).length === 0 ? null : (runs?.[0] ?? null);
   const lastRunTokens =
     lastRun !== null &&
     typeof lastRun.tokens === "number" &&
@@ -1569,7 +1550,7 @@ export function Inspector(props: InspectorProps): ReactElement {
                 · {t("shell.cards.watcher.lastCheck")}{": "}
                 {watcherStatus.last_check_at
                   ? formatScreenTime(watcherStatus.last_check_at)
-                  : t("watcher.tab.notKnown")}
+                  : t("watcher.tab.noChecksYet")}
               </p>
               {/* FXZERO R4 extra gate: the model names the exact served
                   watcher model (the one that answered), never a setting

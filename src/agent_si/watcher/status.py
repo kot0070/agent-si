@@ -72,7 +72,19 @@ def _watcher_model(project_id: str) -> str:
     Reads stored WATCH_DECISION rows only: the newest row carrying both
     a ``model=`` and an ``action=`` marker names the model that
     answered; default-action and OFF-marker rows name no model.
+    FXCARDS C4: a row names a model only when that call was counted in
+    stats (watcher_calls > 0); with no counted call the card reads
+    Rules only, never a model name beside 0 calls.
     """
+    try:
+        from agent_si.watcher import stats as _stats_home
+
+        calls = _stats_home.get_stats(str(project_id)).get(
+            "watcher_calls", 0)
+        if int(calls) <= 0:  # type: ignore[arg-type]
+            return "Rules only"
+    except Exception:
+        pass
     try:
         rows = journal_store.stored_rows(str(project_id), "WATCH_DECISION")
     except Exception:

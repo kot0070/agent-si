@@ -78,6 +78,12 @@ function connectFailure(err: unknown): string {
       || code === "EVIDENCE_PROBE_NETWORK") {
       return t("providers.connect.unreachable");
     }
+    // FXSMALL item 6: a conflicting re-connect (same id, different base
+    // URL) refuses with a code the dialog maps to one plain sentence;
+    // the raw backend text never reaches the user in either locale.
+    if (code === "PROVIDER_CONFLICT") {
+      return t("providers.connect.conflict");
+    }
     if (typeof err.details?.message === "string"
       && err.details.message.length > 0) {
       return t("providers.connect.failedMessage",

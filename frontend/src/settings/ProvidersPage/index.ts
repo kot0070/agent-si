@@ -6,6 +6,7 @@ export type { ChatChoice } from "./ChatSelector";
 export { CONNECT_TIMEOUT_MS, ConnectDialog, saveWithTimeout } from "./ConnectDialog";
 export type { ConnectResult } from "./ConnectDialog";
 export { DisconnectDialog } from "./DisconnectDialog";
+export { LocalConnectSection } from "./LocalConnectSection";
 export { listServedModels, listProviderModels, mergeModelList, modelPriceText } from "./modelsApi";
 export type { ServedModelRow, ProviderModelRow, ProviderModelsOutcome } from "./modelsApi";
 export { LeftoverFinder } from "./LeftoverFinder";

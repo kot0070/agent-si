@@ -38,6 +38,8 @@ import dataclasses
 from fastapi import HTTPException
 from typing import Any
 
+from agent_si.providers.adapters.base import AdapterConfigError
+
 # Error codes (Manifest 21A pattern: module constant + Exception.code).
 CHAT_BAD_REQUEST = "CHAT_BAD_REQUEST"
 MANAGER_STREAM_ABSENT = "MANAGER_STREAM_ABSENT"
@@ -47,6 +49,16 @@ MANAGER_STREAM_FAILED = "MANAGER_STREAM_FAILED"
 #: SSE error over HTTP 200, never a 404 stack). A mid-stream manager
 #: ProviderUnboundError maps to this code (see _chat_error_event).
 NO_PROVIDER_BOUND = "NO_PROVIDER_BOUND"
+
+#: FXSTORE: the routed provider is connected but its key value is gone
+#: (sibling window disconnected, or a memory-isolated restart without a
+#: re-save). Chat names the missing key plainly, never engine jargon.
+SECRET_VALUE_MISSING = "SECRET_VALUE_MISSING"
+
+#: FXSTORE: the credential store itself cannot be read (OS store
+#: failure, timeout). Never mixed with a missing key: this says the
+#: store is unreadable, the missing code says no key.
+CREDENTIAL_STORE_UNREADABLE = "CREDENTIAL_STORE_UNREADABLE"
 
 #: An AgentTask crossing the chat boundary was rejected at dispatch.
 CHAT_DISPATCH_REJECTED = "CHAT_DISPATCH_REJECTED"
@@ -202,12 +214,21 @@ def _chat_error_event(stream_id: str, err: Exception) -> dict[str, Any]:
         message = err.args[0]
     else:
         message = str(err) or type(err).__name__
-    return {
+    payload = {
         "type": "error",
         "stream_id": stream_id,
         "code": str(code),
         "message": str(message),
     }
+    # FXSTORE: a missing-key (or unreadable-store) terminal carries the
+    # provider id (never the value) so the UI names the key plainly.
+    try:
+        _provider = getattr(err, "provider_id", None)
+    except Exception:
+        _provider = None
+    if isinstance(_provider, str) and _provider:
+        payload["provider_id"] = _provider
+    return payload
 
 
 #: Terminal SSE type -> task repo status (FXR4B D1: every run's task,
@@ -1254,6 +1275,15 @@ def _manager_event_payload(
         value = data.get(key, None)
         if value is not None:
             payload[key] = value
+    # FXSTORE: an engine error terminal carries its machine code plus
+    # the provider id (ids only) so the UI names the key plainly.
+    # Forwarded on error terminals only: done-event payloads stay
+    # byte-identical.
+    if kind == "error":
+        for key in ("code", "provider_id"):
+            value = data.get(key, None)
+            if isinstance(value, str) and value:
+                payload[key] = value
     return payload
 
 
@@ -1300,6 +1330,42 @@ def bridge_for_app(app: Any) -> ManagerSdkBridge:
     return bridge
 
 
+class SecretValueMissing(AdapterConfigError):
+    """FXSTORE: the routed provider's key value is gone (no entry).
+
+    Carries the stable machine code SECRET_VALUE_MISSING plus the
+    provider id (never the value). The chat event maps the code to the
+    plain line; the engine text never reaches the screen.
+    """
+
+    code = SECRET_VALUE_MISSING
+
+    def __init__(self, secret_id: Any) -> None:
+        super().__init__(
+            "secret value missing for %r (save the key again)"
+            % (str(secret_id or ""),),
+            "chat-bind:secret-missing")
+        self.provider_id = str(secret_id or "")
+
+
+class CredentialStoreUnreadable(AdapterConfigError):
+    """FXSTORE: the credential store itself cannot be read.
+
+    Carries CREDENTIAL_STORE_UNREADABLE plus the provider id. Raised
+    for OSError/TimeoutError (or any non-KeyError read failure), never
+    for a missing entry.
+    """
+
+    code = CREDENTIAL_STORE_UNREADABLE
+
+    def __init__(self, secret_id: Any) -> None:
+        super().__init__(
+            "credential store unreadable for %r (read failed)"
+            % (str(secret_id or ""),),
+            "chat-bind:store-unreadable")
+        self.provider_id = str(secret_id or "")
+
+
 def _read_secret_value(credential_store: Any, secret_id: str) -> str:
     """Resolve one secret value at call time (ids in, value out).
 
@@ -1307,9 +1373,32 @@ def _read_secret_value(credential_store: Any, secret_id: str) -> str:
     (never logs, never stores the value) when the store cannot serve
     it. The value travels only to the provider transport Authorization
     header, never into a body, log, URL or fixture.
+
+    FXSTORE split: a gone value raises SecretValueMissing (code
+    SECRET_VALUE_MISSING, carries provider_id), an unreadable store
+    raises CredentialStoreUnreadable (code CREDENTIAL_STORE_UNREADABLE).
+    The two are never mixed: KeyError (or an empty value) means no key,
+    OSError/TimeoutError (or any other read failure) means the store
+    cannot be read.
     """
     if credential_store is not None and secret_id:
-        for attr in ("get_secret", "get", "retrieve", "read",
+        probe = getattr(credential_store, "get_secret", None)
+        if callable(probe):
+            try:
+                candidate = probe(secret_id)
+            except KeyError:
+                raise SecretValueMissing(secret_id) from None
+            except (OSError, TimeoutError):
+                raise CredentialStoreUnreadable(secret_id) from None
+            except Exception:
+                raise CredentialStoreUnreadable(secret_id) from None
+            value = candidate
+            if isinstance(candidate, Mapping):
+                value = candidate.get("value")
+            if isinstance(value, str) and value:
+                return value
+            raise SecretValueMissing(secret_id) from None
+        for attr in ("get", "retrieve", "read",
                      "get_secret_value"):
             loader = getattr(credential_store, attr, None)
             if not callable(loader):
@@ -1331,12 +1420,9 @@ def _read_secret_value(credential_store: Any, secret_id: str) -> str:
             candidate = candidate.get("value")
         if isinstance(candidate, str) and candidate:
             return candidate
-    from agent_si.providers.adapters.base import AdapterConfigError
+        raise SecretValueMissing(secret_id) from None
 
-    raise AdapterConfigError(
-        "secret value unavailable at call time for %r "
-        "(bind the credential store value port)" % (secret_id,),
-        "chat-bind:secret")
+    raise SecretValueMissing(secret_id or "")
 
 
 def _normalize_gateway_usage(usage: Any) -> dict:

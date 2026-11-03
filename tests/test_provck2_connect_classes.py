@@ -161,11 +161,11 @@ def test_store_read_transient_retry_recovers(tmp_path, monkeypatch):
 
     def _flaky(secret_id, *args, **kwargs):
         calls["n"] += 1
-        # Budget 12: the connect-lane best-effort refresh read walks the
+        # Budget 7: the connect-lane best-effort refresh read walks the
         # value port fallbacks first (6 failing reads), so the evidence
-        # preflight fails its whole first attempt (6 more, retrying)
-        # then recovers on attempt 2.
-        if calls["n"] <= 12:
+        # preflight fails its first attempt on the single classified
+        # probe (1 more, retrying) then recovers on attempt 2.
+        if calls["n"] <= 7:
             raise RuntimeError("PROVCK2 simulated transient store outage")
         return orig(secret_id, *args, **kwargs)
 

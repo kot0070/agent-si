@@ -85,11 +85,11 @@ describe("WatcherTab (fetch-level fake only)", () => {
     );
     render(<WatcherTab projectId="proj-w" />);
     expect(await screen.findByTestId("watcher-error")).toBeTruthy();
-    // FXCLASS CD-7: the 500 maps through apiErrorLocaleKey and keeps the
-    // ApiError code; no raw "request failed: 500" reaches the screen.
+    // FXANSWER S1: the 500 maps to GENERIC_ERROR; no raw
+    // "request failed: 500" reaches the screen.
     expect(
       screen.getByTestId("watcher-error").textContent,
-    ).toContain("CONTEXT_WRONG_CONTRACT_VERSION");
+    ).toContain("GENERIC_ERROR");
     expect(
       screen.getByTestId("watcher-error").textContent,
     ).not.toContain("request failed");

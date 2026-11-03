@@ -194,6 +194,10 @@ export const ChatStreamEventSchema = z.object({
   // FXASK A8: mid-stream install ask argv (exact words); omitted on
   // every older event.
   argv: z.array(z.string()).optional(),
+  // FXSTORE: secret-store terminals carry the provider id (never the
+  // value) so the UI names the missing key. Optional: older events
+  // parse exactly as before.
+  provider_id: z.string().optional(),
 });
 
 export type ChatStreamEvent = z.infer<typeof ChatStreamEventSchema>;

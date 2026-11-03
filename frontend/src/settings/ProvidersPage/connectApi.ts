@@ -196,6 +196,17 @@ export async function listConnectedProviders(): Promise<string[]> {
   return ids;
 }
 
+// POST one disconnect request for a local preset: the handler detaches the
+// attached runtime (local_connect.py entry `disconnect`), nothing else.
+// The card mirror removal follows the 2xx answer like the cloud flow.
+export async function disconnectLocal(): Promise<void> {
+  await requestResponse("/api/v1/local/disconnect", {
+    method: "POST",
+    kind: "write",
+    body: {},
+  });
+}
+
 // POST one disconnect request; the card follows a 2xx answer.
 export async function disconnectProvider(providerId: string): Promise<void> {
   await requestResponse(

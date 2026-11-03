@@ -88,10 +88,11 @@ export function notKnown(): string {
   return t("watcher.tab.notKnown");
 }
 
-/** Last watcher action in plain words, never the raw evt id. */
+/** Last watcher action in plain words, never the raw evt id. A project with
+ * no run yet reads "no action yet", never a "not known" placeholder. */
 export function describeLastAction(summary: string | undefined): string {
   if (!summary) {
-    return notKnown();
+    return t("watcher.tab.noActionYet");
   }
   if (summary.includes("BLOCK")) {
     return t("watcher.tab.actionBlocked");
@@ -292,7 +293,7 @@ export function WatcherTab({ projectId }: { projectId: string }) {
         {typeof status.alerts_raised === "number" ? status.alerts_raised : notKnown()}
       </p>
       <p data-testid="watcher-last-check">
-        {t("watcher.tab.lastCheck")}: {status.last_check_at ? formatScreenTime(status.last_check_at) : notKnown()}
+        {t("watcher.tab.lastCheck")}: {status.last_check_at ? formatScreenTime(status.last_check_at) : t("watcher.tab.noChecksYet")}
       </p>
       <p data-testid="watcher-calls">
         {t("watcher.tab.modelCalls")}:{" "}

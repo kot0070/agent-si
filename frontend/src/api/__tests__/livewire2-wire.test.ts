@@ -155,7 +155,7 @@ describe("L0B-08 served budget shape", () => {
         ),
     );
     await expect(readBudgetState("p-1")).rejects.toMatchObject({
-      code: "CONTEXT_WRONG_CONTRACT_VERSION",
+      code: "GENERIC_ERROR",
     });
   });
 
@@ -330,6 +330,11 @@ describe("L0B-11 error codes and locale messages", () => {
   it("maps every ApiError code to its own en and uk message", () => {
     for (const code of API_ERROR_CODES) {
       const key = apiErrorLocaleKey(code as ApiErrorCode);
+      // FXANSWER S1: GENERIC_ERROR is the generic by design.
+      if (code === "GENERIC_ERROR") {
+        expect(key).toBe("errors.generic");
+        continue;
+      }
       expect(key).not.toBe("errors.generic");
       setLocale("en");
       const english = t(key);
@@ -377,7 +382,7 @@ describe("L0B-11 error codes and locale messages", () => {
       parseErrorBody({ error: "no budget state on file 'p-9'" }, 404),
     ).toMatchObject({ code: "CONTEXT_MISSING" });
     expect(parseErrorBody({ detail: "boom" }, 500)).toMatchObject({
-      code: "CONTEXT_WRONG_CONTRACT_VERSION",
+      code: "GENERIC_ERROR",
     });
   });
 });

@@ -22,6 +22,7 @@ from typing import Any, Dict, List
 
 __all__ = (
     "STOP_TIMEOUT_S",
+    "quiet_flags",
     "spawn",
     "job_of",
     "kill_tree",
@@ -38,6 +39,17 @@ __all__ = (
 
 #: One stop timeout (seconds) for every stop path in this lane set.
 STOP_TIMEOUT_S = 5.0
+
+
+def quiet_flags() -> int:
+    """creationflags hiding the console of every child (Windows only).
+
+    CREATE_NO_WINDOW on Windows, 0 elsewhere: pass as ``creationflags``
+    to every subprocess.Popen/run/call (and asyncio
+    create_subprocess_*) so a windowless parent never flashes a console
+    child. Flag only: streams, stdin and argv are untouched.
+    """
+    return int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
 
 #: Open Job Object handles: kept so the job outlives every spawn call.
 _JOBS: List[Any] = []
@@ -137,10 +149,16 @@ def spawn(argv: List[str], **kwargs: Any) -> "subprocess.Popen":
     Same signature as subprocess.Popen; the job assignment is
     best-effort (a silent pass keeps the plain child, whose tree the
     taskkill fallback still kills on stop). On POSIX the child starts
-    a new session so the fallback kills only its own group.
+    a new session so the fallback kills only its own group. On Windows
+    quiet_flags() is ORed into creationflags (kept when the caller
+    passes its own flags, e.g. CREATE_NEW_PROCESS_GROUP), so the child
+    never flashes a console.
     """
     if os.name != "nt":
         kwargs.setdefault("start_new_session", True)
+    else:
+        kwargs["creationflags"] = (
+            int(kwargs.get("creationflags", 0) or 0) | quiet_flags())
     proc = subprocess.Popen(argv, **kwargs)
     _assign_to_job(proc)
     return proc
@@ -163,6 +181,7 @@ def kill_tree_pid(pid: int) -> None:
                 ["taskkill", "/PID", str(ident), "/T", "/F"],
                 capture_output=True,
                 timeout=STOP_TIMEOUT_S,
+                creationflags=quiet_flags(),
             )
     else:
         import signal

@@ -190,6 +190,9 @@ export type ApiErrorCode =
   | "PROJECT_FOLDER_IN_USE"
   | "PROJECT_FOLDER_MISSING"
   | "NO_PROVIDER_BOUND"
+  | "GENERIC_ERROR"
+  | "SECRET_VALUE_MISSING"
+  | "CREDENTIAL_STORE_UNREADABLE"
   | "APPROVAL_REQUIRED";
 
 export interface ApiErrorBody {
@@ -235,7 +238,7 @@ export interface ApiClient {
   listTasks(project_id: string): Promise<TaskRecord[]>;
   readTask(task_id: string): Promise<TaskRecord>;
   createTask(project_id: string, body: TaskCreate): Promise<TaskRecord>;
-  openChatStream(body: ChatOpen): ChatStream;
+  openChatStream(body: ChatOpen, opts?: { signal?: AbortSignal }): ChatStream;
   cancelChatStream(stream_id: string): Promise<void>;
   readBudget(project_id: string): Promise<BudgetState>;
 }

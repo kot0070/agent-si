@@ -31,6 +31,7 @@ import {
   requestJson,
   requestResponse,
 } from "../api/errors";
+import { readLedgerWithRuns } from "../api/projectsApi";
 import { DEFAULT_LOCALE, formatScreenTime, t } from "../locale/index";
 import enTable from "../locale/en.json";
 import { ApprovalCard } from "./ApprovalCard";
@@ -65,6 +66,10 @@ import {
 } from "../agents/agentsApi";
 import type { Placement } from "../agents/agentsApi";
 import { listConnectedProviders } from "../settings/ProvidersPage/connectApi";
+import {
+  getPreset,
+  getProviderCatalog,
+} from "../settings/ProvidersPage/catalog";
 import { readRoleProfiles } from "../settings/index";
 import { readTeamMode, saveTeamMode } from "../settings/projectLimitsApi";
 import { Icon } from "../ui/icons";
@@ -90,6 +95,27 @@ interface BlockingError {
   code: string;
   /** Failed task text for the one-line error ("which step"), if known. */
   task?: string;
+  /** FXSTORE: routed provider id on secret-store terminals (ids only). */
+  providerId?: string;
+}
+
+/** FXSTORE: product label for a provider id (locale-independent names:
+ * "Meta" reads the same in en and uk). Unknown ids pass through, so
+ * the line never hides which key is missing. */
+function providerLabel(providerId: string | undefined): string {
+  const id = (providerId ?? "").trim();
+  if (id === "") {
+    return "provider";
+  }
+  try {
+    const found = getPreset(getProviderCatalog(), id);
+    if (found !== undefined) {
+      return found.label;
+    }
+  } catch {
+    // Catalog unreadable: the raw id still names the key.
+  }
+  return id;
 }
 
 // FXCHATHIST Part 2: the store slice is session-scoped. The store itself
@@ -206,6 +232,11 @@ const proposalMessages = new Set<string>();
 // frozen, so the per-message mark lives here, keyed by the unique
 // store message id.
 const engineTurnStatus = new Map<string, "ok" | "failed" | "stopped">();
+
+// FXWHERE: run id per assistant message id, so the verdict can name the
+// project folder from the runs ledger (run_id -> folder). Live runs set
+// it at creation; served history turns carry their stored run_id.
+const engineTurnRun = new Map<string, string>();
 
 // Stopped-turn assistants show one plain stopped line instead of the card.
 const stoppedAssistants = new Set<string>();
@@ -576,7 +607,9 @@ only (no drive, no user name) — the backstop for history rows stored
 before the server started sending relative paths. */
 export function shortProgramLine(line: string): string {
   const redacted = line.replace(/C:\\Users\\[^\\\s"']+/gi, "~");
-  const shortCmd = redacted.replace(
+  const where = VERDICT_WHERE_RE.exec(redacted);
+  const body = where !== null ? redacted.slice(0, where.index) : redacted;
+  const shortCmd = body.replace(
     /(\$\s+)([A-Za-z]:[\\/][^\s"']+)/g,
     (_match, head: string, token: string) => {
       const base = token.split(/[\\/]/).pop() ?? token;
@@ -584,10 +617,16 @@ export function shortProgramLine(line: string): string {
       return `${head}${name}`;
     },
   );
-  return shortCmd.replace(/[A-Za-z]:[\\/][^\s"']*/g, (token: string) => {
+  const shortBody = shortCmd.replace(/[A-Za-z]:[\\/][^\s"']*/g, (token: string) => {
     const base = token.split(/[\\/]/).pop() ?? token;
     return base !== "" ? base : token;
   });
+  if (where === null) {
+    return shortBody;
+  }
+  return (
+    shortBody + `, in ${where[1] ?? ""}` + redacted.slice(where.index + where[0].length)
+  );
 }
 
 /** FXCHATV V4: one live step line while a run works — the current
@@ -652,6 +691,17 @@ export interface EngineSummary {
   /** FXOPEN O4: one plain line when the text announces a second plan
   ("Director: plan of 2 parts" then "of 3 parts"); null otherwise. */
   planChanged: string | null;
+  /** FXANSWER: the plain answer text when the run ended as an answer
+  (server marker below); null when the run answered nothing. */
+  answer: string | null;
+  /** FXANSWERb-1: the run is a team-off solo run (its own "Done, not
+  audited." line); solo runs have no Part rows, so the verdict reads
+  the solo line plus the real files instead of the empty-plan line. */
+  solo: boolean;
+  /** FXWHERE: the project folder the files went into (resolved from
+  the runs ledger by run id); null when unknown, then the verdict
+  keeps the pre-FXWHERE shape. */
+  folder: string | null;
 }
 
 const PLAN_OF_RE = /Director:\s*plan of (\d+)\s*parts?/i;
@@ -684,9 +734,41 @@ export function planChangedLine(text: string): string | null {
   );
 }
 
+/** FXANSWER: the server marker for a run that ended as a plain answer
+(no parts, no build). The visible reply is the answer text itself. */
+export const PLAIN_ANSWER_MARKER = "run answered: plain answer, no parts";
+
+/** FXANSWER: the answer text of a plain-answer run: the run text minus
+engine-log lines and the marker itself. Null when the run answered
+nothing. A marker with no extractable answer falls back to the text
+minus the marker only, so an answer never reads as "Nothing was built". */
+export function extractPlainAnswer(text: string): string | null {
+  if (!text.includes(PLAIN_ANSWER_MARKER)) {
+    return null;
+  }
+  const lines = text.split("\n").map((line) => line.trim());
+  const stripped = lines.filter(
+    (line) =>
+      line !== "" &&
+      line !== PLAIN_ANSWER_MARKER &&
+      !line.startsWith("[files:") &&
+      !ENGINE_LOG_MARKERS.test(line),
+  );
+  const kept = stripped.length > 0
+    ? stripped
+    : lines.filter(
+      (line) => line !== "" && line !== PLAIN_ANSWER_MARKER,
+    );
+  if (kept.length === 0) {
+    return null;
+  }
+  return kept.join("\n");
+}
+
 export function summarizeEngineTurn(
   text: string,
   status: "ok" | "failed" | "stopped",
+  folder: string | null = null,
 ): EngineSummary {
   const lines = text.split("\n");
   const verdicts = new Map<string, boolean>();
@@ -750,6 +832,9 @@ export function summarizeEngineTurn(
   // ("run success: all N parts PASS"), its announced plan
   // ("Director: plan of N parts"), or the team-off solo marker
   // ("Done, not audited."). A hollow run never says Done.
+  // FXANSWER: a plain-answer run (server marker) is never hollow: it
+  // answered with no parts, and its visible reply is the answer text.
+  const plainAnswer = extractPlainAnswer(text);
   const soloDone = /Done, not audited\./.test(text);
   let wholeParts = parts;
   let wholePassed = passed;
@@ -772,11 +857,13 @@ export function summarizeEngineTurn(
       }
     }
   }
-  // FXASK A3: model text is not evidence. Zero part rows with no
-  // engine evidence (success count, announced plan, solo marker) is
-  // hollow even when the text lists files: files alone never say Done.
+  // FXASK A3 + FXANSWER: model text is not evidence. Zero part rows
+  // with no engine evidence (success count, announced plan, solo
+  // marker, plain answer) is hollow even when the text lists files:
+  // files alone never say Done, and a 0-part run with no answer never
+  // says Done.
   const hollow =
-    wholeParts === 0 && !soloDone;
+    wholeParts === 0 && !soloDone && plainAnswer === null;
   const failed =
     status !== "ok" ||
     hollow ||
@@ -792,8 +879,23 @@ export function summarizeEngineTurn(
     held,
     denied,
     planChanged: planChangedLine(text),
+    answer: plainAnswer,
+    folder,
+    solo: soloDone,
   };
 }
+
+/** FXWHERE: the folder segment of the verdict. A user profile segment
+(C:\Users\<name>) never reaches the screen; the real project folder
+does, so the verdict says WHERE the files went. */
+export function verdictFolderLabel(folder: string): string {
+  return folder.replace(/C:\\Users\\[^\\\s"']+/gi, "~");
+}
+
+/** FXWHERE: a verdict `, in <folder>` tail keeps its real path (the
+user profile segment is already ~ above); it is not an executable
+token, so the drive-letter strip below must not basename it. */
+const VERDICT_WHERE_RE = /, in ((?:[A-Za-z]:[\\/]|~[\\/])[^\s"']*)/;
 
 /** FXZERO R1 plain sentence for a zero-part run: nothing was built,
 the plan had no parts, what to say next plus one example. Localised
@@ -811,7 +913,9 @@ function emptyPlanLine(costNote = ""): string {
   return `${sentence}${costNote}.`;
 }
 
-/** One plain verdict line for a finished engine turn. */
+/** One plain verdict line for a finished engine turn. FXANSWER: a
+plain-answer run reads as the answer text itself, never Done/Failed,
+never the nothing-built sentence. */
 export function engineVerdictLine(
   summary: EngineSummary,
   costNote = "",
@@ -833,6 +937,30 @@ export function engineVerdictLine(
       { command: summary.denied },
     );
   }
+  if (summary.answer !== null && summary.answer !== "") {
+    return summary.answer;
+  }
+  if (summary.solo) {
+    // FXANSWERb-1: a solo run has no Part rows: the verdict reads the
+    // solo line plus the real files, never the empty-plan line while
+    // the files are on disk. A solo run that wrote nothing and
+    // answered nothing stays not Done.
+    const where =
+      summary.folder !== null && summary.folder !== ""
+        ? `, in ${verdictFolderLabel(summary.folder)}`
+        : "";
+    if (summary.done) {
+      const files =
+        summary.files.length > 0
+          ? `, files: ${summary.files.join(", ")}`
+          : "";
+      return `Done, not audited${files}${where}${costNote}.`;
+    }
+    if (summary.files.length === 0) {
+      return emptyPlanLine(costNote);
+    }
+    return `Failed — 0 parts, 0 passed, files: ${summary.files.join(", ")}${where}${costNote}.`;
+  }
   if (summary.parts === 0) {
     return emptyPlanLine(costNote);
   }
@@ -845,7 +973,10 @@ export function engineVerdictLine(
     summary.passed === 1 ? "1 passed" : `${summary.passed} passed`;
   const files =
     summary.files.length > 0
-      ? `files: ${summary.files.join(", ")}`
+      ? `files: ${summary.files.join(", ")}` +
+        (summary.folder !== null && summary.folder !== ""
+          ? `, in ${verdictFolderLabel(summary.folder)}`
+          : "")
       : "files: none listed";
   const next = summary.done
     ? ""
@@ -861,9 +992,23 @@ check lines name the program only). */
 export function EngineTurnView(props: {
   text: string;
   status: "ok" | "failed" | "stopped";
+  /** FXWHERE: project folder the files went into (runs ledger, keyed
+  by run id). Null/omitted keeps the pre-FXWHERE verdict line. */
+  folder?: string | null;
 }): ReactElement {
-  const summary = summarizeEngineTurn(props.text, props.status);
+  const summary = summarizeEngineTurn(
+    props.text,
+    props.status,
+    props.folder ?? null,
+  );
   const costNote = costKnown(props.text) ? "" : ", cost not known";
+  // FXANSWER item 4: a stopped run says Stopped, never Failed, never a
+  // parts verdict. The Details disclosure below stays as it is.
+  const stoppedLine = pt("chat.run.stopped", "Stopped.");
+  const verdict =
+    props.status === "stopped"
+      ? stoppedLine
+      : engineVerdictLine(summary, costNote);
   // R05: the disclosure collapses only recognised engine logs. Plain
   // output (no engine markers) opens on the assistant message text, so
   // live and return-to-chat rows render the identical visible text.
@@ -873,7 +1018,7 @@ export function EngineTurnView(props: {
   return (
     <>
       <p data-testid="run-verdict" style={{ whiteSpace: "pre-wrap" }}>
-        {shortProgramLine(engineVerdictLine(summary, costNote))}
+        {shortProgramLine(verdict)}
       </p>
       {summary.planChanged !== null ? (
         <>
@@ -904,6 +1049,19 @@ export function EngineTurnView(props: {
       </div>
     </>
   );
+}
+
+// FXWHERE: run id -> project folder from the runs ledger; unknown
+// keeps the pre-FXWHERE verdict line (null folder).
+function folderForMessage(
+  messageId: string,
+  runFolders: Record<string, string>,
+): string | null {
+  const runId = engineTurnRun.get(messageId);
+  if (runId === undefined) {
+    return null;
+  }
+  return runFolders[runId] ?? null;
 }
 
 // Merge one served page into the slice, oldest first. Merge key is the
@@ -949,6 +1107,27 @@ function buildHistoryBatch(
     known.add(assistantId);
     const parsed = Date.parse(turn.time);
     const at = Number.isNaN(parsed) ? Date.now() : parsed;
+    if (turn.status === "interrupted") {
+      // FXANSWER item 4: only a restart-reconciled row carries the
+      // app-closed banner. Same shape as a leftover running row used
+      // to render: stored text plus a resend, never a card.
+      batch.push({
+        id: userId,
+        role: "user",
+        text: turn.user_text,
+        at,
+        final: true,
+      });
+      batch.push({
+        id: assistantId,
+        role: "assistant",
+        text: interruptedText(turn.assistant_text),
+        at,
+        final: true,
+        resendPrompt: turn.user_text,
+      });
+      continue;
+    }
     if (turn.status === "running") {
       batch.push({
         id: userId,
@@ -960,12 +1139,16 @@ function buildHistoryBatch(
       const closedByWindow =
         typeof turn.run_end_reason === "string" &&
         turn.run_end_reason.includes("client disconnect");
+      // FXANSWER item 4: a running row the startup reconcile did not
+      // mark is still live (or its terminal write is still in flight):
+      // no app-closed banner, no error card. Only a recorded client
+      // disconnect names the window-closed line.
       batch.push({
         id: assistantId,
         role: "assistant",
         text: closedByWindow
           ? `${turn.assistant_text !== "" ? `${turn.assistant_text}\n` : ""}${disconnectClosedText()}`
-          : interruptedText(turn.assistant_text),
+          : turn.assistant_text,
         at,
         final: true,
         resendPrompt: turn.user_text,
@@ -979,6 +1162,10 @@ function buildHistoryBatch(
       at,
       final: true,
     });
+    if (turn.run_id !== "") {
+      // FXWHERE: served run id rides to the verdict folder lookup.
+      engineTurnRun.set(assistantId, turn.run_id);
+    }
     if (turn.assistant_text !== "") {
       batch.push({
         id: assistantId,
@@ -1017,7 +1204,9 @@ function buildHistoryBatch(
         stoppedAssistants.add(assistantId);
       }
     }
-    if (turn.status === "failed" || turn.status === "stopped") {
+    if (turn.status === "failed") {
+      // FXANSWER item 4: a stopped run is not an error: no error card,
+      // no degraded health, no Retry. Failed turns keep the card.
       sawTerminal = true;
       emitBlocking(key, {
         errorKey: apiErrorLocaleKey(turn.error_code || "UNKNOWN"),
@@ -1176,6 +1365,16 @@ function chatErrorText(
   ) {
     return t("chat.error.noProvider");
   }
+  // FXSTORE: a gone key names the provider plainly (with a Settings
+  // link next to Retry); an unreadable store says so, never a missing key.
+  if (blocking.code === "SECRET_VALUE_MISSING") {
+    return t("chat.error.keyMissing", {
+      label: providerLabel(blocking.providerId),
+    });
+  }
+  if (blocking.code === "CREDENTIAL_STORE_UNREADABLE") {
+    return t("chat.error.storeUnreadable");
+  }
   const raw = blocking.task ?? prompt ?? "";
   const step =
     raw.trim() !== "" ? ` — task "${raw.trim().slice(0, 140)}"` : "";
@@ -1327,6 +1526,11 @@ function handleRunError(
       errorKey: apiErrorLocaleKey(error.code),
       code: error.code,
       ...(record === undefined ? {} : { task: record.prompt }),
+      // FXSTORE: the routed provider id rides along so the banner
+      // names the missing key instead of a generic line.
+      ...(error.details?.providerId === undefined
+        ? {}
+        : { providerId: error.details.providerId }),
     });
   } else {
     emitBlocking(key, {
@@ -1384,6 +1588,8 @@ function startChatRun(
     at,
     final: false,
   }).id;
+  // FXWHERE: live run id rides to the verdict folder lookup.
+  engineTurnRun.set(assistantId, runId);
   // The running turn opens the run; the terminal write below upserts
   // the same run id, so each run leaves exactly one stored turn.
   void recordTurnBestEffort(projectId, text, "", {
@@ -1574,6 +1780,46 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
     setDraft(next);
   }
   const [teamMode, setTeamMode] = useState<"on" | "off">("on");
+  // FXWHERE: project folder per run id (runs ledger), so the Done line
+  // names where the files went. Best effort: unknown stays null and the
+  // verdict keeps the pre-FXWHERE shape. Reloaded when the run ends
+  // (the ledger row lands then) and when the project changes.
+  const [runFolders, setRunFolders] = useState<Record<string, string>>({});
+  const streamingRef = useRef(streaming);
+  const loadedProjectRef = useRef<string | null>(null);
+  useEffect(() => {
+    const wasStreaming = streamingRef.current;
+    streamingRef.current = streaming;
+    const runEnded = wasStreaming === true && streaming === false;
+    const projectChanged = loadedProjectRef.current !== props.projectId;
+    if (!runEnded && !projectChanged) {
+      return;
+    }
+    loadedProjectRef.current = props.projectId;
+    let alive = true;
+    void readLedgerWithRuns(props.projectId)
+      .then(({ runs }) => {
+        if (!alive) {
+          return;
+        }
+        const next: Record<string, string> = {};
+        for (const row of runs) {
+          if (row.run_id !== "" && row.folder !== undefined && row.folder !== "") {
+            next[row.run_id] = row.folder;
+          }
+        }
+        setRunFolders(next);
+      })
+      .catch(() => {
+        if (alive) {
+          setRunFolders({});
+        }
+      });
+    return () => {
+      alive = false;
+    };
+    // Mount plus every run end (streaming true -> false).
+  }, [props.projectId, streaming]);
   useEffect(() => {
     let alive = true;
     void readTeamMode(props.projectId)
@@ -1599,11 +1845,13 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
   );
   // No model bound: the draft text stays so the user can connect a
   // provider and send the same task again. Never clobbers text the
-  // user typed after the send.
+  // user typed after the send. FXSTORE: a gone key restores the draft
+  // too (reconnect, then send the same task again).
   useEffect(() => {
     if (
       blocking !== null &&
-      blocking.code === "NO_PROVIDER_BOUND" &&
+      (blocking.code === "NO_PROVIDER_BOUND" ||
+        blocking.code === "SECRET_VALUE_MISSING") &&
       blocking.task !== undefined &&
       blocking.task.trim() !== "" &&
       draft.trim() === ""
@@ -2315,6 +2563,7 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
                 <EngineTurnView
                   text={message.text}
                   status={engineTurnStatus.get(message.id) ?? "ok"}
+                  folder={folderForMessage(message.id, runFolders)}
                 />
               ) : (
                 <p style={{ whiteSpace: "pre-wrap" }}>
@@ -2689,8 +2938,9 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
               </button>
               {/* A2: the no-provider notice carries one action that gets
                   the user connected, next to Retry (same target as the
-                  composer hint). */}
+                  composer hint). FXSTORE: a gone key links Settings too. */}
               {blocking.code === "NO_PROVIDER_BOUND" ||
+              blocking.code === "SECRET_VALUE_MISSING" ||
               blocking.errorKey === "firstrun.steps.connectProvider" ? (
                 <a
                   data-testid="kit-error-connect"

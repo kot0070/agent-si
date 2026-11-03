@@ -446,6 +446,29 @@ def _reconcile_running_to_interrupted(app: Any) -> dict[str, Any]:
     except Exception:
         pass
     try:
+        # FXANSWER: chat turns still running are crash/restart leftovers
+        # too: mark them interrupted so only those rows show the
+        # app-closed banner (never a live running row).
+        from agent_si.backend import chat_history as _chathist
+
+        try:
+            marked = _chathist.mark_interrupted_at_restart(app)
+        except Exception:
+            marked = {}
+        try:
+            result["turns"] = int((marked or {}).get("turns", 0))
+        except Exception:
+            result["turns"] = 0
+        try:
+            for project in (marked or {}).get("projects", []) or []:
+                entry = touched.setdefault(str(project), {
+                    "tasks": [], "runs": []})
+                entry.setdefault("turns", []).append("history")
+        except Exception:
+            pass
+    except Exception:
+        pass
+    try:
         from agent_si.watcher import journal as _journal
 
         for project, entry in touched.items():
@@ -1168,6 +1191,20 @@ def create_app(settings: Any = None,
                 return "memory"
             if _low == "os":
                 return "os"
+        # FXSTORE: test-only window isolation. AGENT_SI_SECRET_STORE is
+        # read from the process environment (never from a route or a
+        # screen) when the app is created; the value "memory"
+        # (case-insensitive, trimmed) selects the memory stack so keyed
+        # windows no longer share the OS credential store. Explicit
+        # settings win over env, env wins over the default; any other
+        # or unset value keeps the OS default.
+        try:
+            _env_raw = _k04_os.environ.get("AGENT_SI_SECRET_STORE", "")
+        except Exception:
+            _env_raw = ""
+        if isinstance(_env_raw, str) and _env_raw.strip().lower() \
+                == "memory":
+            return "memory"
         if isinstance(_settings, Mapping):
             if _settings.get("testing") is True:
                 return "memory"

@@ -30,19 +30,9 @@ const RUNS_LEDGER_TWO_RUNS = {
     { package_id: "pkg-1", agents: 2, peak_concurrency: 2, wall_time_s: 60 },
     { package_id: "pkg-2", agents: 2, peak_concurrency: 2, wall_time_s: 61 },
   ],
+  // FXCARDS C1: the served runs key is newest-first (records.py sorts
+  // reverse=True), so fixtures use the real served order: run-2 first.
   runs: [
-    {
-      run_id: "run-1",
-      start: "2026-02-11T06:40:00Z",
-      end: "2026-02-11T06:41:00Z",
-      parts: [],
-      verdicts: {},
-      tokens: 5142,
-      cost: "UNKNOWN",
-      files: ["a.txt"],
-      success: true,
-      summary: "first",
-    },
     {
       run_id: "run-2",
       start: "2026-02-11T06:42:00Z",
@@ -54,6 +44,18 @@ const RUNS_LEDGER_TWO_RUNS = {
       files: ["b.txt"],
       success: true,
       summary: "second",
+    },
+    {
+      run_id: "run-1",
+      start: "2026-02-11T06:40:00Z",
+      end: "2026-02-11T06:41:00Z",
+      parts: [],
+      verdicts: {},
+      tokens: 5142,
+      cost: "UNKNOWN",
+      files: ["a.txt"],
+      success: true,
+      summary: "first",
     },
   ],
 };
@@ -186,6 +188,13 @@ describe("fxtelem two-run truth", () => {
     const lastRun = await screen.findByTestId("tokens-last-run");
     expect(lastRun.textContent).toContain("13,938");
     expect(lastRun.textContent).toContain("Last run");
+    // FXCARDS C1: the served runs key is newest-first, so Results and the
+    // Context Last-run read run-2 (the second run), never run-1.
+    const verdict = await screen.findByTestId("result-last-verdict");
+    expect(verdict.getAttribute("title")).toContain("run-2");
+    expect(verdict.textContent).toContain("second");
+    expect(await screen.findByTestId("result-open-run-2")).toBeTruthy();
+    expect(screen.queryByTestId("result-open-run-1")).toBeNull();
     // Rail "This project" is the project-scoped telemetry total: the same
     // number the project Tokens tab shows, and the per-model rows add up
     // to it.
@@ -270,19 +279,10 @@ describe("fxtelem team now means now", () => {
     rows: [
       { package_id: "pkg-1", agents: 2, peak_concurrency: 2, wall_time_s: 60 },
     ],
+    // FXCARDS C1: the served runs key is newest-first (records.py sorts
+    // reverse=True): run-new first. (The live snapshot below stays
+    // stale-first on purpose: the card must still lead with RUNNING.)
     runs: [
-      {
-        run_id: "run-old",
-        start: "2026-02-11T06:40:00Z",
-        end: "2026-02-11T06:41:00Z",
-        parts: [],
-        verdicts: {},
-        tokens: 100,
-        cost: "UNKNOWN",
-        files: [],
-        success: false,
-        summary: "old",
-      },
       {
         run_id: "run-new",
         start: "2026-02-11T06:42:00Z",
@@ -294,6 +294,18 @@ describe("fxtelem team now means now", () => {
         files: [],
         success: true,
         summary: "new",
+      },
+      {
+        run_id: "run-old",
+        start: "2026-02-11T06:40:00Z",
+        end: "2026-02-11T06:41:00Z",
+        parts: [],
+        verdicts: {},
+        tokens: 100,
+        cost: "UNKNOWN",
+        files: [],
+        success: false,
+        summary: "old",
       },
     ],
   };

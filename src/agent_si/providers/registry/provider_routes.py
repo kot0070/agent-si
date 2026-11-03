@@ -38,6 +38,7 @@ from .provider_api import (
     LIVE_LINKED,
     NOT_FOUND,
     NOT_OWN_PREFIX,
+    PROVIDER_CONFLICT_CODE,
     TOKEN_REQUIRED,
     list_leftover_keys,
     request_delete_entry,
@@ -163,6 +164,55 @@ def _model_entries(raw: Any) -> List[Tuple[str, Any]]:
     return entries
 
 
+def _secret_value_gone(ctx: ProviderCtx, view: Any) -> bool:
+    """True when the view's key value is provably gone (FXSTORE).
+
+    The providers list is the card truth: a connected provider whose
+    value is gone (sibling window disconnected, memory-isolated
+    restart without a re-save) is dropped so the card shows Connect,
+    not Disconnect. Reads resolve one value through ``get_secret``
+    first (KeyError or an empty value means gone); any other read
+    failure means the store is unreadable, so the row stays (fail
+    open: the chat path says the store cannot be read). No store on
+    the ctx, or a view without a secret id (local runtimes), keeps the
+    legacy row. Values never travel: only presence is probed.
+    """
+    try:
+        store = getattr(ctx, "credential_store", None)
+    except Exception:
+        return False
+    if store is None:
+        return False
+    try:
+        secret_id = getattr(getattr(view, "secret_ref", None),
+                            "secret_id", "")
+    except Exception:
+        return False
+    if not isinstance(secret_id, str) or not secret_id:
+        return False
+    probe = getattr(store, "get_secret", None)
+    if callable(probe):
+        try:
+            value = probe(secret_id)
+        except KeyError:
+            return True
+        except Exception:
+            return False
+        if isinstance(value, Mapping):
+            try:
+                value = value.get("value")
+            except Exception:
+                return False
+        return not (isinstance(value, str) and value)
+    checker = getattr(store, "has", None)
+    if callable(checker):
+        try:
+            return not checker(secret_id)
+        except Exception:
+            return False
+    return False
+
+
 def list_providers(ctx: ProviderCtx, query, body) -> Tuple[int, Dict]:
     """List provider matrix rows (ids and health only, never key material)."""
     only = _as_bool((query or {}).get("only_evidenced", False))
@@ -171,8 +221,12 @@ def list_providers(ctx: ProviderCtx, query, body) -> Tuple[int, Dict]:
     except ValueError as exc:
         return 400, {"error": str(exc)}
     # K04BIND1: surface the verbatim evidence-failure reason (no secret).
+    # FXSTORE: drop rows whose key value is provably gone (the card
+    # shows Connect, not Disconnect); unreadable stores keep the row.
     rows = []
     for view in views:
+        if _secret_value_gone(ctx, view):
+            continue
         rows.append(_view_payload(
             view, _facade_error(ctx.facade, view.provider_id)))
     return 200, {"providers": rows}
@@ -207,7 +261,11 @@ def connect_provider(ctx: ProviderCtx, query, body) -> Tuple[int, Dict]:
     try:
         view = ctx.facade.register_provider(descriptor, key_ref)
     except ValueError as exc:
-        return 400, {"error": str(exc)}
+        message = str(exc)
+        if message.startswith(PROVIDER_CONFLICT_CODE + ":"):
+            return 400, {"code": PROVIDER_CONFLICT_CODE,
+                         "message": message.split(":", 1)[1].strip()}
+        return 400, {"error": message}
     _refresh_best_effort(ctx, preset["provider_id"], view, model)
     return 200, {"provider": view.describe()}
 

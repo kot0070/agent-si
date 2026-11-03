@@ -171,7 +171,7 @@ describe("http error codes", () => {
     expect(error).toMatchObject({ code: "CONTEXT_MISSING", status: 0 });
   });
 
-  it("maps an error body without a code to CONTEXT_WRONG_CONTRACT_VERSION", async () => {
+  it("maps an error body without a code to GENERIC_ERROR (FXANSWER S1)", async () => {
     vi.stubGlobal(
       "fetch",
       async () =>
@@ -182,7 +182,7 @@ describe("http error codes", () => {
     );
     const client = new HttpApiClient();
     await expect(client.listProjects()).rejects.toMatchObject({
-      code: "CONTEXT_WRONG_CONTRACT_VERSION",
+      code: "GENERIC_ERROR",
       status: 500,
     });
   });
@@ -310,14 +310,14 @@ describe("fake validation", () => {
     });
   });
 
-  it("rejects invalid live rows on setLiveRows", async () => {
+  it("rejects invalid live rows on setLiveRows (FXANSWER S1)", async () => {
     const client = new FakeApiClient({});
     expect(() =>
       client.setLiveRows([
         { agent: "a-1", scope: "s-1", deliverable: "d-1", status: "QUEUED" },
         { agent: "broken", scope: "", deliverable: "", status: "NOPE" as never },
       ]),
-    ).toThrow("CONTEXT_WRONG_CONTRACT_VERSION");
+    ).toThrow("GENERIC_ERROR");
     expect(await client.listAgentsLive()).toHaveLength(2);
   });
 

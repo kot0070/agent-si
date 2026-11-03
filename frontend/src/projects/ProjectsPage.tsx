@@ -254,6 +254,9 @@ export function ProjectsPage(): ReactElement {
         setCollapsed(!expanded);
       }}
     >
+      {/* FXANSWER S1: a failed first load never hides the page: the
+      form stays with a Retry, so a transient failure at startup
+      cannot strand the route with no buttons. */}
       {failure !== null ? (
         <ErrorPanel
           errorKey={failure.errorKey}
@@ -263,7 +266,8 @@ export function ProjectsPage(): ReactElement {
             refresh();
           }}
         />
-      ) : projects === null ? (
+      ) : null}
+      {projects === null && failure === null ? (
         <LoadingState loadingKey="ui.loading.more" />
       ) : (
         <div>
@@ -326,7 +330,13 @@ export function ProjectsPage(): ReactElement {
               {t("projects.list.create")}
             </button>
           </form>
-          {projects.length === 0 ? (
+          {projects === null ? (
+            <EmptyState
+              stateKey="projects.list.empty"
+              actionKey={null}
+              onAction={null}
+            />
+          ) : projects.length === 0 ? (
             <EmptyState
               stateKey="projects.list.empty"
               actionKey={null}

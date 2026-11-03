@@ -82,6 +82,7 @@
       "needOneModel": "Tick at least one model, or Cancel to keep the current list.",
       "refusedKey": "The provider refused this key. Paste the full key again.",
       "unreachable": "Could not reach the provider.",
+      "conflict": "This provider is already connected with different settings — disconnect it first, then connect again.",
       "check": "Check",
       "checking": "Checking...",
       "checked": "Key checked. Save to connect.",
@@ -238,7 +239,8 @@
     "localAi": {
       "needItNow": "Only when you want work to stay on this machine.",
       "purpose": "Run models on this PC.",
-      "title": "Local AI"
+      "title": "Local LLM",
+      "empty": "There are no local presets. Add Ollama or LM Studio to connect on this machine."
     },
     "localbench": {
       "title": "Local benchmark",
@@ -388,6 +390,8 @@
       "modelOff": "Off",
       "fallbackNote": "Off means the watcher never uses cloud models.",
       "notKnown": "not known",
+      "noChecksYet": "No checks yet",
+      "noActionYet": "No action yet",
       "checks": "Rule checks",
       "alerts": "Alerts",
       "lastCheck": "Last check",
@@ -420,7 +424,7 @@
       "firstTask": "Run your first task"
     },
     "optional": {
-      "localAI": "Local AI",
+      "localAI": "Local LLM",
       "watcherPreset": "Watcher preset",
       "automations": "Automations",
       "kbs": "Knowledge bases"
@@ -570,7 +574,7 @@
         "emptyLine": "No providers connected"
       },
       "localai": {
-        "title": "Local AI",
+        "title": "Local LLM",
         "subtitle": "On-machine models.",
         "total": "On-machine models",
         "emptyLine": "Not set up"
@@ -615,6 +619,8 @@
     },
     "error": {
       "retry": "Retry",
+      "keyMissing": "The key for {label} is not available. Connect it again.",
+      "storeUnreadable": "The credential store cannot be read.",
       "noProvider": "Connect a provider first, then send your task again."
     },
     "hierarchy": {
@@ -644,7 +650,8 @@
     },
     "run": {
       "emptyPlan": "Nothing was built — the plan had no parts. Say what you want built, for example: “{example}”",
-      "emptyPlanExample": "Add a contact page with a test."
+      "emptyPlanExample": "Add a contact page with a test.",
+      "stopped": "Stopped."
     },
     "stream": {
       "spinner": "Working on it",
@@ -703,7 +710,7 @@
       "title": "Cost"
     },
     "local_ai": {
-      "title": "Local AI"
+      "title": "Local LLM"
     },
     "cloud_ai": {
       "title": "Cloud AI"

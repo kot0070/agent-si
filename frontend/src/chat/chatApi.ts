@@ -38,39 +38,54 @@ export function streamChat(
   if (!checked.success) {
     throw invalidBody();
   }
-  const stream = client.openChatStream(checked.data);
+  // FXANSWER S2: the cancel aborts the local fetch reader at once, so
+  // one click stops even while the server stream is parked with no
+  // chunks flowing (a stalled model call). The server cancel still
+  // posts so the engine stops too.
+  const controller = new AbortController();
+  const stream = client.openChatStream(checked.data, {
+    signal: controller.signal,
+  });
   let cancelRequested = false;
   const done: Promise<{ aborted: boolean; executed?: boolean }> = (async () => {
     let aborted = false;
     let executed: boolean | undefined;
-    for await (const raw of stream.chunks) {
-      if (cancelRequested || progress.isCancelled()) {
-        aborted = true;
-        break;
+    try {
+      for await (const raw of stream.chunks) {
+        if (cancelRequested || progress.isCancelled()) {
+          aborted = true;
+          break;
+        }
+        const chunk = ChatChunkSchema.safeParse(raw);
+        if (!chunk.success) {
+          throw invalidBody();
+        }
+        const data: ChatChunk = chunk.data;
+        // D6(b): an executed engine turn marks its done event with
+        // executed:true. That withholds the verdict card; plain answers
+        // keep it. (Done text alone is not a signal: served plain
+        // vocabulary repeats delta text on done, L0B-10.)
+        if (data.executed === true) {
+          executed = true;
+        }
+        if (data.delta !== "") {
+          progress.onChunkText(data.delta);
+        }
+        // FXASK A8: a mid-stream install ask shows the card while the
+        // same stream keeps going; the terminal done still closes it.
+        if (data.ask !== undefined) {
+          progress.onAsk?.(data.ask);
+        }
+        if (data.done) {
+          break;
+        }
       }
-      const chunk = ChatChunkSchema.safeParse(raw);
-      if (!chunk.success) {
-        throw invalidBody();
+    } catch (error) {
+      // An aborted reader rejects here; anything else still throws.
+      if (!cancelRequested && !progress.isCancelled()) {
+        throw error;
       }
-      const data: ChatChunk = chunk.data;
-      // D6(b): an executed engine turn marks its done event with
-      // executed:true. That withholds the verdict card; plain answers
-      // keep it. (Done text alone is not a signal: served plain
-      // vocabulary repeats delta text on done, L0B-10.)
-      if (data.executed === true) {
-        executed = true;
-      }
-      if (data.delta !== "") {
-        progress.onChunkText(data.delta);
-      }
-      // FXASK A8: a mid-stream install ask shows the card while the
-      // same stream keeps going; the terminal done still closes it.
-      if (data.ask !== undefined) {
-        progress.onAsk?.(data.ask);
-      }
-      if (data.done) {
-        break;
-      }
+      aborted = true;
     }
     // D6(b): the executed key exists only for executed engine turns so
     // plain resolutions keep their exact historical shape.
@@ -85,6 +100,11 @@ export function streamChat(
     done,
     cancel(): Promise<void> {
       cancelRequested = true;
+      try {
+        controller.abort();
+      } catch {
+        // The server cancel below still stops the engine.
+      }
       return client.cancelChatStream(stream.stream_id);
     },
   };

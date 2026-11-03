@@ -5,7 +5,8 @@
 // button, and Cancel.
 
 import { useEffect, useRef, useState } from "react";
-import { disconnectProvider, isNetworkFailure } from "./connectApi";
+import { disconnectLocal, disconnectProvider, isNetworkFailure } from "./connectApi";
+import { PROVIDER_CATALOG, getPreset } from "./catalog";
 import { ApiError } from "../../api/errors";
 import { t } from "../../locale/index";
 import { APP_NAMESPACE_PREFIX } from "./types";
@@ -23,14 +24,19 @@ type DisconnectDialogProps = {
   onDisconnected: (secretId: string) => void;
 };
 
-function disconnectFailure(err: unknown): string {
+function disconnectSentence(err: unknown): { text: string; details: string | null } {
   if (err instanceof ApiError) {
-    return t("providers.disconnect.failedCode", { code: err.code, status: String(err.status) });
+    // FXSMALL: the user reads a plain sentence, never a machine code plus
+    // status; the code rides the Details disclosure (ErrorPanel pattern).
+    return {
+      text: t("providers.disconnect.failed"),
+      details: `${err.code} (status ${err.status})`,
+    };
   }
   if (err instanceof Error && err.message.length > 0) {
-    return t("providers.disconnect.failedMessage", { message: err.message });
+    return { text: t("providers.disconnect.failedMessage", { message: err.message }), details: null };
   }
-  return t("providers.disconnect.failedGeneric");
+  return { text: t("providers.disconnect.failedGeneric"), details: null };
 }
 
 export function DisconnectDialog({
@@ -45,6 +51,7 @@ export function DisconnectDialog({
 }: DisconnectDialogProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetails, setErrorDetails] = useState<string | null>(null);
   const cancelRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
@@ -53,6 +60,7 @@ export function DisconnectDialog({
     }
     setBusy(false);
     setError(null);
+    setErrorDetails(null);
     return undefined;
   }, [open, secretId, provider_id]);
 
@@ -106,6 +114,7 @@ export function DisconnectDialog({
     }
     setBusy(true);
     setError(null);
+    setErrorDetails(null);
     try {
       // The frozen identity is provider_id: the remove runs only for a
       // secret bound to that provider; a mismatch is refused visibly
@@ -121,10 +130,21 @@ export function DisconnectDialog({
         return;
       }
       try {
-        await disconnectProvider(provider_id);
+        // Local presets attach a runtime instead of registering a provider
+        // row, so the registry disconnect 404s for them (TRIAL3 20:20:32):
+        // they detach through the local route, which flips the same card.
+        // The preset kind is locale-independent, so the frozen import-time
+        // catalog answers it without rendering anything.
+        if (getPreset(PROVIDER_CATALOG, provider_id)?.kind === "local") {
+          await disconnectLocal();
+        } else {
+          await disconnectProvider(provider_id);
+        }
       } catch (err: unknown) {
         if (!isNetworkFailure(err)) {
-          setError(disconnectFailure(err));
+          const sentence = disconnectSentence(err);
+          setError(sentence.text);
+          setErrorDetails(sentence.details);
           return;
         }
         // No route answered (offline run): fall through to the local
@@ -191,6 +211,12 @@ export function DisconnectDialog({
         <h2>{t("providers.disconnect.title", { label: providerLabel })}</h2>
         <p>{t("providers.disconnect.body", { label: providerLabel })}</p>
         {error !== null ? <p role="alert">{error}</p> : null}
+        {errorDetails !== null ? (
+          <details>
+            <summary>{t("ui.error.details")}</summary>
+            <span>{errorDetails}</span>
+          </details>
+        ) : null}
         {/* U7: Cancel + Disconnect share one spaced action row. */}
         <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
         <button
