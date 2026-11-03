@@ -19,9 +19,14 @@ const DIAGNOSTICS_ENTRIES = [
 ] as const;
 
 /** B2: the log-folder line never shows the machine's user profile
-segment (C:\Users\<name>); the rest of the path stays for support. */
+segment; the rest of the path stays for support. Covers Windows
+(C:\Users\<name>, also forward-slash form) and POSIX (/home/<name>,
+/Users/<name>) profile roots. */
 export function maskLogDir(path: string): string {
-  return path.replace(/([A-Za-z]:\\Users\\)[^\\]+/g, "$1…");
+  return path
+    .replace(/([A-Za-z]:[\\/]Users[\\/])[^\\/]+/gi, "$1…")
+    .replace(/(\/home\/)[^/]+/g, "$1…")
+    .replace(/(\/Users\/)[^/]+/g, "$1…");
 }
 
 export function DiagnosticsSection(): ReactElement {
