@@ -24,6 +24,8 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ENV_NAME = "AGENT_SI_DATA_DIR"
+WHEELS_DIR_ENV = "AGENT_SI_WHEELS_DIR"
+FRONTEND_TARBALL_ENV = "AGENT_SI_FRONTEND_TARBALL"
 ENTRY_SCRIPT = "/src/app/main.tsx"
 START_META = '<meta name="agent-si-start" content="tools/start.py" />'
 BACKEND_MODULE = "agent_si.backend.app"
@@ -103,14 +105,54 @@ def apply_example(example: str | None) -> dict:
             "note": "existing env kept; example fills defaults only"}
 
 
+def _wheels_dir(root: Path) -> str | None:
+    """Offline wheel cache: env override wins, else <root>/wheels."""
+    override = os.environ.get(WHEELS_DIR_ENV)
+    if override:
+        return override
+    candidate = root / "wheels"
+    if candidate.is_dir():
+        return str(candidate)
+    return None
+
+
+def _tarball_path() -> str | None:
+    """Explicit cached frontend tarball, else the materialized tree."""
+    override = os.environ.get(FRONTEND_TARBALL_ENV)
+    return override if override else None
+
+
 def check_lockfiles(root: Path) -> dict:
+    """Verify the offline install inputs are really on disk.
+
+    Lockfiles must exist; every pinned backend wheel must hold a
+    matching archive in the wheels cache (or an installed dist at the
+    pinned version when no cache is in play); the frontend tarball
+    (or the materialized node_modules tree at pinned versions) must
+    be present. Stdlib only, nothing fetched, no substitution.
+    """
     files = list(LOCKFILES)
     missing = [rel for rel in files if not (root / rel).is_file()]
     if missing:
         return {"files": files, "offline": True, "status": "error",
                 "missing": missing}
+    saved = ensure_importable(root)
+    try:
+        from agent_si import startup_log as _slog
+
+        wheel_missing = _slog.backend_wheel_missing(
+            str(root), _wheels_dir(root))
+        tar_missing = _slog.frontend_tarball_missing(
+            str(root), _tarball_path())
+    finally:
+        sys.path[:] = saved
+    missing = wheel_missing + tar_missing
+    if missing:
+        reason = ("absent-wheel" if wheel_missing else "missing-tarball")
+        return {"files": files, "offline": True, "status": "error",
+                "missing": missing, "reason": reason}
     return {"files": files, "offline": True, "status": "ok",
-            "note": "offline; nothing installed"}
+            "note": "offline; pinned artifacts verified, nothing fetched"}
 
 
 def read_frontend_index(root: Path) -> str:
@@ -153,13 +195,15 @@ def fresh_data_dir(data_dir: str) -> dict:
 
 def build_record(root: Path, tag: str, data_dir: str, record_path: str | None,
                  step_status: dict, entries: dict, configure: dict,
-                 lockfiles: dict, smoke: dict) -> dict:
+                 lockfiles: dict, smoke: dict,
+                 startup_log: str | None = None) -> dict:
     return {
         "tool": "tools/start.py",
         "tag": tag,
         "root": str(root),
         "data_dir": data_dir,
         "record_path": record_path,
+        "startup_log": startup_log,
         "steps": list(STEP_ORDER),
         "step_status": dict(step_status),
         "entries": dict(entries),
@@ -203,6 +247,36 @@ def run_launch_checks(root: Path) -> tuple:
     return entries, step_status
 
 
+def _boot_outcome(step_status: dict, lockfiles: dict,
+                  smoke: dict) -> tuple:
+    """Map step results to the startup.log boot line."""
+    reason = lockfiles.get("reason")
+    if (step_status.get("lockfiles") == "error"
+            and reason in ("absent-wheel", "missing-tarball")):
+        return "FAILED", reason
+    if (step_status.get("checkout") != "ok"
+            or step_status.get("configure") != "ok"):
+        return "FAILED", "start-failed"
+    if smoke.get("status") != "pass":
+        return "FAILED", "smoke-failed"
+    if all(v == "ok" for v in step_status.values()):
+        return "OK", None
+    return "FAILED", "start-failed"
+
+
+def _record_boot(root: Path, data_dir: str, boot: str,
+                 reason: str | None) -> str:
+    """Write <data dir>/startup.log for this boot; return its path."""
+    saved = ensure_importable(root)
+    try:
+        from agent_si import startup_log as _slog
+
+        return _slog.write_boot_log(data_dir, str(root),
+                                    boot=boot, reason=reason)
+    finally:
+        sys.path[:] = saved
+
+
 def cmd_smoke(args: argparse.Namespace) -> int:
     root = repo_root()
     entries, step_status = run_launch_checks(root)
@@ -234,8 +308,17 @@ def cmd_smoke(args: argparse.Namespace) -> int:
                 smoke["status"] = "fail"
                 smoke["error"] = "frontend entry wiring missing"
     step_status["launch"] = "ok" if smoke["status"] == "pass" else "error"
+    boot, reason = _boot_outcome(step_status, lockfiles, smoke)
+    try:
+        log_path = _record_boot(root, data_dir, boot, reason)
+    except OSError as exc:
+        print(f"startup log failed: {type(exc).__name__}: {exc}",
+              file=sys.stderr)
+        return 1
+    print(f"startup_log={log_path}")
     record = build_record(root, args.tag, data_dir, args.record,
-                          step_status, entries, configure, lockfiles, smoke)
+                          step_status, entries, configure, lockfiles, smoke,
+                          startup_log=log_path)
     if args.record:
         write_record(args.record, record)
         print(f"recorded {args.record}")
@@ -304,6 +387,15 @@ def cmd_serve(args: argparse.Namespace) -> int:
         step_status["lockfiles"] = "error"
     data_dir = resolve_data_dir(root, args.data_dir)
     if step_status["checkout"] != "ok" or step_status["lockfiles"] != "ok":
+        boot, reason = _boot_outcome(step_status, lockfiles,
+                                     {"status": "fail"})
+        try:
+            log_path = _record_boot(root, data_dir, boot, reason)
+        except OSError as exc:
+            print(f"startup log failed: {type(exc).__name__}: {exc}",
+                  file=sys.stderr)
+            return 1
+        print(f"startup_log={log_path}")
         print("start path not ready", file=sys.stderr)
         return 1
     port = args.port or pick_port()
@@ -319,12 +411,20 @@ def cmd_serve(args: argparse.Namespace) -> int:
         return 1
     server, thread, httpd, frontend_thread = running
     step_status["launch"] = "ok"
+    try:
+        serve_log = _record_boot(root, data_dir, "OK", None)
+    except OSError as exc:
+        print(f"startup log failed: {type(exc).__name__}: {exc}",
+              file=sys.stderr)
+        return 1
+    print(f"startup_log={serve_log}")
     if args.record:
         record = build_record(
             root, args.tag, data_dir, args.record, step_status, entries,
             configure, lockfiles,
             {"status": "not-run", "openapi_status": None,
-             "entry_ok": None, "meta_ok": None, "error": None})
+             "entry_ok": None, "meta_ok": None, "error": None},
+            startup_log=serve_log)
         write_record(args.record, record)
     print(f"ready backend=http://127.0.0.1:{port} "
           f"frontend=http://127.0.0.1:{httpd.server_port} "
