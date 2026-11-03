@@ -31,14 +31,8 @@ CHAT_URL = re.compile(r".*/projects/p-7/chat")
 
 
 def _build_frontend():
-    npm = shutil.which("npm")
-    assert npm is not None
-    completed = subprocess.run(
-        '"%s" --prefix frontend run build' % npm, cwd=WS, shell=True,
-        capture_output=True, text=True, timeout=900)
-    tail = (completed.stdout + completed.stderr)[-2000:]
-    assert completed.returncode == 0, "build failed:\n" + tail
-    assert os.path.isfile(os.path.join(DIST, "index.html"))
+    from tests._distbuild import build_once
+    build_once(WS)
 
 
 class _DistHandler(SimpleHTTPRequestHandler):
