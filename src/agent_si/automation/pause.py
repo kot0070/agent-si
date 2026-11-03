@@ -83,3 +83,8 @@ def is_effective(project_id):
     if _GLOBAL_PAUSED:
         return True
     return bool(_PROJECT_FLAGS.get(project_id, False))
+
+
+def get_project(project_id):
+    """Report the per-project switch alone (ignores the global flag)."""
+    return bool(_PROJECT_FLAGS.get(project_id, False))

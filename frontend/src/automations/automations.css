@@ -1,0 +1,15 @@
+/* FXAUTO compact card rows: same spacing rhythm as the watcher tab. */
+.fxauto-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  padding: 0.625rem 0.75rem;
+  margin: 0.375rem 0;
+}
+
+.fxauto-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  padding: 0.25rem 0;
+}

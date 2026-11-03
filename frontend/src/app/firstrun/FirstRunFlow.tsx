@@ -7,6 +7,7 @@
 // walk so unit tests never touch the network.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { FormEvent, ReactElement } from 'react';
+import { useNavigate } from 'react-router-dom';
 import './firstrun.css';
 import { t } from '../../locale/index';
 import { ApiError, apiErrorLocaleKey, getUiToken, requestResponse } from '../../api/errors';
@@ -100,6 +101,35 @@ function useOptionalCurrentProject(): CurrentProject | null {
   } catch {
     return null;
   }
+}
+
+// FXAUTO: the optional automations step opens the Automations page.
+// Router-aware only so bare mounts keep the legacy synchronous walk.
+function useOptionalNavigate(): ((to: string) => void) | null {
+  try {
+    return useNavigate();
+  } catch {
+    return null;
+  }
+}
+
+function OptionalAutomationsLabel(): ReactElement {
+  const navigate = useOptionalNavigate();
+  if (navigate === null) {
+    return <>{t('firstrun.optional.automations')}</>;
+  }
+  return (
+    <button
+      type="button"
+      data-testid="firstrun-optional-automations"
+      className="fx-btn-quiet"
+      onClick={() => {
+        navigate('/settings/automations');
+      }}
+    >
+      {t('firstrun.optional.automations')}
+    </button>
+  );
 }
 
 export function FirstRunFlow(props: FirstRunFlowProps): ReactElement {
@@ -541,7 +571,11 @@ export function FirstRunFlow(props: FirstRunFlowProps): ReactElement {
           <ul>
             {OPTIONAL_STEPS.map((step) => (
               <li key={step}>
-                {t(`firstrun.optional.${step}`)}
+                {step === 'automations' ? (
+                  <OptionalAutomationsLabel />
+                ) : (
+                  t(`firstrun.optional.${step}`)
+                )}
                 {skipped.includes(step) ? null : (
                   <button type="button" className="fx-btn-quiet" onClick={() => skip(step)}>
                     {t('firstrun.skip')}

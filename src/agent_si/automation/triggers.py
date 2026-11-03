@@ -67,6 +67,15 @@ def get_trigger(project_id, trigger_id):
     return dict(rec)
 
 
+def list_triggers(project_id):
+    """Return every stored trigger definition for one project."""
+    return [
+        dict(rec)
+        for trigger_id, rec in sorted(_triggers.items())
+        if rec.get("project_id") == project_id
+    ]
+
+
 def _fire_bound(project_id, rec):
     """Fire through the scheduler ledger path; None when unbound/not due."""
     kind = rec.get("kind") or ""

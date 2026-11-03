@@ -64,6 +64,7 @@ import { BenchHistoryList } from "../k07next3/BenchHistoryList";
 import { DiagnosticsSection } from "../settings/DiagnosticsSection";
 import { QaCatalogSection } from "../settings/QaCatalogSection";
 import { WatcherTab } from "../watcher/WatcherTab";
+import { AutomationsPage } from "../automations/AutomationsPage";
 import { KbRefreshProposal } from "../k07next2/KbRefreshProposal";
 
 export const ROUTES: RouteTable = {
@@ -600,6 +601,19 @@ function SettingsTabs(): ReactElement {
       >
         {t("diagnostics.title")}
       </NavLink>
+      {/* FXAUTO: the Watcher and automations group is a row, not a tab,
+          so the ten tab links counted by App.test stay exactly ten. */}
+      <span data-testid="settings-group-watcher-automations">
+        {t("settings.group.watcherAutomations")}
+      </span>
+      <NavLink
+        key="automations"
+        to="/settings/automations"
+        data-testid="settings-row-automations"
+        className={({ isActive }) => (isActive ? "fx-tab-active" : undefined)}
+      >
+        {t("settings.automations.title")}
+      </NavLink>
     </nav>
   );
 }
@@ -636,13 +650,37 @@ function SettingsSectionRoute(): ReactElement {
       </SettingsLayout>
     );
   }
-  const route = SETTINGS_ROUTES.find((entry) => entry.path === params.section);
+  // FXAUTO: the automations row lives in the Watcher and automations
+  // group, not in SETTINGS_ROUTES, so the ten tab links stay ten.
+  const route = SETTINGS_ROUTES.find((entry) => entry.path === params.section) ??
+    (params.section === "automations"
+      ? {
+          path: "automations",
+          titleKey: "settings.automations.title",
+          purposeKey: "settings.automations.purpose",
+          needItNowKey: "settings.automations.needItNow",
+        }
+      : undefined);
   if (route === undefined) {
     return (
       <EmptyState stateKey="ui.table.empty" actionKey={null} onAction={null} />
     );
   }
   const projectId = current.projectId;
+  if (route.path === "automations") {
+    return (
+      <SettingsLayout
+        titleKey={route.titleKey}
+        purposeKey={route.purposeKey}
+        needItNowKey={route.needItNowKey}
+      >
+        <SettingsTabs />
+        <span data-testid="settings-section-body">
+          <AutomationsPage projectId={projectId} />
+        </span>
+      </SettingsLayout>
+    );
+  }
   return (
     <SettingsLayout
       titleKey={route.titleKey}
