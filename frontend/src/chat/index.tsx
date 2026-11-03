@@ -920,14 +920,9 @@ export function engineVerdictLine(
   summary: EngineSummary,
   costNote = "",
 ): string {
-  // FXASK A7: a held run waits, never Done, never a 0-parts line.
-  if (summary.held !== null) {
-    return pt(
-      "chat.permission.waitingHold",
-      "Waiting for your permission to run {command}.",
-      { command: summary.held },
-    );
-  }
+  // FXDENYLINE: a denied run reads its REAL end state (Stopped), never a
+  // stale Waiting line: the deny epilogue lands on text that still holds
+  // the earlier hold line, so denied wins over held.
   // FXASK A3: a denied install closes Stopped with what was refused
   // and why (nothing was installed), never Done, never 0-parts.
   if (summary.denied !== null) {
@@ -935,6 +930,14 @@ export function engineVerdictLine(
       "chat.permission.deniedRun",
       "Stopped: you denied {command}. Nothing was installed.",
       { command: summary.denied },
+    );
+  }
+  // FXASK A7: a held run waits, never Done, never a 0-parts line.
+  if (summary.held !== null) {
+    return pt(
+      "chat.permission.waitingHold",
+      "Waiting for your permission to run {command}.",
+      { command: summary.held },
     );
   }
   if (summary.answer !== null && summary.answer !== "") {
