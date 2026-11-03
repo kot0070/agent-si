@@ -71,7 +71,10 @@ __all__ = (
     "CALLER_PROJECT",
     "ACTION_CATALOG",
     "BUILTIN_TEMPLATE_IDS",
+    "PLAN_TEMPLATE_IDS",
+    "TEMPLATE_UI",
     "list_templates",
+    "builder_draft",
     "import_template",
     "instantiate",
     "materialize",
@@ -173,6 +176,124 @@ _BUILTINS: Dict[str, Dict[str, Any]] = {
 
 BUILTIN_TEMPLATE_IDS: Tuple[str, ...] = tuple(_BUILTINS)
 
+#: Plan templates (kit BUILD_PLAN:944): the five promised no-code presets.
+#: Stored apart from _BUILTINS so the frozen six keep their exact tuple;
+#: list_templates serves these first.
+_PLAN: Dict[str, Dict[str, Any]] = {
+    "tpl-reread-3h": {
+        "name": "re-read-3h",
+        "version": 1,
+        "description": "Re-read requirements every 3 h: watch for changes, "
+        "notify the journal.",
+        "steps": _steps(
+            ("service.watch", {"project_id": CALLER_PROJECT}, ("project_id", "changed", "checked_at")),
+            ("journal.notify", {"kind": "AUTOMATION_RUN"}, ("entry_id", "timestamp")),
+        ),
+    },
+    "tpl-checkpoint-30m": {
+        "name": "checkpoint-30m",
+        "version": 1,
+        "description": "Checkpoint every 30 min: check the API service, "
+        "notify the journal.",
+        "steps": _steps(
+            ("service.check", {"service_id": "svc-api"}, ("service_id", "state", "checked_at")),
+            ("journal.notify", {"kind": "AUTOMATION_RUN"}, ("entry_id", "timestamp")),
+        ),
+    },
+    "tpl-resume-restart": {
+        "name": "resume-restart",
+        "version": 1,
+        "description": "Resume after restart: read the apps card facts, "
+        "notify the journal.",
+        "steps": _steps(
+            ("apps.card.read", {"project_id": CALLER_PROJECT}, ("project_id", "service_ids", "paused")),
+            ("journal.notify", {"kind": "AUTOMATION_RUN"}, ("entry_id", "timestamp")),
+        ),
+    },
+    "tpl-pause-90pct": {
+        "name": "pause-90pct",
+        "version": 1,
+        "description": "Pause at 90% budget: watch for changes, notify the "
+        "journal before the pause.",
+        "steps": _steps(
+            ("service.watch", {"project_id": CALLER_PROJECT}, ("project_id", "changed", "checked_at")),
+            ("journal.notify", {"kind": "AUTOMATION_RUN"}, ("entry_id", "timestamp")),
+        ),
+    },
+    "tpl-notify-audit-fail": {
+        "name": "notify-audit-fail",
+        "version": 1,
+        "description": "Notify on audit FAIL: check the API service, notify "
+        "the journal.",
+        "steps": _steps(
+            ("service.check", {"service_id": "svc-api"}, ("service_id", "state", "checked_at")),
+            ("journal.notify", {"kind": "AUTOMATION_RUN"}, ("entry_id", "timestamp")),
+        ),
+    },
+}
+
+PLAN_TEMPLATE_IDS: Tuple[str, ...] = tuple(_PLAN)
+
+#: UI metadata per plan template: locale keys for the trigger/action chips
+#: plus the rule-builder draft that Use fills in (nothing runs until Save).
+TEMPLATE_UI: Dict[str, Dict[str, Any]] = {
+    "tpl-reread-3h": {
+        "trigger_key": "fxauto.chips.every3h",
+        "action_key": "fxauto.chips.reread",
+        "draft": {
+            "when_kind": "schedule",
+            "when_detail": "every-3h",
+            "if_text": "",
+            "do": "reread-context",
+            "miss": "once",
+        },
+    },
+    "tpl-checkpoint-30m": {
+        "trigger_key": "fxauto.chips.every30m",
+        "action_key": "fxauto.chips.checkpoint",
+        "draft": {
+            "when_kind": "schedule",
+            "when_detail": "every-30m",
+            "if_text": "",
+            "do": "checkpoint",
+            "miss": "once",
+        },
+    },
+    "tpl-resume-restart": {
+        "trigger_key": "fxauto.chips.onRestart",
+        "action_key": "fxauto.chips.checkpoint",
+        "draft": {
+            "when_kind": "event",
+            "when_detail": "app-started",
+            "if_text": "",
+            "do": "checkpoint",
+            "miss": "once",
+        },
+    },
+    "tpl-pause-90pct": {
+        "trigger_key": "fxauto.chips.budget90",
+        "action_key": "fxauto.chips.pauseProject",
+        "draft": {
+            "when_kind": "metric",
+            "when_detail": "budget-90",
+            "if_text": "",
+            "do": "pause-project",
+            "miss": "once",
+        },
+    },
+    "tpl-notify-audit-fail": {
+        "trigger_key": "fxauto.chips.auditFailed",
+        "action_key": "fxauto.chips.notify",
+        "draft": {
+            "when_kind": "event",
+            "when_detail": "audit-failed",
+            "if_text": "",
+            "do": "notify",
+            "miss": "once",
+        },
+    },
+}
+
 #: Imported templates: validated specs registered through import_template.
 _IMPORTS: Dict[str, Dict[str, Any]] = {}
 
@@ -232,19 +353,31 @@ def _validate_spec(template_id: str, spec: Any) -> Dict[str, Any]:
 
 
 def list_templates() -> Tuple[str, ...]:
-    """Built-in plus imported template ids."""
-    return tuple(_BUILTINS) + tuple(_IMPORTS)
+    """Plan templates first, then built-ins, then imports."""
+    return tuple(_PLAN) + tuple(_BUILTINS) + tuple(_IMPORTS)
+
+
+def builder_draft(template_id: str) -> Dict[str, Any]:
+    """Rule-builder draft for one template (Use fills the builder)."""
+    meta = TEMPLATE_UI.get(template_id)
+    if meta is None:
+        raise _auto_iface().AutomationError(
+            "TEMPLATE_NOT_FOUND", "unknown template %r" % (template_id,)
+        )
+    return dict(meta["draft"])
 
 
 def import_template(template_id: str, spec: Dict[str, Any]) -> str:
     """Register an imported no-code template spec (validated, else ValueError)."""
-    if template_id in _BUILTINS:
+    if template_id in _BUILTINS or template_id in _PLAN:
         raise ValueError("template id %r is built in" % (template_id,))
     _IMPORTS[template_id] = _validate_spec(template_id, spec)
     return template_id
 
 
 def _lookup(template_id: str) -> Dict[str, Any]:
+    if template_id in _PLAN:
+        return _PLAN[template_id]
     if template_id in _BUILTINS:
         return _BUILTINS[template_id]
     if template_id in _IMPORTS:

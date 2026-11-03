@@ -127,6 +127,17 @@ def get_timer(timer_id):
     return dict(rec)
 
 
+def get_metric(metric_id):
+    """Return the stored metric rule row."""
+    rec = _metrics.get(metric_id)
+    if rec is None:
+        raise _auto_iface().AutomationError(
+            code="TRIGGER_NOT_FOUND",
+            detail="metric %s unknown" % metric_id,
+        )
+    return dict(rec)
+
+
 def ledger():
     """Return the recorded action ledger, oldest first."""
     return [dict(entry) for entry in _ledger]

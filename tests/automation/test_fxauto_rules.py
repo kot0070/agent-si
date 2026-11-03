@@ -22,6 +22,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 import agent_si.automation.interface as auto_iface
+import agent_si.context_keeper.interface as ck_iface  # noqa: F401
 from agent_si.automation import pause, runner, scheduler, templates, triggers
 
 
@@ -44,10 +45,14 @@ def env(tmp_path):
     from agent_si.context_keeper import checkpoints as ckpt_home
     store = ckpt_home.Checkpoints()
     journal = []
+
+    def _hook(*args, **kwargs):
+        journal.append((args, kwargs))
+
     rules.set_context(
         {
             "checkpoints": store,
-            "journal": lambda *a: journal.append(a),
+            "journal": _hook,
             "keeper_dir": str(tmp_path / "keeper"),
         }
     )
@@ -99,7 +104,7 @@ def test_run_now_records_run_executes_checkpoint(env):
     fired = rules.fire_rule("proj-a", rule["rule_id"])
     run = fired["run"]
     assert run["state"] == "RUNNING"
-    assert "checkpoint" in fired["result"].lower()
+    assert fired["result"]["key"] == "fxauto.results.checkpoint"
     assert store.latest_for_project("proj-a") is not None
     history = runner.get_history("proj-a", run["run_id"])
     assert any("checkpoint" in entry["event"] for entry in history)
@@ -118,11 +123,12 @@ def test_run_now_uses_templates_checkpoint_every_30m(env):
     fired = rules.fire_rule("proj-a", rule["rule_id"])
     assert store.latest_for_project("proj-a") is not None
     assert fired["run"]["state"] == "RUNNING"
+    assert fired["result"]["key"] == "fxauto.results.checkpoint"
 
 
 def test_due_timer_fires_on_tick(env):
     rules, _actions, _journal, store = env
-    rule = _schedule(env)
+    rule = _schedule(env, now=0.0)
     out = rules.tick(now=10_000.0)
     assert len(out) == 1
     assert store.latest_for_project("proj-a") is not None
@@ -176,7 +182,7 @@ def test_strong_action_waits_for_approval_then_pauses(env):
     rule = _schedule(env, do="pause-project", when_detail="every-3h")
     fired = rules.fire_rule("proj-a", rule["rule_id"])
     assert fired["approval"] is not None
-    assert "approval" in fired["result"].lower()
+    assert fired["result"]["key"] == "fxauto.results.waitingApproval"
     assert pause.is_effective("proj-a") is False
     pending = rules.list_approvals("proj-a")
     assert len(pending) == 1
@@ -184,7 +190,7 @@ def test_strong_action_waits_for_approval_then_pauses(env):
         "proj-a", pending[0]["approval_id"], True
     )
     assert pause.is_effective("proj-a") is True
-    assert "paus" in decided["result"].lower()
+    assert decided["result"]["key"] == "fxauto.results.paused"
 
 
 def test_metric_rule_fires_on_forced_reading(env):
@@ -198,7 +204,7 @@ def test_metric_rule_fires_on_forced_reading(env):
     )
     fired = rules.fire_rule("proj-a", rule["rule_id"])
     assert fired["run"]["state"] == "RUNNING"
-    assert "notif" in fired["result"].lower()
+    assert fired["result"]["key"] == "fxauto.results.notified"
 
 
 def test_metric_tick_uses_live_source(env):
@@ -242,7 +248,7 @@ def test_rules_survive_save_load(tmp_path, env):
     rules.set_context(
         {
             "checkpoints": store,
-            "journal": lambda *a: None,
+            "journal": lambda *a, **k: None,
             "keeper_dir": None,
         }
     )
@@ -262,9 +268,9 @@ def test_run_history_lists_rule_state_plain_result(env):
     assert len(rows) == 1
     row = rows[0]
     assert row["rule"] == "half-hour checkpoint"
-    assert row["state"] == "RUNNING"
-    assert isinstance(row["result"], str) and row["result"] != ""
-    assert "AUTOMATION" not in row["result"]
+    assert row["state"] == "Running"
+    assert isinstance(row["result"], dict) and row["result"]["key"] != ""
+    assert "AUTOMATION" not in row["result"]["key"]
     assert row["run_id"] == fired["run"]["run_id"]
 
 
