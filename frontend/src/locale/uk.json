@@ -946,6 +946,10 @@
     },
     "routing": {
       "autoWhy": "Авто: найдешевша відома ціна серед підключених провайдерів."
+    },
+    "tabs": {
+      "scrollPrev": "Show earlier tabs",
+      "scrollNext": "Show later tabs"
     }
   }
 }

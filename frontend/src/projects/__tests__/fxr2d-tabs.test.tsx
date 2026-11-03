@@ -1,5 +1,6 @@
-// U1: project tab strip reads as quiet text tabs that wrap to more
-// lines — no boxed scroll row, no thick scrollbar, no solid repaint.
+// FXLOOK D1 supersedes U1: 16 tabs in 3 wrapped rows hid the working
+// area, so the strip is ONE scrolled row (nowrap lane + arrows), never
+// wrapped text. Reason: owner-found D1 (tabs wrapped to ~200px/3 rows).
 /** @vitest-environment jsdom */
 import { describe, expect, it } from 'vitest';
 // @ts-ignore: node fs available offline in this repo's tests
@@ -8,9 +9,9 @@ import { readFileSync } from 'node:fs';
 const css = readFileSync('src/projects/projectview.css', 'utf8');
 
 describe('U1 quiet wrapping tab strip', () => {
-  it('tab row wraps with no sideways scroll', () => {
-    expect(css).toMatch(/\.fxpv-tabs\s*\{[^}]*flex-wrap:\s*wrap/);
-    expect(css).toMatch(/\.fxpv-tabs\s*\{[^}]*overflow-x:\s*visible/);
+  it('tab row never wraps: one nowrap lane with sideways scroll', () => {
+    expect(css).toMatch(/\.fxpv-tabs\s*\{[^}]*flex-wrap:\s*nowrap/);
+    expect(css).toMatch(/\.fxpv-tabs-scroll\s*\{[^}]*overflow-x:\s*auto/);
   });
 
   it('tabs are quiet text: no box, no solid repaint on hover', () => {

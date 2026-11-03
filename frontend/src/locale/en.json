@@ -946,6 +946,10 @@
     },
     "routing": {
       "autoWhy": "Auto: cheapest known price among connected providers."
+    },
+    "tabs": {
+      "scrollPrev": "Show earlier tabs",
+      "scrollNext": "Show later tabs"
     }
   }
 }

@@ -254,7 +254,9 @@ div[data-testid="pairing-strip"] > [data-testid="pairing-badge"] {
 }
 
 /* FXDESIGN1 S1: project tabs read as tabs. */
-nav [data-testid^="project-menu-"] {
+/* FXLOOK D7: the chat tab is a real tab too (same border + fill). */
+nav [data-testid^="project-menu-"],
+nav button[data-testid="project-chat-tab"] {
   display: inline-block;
   padding: 6px 12px;
   margin-right: 4px;
@@ -265,6 +267,18 @@ nav [data-testid^="project-menu-"] {
   border-radius: 8px 8px 0 0;
   text-decoration: none;
   cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* FXLOOK D7: the selected project tab (chat included) reads selected
+   on every route, even where projectview.css never loads. */
+nav button[data-testid="project-chat-tab"].fxpv-tab-selected,
+nav [data-testid^="project-menu-"].fxpv-tab-selected {
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  border-color: var(--fx-accent);
 }
 
 /* FXSMALL W13: one shared hover for every project tab (chat + 15 views).
