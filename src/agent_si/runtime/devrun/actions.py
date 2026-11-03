@@ -858,9 +858,6 @@ class _ExecTool:
             if venv_bin is not None:
                 env["PATH"] = (venv_bin + os.pathsep
                                + env.get("PATH", ""))
-            flags = 0
-            if os.name == "nt":
-                flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
             try:
                 with _retry_av_lock(
                         lambda: open(log_path, "ab")) as handle:
@@ -873,7 +870,7 @@ class _ExecTool:
                         stdout=handle,
                         stderr=subprocess.STDOUT,
                         env=env,
-                        creationflags=flags,
+                        creationflags=_proc_tree.quiet_flags(),
                     )
             except FileNotFoundError:
                 raise SpawnNotInstalled(

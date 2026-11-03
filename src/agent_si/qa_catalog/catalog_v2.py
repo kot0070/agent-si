@@ -17,6 +17,8 @@ import subprocess
 import sys
 import time
 
+from agent_si.backend.proc_tree import quiet_flags
+
 CATALOG_VERSION = 2
 
 CODE_KINDS = ("CODE-STATIC", "CODE-RUNTIME", "CODE-UI")
@@ -597,6 +599,7 @@ def _kill_tree(proc) -> None:
                 ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
                 capture_output=True,
                 timeout=10,
+                creationflags=quiet_flags(),
             )
         else:
             import signal
@@ -700,6 +703,7 @@ def run_code_test(test_id: str, project_root: str, evidence_dir: str, budgets=No
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=root,
+            creationflags=quiet_flags(),
         )
     except Exception as exc:
         return _refusal(test_id, runner, "BLOCKED", "host_spawn_failed: %s" % exc)
