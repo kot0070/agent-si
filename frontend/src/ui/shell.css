@@ -159,6 +159,16 @@ span[data-testid="kit-collapsed-line"] {
   border-radius: 6px;
 }
 
+/* FXSMALL W04: the theme toggle hovers to the primary-hover fill with the
+   primary ink (token pair, >=4.5:1 both themes). The generic button:hover
+   would keep the dark ink on the fill (2.05:1 in the light theme). Quiet
+   and danger topbar buttons keep their own more specific hover rules. */
+.fx-topbar button[data-testid="theme-toggle"]:hover:not(:disabled) {
+  background-color: var(--fx-btn-primary-hover);
+  border-color: var(--fx-btn-primary-hover);
+  color: var(--fx-btn-primary-ink);
+}
+
 /* Inspector cards: compact sections with a one-line subtitle. */
 div[data-testid^="inspector-card-"] > p[data-testid$="-sub"] {
   opacity: 0.8;
@@ -257,9 +267,20 @@ nav [data-testid^="project-menu-"] {
   cursor: pointer;
 }
 
-nav [data-testid^="project-menu-"]:hover {
-  border-color: var(--fx-accent);
-  color: var(--fx-accent);
+/* FXSMALL W13: one shared hover for every project tab (chat + 15 views).
+   The chat route never loads projectview.css, so the always-loaded shell
+   owns the hover: the fill repaints to the primary-hover token with the
+   primary ink (>=4.5:1 both themes, tokens only, no one-off colours), so
+   rest and hover never compute the same on any route. Specificity beats
+   both the global button:hover fill and the projectview quiet hover, so
+   every tab computes the same restyle on every route. */
+nav.fxpv-tabs button[data-testid="project-chat-tab"]:hover:not(:disabled),
+nav.fxpv-tabs button[data-testid^="project-menu-"]:hover:not(:disabled) {
+  background-color: var(--fx-btn-primary-hover);
+  border-color: var(--fx-btn-primary-hover);
+  color: var(--fx-btn-primary-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 nav [data-testid^="project-menu-"]:focus-visible {
@@ -1024,6 +1045,15 @@ button[data-testid="hierarchy-collapsed"]:hover:not(:disabled) {
   text-underline-offset: 3px;
   min-height: 32px;
   cursor: pointer;
+}
+
+/* FXSMALL W04: the language select paints the surface token instead of
+   staying transparent, so rest + hover + focus resolve the ink-on-surface
+   token pair (>=4.5:1 both themes) instead of a sampled pixel blend (4.25:1
+   in the light theme). Visually identical: the strip behind it is the
+   surface. Tokens only, no one-off colours. */
+.fx-topbar .fx-topbar-language select.fx-topbar-control {
+  background-color: var(--fx-surface);
 }
 
 .fx-topbar button.fx-btn-quiet {

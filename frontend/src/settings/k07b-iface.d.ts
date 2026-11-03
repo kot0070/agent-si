@@ -660,6 +660,8 @@ export type LocaleKey =
   | 'watcher.tab.modelCalls'
   | 'watcher.tab.modelTokens'
   | 'watcher.tab.notKnown'
+  | 'watcher.tab.noActionYet'
+  | 'watcher.tab.noChecksYet'
   | 'watcher.tab.rulesTitle'
   | 'watcher.tab.watches'
   | 'watcher.tab.ok'

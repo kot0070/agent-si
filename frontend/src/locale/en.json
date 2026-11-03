@@ -388,6 +388,8 @@
       "modelOff": "Off",
       "fallbackNote": "Off means the watcher never uses cloud models.",
       "notKnown": "not known",
+      "noChecksYet": "No checks yet",
+      "noActionYet": "No action yet",
       "checks": "Rule checks",
       "alerts": "Alerts",
       "lastCheck": "Last check",
