@@ -4113,20 +4113,22 @@ def _apply_actions(*, record: Any, row: Any, folder: str, project: str,
                    repeat_counts: dict | None = None,
                    lock: Any = None,
                    _notes_prefix: Any = None,
-                   _stop_prefix: Any = None) -> Any:
+                   _stop_prefix: Any = None,
+                   _refusals_prefix: Any = None) -> Any:
     """Apply one worker turn; every refusal returns as text.
 
     Returns (notes, stop_note): notes feed the worker's next turn;
     stop_note carries the honest line when one identical failing run
     call hit three times, ending the attempt. Only run actions count
     (read-only calls stay free); different args never collide.
-    The _notes_prefix/_stop_prefix pair resumes a turn parked on an
-    install ask (FXASK A8) with identical text and stop semantics.
+    The _notes_prefix/_stop_prefix/_refusals_prefix triple resumes a
+    turn parked on an install ask (FXASK A8) with identical text, stop
+    and refusal semantics.
     """
     from agent_si.runtime.devrun import actions as _actions
 
     notes: list[str] = list(_notes_prefix or [])
-    refusals: list[str] = []
+    refusals: list[str] = list(_refusals_prefix or [])
     counts = repeat_counts if isinstance(repeat_counts, dict) else {}
     stop_note: str | None = (
         str(_stop_prefix) if _stop_prefix is not None else None)
