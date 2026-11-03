@@ -100,7 +100,6 @@ export function LeftoverFinder({
                 {linked ? (
                   <span title={t("providers.leftover.inUseTitle")}>{t("providers.leftover.inUse")}</span>
                 ) : (
-                  {/* FXBTN: one spaced action row; cancel reads quiet. */}
                   <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
                     <button
                       type="button"
