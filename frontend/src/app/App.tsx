@@ -67,6 +67,7 @@ import { BenchGatewayCheck } from "../k07next2/BenchGatewayCheck";
 import { TelemetrySummary } from "../k07next2/TelemetrySummary";
 import { BenchHistoryList } from "../k07next3/BenchHistoryList";
 import { DiagnosticsSection } from "../settings/DiagnosticsSection";
+import { QaCatalogSection } from "../settings/QaCatalogSection";
 import { WatcherTab } from "../watcher/WatcherTab";
 import { KbRefreshProposal } from "../k07next2/KbRefreshProposal";
 
@@ -694,6 +695,10 @@ function SettingsSectionRoute(): ReactElement {
       ) : route.path === "localbench" ? (
         <span data-testid="settings-section-body">
           <LocalBenchTab client={new HttpLocalBenchClient()} />
+        </span>
+      ) : route.path === "qacatalog" ? (
+        <span data-testid="settings-section-body">
+          <QaCatalogSection />
         </span>
       ) : route.path === "models" || route.path === "routing" ? (
         <span data-testid="settings-section-body">

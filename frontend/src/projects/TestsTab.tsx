@@ -15,7 +15,7 @@ import { useEffect, useState } from "react";
 import type { ReactElement } from "react";
 import { ApiError, apiErrorLocaleKey } from "../api/errors";
 import { backoffForFailures, isHiddenTick, onVisible } from "../api/polling";
-import { t } from "../locale/index";
+import { t, useLocale } from "../locale/index";
 import { EmptyState } from "../ui/EmptyState";
 import { ErrorPanel } from "../ui/ErrorPanel";
 import { LoadingState } from "../ui/LoadingState";
@@ -23,9 +23,10 @@ import {
   readLatestPlan,
   readLatestRun,
   readResultOutput,
+  readTestBases,
   readTestsView,
 } from "./projectsApi";
-import type { TestsView } from "./projectsApi";
+import type { TestBase, TestsView } from "./projectsApi";
 
 export interface TestsTabProps {
   projectId: string;
@@ -66,6 +67,7 @@ function testKindText(kind: string | undefined): string {
 }
 
 export function TestsTab(props: TestsTabProps): ReactElement {
+  const { locale } = useLocale();
   const [phase, setPhase] = useState<
     | { kind: "loading" }
     | { kind: "empty" }
@@ -75,6 +77,13 @@ export function TestsTab(props: TestsTabProps): ReactElement {
   const [nonce, setNonce] = useState(0);
   const [outputs, setOutputs] = useState<Record<string, string>>({});
   const [opening, setOpening] = useState<Record<string, boolean>>({});
+  // FXQACAT rail header: served bases plus the last plan name and the
+  // served start time. Bases are supplementary: a failed bases read leaves
+  // the tab on its served counters (no failure flip, no logging), exactly
+  // like the empty state on a new project.
+  const [headerBases, setHeaderBases] = useState<TestBase[] | null>(null);
+  const [lastPlan, setLastPlan] = useState<string | null>(null);
+  const [lastStartedAt, setLastStartedAt] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -84,6 +93,12 @@ export function TestsTab(props: TestsTabProps): ReactElement {
         const run = await readLatestRun(props.projectId);
         const view = await readTestsView(plan.plan_id, run.run_id);
         if (alive) {
+          setLastPlan(plan.plan_id);
+          setLastStartedAt(
+            typeof run.started_at === "string" && run.started_at !== ""
+              ? run.started_at
+              : null,
+          );
           setPhase({ kind: "ready", view });
         }
       } catch (error) {
@@ -94,6 +109,16 @@ export function TestsTab(props: TestsTabProps): ReactElement {
           setPhase({ kind: "empty" });
         } else {
           setPhase({ kind: "failed", failure: toTestsFailure(error) });
+        }
+      }
+      try {
+        const bases = await readTestBases();
+        if (alive) {
+          setHeaderBases(bases.bases);
+        }
+      } catch {
+        if (alive) {
+          setHeaderBases(null);
         }
       }
     }
@@ -198,6 +223,20 @@ export function TestsTab(props: TestsTabProps): ReactElement {
     <section data-testid="tests-tab">
       <h2>{t("projects.tests.title")}</h2>
       <p data-testid="tests-explainer">{t("projects.tests.explainer")}</p>
+      {headerBases !== null ? (
+        <p data-testid="tests-bases">
+          {headerBases.map((row) => `${row.base_id} (${row.kind})`).join(", ")}
+        </p>
+      ) : null}
+      {lastPlan !== null ? (
+        <p data-testid="tests-last-plan">
+          {lastPlan}
+          {lastStartedAt !== null ? ` · ${lastStartedAt}` : ""}
+        </p>
+      ) : null}
+      <a data-testid="tests-catalog-link" href="/settings/qacatalog">
+        {locale === "uk" ? "База тестів" : "Test catalog"}
+      </a>
       {phase.kind === "loading" ? (
         <LoadingState loadingKey="ui.loading.more" />
       ) : phase.kind === "empty" ? (

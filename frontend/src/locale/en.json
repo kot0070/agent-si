@@ -308,6 +308,11 @@
     "providers": {
       "searchPlaceholder": "Search providers or models"
     },
+    "qacatalog": {
+      "needItNow": "Only to inspect which tests the app runs.",
+      "purpose": "Which test catalog the app runs, and its versions.",
+      "title": "Test catalog"
+    },
     "routing": {
       "needItNow": "Only when a routing choice surprises you.",
       "purpose": "How tasks reach models.",
