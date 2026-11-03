@@ -401,8 +401,9 @@ __all__ = [
 # numbers are per-1M-tokens exactly as the pricing pages state
 # them; no unit conversion is applied. Proposal envelopes are
 # the provider docs base when that base is allowlisted, else
-# STAGED_SECTION_ENVELOPE (the frozen allowlist has no entry
-# for 12 of the 16 staged providers); per-field change sources
+# the shipped-copy marker ("shipped copy from <date>": the
+# frozen allowlist has no own entry for 7 of the 16 staged
+# providers); per-field change sources
 # always carry the true section-cited URL.
 STAGED_SECTIONS_RETRIEVED_AT = "2026-10-11"
 STAGED_SECTION_ENVELOPE = "https://platform.openai.com/docs"
@@ -577,23 +578,21 @@ STAGED_MANIFEST_SOURCES = [
     "https://x.ai/news/grok-4",
 ]
 STAGED_PROVIDER_ENVELOPES = {
-    "anthropic": "https://platform.openai.com/docs",
-    "azure-openai": "https://platform.openai.com/docs",
-    "bedrock": "https://platform.openai.com/docs",
-    "cohere": "https://platform.openai.com/docs",
-    "deepseek": "https://platform.openai.com/docs",
-    "fireworks": "https://platform.openai.com/docs",
-    "google": "https://platform.openai.com/docs",
-    "groq": "https://console.groq.com/docs/model/openai/gpt-oss-120b",
-    "local": "https://platform.openai.com/docs",
-    "meta": "https://platform.openai.com/docs",
+    "anthropic": "https://docs.anthropic.com",
+    "deepseek": "https://docs.deepseek.com",
+    "google": "https://cloud.google.com/vertex-ai/docs",
+    "groq": "https://console.groq.com/docs",
+    "local": "https://ollama.com/docs",
+    "meta": "https://dev.meta.ai/docs",
     "mistral": "https://docs.mistral.ai/models/mistral-large-4-0",
-    "openai": "https://platform.openai.com/docs/models/gpt-6-astra",
-    "openrouter": "https://platform.openai.com/docs",
-    "perplexity": "https://platform.openai.com/docs",
-    "together": "https://platform.openai.com/docs",
+    "openai": "https://platform.openai.com/docs",
     "xai": "https://docs.x.ai/docs/models/grok-4.7",
 }
+for _pid in ("azure-openai", "bedrock", "cohere", "fireworks",
+             "openrouter", "perplexity", "together"):
+    STAGED_PROVIDER_ENVELOPES[_pid] = (
+        "shipped copy from " + STAGED_SECTIONS_RETRIEVED_AT)
+del _pid
 _STAGED_SECTION_ROWS = {
     "anthropic": [
         ("claude-fable-5-1", {
