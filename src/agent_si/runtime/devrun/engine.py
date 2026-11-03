@@ -60,7 +60,7 @@ class _InstallHeld(Exception):
 
     def __init__(self, tool_id: str, command: str) -> None:
         super().__init__(
-            "run held: install permission needed for %s" % (tool_id,))
+            "run held: waiting for your permission to run %s" % (command,))
         self.tool_id = str(tool_id)
         self.command = str(command)
 
@@ -2080,7 +2080,7 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                 project_id=project, run_id=run_id, task_id=task_id)
         _close_live("BLOCKED")
         _journal("DEVRUN_END", _end_summary())
-        status = "Needs your permission to install: %s" % (exc.command,)
+        status = "Waiting for your permission to run %s." % (exc.command,)
         yield _run_event("delta", turn, task_id, status,
                          {"run_id": run_id})
         turn += 1
@@ -2088,13 +2088,15 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                          _ledger_total_line(record),
                          {"run_id": run_id})
         turn += 1
-        yield _run_event("delta", turn, task_id, record["summary"],
+        yield _run_event("delta", turn, task_id, status,
                          {"run_id": run_id,
                           "success": bool(record.get("success"))})
         turn += 1
+        # FXBTN: the id rides the record field + data.tool_id, never the
+        # text: the approval reason is the same waiting line the user sees.
         yield _run_event("approval", turn, task_id, status,
                          {"run_id": run_id, "tool_id": exc.tool_id,
-                          "reason": record["summary"]})
+                          "reason": status})
     except GeneratorExit:
         # FXPARALLEL BEGIN disconnect: latch abort so part threads see
         # it; _run_parts joins them on its way out.
