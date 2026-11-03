@@ -2385,13 +2385,11 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
           the h1 stays in the DOM for the frozen heading contract but reads
           as plain conversation (visually hidden). */}
       <h1 className="fx-vh">{t("shell.sidebar.chat")}</h1>
-      <HierarchyRows
-        projectId={props.projectId}
-        onExpandedChange={setHierExpanded}
-      />
+      {/* FXLOOK D2: the stream lane holds messages only; the hierarchy
+          strip lives in the composer tray below, so the message lane is
+          the single scroller of the column. */}
       <div
         data-testid="chat-layout"
-        style={{ maxHeight: "calc(100vh - 200px)" }}
       >
         <div
           data-testid="chat-messages"
@@ -2642,6 +2640,15 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
             inside, the send as an icon button inside right; a small status
             line under it (model | route | working state). */}
         <div data-testid="chat-composer" className="fx-composer">
+          {/* FXLOOK D2: the `Director: Auto ...` strip folds into the
+              composer tray: one line at most (CSS ellipsis), so the
+              column stays stream + pinned composer. */}
+          <div data-testid="chat-tray" className="fx-composer-tray">
+            <HierarchyRows
+              projectId={props.projectId}
+              onExpandedChange={setHierExpanded}
+            />
+          </div>
           <div>
             <span>{t("settings.project.team")}</span>
             <button

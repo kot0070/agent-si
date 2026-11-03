@@ -528,7 +528,7 @@ function ChatTabRoute(): ReactElement {
     return <ProjectsPageView />;
   }
   return (
-    <div>
+    <div className="fx-chat-route">
       <div data-testid="chat-route-head" className="fx-chat-head">
         <span data-testid="chat-route-project">
           {projectName ?? projectId}

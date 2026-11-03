@@ -516,10 +516,54 @@ div[data-testid="chat-layout"] {
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
+  max-height: calc(100vh - 200px);
   width: 100%;
   max-width: 900px;
   margin-left: auto;
   margin-right: auto;
+}
+
+/* FXLOOK D2: the project chat route is a bounded full-height column —
+   head on top, the stream lane takes the free space and is the ONLY
+   scroller, the composer pins to the column bottom. The page itself
+   never scrolls on this route: the column reserves the shell chrome
+   (top bar, main padding, route head) instead of growing past it. */
+.fx-chat-route {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: calc(100vh - 190px);
+}
+
+.fx-chat-route > section[data-testid="chat-area"] {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.fx-chat-route div[data-testid="chat-layout"] {
+  max-height: none;
+}
+
+.fx-chat-route div[data-testid="chat-composer"] {
+  flex: 0 0 auto;
+}
+
+/* FXLOOK D2: the hierarchy strip folded into the composer tray reads
+   as one line at most; the full text rides the title tooltip. */
+.fx-composer-tray {
+  min-width: 0;
+}
+
+.fx-composer-tray section[data-testid="hierarchy"] {
+  min-width: 0;
+}
+
+.fx-composer-tray button[data-testid="hierarchy-collapsed"] {
+  display: block;
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 div[data-testid="chat-messages"] {
