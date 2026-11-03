@@ -1168,6 +1168,20 @@ def create_app(settings: Any = None,
                 return "memory"
             if _low == "os":
                 return "os"
+        # FXSTORE: test-only window isolation. AGENT_SI_SECRET_STORE is
+        # read from the process environment (never from a route or a
+        # screen) when the app is created; the value "memory"
+        # (case-insensitive, trimmed) selects the memory stack so keyed
+        # windows no longer share the OS credential store. Explicit
+        # settings win over env, env wins over the default; any other
+        # or unset value keeps the OS default.
+        try:
+            _env_raw = _k04_os.environ.get("AGENT_SI_SECRET_STORE", "")
+        except Exception:
+            _env_raw = ""
+        if isinstance(_env_raw, str) and _env_raw.strip().lower() \
+                == "memory":
+            return "memory"
         if isinstance(_settings, Mapping):
             if _settings.get("testing") is True:
                 return "memory"
