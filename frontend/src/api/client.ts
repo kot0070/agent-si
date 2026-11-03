@@ -221,7 +221,7 @@ export class HttpApiClient implements ApiClient {
             return;
           }
           case "error": {
-            throw apiErrorFromCode(wire.code, status);
+            throw chatStreamError(status, wire);
           }
           case "approval": {
             // FXASK2: the approval event carries the held tool's id
@@ -352,6 +352,30 @@ function invalidInput(): ApiError {
 // FXASK2: approval hold as an error carrying the held tool's id from
 // the wire event (guard tool_name). The id travels on the error so the
 // chat dialog and the task-run path run the same per-tool check.
+// FXSTORE: a chat-stream error terminal carries the served code plus
+// the routed provider id (ids only). The provider rides the error so
+// the chat names a missing key plainly, with a Settings link.
+function chatStreamError(
+  status: number,
+  wire: { code?: string; provider_id?: unknown },
+): ApiError {
+  const raw =
+    typeof wire.code === "string" && wire.code !== ""
+      ? wire.code
+      : "CONTEXT_WRONG_CONTRACT_VERSION";
+  const err = apiErrorFromCode(raw, status);
+  if (
+    typeof wire.provider_id === "string" &&
+    wire.provider_id !== ""
+  ) {
+    return new ApiError(err.code, err.status, {
+      ...err.details,
+      providerId: wire.provider_id,
+    });
+  }
+  return err;
+}
+
 function approvalRequired(status: number, toolId: unknown): ApiError {
   if (typeof toolId === "string" && toolId !== "") {
     return new ApiError("APPROVAL_REQUIRED", status, { toolId });

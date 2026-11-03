@@ -65,6 +65,10 @@ import {
 } from "../agents/agentsApi";
 import type { Placement } from "../agents/agentsApi";
 import { listConnectedProviders } from "../settings/ProvidersPage/connectApi";
+import {
+  getPreset,
+  getProviderCatalog,
+} from "../settings/ProvidersPage/catalog";
 import { readRoleProfiles } from "../settings/index";
 import { readTeamMode, saveTeamMode } from "../settings/projectLimitsApi";
 import { Icon } from "../ui/icons";
@@ -90,6 +94,27 @@ interface BlockingError {
   code: string;
   /** Failed task text for the one-line error ("which step"), if known. */
   task?: string;
+  /** FXSTORE: routed provider id on secret-store terminals (ids only). */
+  providerId?: string;
+}
+
+/** FXSTORE: product label for a provider id (locale-independent names:
+ * "Meta" reads the same in en and uk). Unknown ids pass through, so
+ * the line never hides which key is missing. */
+function providerLabel(providerId: string | undefined): string {
+  const id = (providerId ?? "").trim();
+  if (id === "") {
+    return "provider";
+  }
+  try {
+    const found = getPreset(getProviderCatalog(), id);
+    if (found !== undefined) {
+      return found.label;
+    }
+  } catch {
+    // Catalog unreadable: the raw id still names the key.
+  }
+  return id;
 }
 
 // FXCHATHIST Part 2: the store slice is session-scoped. The store itself
@@ -1096,6 +1121,16 @@ function chatErrorText(
   ) {
     return t("chat.error.noProvider");
   }
+  // FXSTORE: a gone key names the provider plainly (with a Settings
+  // link next to Retry); an unreadable store says so, never a missing key.
+  if (blocking.code === "SECRET_VALUE_MISSING") {
+    return t("chat.error.keyMissing", {
+      label: providerLabel(blocking.providerId),
+    });
+  }
+  if (blocking.code === "CREDENTIAL_STORE_UNREADABLE") {
+    return t("chat.error.storeUnreadable");
+  }
   const raw = blocking.task ?? prompt ?? "";
   const step =
     raw.trim() !== "" ? ` — task "${raw.trim().slice(0, 140)}"` : "";
@@ -1240,6 +1275,11 @@ function handleRunError(
       errorKey: apiErrorLocaleKey(error.code),
       code: error.code,
       ...(record === undefined ? {} : { task: record.prompt }),
+      // FXSTORE: the routed provider id rides along so the banner
+      // names the missing key instead of a generic line.
+      ...(error.details?.providerId === undefined
+        ? {}
+        : { providerId: error.details.providerId }),
     });
   } else {
     emitBlocking(key, {
@@ -1497,11 +1537,13 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
   );
   // No model bound: the draft text stays so the user can connect a
   // provider and send the same task again. Never clobbers text the
-  // user typed after the send.
+  // user typed after the send. FXSTORE: a gone key restores the draft
+  // too (reconnect, then send the same task again).
   useEffect(() => {
     if (
       blocking !== null &&
-      blocking.code === "NO_PROVIDER_BOUND" &&
+      (blocking.code === "NO_PROVIDER_BOUND" ||
+        blocking.code === "SECRET_VALUE_MISSING") &&
       blocking.task !== undefined &&
       blocking.task.trim() !== "" &&
       draft.trim() === ""
@@ -2566,8 +2608,9 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
               </button>
               {/* A2: the no-provider notice carries one action that gets
                   the user connected, next to Retry (same target as the
-                  composer hint). */}
+                  composer hint). FXSTORE: a gone key links Settings too. */}
               {blocking.code === "NO_PROVIDER_BOUND" ||
+              blocking.code === "SECRET_VALUE_MISSING" ||
               blocking.errorKey === "firstrun.steps.connectProvider" ? (
                 <a
                   data-testid="kit-error-connect"
