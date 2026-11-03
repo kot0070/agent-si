@@ -7,7 +7,9 @@ import { describe, expect, it } from "vitest";
 // @ts-ignore: node types unavailable offline
 import { readdirSync, readFileSync, statSync } from "node:fs";
 // @ts-ignore: node types unavailable offline
+// @ts-ignore: node types unavailable offline
 import { join, relative } from "node:path";
+// @ts-ignore: node types unavailable offline
 import { fileURLToPath } from "node:url";
 
 const FRONTEND = fileURLToPath(new URL("../../..", import.meta.url));
