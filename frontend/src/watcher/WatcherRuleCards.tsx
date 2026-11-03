@@ -161,8 +161,8 @@ export function WatcherRuleCards(props: {
   }
 
   return (
-    <section data-testid="watcher-rule-cards">
-      <h3 data-testid="watcher-rule-cards-title">
+    <section data-testid="watcher-fxrules">
+      <h3 data-testid="watcher-fxrules-title">
         {t("watcher.page.rulesTitle")}
       </h3>
       <label>

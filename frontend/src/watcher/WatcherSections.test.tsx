@@ -22,7 +22,7 @@ describe("WatcherSections (RED: aggregator missing)", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     render(<WatcherSections projectId="proj-s" />);
-    expect(screen.getByTestId("watcher-rule-cards")).toBeTruthy();
+    expect(screen.getByTestId("watcher-fxrules")).toBeTruthy();
     expect(screen.getByTestId("watcher-presets")).toBeTruthy();
     expect(screen.getByTestId("watcher-alerts-section")).toBeTruthy();
     expect(screen.getByTestId("watcher-apps")).toBeTruthy();

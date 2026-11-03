@@ -238,7 +238,7 @@ export function WatcherAlerts(props: { projectId: string }): React.JSX.Element {
           </div>
         ) : null}
       </div>
-      <div data-testid="watcher-integrity">
+      <div data-testid="watcher-integrity-box">
         <button
           type="button"
           data-testid="watcher-integrity-check"
