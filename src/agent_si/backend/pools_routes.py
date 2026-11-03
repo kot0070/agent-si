@@ -552,7 +552,7 @@ def _enabled_allows(ctx: RoutingCtx, provider: Any,
     pid = str(provider)
     enabled = _model_lists.load_enabled(state_dir, pid)
     if enabled is None:
-        if provider_id in LOCAL_PROVIDER_IDS:
+        if pid in _provider_routes.LOCAL_PROVIDER_IDS:
             names = _local_model_names(pid)
             if names is None:
                 return None
