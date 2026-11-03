@@ -873,11 +873,11 @@ def test_u8_check_line_names_tool_not_path(tmp_path):
 
 def test_j4_total_line_no_bare_unknown(tmp_path):
     first, _second = _u8_two_turns(tmp_path)
-    totals = [d for d in first if "tokens; cost:" in d]
+    totals = [d for d in first if "tokens; cost" in d]
     assert totals, first
     assert totals == [
         "Total: 0 input + 0 output = 0 tokens; "
-        "cost: cost not known (no price)\n"], totals
+        "cost not known (no price)\n"], totals
     joined = "\n".join(first)
     assert "UNKNOWN" not in joined, joined
 

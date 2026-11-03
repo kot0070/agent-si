@@ -863,8 +863,13 @@ def _ledger_total_line(record: Any) -> str:
             priced = amount if priced is None else priced + amount
     except Exception:
         unknown = True
-    cost_text = ("cost not known (no price)"
-                 if unknown or priced is None else str(priced))
+    # FXBTN: the unknown-price line renders the not-known phrase once,
+    # never "cost: cost ...".
+    if unknown or priced is None:
+        return ("Total: %d input + %d output = %d tokens; "
+                "cost not known (no price)"
+                % (total_in, total_out, total_in + total_out))
+    cost_text = str(priced)
     return ("Total: %d input + %d output = %d tokens; cost: %s"
             % (total_in, total_out, total_in + total_out, cost_text))
 
