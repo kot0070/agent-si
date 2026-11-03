@@ -770,6 +770,9 @@
     "folder": {
       "choose": "Choose folder",
       "missing": "Project folder not found: {path}. Choose another folder in Projects."
+    },
+    "details": {
+      "open": "Project details"
     }
   },
   "agents": {

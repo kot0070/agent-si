@@ -253,6 +253,16 @@ div[data-testid="pairing-strip"] > [data-testid="pairing-badge"] {
   border-radius: 999px;
 }
 
+/* FXLOOK D8: chat route head is one line: project name + quiet
+   Project-details button. */
+.fx-chat-head {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.25rem 0;
+}
+
 /* FXDESIGN1 S1: project tabs read as tabs. */
 /* FXLOOK D7: the chat tab is a real tab too (same border + fill). */
 nav [data-testid^="project-menu-"],
