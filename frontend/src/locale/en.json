@@ -638,7 +638,9 @@
       "allowProject": "For this project",
       "deny": "Deny",
       "allowed": "Install permission granted for {command}",
-      "denied": "Install permission denied for {command}"
+      "denied": "Install permission denied for {command}",
+      "deniedRun": "Stopped: you denied {command}. Nothing was installed.",
+      "waitingHold": "Waiting for your permission to run {command}."
     },
     "run": {
       "emptyPlan": "Nothing was built — the plan had no parts. Say what you want built, for example: “{example}”",
