@@ -1031,7 +1031,7 @@ def _t9_fold(text):
     # nothing under the sandbox PATH); fold it so the safety switch
     # compares order plus shape, not the machine's python location.
     # The class includes the space: some machines resolve the
-    # interpreter under a profile dir like "C:\Users\PC IA\...".
+    # interpreter under a profile dir like "C:\Users\<name>\...".
     text = re.sub(r"[A-Za-z]:[\\\w\-.\\/ ]*python(\.exe)?",
                   "python", text, flags=re.IGNORECASE)
     return re.sub(r"[0-9a-f]{8,}", "H", text)
