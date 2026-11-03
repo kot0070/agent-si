@@ -96,7 +96,7 @@ describe("FXB1 R05 history text", () => {
     expect(screen.getByTestId("run-steps").hasAttribute("hidden")).toBe(false);
     expect(normalizedText(await screen.findByTestId("run-verdict").then(
       (el) => el.textContent,
-    ))).toContain("Done");
+    ))).toContain("Nothing was built");
   });
 
   it("engine logs stay collapsed behind Details", async () => {
@@ -116,7 +116,7 @@ describe("FXB1 R05 history text", () => {
       <EngineTurnView text={"log line 1\nlog line 2"} status="ok" />,
     );
     expect(normalizedText(container.textContent)).toBe(
-      "Done — 0 parts, 0 passed, files: none listed. " +
+      "Nothing was built — the plan had no parts. Say what you want built, for example: “Add a contact page with a test.”. " +
         "Details log line 1 log line 2",
     );
   });

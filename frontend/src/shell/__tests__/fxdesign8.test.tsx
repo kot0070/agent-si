@@ -113,6 +113,7 @@ const RUNS_LEDGER = {
       run_id: "run-7",
       project: "p-1",
       task: "say hi",
+      title: "Say hi to the owner",
       start: "2026-02-11T06:40:00Z",
       end: "2026-02-11T06:42:44Z",
       success: true,
@@ -274,8 +275,12 @@ describe("fxdesign8 results from the runs key", () => {
     stubFx8();
     renderInspector();
     const verdict = await screen.findByTestId("result-last-verdict");
-    expect(verdict.textContent).toContain("run-7");
+    // FXZERO R2: the task title (or a short human name) is primary;
+    // the raw run id rides the details only (tooltip), never the text.
+    expect(verdict.textContent).toContain("Say hi to the owner");
     expect(verdict.textContent).toContain("greeted the owner");
+    expect(verdict.textContent).not.toContain("run-7");
+    expect(verdict.getAttribute("title")).toContain("run-7");
     const files = await screen.findByTestId("result-last-files");
     expect(files.textContent).toContain("hello.txt");
     const open = await screen.findByTestId("result-open-run-7");

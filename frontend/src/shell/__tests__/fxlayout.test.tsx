@@ -300,7 +300,7 @@ describe("fxlayout shell over the real app", () => {
       t("shell.cards.watcher.ok"),
     );
     expect(screen.getByTestId("watcher-model").textContent).toContain(
-      t("watcher.tab.modelApi"),
+      t("telemetry.unavailable"),
     );
     const action = screen.getByTestId("watcher-action");
     expect(action.textContent).toContain(

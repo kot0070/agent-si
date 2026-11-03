@@ -63,16 +63,29 @@ def _tokens_of(usage: object) -> int:
 
 def record_tick(project_id: str, checked_at: str,
                 decisions: Tuple[Tuple[str, str], ...] = ()) -> None:
-    """Record one engine pass: checks per card, alerts per journaled row."""
+    """Record one engine pass: checks per card, alerts per journaled row.
+
+    FXZERO R4: an unchanged repeat (no new row, repeat flag set) still
+    counts into the per-rule fired tally: one condition, one alert,
+    repeats counted on it. Two-tuples stay accepted (legacy callers).
+    """
     key = str(project_id)
-    _CHECKS[key] = int(_CHECKS.get(key, 0)) + len(tuple(decisions))
+    items = tuple(decisions)
+    _CHECKS[key] = int(_CHECKS.get(key, 0)) + len(items)
     fired = _FIRED.setdefault(key, {})
     alerts = 0
-    for rule_id, journal_entry_id in tuple(decisions):
+    for item in items:
+        try:
+            rule_id = str(item[0])
+            journal_entry_id = str(item[1] or "")
+            repeat = bool(item[2]) if len(item) > 2 else False
+        except (IndexError, TypeError, AttributeError):
+            continue
         if journal_entry_id:
             alerts += 1
-            name = str(rule_id)
-            fired[name] = int(fired.get(name, 0)) + 1
+            fired[rule_id] = int(fired.get(rule_id, 0)) + 1
+        elif repeat:
+            fired[rule_id] = int(fired.get(rule_id, 0)) + 1
     _ALERTS[key] = int(_ALERTS.get(key, 0)) + alerts
     _LAST_CHECK[key] = str(checked_at)
 
