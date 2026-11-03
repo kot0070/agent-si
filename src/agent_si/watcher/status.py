@@ -116,7 +116,21 @@ def _watched_now(project_id: str) -> Tuple[int, int]:
 
         store = getattr(_live_home, "_LIVE_ROWS", {})
         if isinstance(store, dict):
-            agents = len(store)
+            # FXZERO R4: a finished run is not watched: count live rows
+            # only, never RETURNED/BLOCKED history.
+            is_live = getattr(_live_home, "is_live_row", None)
+            for row in store.values():
+                try:
+                    if not isinstance(row, dict):
+                        continue
+                    if callable(is_live):
+                        if is_live(row):
+                            agents += 1
+                    elif str(row.get("status", "")).upper() in (
+                            "RUNNING", "QUEUED", "CREATED", "PENDING"):
+                        agents += 1
+                except Exception:
+                    continue
     except Exception:
         agents = 0
     return runs, agents

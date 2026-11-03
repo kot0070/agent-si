@@ -161,7 +161,9 @@ def tick(project_id: str) -> EngineTick:
     for card_id in DUE_CARDS:
         decision = rule_cards.evaluate(project_id, card_id)
         fired.append(card_id)
-        decisions.append((str(card_id), str(decision.journal_entry_id or "")))
+        decisions.append((str(card_id), str(decision.journal_entry_id or ""),
+                          bool(rule_cards.last_was_repeat(
+                              project_id, card_id))))
     checked = _utcnow()
     try:
         stats_home.record_tick(project_id, checked, tuple(decisions))

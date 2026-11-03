@@ -28,6 +28,7 @@ export interface WatcherStatusData {
   checks_done?: number;
   alerts_raised?: number;
   last_check_at?: string;
+  watcher_model?: string;
   watcher_calls?: number;
   watcher_tokens?: number;
   watched_runs?: number;
@@ -64,6 +65,8 @@ export async function fetchWatcherStatus(
       typeof body.alerts_raised === "number" ? body.alerts_raised : undefined,
     last_check_at:
       typeof body.last_check_at === "string" ? body.last_check_at : undefined,
+    watcher_model:
+      typeof body.watcher_model === "string" ? body.watcher_model : undefined,
     watcher_calls:
       typeof body.watcher_calls === "number" ? body.watcher_calls : undefined,
     watcher_tokens:

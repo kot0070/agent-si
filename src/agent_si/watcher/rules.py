@@ -104,6 +104,16 @@ RULES: Dict[str, RuleCard] = {
 #: Decision sequence; restarted by reset_state for probe isolation.
 _SEQ = 0
 
+#: FXZERO R4: last journaled alert per project+card: (verdict, condition
+#: signature). One condition journals one alert; an unchanged repeat
+#: journals nothing (the repeat still counts into the per-rule tally).
+_LAST_ALERT: Dict[Tuple[str, str], Tuple[str, str]] = {}
+
+#: FXZERO R4: project+card pairs whose latest evaluation was such an
+#: unchanged repeat (side channel: the frozen WatchDecision shape is
+#: untouched). Cleared with _LAST_ALERT by reset_state.
+_REPEAT: set = set()
+
 
 def _utcnow() -> str:
     """Current UTC time rendered like the frozen timestamps."""
@@ -161,6 +171,8 @@ def reset_state() -> None:
     """Restart decision ids; the card registry is definitions, not state."""
     global _SEQ
     _SEQ = 0
+    _LAST_ALERT.clear()
+    _REPEAT.clear()
     _TIMER_PAUSED.clear()
     _SETTINGS.clear()
     _WATCHER_MODEL.update({
@@ -345,6 +357,61 @@ def _metered_model_call(key: str, decision_id: str, model_name: str,
     return (default[0], tuple(default[1]), usage, "garbage reply", True)
 
 
+def _condition_signature(card: RuleCard, rows: Tuple) -> str:
+    """Fingerprint the stored facts one verdict rests on.
+
+    Trigger-fact entry ids plus the latest SERVICE_STATE stamp: new
+    trigger facts or a fresh heartbeat change the condition (alert
+    again); an identical repeat does not (one condition, one alert).
+    """
+    try:
+        kinds = _trigger_kinds(card)
+        hits = sorted(
+            str(getattr(row, "entry_id", ""))
+            for row in rows
+            if getattr(row, "kind", "") in kinds)
+    except Exception:
+        hits = []
+    try:
+        beats = sorted(
+            str(getattr(row, "timestamp", ""))
+            for row in rows
+            if getattr(row, "kind", "") == "SERVICE_STATE")
+        heartbeat = beats[-1] if beats else ""
+    except Exception:
+        heartbeat = ""
+    return "%s|%s" % (",".join(hits), heartbeat)
+
+
+def _journal_once(project_id: str, card: RuleCard,
+                  verdict: WatchVerdict, rows: Tuple,
+                  summary: str) -> Tuple[str, bool]:
+    """Journal one alert unless this exact condition already journaled.
+
+    Returns (entry id, repeat): a repeat journals nothing and returns an
+    empty id with repeat True (also recorded in the _REPEAT side
+    channel for the engine tick).
+    """
+    key = (str(project_id), str(card.rule_id))
+    sig = "%s|%s" % (
+        verdict.value, _condition_signature(card, rows))
+    if _LAST_ALERT.get(key) == sig:
+        _REPEAT.add(key)
+        return "", True
+    entry = append_event(
+        str(project_id), "watcher", "WATCH_DECISION",
+        summary, (str(card.rule_id),),
+    )
+    _LAST_ALERT[key] = sig
+    _REPEAT.discard(key)
+    return entry.entry_id, False
+
+
+def last_was_repeat(project_id: str, rule_id: str) -> bool:
+    """True when the latest evaluation was an unchanged repeat (no row)."""
+    return (str(project_id), str(rule_id)) in _REPEAT
+
+
 def evaluate(project_id: str, rule_id: str) -> WatchDecision:
     """Decide one stored rule card; row only off the resting verdict.
 
@@ -378,16 +445,16 @@ def evaluate(project_id: str, rule_id: str) -> WatchDecision:
     decision_id = "dec-%04d" % _SEQ
     if card.model == "OFF":
         verdict = WatchVerdict.ALLOW
-        entry = append_event(
-            str(project_id), "watcher", "WATCH_DECISION",
-            "%s ALLOW OFF" % (str(rule_id),), (str(rule_id),),
-        )
+        rows = journal_store.stored_rows(str(project_id))
+        entry_id, _ = _journal_once(
+            str(project_id), card, verdict, rows,
+            "%s ALLOW OFF" % (str(rule_id),))
         return WatchDecision(
             decision_id=decision_id,
             project_id=str(project_id),
             rule_id=str(rule_id),
             verdict=verdict,
-            journal_entry_id=entry.entry_id,
+            journal_entry_id=entry_id,
             decided_at=_utcnow(),
         )
     rows = journal_store.stored_rows(str(project_id))
@@ -429,16 +496,14 @@ def evaluate(project_id: str, rule_id: str) -> WatchDecision:
                 str(rule_id), verdict.value, note)
     if card.model == "API":
         summary = "%s API->local" % summary
-    entry = append_event(
-        str(project_id), "watcher", "WATCH_DECISION",
-        summary, (str(rule_id),),
-    )
+    entry_id, _ = _journal_once(
+        str(project_id), card, verdict, rows, summary)
     return WatchDecision(
         decision_id=decision_id,
         project_id=str(project_id),
         rule_id=str(rule_id),
         verdict=verdict,
-        journal_entry_id=entry.entry_id,
+        journal_entry_id=entry_id,
         decided_at=_utcnow(),
     )
 

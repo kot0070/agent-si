@@ -42,14 +42,12 @@ import {
   describeLastAction,
   fetchWatcherJournal,
   fetchWatcherStatus,
-  watcherModelName,
 } from "../watcher/WatcherTab";
 import { WATCHER_JOURNAL_ROUTE } from "../watcher/WatcherTab";
 import type {
   WatcherJournalEntry,
   WatcherStatusData,
 } from "../watcher/WatcherTab";
-import { loadWatcherSettings } from "../watcher/watcherSettings";
 import { useCollapsedCard } from "./collapsed";
 
 export interface InspectorProps extends InspectorBaseProps {
@@ -869,16 +867,10 @@ export function Inspector(props: InspectorProps): ReactElement {
   const reportsHref =
     projectId === null ? "/projects" : `/projects/${projectId}/reports`;
 
-  const watcherSettings = loadWatcherSettings(projectId);
-  const watcherModel = watcherSettings.model;
-  // FXTABS T9: the rail names what is really used. A "local" setting with
-  // no local model served means the cloud fallback does the work.
-  const effectiveWatcherModel =
-    watcherModel === "local" &&
-    (localModels === null || localModels.length === 0)
-      ? "API"
-      : watcherModel;
-  const latestJournal = (journal ?? [])[0];
+  const latestJournal =
+    journal === null || journal.length === 0
+      ? undefined
+      : journal[journal.length - 1];
   const watcherActionId =
     latestJournal === undefined
       ? (watcherStatus?.journal_head ?? DASH)
@@ -1579,9 +1571,17 @@ export function Inspector(props: InspectorProps): ReactElement {
                   ? formatDateTime(watcherStatus.last_check_at)
                   : t("watcher.tab.notKnown")}
               </p>
+              {/* FXZERO R4 extra gate: the model names the exact served
+                  watcher model (the one that answered), never a setting
+                  label; with no answering model it reads unavailable. */}
               <p data-testid="watcher-model">
                 {t("watcher.tab.model")}:{" "}
-                {watcherModelName(effectiveWatcherModel)}
+                {typeof watcherStatus.watcher_calls === "number" &&
+                watcherStatus.watcher_calls > 0 &&
+                typeof watcherStatus.watcher_model === "string" &&
+                watcherStatus.watcher_model !== ""
+                  ? watcherStatus.watcher_model
+                  : t("telemetry.unavailable")}
                 {" \u00b7 "}
                 {t("shell.cards.watcher.calls")}{": "}
                 {typeof watcherStatus.watcher_calls === "number"
