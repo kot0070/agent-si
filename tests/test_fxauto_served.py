@@ -113,6 +113,7 @@ def test_rule_create_list_run_now_records_checkpoint(tmp_path):
     payload = fired.json()
     assert payload["result"]["key"] == "fxauto.results.checkpoint"
     assert payload["run"]["state"] == "RUNNING"
+    assert isinstance(payload["run"]["time"], str)
 
     runs = client.get("/api/v1/automations/runs",
                       params={"project_id": PROJECT})

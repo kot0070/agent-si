@@ -276,8 +276,15 @@ async def ui_run_rule(rule_id: str, request: Request) -> Any:
     except _auto_iface().AutomationError as err:
         _automation_error(err)
         raise AssertionError("unreachable")
+    run = None if fired["run"] is None else {
+        "run_id": fired["run"].get("run_id", ""),
+        "time": _iso(fired["run"].get("started_at")),
+        "rule": "",
+        "state": fired["run"].get("state", ""),
+        "result": fired["result"],
+    }
     return {
-        "run": fired["run"],
+        "run": run,
         "result": fired["result"],
         "approval": fired["approval"],
     }
