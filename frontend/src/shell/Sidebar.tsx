@@ -12,6 +12,7 @@ import { useApiClient, useCurrentProject } from "../app/ApiClientProvider";
 import { useProjectList } from "../projects/projectList";
 import { hasChatUnseen, useUnseenVersion } from "../chat/index";
 import { t } from "../locale/index";
+import { releaseFirstRunGateForSession } from "../app/firstrun/gateRelease";
 import { Icon } from "../ui/icons";
 import type { IconName } from "../ui/icons";
 import { EmptyState } from "../ui/EmptyState";
@@ -27,6 +28,7 @@ function railClass({ isActive }: { isActive: boolean }): string | undefined {
 interface RailEntry {
   testId: string;
   purposeId: string;
+  kitPurposeId: string;
   to: string;
   end: boolean;
   titleKey: string;
@@ -61,6 +63,7 @@ export function Sidebar(props: SidebarProps): ReactElement {
     {
       testId: "menu-new-task",
       purposeId: "menu-new-task-purpose",
+      kitPurposeId: "kit-tab-purpose-new-task",
       to: "/",
       end: true,
       titleKey: "tasks.creator.title",
@@ -70,6 +73,7 @@ export function Sidebar(props: SidebarProps): ReactElement {
     {
       testId: "menu-projects",
       purposeId: "menu-projects-purpose",
+      kitPurposeId: "kit-tab-purpose-projects",
       to: "/projects",
       end: true,
       titleKey: "shell.sidebar.projects",
@@ -79,6 +83,7 @@ export function Sidebar(props: SidebarProps): ReactElement {
     {
       testId: "menu-results",
       purposeId: "menu-results-purpose",
+      kitPurposeId: "kit-tab-purpose-results",
       to: resultsTo,
       end: true,
       titleKey: "projects.reports.title",
@@ -88,6 +93,7 @@ export function Sidebar(props: SidebarProps): ReactElement {
     {
       testId: "menu-settings",
       purposeId: "menu-settings-purpose",
+      kitPurposeId: "kit-tab-purpose-settings",
       to: "/settings",
       end: false,
       titleKey: "shell.sidebar.settings",
@@ -107,6 +113,13 @@ export function Sidebar(props: SidebarProps): ReactElement {
   const unseenTick = useUnseenVersion();
   void unseenTick;
 
+  // FXNAV W03: a rail click during the guided first run visits that
+  // page for the rest of the session (same effect as Skip, but the run
+  // stays resumable: never marked done here).
+  function releaseGate(): void {
+    releaseFirstRunGateForSession();
+  }
+
   return (
     <nav data-testid="sidebar" aria-label={t("shell.sidebar.projects")}>
       {entries.map((entry) => (
@@ -117,18 +130,23 @@ export function Sidebar(props: SidebarProps): ReactElement {
             end={entry.end}
             className={railClass}
             title={t(entry.purposeKey)}
+            onClick={releaseGate}
           >
             <Icon name={entry.icon} />
             <span>{t(entry.titleKey)}</span>
           </NavLink>
           {/* FXDESIGN6: the purpose line reads on the tab's own header;
-              the rail keeps it only for the selected entry. */}
+              the rail keeps it only for the selected entry. The nested
+              kit span carries the same sentence for the kit caption
+              probe (all four stay mounted, hidden unless active). */}
           <span
             data-testid={entry.purposeId}
             className="fx-rail-purpose"
             hidden={isEntryActive(entry) ? undefined : true}
           >
-            {t(entry.purposeKey)}
+            <span data-testid={entry.kitPurposeId}>
+              {t(entry.purposeKey)}
+            </span>
           </span>
         </span>
       ))}

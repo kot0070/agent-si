@@ -416,26 +416,25 @@ export function LocalTestsSwitch(props: {
   );
 }
 
-// One plain first-time-user sentence per tab. Inline English: the locale
-// tables are owned by another lane, and these sentences are product copy
-// mandated for the views rework (same precedent as LocalTestsSwitch).
-const VIEW_SENTENCE: Record<ProjectViewName, string | null> = {
-  overview: "What this project is and how it is doing.",
-  tasks: "Things to do, with their current state.",
-  runs: "Every run of this project, and what came out of it.",
-  time: "How long the runs took.",
-  "ai-usage": "Where the AI work happened.",
-  tokens: "Tokens used per role and model; money lives on the Cost tab.",
-  cost: "Money spent, reserved and left, against the budget limit.",
-  "local-ai": "Work running on this machine.",
-  "cloud-ai": "Work running with cloud providers.",
-  models: "Which model did each job.",
-  "routing-decisions": "Why this model was chosen.",
-  audits: "What needs attention.",
-  errors: "What went wrong.",
-  reports: "Totals and files from the runs.",
-  // The tests tab already opens with its own served explainer line.
-  tests: null,
+// FXNAV P16-purpose: one plain first-time-user sentence per tab from the
+// locale tables (projectView.purpose.* in en.json/uk.json); no inline
+// copy, both languages ship the same key set (locale parity gate).
+const VIEW_PURPOSE_KEY: Record<ProjectViewName, string> = {
+  overview: "projectView.purpose.overview",
+  tasks: "projectView.purpose.tasks",
+  runs: "projectView.purpose.runs",
+  time: "projectView.purpose.time",
+  "ai-usage": "projectView.purpose.aiUsage",
+  tokens: "projectView.purpose.tokens",
+  cost: "projectView.purpose.cost",
+  "local-ai": "projectView.purpose.localAi",
+  "cloud-ai": "projectView.purpose.cloudAi",
+  models: "projectView.purpose.models",
+  "routing-decisions": "projectView.purpose.routing",
+  audits: "projectView.purpose.audits",
+  errors: "projectView.purpose.errors",
+  reports: "projectView.purpose.reports",
+  tests: "projectView.purpose.tests",
 };
 
 const RUNS_VIEWS: ReadonlySet<string> = new Set([
@@ -1938,9 +1937,7 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
           </button>
         ))}
       </nav>
-      {VIEW_SENTENCE[props.view] === null ? null : (
-        <p data-testid="tab-purpose">{VIEW_SENTENCE[props.view]}</p>
-      )}
+      <p data-testid="tab-purpose">{t(VIEW_PURPOSE_KEY[props.view])}</p>
       <section
         data-testid={`kit-card-project-${props.view}`}
         aria-label={t(projectViewTitleKey(props.view))}
