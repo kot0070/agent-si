@@ -61,9 +61,13 @@ export function ClosingGuard(props: ClosingGuardProps): ReactElement {
           aria-label={t(props.confirmKey)}
         >
           <p>{t(props.confirmKey)}</p>
+          {/* FXBTN: one spaced action row: stay is the quiet way back,
+              leave is the single primary. */}
+          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
           <button
             type="button"
             data-testid="closing-stay"
+            data-variant="quiet"
             onClick={() => {
               blocker.reset();
             }}
@@ -73,11 +77,13 @@ export function ClosingGuard(props: ClosingGuardProps): ReactElement {
           <button
             type="button"
             data-testid="closing-leave"
+            data-variant="primary"
             autoFocus
             onClick={leave}
           >
             {t("shell.closing.leave")}
           </button>
+          </div>
         </div>
       ) : null}
       {blocker.state !== "blocked" && departed ? (

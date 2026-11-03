@@ -2,6 +2,7 @@ import { createElement, useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { t } from '../locale/index';
+import { isFirstRunGateReleased } from '../app/firstrun/gateRelease';
 import { ApiError, apiErrorLocaleKey, requestResponse } from '../api/errors';
 import {
   readRoleProfileFromServer,
@@ -541,6 +542,13 @@ export function FirstRunGate(): ReactElement | null {
   const [settled, setSettled] = useState<boolean>(() => readFirstRunDone());
   useEffect(() => {
     if (readFirstRunDone()) {
+      setSettled(true);
+      return;
+    }
+    // FXNAV W03: a rail click during first run releases the gate for
+    // the session (the user chose a page; Skip's effect without marking
+    // done). /firstrun stays resumable; a reload re-arms the guided flow.
+    if (isFirstRunGateReleased()) {
       setSettled(true);
       return;
     }
