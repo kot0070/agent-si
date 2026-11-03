@@ -219,6 +219,38 @@ describe("fxkbupdate kb screen over stubbed fetch", () => {
     expect(result.textContent).toContain("muse-spark-1.3-contributor");
   });
 
+  it("uploads a file, previews old to new, and applies from the screen", async () => {
+    renderScreen();
+    await screen.findByTestId("kb-status");
+    const payload = JSON.stringify({
+      models: [
+        {
+          provider_id: "meta",
+          model_id: "muse-spark-1.3-contributor",
+          fields: { cost_tier: "bulk-cheap" },
+        },
+      ],
+      retrieved_at: "2026-11-03",
+    });
+    const picked = new File([payload], "kb-meta.json", {
+      type: "application/json",
+    });
+    fireEvent.change(screen.getByTestId("kb-file-input"), {
+      target: { files: [picked] },
+    });
+    expect(await screen.findByTestId("kb-file-name")).toBeTruthy();
+    await screen.findByTestId("kb-preview");
+    expect(screen.getByTestId("kb-preview").textContent).toContain(
+      "muse-spark-1.3-contributor",
+    );
+    fireEvent.click(screen.getAllByTestId("kb-preview-apply")[0]);
+    const result = await screen.findByTestId("kb-update-result");
+    expect(result.textContent).toContain("muse-spark-1.3-contributor");
+    expect(
+      screen.getByTestId("k07next2-kb-proposal").textContent,
+    ).not.toContain("KB_");
+  });
+
   it("uk locale renders translated controls and the up-to-date line", async () => {
     setLocale("uk");
     renderScreen();
