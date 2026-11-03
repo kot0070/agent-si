@@ -137,20 +137,20 @@ def main() -> int:
         checks.append({"check": "manifest_parse", "target": rel})
     for tool in tools:
         _hit = shutil.which(tool)
-        _is_stub = False
+        _is_alias_shim = False
         if _hit is not None:
             try:
-                _is_stub = ("windowsapps" in str(_hit).lower())
+                _is_alias_shim = ("windowsapps" in str(_hit).lower())
             except Exception:
-                _is_stub = False
-            if not _is_stub:
+                _is_alias_shim = False
+            if not _is_alias_shim:
                 try:
                     import os as _os2
                     if _os2.path.isfile(_hit) and _os2.path.getsize(_hit) == 0:
-                        _is_stub = True
+                        _is_alias_shim = True
                 except OSError:
-                    _is_stub = False
-        if _hit is None or _is_stub:
+                    _is_alias_shim = False
+        if _hit is None or _is_alias_shim:
             with open(os.path.join(evidence_dir, name), "w", encoding="utf-8") as handle:
                 json.dump({"checks": checks, "issues": issues}, handle, indent=2)
             _emit(
