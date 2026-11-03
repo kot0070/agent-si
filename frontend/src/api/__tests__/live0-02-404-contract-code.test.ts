@@ -78,10 +78,11 @@ describe("LIVE0-02 explicit contract-version code on 404 still reads not-found",
     expect(failure).toMatchObject({ code: "NO_PROVIDER_BOUND", status: 404 });
   });
 
-  it("a codeless 500 still reports the contract-version error", async () => {
+  it("a codeless 500 still reports the generic error, never contract-version (FXANSWER S1)", async () => {
     stubStatus(500, { surprise: true });
     const failure = await new HttpApiClient().listProjects().catch((error: unknown) => error);
     expect(failure).toBeInstanceOf(ApiError);
-    expect(failure).toMatchObject({ code: "CONTEXT_WRONG_CONTRACT_VERSION", status: 500 });
+    expect(failure).toMatchObject({ code: "GENERIC_ERROR", status: 500 });
+    expect(apiErrorLocaleKey((failure as ApiError).code)).toBe("errors.generic");
   });
 });

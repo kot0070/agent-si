@@ -108,7 +108,7 @@ export class HttpApiClient implements ApiClient {
     return createTaskRecord(project_id, body);
   }
 
-  openChatStream(body: ChatOpen): ChatStream {
+  openChatStream(body: ChatOpen, opts?: { signal?: AbortSignal }): ChatStream {
     let request: ChatOpen;
     try {
       request = parseOrThrow(ChatOpenSchema, body, 400);
@@ -253,6 +253,7 @@ export class HttpApiClient implements ApiClient {
             kind: "chat",
             body: { project: request.project_id, message: request.prompt_ref },
             actor,
+            ...(opts?.signal === undefined ? {} : { signal: opts.signal }),
           },
         );
       } catch (error) {

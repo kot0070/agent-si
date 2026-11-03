@@ -41,7 +41,7 @@ describe("LIVE0-03 bounded retry with backoff, no storm", () => {
     });
     const started = Date.now();
     await expect(new HttpApiClient().listProjects()).rejects.toMatchObject({
-      code: "CONTEXT_WRONG_CONTRACT_VERSION",
+      code: "GENERIC_ERROR",
       status: 500,
     });
     const elapsed = Date.now() - started;

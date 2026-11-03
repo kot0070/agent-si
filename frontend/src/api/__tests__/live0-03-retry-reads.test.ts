@@ -30,7 +30,7 @@ describe("LIVE0-03 bounded retry with backoff beyond listProjects", () => {
     });
     const started = Date.now();
     await expect(new HttpApiClient().readProject("p-1")).rejects.toMatchObject({
-      code: "CONTEXT_WRONG_CONTRACT_VERSION",
+      code: "GENERIC_ERROR",
       status: 500,
     });
     const elapsed = Date.now() - started;
@@ -90,7 +90,7 @@ describe("LIVE0-03 bounded retry with backoff beyond listProjects", () => {
       return jsonResponse(500, { surprise: true });
     });
     await expect(new HttpApiClient().listAgentsLive()).rejects.toMatchObject({
-      code: "CONTEXT_WRONG_CONTRACT_VERSION",
+      code: "GENERIC_ERROR",
       status: 500,
     });
     expect(calls).toBe(3);

@@ -1360,31 +1360,117 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
             turn += 1
             _check_stop()
             from agent_si.runtime.devrun import protocol as _solo_proto
+            # FXANSWER (a): a question or a message with no file work
+            # may be answered in plain visible text: the brief allows
+            # {"answer"}. A build task keeps the strict actions/done
+            # brief below.
+            if (_looks_like_question(user_message)
+                    or not _looks_like_build_task(user_message)):
+                solo_history: list = [{
+                    "role": "user",
+                    "content": (
+                        "You are the worker. Project task: %s. This "
+                        "needs no file work: answer it in plain visible "
+                        "text. Return ONLY {\"answer\": \"...\"} with "
+                        "the answer, no prose outside the JSON.%s" % (
+                            user_message or "(no task text)",
+                            _platform_guidance()))}]
+            else:
+                solo_history = [{
+                    "role": "user",
+                    "content": (
+                        "You are the worker. Project task: %s. Work in the "
+                        "project folder. Actions: read_file {path}, "
+                        "list_dir {path}, write_file {path, content}, run "
+                        "{argv}. Relative paths only, stays inside the "
+                        "project folder. To install packages, run the "
+                        "installer argv (for example [\"npm\", \"install\"]): "
+                        "the run action IS the permission ask the app shows "
+                        "the user. You may run checks. Return ONLY "
+                        "{\"actions\": [...], \"done\": bool}: done true only "
+                        "when the task is complete. Project folder: %s. If the "
+                        "task names a place outside the project folder, never "
+                        "claim the file went there: work inside the project "
+                        "folder only, done true only when the inside work is "
+                        "complete - the run verdict names where every file "
+                        "went.%s" % (
+                            message or "(no task text)", folder,
+                            _platform_guidance()))}]
             solo_spec: dict[str, Any] = {
                 "part_id": "solo", "goal": message or "(no task text)",
                 "files": []}
             solo_row: dict[str, Any] = {"part_id": "solo"}
-            solo_history: list = [{
-                "role": "user",
-                "content": (
-                    "You are the worker. Project task: %s. Work in the "
-                    "project folder. Actions: read_file {path}, "
-                    "list_dir {path}, write_file {path, content}, run "
-                    "{argv}. Relative paths only, stays inside the "
-                    "project folder. To install packages, run the "
-                    "installer argv (for example [\"npm\", \"install\"]): "
-                    "the run action IS the permission ask the app shows "
-                    "the user. You may run checks. Return ONLY "
-                    "{\"actions\": [...], \"done\": bool}: done true only "
-                    "when the task is complete. Project folder: %s. If the "
-                    "task names a place outside the project folder, never "
-                    "claim the file went there: work inside the project "
-                    "folder only, done true only when the inside work is "
-                    "complete - the run verdict names where every file "
-                    "went.%s" % (
-                        message or "(no task text)", folder,
-                        _platform_guidance()))}]
-            for _turn in range(max(1, int(turn_cap))):
+
+            def _solo_written_files() -> list:
+                """FXANSWERb-1: solo spec files that exist under the folder.
+
+                Only real files under the project folder are named, so
+                the verdict never claims a file that is not on disk.
+                """
+                out: list = []
+                try:
+                    names = solo_spec.get("files") or []
+                except Exception:
+                    return out
+                for name in names:
+                    try:
+                        rel = str(name).replace("\\", "/")
+                    except Exception:
+                        continue
+                    if not rel or rel in out:
+                        continue
+                    try:
+                        full = os.path.join(str(folder), rel)
+                    except Exception:
+                        continue
+                    try:
+                        if os.path.isfile(full):
+                            out.append(rel)
+                    except Exception:
+                        continue
+                return out
+
+            def _solo_end(success: bool, summary: str,
+                          first: str = "") -> Any:
+                """FXANSWER terminal tail: an optional answer delta
+                first, then the ledger line, the written-files marker,
+                the summary and done."""
+                nonlocal turn
+                record["success"] = success
+                record["summary"] = summary
+                _finish_task()
+                _publish()
+                _close_live("RETURNED" if success else "BLOCKED")
+                _journal("DEVRUN_END", _end_summary())
+                if first:
+                    yield _run_event("delta", turn, task_id, first,
+                                     {"run_id": run_id})
+                    turn += 1
+                yield _run_event(
+                    "delta", turn, task_id,
+                    _ledger_total_line(record),
+                    {"run_id": run_id})
+                turn += 1
+                _solo_files = _solo_written_files()
+                if _solo_files:
+                    yield _run_event(
+                        "delta", turn, task_id,
+                        "[files: %s]" % (", ".join(_solo_files),),
+                        {"run_id": run_id})
+                    turn += 1
+                yield _run_event("delta", turn, task_id, summary,
+                                 {"run_id": run_id,
+                                  "success": bool(success)})
+                turn += 1
+                yield _run_event("done", turn, task_id, summary,
+                                 {"run_id": run_id,
+                                  "success": bool(success)})
+
+            solo_progress = False
+            solo_empty_retries = 0
+            solo_done = False
+            solo_cap = max(1, int(turn_cap))
+            for _turn in range(solo_cap):
                 _check_stop()
                 try:
                     _resp = _call(
@@ -1402,13 +1488,80 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                         "done", turn, task_id, record["summary"],
                         {"run_id": run_id, "success": False})
                     return
+                _solo_text = _resp.output_text or ""
+                try:
+                    _solo_raw = _solo_proto.extract_json_object(_solo_text)
+                except Exception as exc:
+                    if not _solo_text.strip():
+                        # FXANSWER (c): an empty reply gets ONE retry
+                        # with the plain instruction; blank again
+                        # fails closed, never success.
+                        if solo_empty_retries >= 1:
+                            yield from _solo_end(
+                                False,
+                                "The model returned nothing. Try again.")
+                            return
+                        solo_empty_retries += 1
+                        solo_history.append({
+                            "role": "assistant",
+                            "content": _solo_text})
+                        solo_history.append({
+                            "role": "user",
+                            "content": (
+                                "Your last reply was empty. Reply now "
+                                "with the answer in plain visible text.")})
+                        continue
+                    if ("no JSON object in reply" in str(exc)
+                            and not solo_progress):
+                        # FXANSWER (b): visible prose with no JSON
+                        # object and nothing done yet IS the answer.
+                        # No second model call.
+                        yield from _solo_end(
+                            True, _ANSWER_SUMMARY, _solo_text.strip())
+                        return
+                    solo_history.append({
+                        "role": "assistant",
+                        "content": _solo_text})
+                    solo_history.append({
+                        "role": "user",
+                        "content": ("Your last reply was not valid JSON: %s "
+                                    "Return ONLY {\"actions\": [...], "
+                                    "\"done\": bool}, no prose.") % (exc,)})
+                    continue
+                if (isinstance(_solo_raw, dict)
+                        and "answer" in _solo_raw
+                        and "actions" not in _solo_raw):
+                    # FXANSWER (a): {"answer"} with no actions ends the
+                    # run at once: the answer is the visible reply.
+                    _solo_answer_text = _solo_raw.get("answer")
+                    if (isinstance(_solo_answer_text, str)
+                            and _solo_answer_text.strip()):
+                        yield from _solo_end(
+                            True, _ANSWER_SUMMARY,
+                            _solo_answer_text.strip())
+                        return
+                    if solo_empty_retries >= 1:
+                        yield from _solo_end(
+                            False,
+                            "The model returned nothing. Try again.")
+                        return
+                    solo_empty_retries += 1
+                    solo_history.append({
+                        "role": "assistant",
+                        "content": _solo_text})
+                    solo_history.append({
+                        "role": "user",
+                        "content": (
+                            "Your last reply was empty. Reply now "
+                            "with the answer in plain visible text.")})
+                    continue
                 try:
                     _parsed_solo = _solo_proto.parse_agent_reply(
-                        _resp.output_text or "")
+                        _solo_text)
                 except Exception as exc:
                     solo_history.append({
                         "role": "assistant",
-                        "content": _resp.output_text or ""})
+                        "content": _solo_text})
                     solo_history.append({
                         "role": "user",
                         "content": ("Your last reply was not valid JSON: %s "
@@ -1446,8 +1599,10 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                     lock=run_lock)
                 solo_history.append({
                     "role": "assistant",
-                    "content": _resp.output_text or ""})
+                    "content": _solo_text})
                 solo_history.append({"role": "user", "content": _notes})
+                if _parsed_solo.get("actions"):
+                    solo_progress = True
                 if _stop_note is not None:
                     record["success"] = False
                     record["summary"] = str(_stop_note)
@@ -1463,7 +1618,16 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                                      {"run_id": run_id})
                     return
                 if _parsed_solo.get("done"):
+                    solo_done = True
                     break
+            if not solo_done:
+                # FXANSWER (d): the loop ran out with done never true.
+                # Never Done: the run stopped without finishing.
+                yield from _solo_end(
+                    False,
+                    "Stopped after %d steps: the task is not finished."
+                    % (solo_cap,))
+                return
             _publish()
             record["success"] = True
             record["summary"] = "Done, not audited."
@@ -1474,6 +1638,16 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                              _ledger_total_line(record),
                              {"run_id": run_id})
             turn += 1
+            # FXANSWERb-1: name the files the solo run really wrote (only
+            # files that exist under the project folder), because no
+            # Part row carries them.
+            _solo_done_files = _solo_written_files()
+            if _solo_done_files:
+                yield _run_event(
+                    "delta", turn, task_id,
+                    "[files: %s]" % (", ".join(_solo_done_files),),
+                    {"run_id": run_id})
+                turn += 1
             yield _run_event("delta", turn, task_id, record["summary"],
                              {"run_id": run_id, "success": True})
             turn += 1
@@ -1786,9 +1960,10 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
             if _build_answer_twice:
                 record["success"] = False
                 record["summary"] = "Nothing was built."
-            elif _looks_like_question(user_message):
+            elif (_looks_like_question(user_message)
+                    or not _looks_like_build_task(user_message)):
                 record["success"] = True
-                record["summary"] = "run answered: plain answer, no parts"
+                record["summary"] = _ANSWER_SUMMARY
             else:
                 # FXZERO R1: a statement-like message answered with no
                 # parts built nothing: not success, with the guidance
@@ -3533,6 +3708,12 @@ _BUILD_VERBS = (
     "напиши", "створи", "зроби", "виправ", "додай", "онови",
     "згенеруй", "запусти", "побудуй", "реалізуй",
 )
+
+#: FXANSWER plain-answer marker: a question or no-file-work message
+#: answered with no parts. Served on the run record, the stream and the
+#: task mirror, so chat shows the answer text itself, never the
+#: empty-plan sentence. The literal is the chat's marker too.
+_ANSWER_SUMMARY = "run answered: plain answer, no parts"
 
 #: FXZERO R1 plain sentence for a statement-like run that ends with
 #: zero parts: nothing built, the plan had no parts, what to say next

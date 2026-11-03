@@ -93,6 +93,7 @@ export type LocaleKey =
   | 'chat.permission.why'
   | 'chat.run.emptyPlan'
   | 'chat.run.emptyPlanExample'
+  | 'chat.run.stopped'
   | 'chat.stream.offline'
   | 'chat.stream.spinner'
   | 'chat.stream.timestamp'

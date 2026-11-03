@@ -647,7 +647,8 @@
     },
     "run": {
       "emptyPlan": "Nothing was built — the plan had no parts. Say what you want built, for example: “{example}”",
-      "emptyPlanExample": "Add a contact page with a test."
+      "emptyPlanExample": "Add a contact page with a test.",
+      "stopped": "Stopped."
     },
     "stream": {
       "spinner": "Working on it",

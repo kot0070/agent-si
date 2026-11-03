@@ -52,9 +52,14 @@ _TURN_FIELDS = ("project_id", "user_text", "assistant_text", "time",
                 "id", "status", "run_id", "error_code", "executed")
 
 #: Stored turn states: a run starts as running, ends ok / failed /
-#: stopped. Every terminal write lands, so restarts can show the last
-#: state instead of dropping it.
-_TURN_STATUSES = ("ok", "running", "failed", "stopped")
+#: stopped. A row the startup reconcile found still running (crash or
+#: window close mid-run) reads interrupted, never resumed: only an
+#: interrupted row shows the app-closed banner, never a live running row.
+_TURN_STATUSES = ("ok", "running", "failed", "stopped", "interrupted")
+
+#: Served run-end reason for a reconcile-marked row (recomputed on every
+#: read, never persisted; the status alone carries the mark).
+RESTART_RECONCILE_REASON = "restart reconcile: the run did not finish"
 
 #: GET page size: the newest N turns plus a cursor for earlier pages.
 _DEFAULT_LIMIT = 200
@@ -346,6 +351,51 @@ def record_turn(app: Any, project_id: str, user_text: str,
         return stored
 
 
+def mark_interrupted_at_restart(app: Any) -> dict:
+    """Flip leftover running turns to interrupted (startup reconcile).
+
+    A turn still running when the app starts is a crash/restart
+    leftover, never live work. Only a marked row shows the app-closed
+    banner; a live running row never does. Returns per-kind counts
+    ({"turns", "projects"}). Never raises: a reconcile failure must
+    not break startup.
+    """
+    marked = 0
+    projects: list = []
+    try:
+        names = [name for name in _memory(app).keys()]
+    except Exception:
+        return {"turns": 0, "projects": []}
+    for project in names:
+        try:
+            lock = _lock_for(project)
+        except Exception:
+            continue
+        try:
+            with lock:
+                rows = _memory(app).get(project) or []
+                count = 0
+                for turn in rows:
+                    try:
+                        if (isinstance(turn, dict)
+                                and turn.get("status") == "running"):
+                            turn["status"] = "interrupted"
+                            count += 1
+                    except Exception:
+                        continue
+                if count:
+                    marked += count
+                    projects.append(project)
+        except Exception:
+            continue
+    if marked:
+        try:
+            _persist(app)
+        except Exception:
+            pass
+    return {"turns": marked, "projects": projects}
+
+
 def _disconnect_reason(app: Any, project: str, turn_time: Any) -> str:
     """Server-side run-end reason for a client disconnect, else "".
 
@@ -537,10 +587,14 @@ def history_page(app: Any, project_id: str, *, limit: int = _DEFAULT_LIMIT,
     for turn in window:
         # A running turn whose stream is gone ended on the server when
         # the window closed: pass the recorded reason through the row
-        # (never persisted, recomputed on every read).
+        # (never persisted, recomputed on every read). An interrupted
+        # row was marked by the startup reconcile: only that row carries
+        # the reconcile reason and the app-closed banner.
         if turn.get("status") == "running":
             turn["run_end_reason"] = _disconnect_reason(
                 app, project, turn.get("time"))
+        elif turn.get("status") == "interrupted":
+            turn["run_end_reason"] = RESTART_RECONCILE_REASON
         else:
             turn["run_end_reason"] = ""
     return {
@@ -641,6 +695,7 @@ __all__ = [
     "chat_messages",
     "history_page",
     "list_turns",
+    "mark_interrupted_at_restart",
     "recent_context",
     "record_turn",
     "register_chat_history_routes",

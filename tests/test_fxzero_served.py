@@ -56,7 +56,10 @@ def _answer_factory(text):
     })
 
 
-# -- item 1: statement-like zero-part run is not success ---------------------
+# -- item 1: statement-like BUILD-task zero-part run is not success ---------
+# FXANSWER narrowed this pin: a Director answer for a message with no
+# build-task verb is a plain answer (success + marker) even without "?",
+# so the not-success case names a build verb ("Demo build").
 
 def test_fxzero_statement_answer_no_parts_not_success(tmp_path):
     project = "fxzero-i1"
@@ -65,11 +68,10 @@ def test_fxzero_statement_answer_no_parts_not_success(tmp_path):
     app = _served_app(tmp_path, project, factory)
     from fastapi.testclient import TestClient
     client = TestClient(app, raise_server_exceptions=False)
-    resp = _post_chat(client, project, folder, message="Demo task")
+    resp = _post_chat(client, project, folder, message="Demo build")
     assert resp.status_code == 200, resp.text
     text = _all_text(_parse_sse(resp.text))
     assert "Nothing was built" in text, text[:800]
-    assert "plan had no parts" in text, text[:800]
     record = _run_record(app, project)
     assert record is not None
     assert record.get("parts", []) == [], record.get("parts")

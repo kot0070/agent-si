@@ -310,7 +310,9 @@ describe("failed and stopped turns", () => {
 
 describe("interrupted restart", () => {
   it("shows the stored text plus interrupted, never Working, with resend", async () => {
-    historyTurns = [turn("t-r", "finish this", "partial work", "running")];
+    // Post-restart rows arrive reconcile-marked (status interrupted):
+    // only those rows show the app-closed banner.
+    historyTurns = [turn("t-r", "finish this", "partial work", "interrupted")];
     renderChat();
     // The note renders with the stored text in one bubble.
     const bubbles = await screen.findAllByTestId("chat-assistant-message");
@@ -390,8 +392,9 @@ describe("install Allow replays once", () => {
       </ApiClientProvider>,
     );
     expect(await screen.findByTestId("permission-dialog")).toBeTruthy();
-    // Restart (fresh client): the served running turn shows interrupted.
-    historyTurns = [turn("t-h", "install me", "", "running")];
+    // Restart (fresh client): the served reconcile-marked turn shows
+    // interrupted.
+    historyTurns = [turn("t-h", "install me", "", "interrupted")];
     cleanup();
     resetChatStore();
     renderChat();
