@@ -47,46 +47,8 @@ def _hex_to_rgb(value):
 
 
 def _build_frontend():
-    npm = shutil.which("npm")
-    if npm is not None:
-        if os.name == "nt":
-            completed = subprocess.run(
-                '"%s" --prefix frontend run build' % npm,
-                cwd=WS,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=600,
-            )
-        else:
-            completed = subprocess.run(
-                [npm, "--prefix", "frontend", "run", "build"],
-                cwd=WS,
-                capture_output=True,
-                text=True,
-                timeout=600,
-            )
-    else:
-        node = shutil.which("node") or shutil.which("nodejs")
-        assert node is not None, "neither npm nor node found on PATH"
-        completed = subprocess.run(
-            [node, os.path.join("node_modules", "vite", "bin", "vite.js"), "build"],
-            cwd=FRONTEND,
-            capture_output=True,
-            text=True,
-            timeout=600,
-        )
-    tail = (completed.stdout + completed.stderr)[-8000:]
-    assert completed.returncode == 0, (
-        "frontend build failed rc=%d npm=%r node=%r:\n%s"
-        % (
-            completed.returncode,
-            shutil.which("npm"),
-            shutil.which("node") or shutil.which("nodejs"),
-            tail,
-        )
-    )
-    assert os.path.isfile(os.path.join(DIST, "index.html")), "dist/index.html missing after build"
+    from tests._distbuild import build_once
+    build_once(WS)
 
 
 class _DistHandler(SimpleHTTPRequestHandler):
