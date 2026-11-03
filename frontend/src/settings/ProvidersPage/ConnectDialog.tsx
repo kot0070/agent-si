@@ -578,8 +578,15 @@ export function ConnectDialog({
           onChange={(event) => setModelQuery(event.target.value)}
         />
       </label>
-      {modelSource === "catalog" ? (
+      {modelSource === "catalog" && shownRows.length > 0 ? (
         <p data-variant="quiet">{t("providers.connect.knownListNote")}</p>
+      ) : null}
+      {/* R2: a local preset with no served rows names that plainly
+          instead of an empty known list. */}
+      {modelSource === "catalog" && shownRows.length === 0 && preset.kind === "local" ? (
+        <p data-variant="quiet">
+          {t("providers.connect.localNotRunning", { label: preset.label })}
+        </p>
       ) : null}
       {/* J10: one header line names the unknown models; the per-row
           chips stay, but the repetition reads once up front. */}

@@ -4,7 +4,7 @@
 import type { ProviderPreset, ProviderState } from "./types";
 import { t } from "../../locale/index";
 import { withConnectedSeed } from "./ChatSelector";
-import { chatCapable, choiceLabel, isListableModelId } from "./roleChoices";
+import { canonical as canonicalChoiceId, chatCapable, choiceLabel, isListableModelId } from "./roleChoices";
 
 export type ChatChoice = {
   providerId: string;
@@ -32,11 +32,17 @@ export function enabledChatChoices(
     if (!state || !state.connected) {
       continue;
     }
+    // A bare served id and its qualified form are one model.
+    const enabled = new Set<string>();
+    for (const id of state.enabledModels) {
+      enabled.add(id);
+      enabled.add(canonicalChoiceId(preset.id, id));
+    }
     for (const model of preset.models) {
-      if (!state.enabledModels.includes(model.id)) {
+      if (!enabled.has(model.id) && !enabled.has(canonicalChoiceId(preset.id, model.id))) {
         continue;
       }
-      if (!isListableModelId(model.id)) {
+      if (!isListableModelId(canonicalChoiceId(preset.id, model.id))) {
         continue;
       }
       const kb = (model as { kb?: unknown }).kb ?? null;
@@ -45,7 +51,7 @@ export function enabledChatChoices(
       }
       out.push({
         providerId: preset.id,
-        modelId: model.id,
+        modelId: canonicalChoiceId(preset.id, model.id),
         label: choiceLabel(preset.label, model.id),
         kb,
       });

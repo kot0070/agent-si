@@ -240,7 +240,13 @@
       "needItNow": "Only when you want work to stay on this machine.",
       "purpose": "Run models on this PC.",
       "title": "Local LLM",
-      "empty": "There are no local presets. Add Ollama or LM Studio to connect on this machine."
+      "empty": "There are no local presets. Add Ollama or LM Studio to connect on this machine.",
+      "connectedModels": "Connected {label}, {count} models.",
+      "modelsLabel": "Local models",
+      "useForAgents": "Use for agents",
+      "workerPinned": "Worker model set to {model}.",
+      "useFailed": "Worker model not set: {reason}.",
+      "noCapability": "No capability data for {model}; it can still be used."
     },
     "localbench": {
       "title": "Local benchmark",

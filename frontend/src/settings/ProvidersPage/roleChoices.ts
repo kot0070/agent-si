@@ -109,7 +109,8 @@ export function choiceLabel(
   return `${providerLabel} — ${bare}`;
 }
 
-function canonical(providerId: string, modelId: string): string {
+/** Canonical `provider/bare` id form (mirrors the served compare). */
+export function canonical(providerId: string, modelId: string): string {
   const prefix = `${providerId}/`;
   const bare = modelId.startsWith(prefix)
     ? modelId.slice(prefix.length)
@@ -136,14 +137,19 @@ export function buildRoleChoices(
     if (state === undefined || !state.connected) {
       continue;
     }
-    const enabled = new Set(
-      state.enabledModels.map((id) => canonical(preset.id, id)),
-    );
+    // Enabled ticks match the display id verbatim or canonically: a
+    // bare served id ("served-extra") and its qualified form
+    // ("openai/served-extra") are one model.
+    const enabled = new Set<string>();
+    for (const id of state.enabledModels) {
+      enabled.add(id);
+      enabled.add(canonical(preset.id, id));
+    }
     for (const model of displayModels[preset.id] ?? []) {
-      const full = canonical(preset.id, model.id);
-      if (!enabled.has(full)) {
+      if (!enabled.has(model.id) && !enabled.has(canonical(preset.id, model.id))) {
         continue;
       }
+      const full = canonical(preset.id, model.id);
       if (!isListableModelId(full)) {
         continue;
       }
