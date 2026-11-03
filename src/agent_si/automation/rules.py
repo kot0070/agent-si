@@ -687,6 +687,48 @@ def run_history(project_id: str) -> List[Dict[str, Any]]:
     return rows
 
 
+def project_ids() -> List[str]:
+    """Every project with rules or approvals (boot event fan-out)."""
+    found = {rule["project_id"] for rule in _rules.values()}
+    found.update(row["project_id"] for row in _approvals.values())
+    return sorted(found)
+
+
+def checkpoints(project_id: str) -> List[Dict[str, Any]]:
+    """Checkpoints written by automations, latest first."""
+    rows = []
+    for key, result in _results.items():
+        if not isinstance(result, dict):
+            continue
+        if result.get("key") != "fxauto.results.checkpoint":
+            continue
+        try:
+            rule_id, run_id = key.split("\x00")
+        except ValueError:
+            continue
+        rule = _rules.get(rule_id)
+        if rule is None or rule.get("project_id") != project_id:
+            continue
+        params = result.get("params") or {}
+        rows.append({
+            "checkpoint_id": params.get("id", ""),
+            "time": params.get("at", ""),
+            "digest": params.get("digest", ""),
+            "rule": rule.get("name", ""),
+            "run_id": run_id,
+        })
+    rows.sort(key=lambda row: str(row["time"]), reverse=True)
+    return rows
+
+
+def checkpoint_run(project_id: str, checkpoint_id: str) -> Optional[str]:
+    """Run id behind one automation checkpoint, else None."""
+    for row in checkpoints(project_id):
+        if row["checkpoint_id"] == checkpoint_id:
+            return row["run_id"]
+    return None
+
+
 def save_state(path: str) -> str:
     """Persist rules, approvals, results and sequences as plain JSON."""
     payload = {

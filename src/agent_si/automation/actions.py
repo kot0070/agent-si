@@ -88,6 +88,8 @@ def do_checkpoint(
             "params": {
                 "name": rule["name"],
                 "id": record.checkpoint_id,
+                "digest": record.hash[:12],
+                "at": record.created_at,
             },
         },
     }
