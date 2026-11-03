@@ -609,12 +609,12 @@ def _deny_shape(argv: list[str]) -> str:
     return ""
 
 
-#: Bare heads whose Store alias stub never counts as installed.
-_STUB_HEADS = frozenset({"python", "python3", "pytest"})
+#: Bare heads whose Store alias shim never counts as installed.
+_ALIAS_SHIM_HEADS = frozenset({"python", "python3", "pytest"})
 
 
-def _is_windows_store_stub(path: str) -> bool:
-    """True when a which() hit is a Windows Store alias stub."""
+def _is_windows_store_alias_shim(path: str) -> bool:
+    """True when a which() hit is a Windows Store alias shim."""
     try:
         text = str(path or "")
     except Exception:
@@ -633,12 +633,12 @@ def _is_windows_store_stub(path: str) -> bool:
 
 
 def _which_real(name: str):
-    """shutil.which filtered for Store stubs."""
+    """shutil.which filtered for Store alias shims."""
     hit = shutil.which(name)
     if hit is None:
         return None
-    if _bare_head(name) in _STUB_HEADS:
-        if _is_windows_store_stub(hit):
+    if _bare_head(name) in _ALIAS_SHIM_HEADS:
+        if _is_windows_store_alias_shim(hit):
             return None
         return hit
     if "windowsapps" in str(hit).lower():
@@ -654,21 +654,21 @@ def _missing_head(words: list[str], folder: str) -> str | None:
     python pair falls back to each other and then to the py launcher);
     a head naming an existing file under the folder also counts as
     startable (Popen resolves it against the child cwd). A Windows
-    Store alias stub (WindowsApps path or zero-byte alias) for
+    Store alias shim (WindowsApps path or zero-byte alias) for
     python/python3/pytest counts as NOT installed and is never
     spawned, not even for --version.
     """
     resolved = resolve_argv([str(word) for word in words], folder)
     prog = str(resolved[0])
     if os.path.isabs(prog):
-        if os.path.isfile(prog) and not _is_windows_store_stub(prog):
+        if os.path.isfile(prog) and not _is_windows_store_alias_shim(prog):
             if shutil.which(prog) is not None:
                 return None
             return None
     else:
         if _which_real(prog) is not None:
             return None
-        if shutil.which(prog) is not None and not _is_windows_store_stub(
+        if shutil.which(prog) is not None and not _is_windows_store_alias_shim(
                 str(shutil.which(prog))):
             return None
     head = str(words[0])
@@ -738,8 +738,8 @@ def resolve_argv(argv: list[str], folder: str | None = None) -> list[str]:
         return words
     found = _which_real(head) if head in ("python", "python3", "pytest", "py") else shutil.which(head)
     if found is not None:
-        # Never return a Store stub, even when the head itself is absolute.
-        if _is_windows_store_stub(found):
+        # Never return a Store alias shim, even when the head itself is absolute.
+        if _is_windows_store_alias_shim(found):
             found = None
         else:
             return [found, *words[1:]]
@@ -751,8 +751,8 @@ def resolve_argv(argv: list[str], folder: str | None = None) -> list[str]:
         if fallback is not None:
             return [fallback, *words[1:]]
     if head in ("python", "python3", "pytest"):
-        # Bare head with only a stub on PATH: stay bare so _missing_head
-        # names the plain missing-tool line (never run the stub).
+        # Bare head with only an alias shim on PATH: stay bare so _missing_head
+        # names the plain missing-tool line (never run the shim).
         return words
     return words
 
