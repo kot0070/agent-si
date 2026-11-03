@@ -203,8 +203,7 @@ def test_save_recreate_app_key_gone_list_empty_chat_names_key(
     assert BAIT not in chat.text
 
 
-def test_missing_key_says_plain_line_not_engine_text(
-        tmp_path, monkeypatch):
+def test_missing_key_says_plain_line_not_engine_text(        tmp_path, monkeypatch):
     """Disconnect-then-send: chat names the key, never engine jargon."""
     def _boom(**kwargs):
         raise OSError("os stack must not run under memory isolation")
@@ -232,3 +231,65 @@ def test_missing_key_says_plain_line_not_engine_text(
     assert "bind the credential store value port" not in chat.text, \
         chat.text
     assert BAIT not in chat.text
+
+
+class _UnreadableStore:
+    """Store whose reads fail: OSError, never KeyError (nothing missing)."""
+
+    def get_secret(self, secret_id):
+        raise OSError("simulated OS store outage")
+
+    def has(self, secret_id):
+        raise OSError("simulated OS store outage")
+
+
+class _LegacyStore:
+    """Duck-typed store without get_secret: value resolves via get."""
+
+    def __init__(self, value):
+        self._value = value
+
+    def get(self, secret_id, default=None):
+        if secret_id == "meta":
+            return self._value
+        return default
+
+
+def test_unreadable_store_says_store_not_missing():
+    """OSError from the store reads as UNREADABLE, never MISSING."""
+    from agent_si.backend import chat_stream as _cs
+    try:
+        _cs._read_secret_value(_UnreadableStore(), "meta")
+    except _cs.CredentialStoreUnreadable as exc:
+        assert exc.code == "CREDENTIAL_STORE_UNREADABLE"
+        assert exc.provider_id == "meta"
+    else:
+        raise AssertionError("expected CredentialStoreUnreadable")
+    event = _cs._chat_error_event("s-1", _cs.CredentialStoreUnreadable("meta"))
+    assert event["code"] == "CREDENTIAL_STORE_UNREADABLE", event
+    assert event["provider_id"] == "meta", event
+    assert "secret value missing" not in event["message"], event
+
+
+def test_missing_key_error_event_carries_code_and_provider():
+    """The gone-key terminal maps to code + provider id, no engine text."""
+    from agent_si.backend import chat_stream as _cs
+    event = _cs._chat_error_event("s-1", _cs.SecretValueMissing("meta"))
+    assert event["type"] == "error", event
+    assert event["code"] == "SECRET_VALUE_MISSING", event
+    assert event["provider_id"] == "meta", event
+    assert "AdapterConfigError" not in event["message"], event
+    assert "bind the credential store value port" not in event["message"], \
+        event
+
+
+def test_legacy_duck_store_still_resolves():
+    """Stores without get_secret keep the legacy loader walk."""
+    from agent_si.backend import chat_stream as _cs
+    assert _cs._read_secret_value(_LegacyStore("v-fake"), "meta") == "v-fake"
+    try:
+        _cs._read_secret_value(_LegacyStore(""), "meta")
+    except _cs.SecretValueMissing as exc:
+        assert exc.code == "SECRET_VALUE_MISSING"
+    else:
+        raise AssertionError("expected SecretValueMissing")
