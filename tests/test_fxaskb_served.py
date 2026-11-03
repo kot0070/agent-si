@@ -1,7 +1,7 @@
 """FXASKB served proof: install ask holds the run, decision recorded, no ask.
 
 B1 engine hold: a worker install run with no recorded decision ends the
-run as held: one status line "Needs your permission to install: <command>"
+run as held: one status line "Waiting for your permission to run <command>."
 plus the terminal approval event carrying the tool id (the same shape the
 chat client maps), with the ledger line, run_end and journal of any run
 end. Served through the real chat stream (create_app + TestClient) with
@@ -57,7 +57,7 @@ PROVIDER = "mock"
 MODEL = "mock-canned"
 
 INSTALL_ARGV = ["cargo", "install", "fxaskb-pkg"]
-HOLD_STATUS = "Needs your permission to install: cargo install fxaskb-pkg"
+HOLD_STATUS = "Waiting for your permission to run cargo install fxaskb-pkg."
 
 
 def _auth(token=TEST_TOKEN, actor=ACTOR):
