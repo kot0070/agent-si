@@ -24,6 +24,7 @@ import functools
 import sys
 import types
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
@@ -221,7 +222,15 @@ def _store_assurance_status(run_id: str, status: Dict[str, Optional[str]]) -> No
 
 
 #: Latest stage run per project: project_id -> {"plan_id", "run_id"}.
+#: FXQACAT (additive): start_stage also records "started_at" (UTC ISO) so
+#: the runs/latest read can name the last run's start time; older entries
+#: without it read back without a time, never an invented one.
 _LATEST_RUN: Dict[str, Dict[str, str]] = {}
+
+
+def _utcnow() -> str:
+    """Current UTC time as an ISO-8601 string (FXQACAT additive helper)."""
+    return datetime.now(timezone.utc).isoformat()
 
 
 def latest_run_for_project(project_id: str) -> Optional[Dict[str, str]]:
@@ -257,7 +266,7 @@ def start_stage(project_id: str, plan_id: str, run_id: str) -> StageRun:
     _RESULTS[run_id] = []
     _ASSURANCE_STATUS.pop(run_id, None)
     _LATEST_RUN[str(project_id)] = {
-        "plan_id": plan_id, "run_id": run_id}
+        "plan_id": plan_id, "run_id": run_id, "started_at": _utcnow()}
     _journal(project_id, run_id, "plan", "PLAN", "stage run opened plan=%s" % plan_id)
     return run
 
