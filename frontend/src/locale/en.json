@@ -766,7 +766,9 @@
       "routing": "Why the router chose this model, from the stored decision.",
       "audits": "Served counts plus rows that need attention.",
       "errors": "Only served failures: blocked agents and failed tasks.",
-      "reports": "Readable totals from served records; the raw export stays behind Show more."
+      "reports": "Readable totals from served records; the raw export stays behind Show more.",
+      "tests": "Latest run results: code tests, AI checks and human verdicts, one row per test.",
+      "chat": "Talk to the project: messages, runs and results in one stream."
     },
     "attempts": "{count} attempts",
     "blockedNote": "Blocked at run end: the row waits on a failed guard. Open the Errors tab for the served reason.",

@@ -552,6 +552,9 @@ function ChatTabRoute(): ReactElement {
           </button>
         ))}
       </nav>
+      {/* FXNAV P16-purpose: the chat tab is the 16th project tab; its
+          panel opens with the same one-sentence purpose line. */}
+      <p data-testid="tab-purpose">{t("projectView.purpose.chat")}</p>
       <ChatAreaView projectId={projectId} />
     </div>
   );
