@@ -44,7 +44,10 @@ async function expectSingleTopBarWithStrip(): Promise<void> {
   const strip = screen.getByTestId("pairing-strip");
   expect(strip.tagName.toLowerCase()).toBe("div");
   expect(topbar.contains(strip)).toBe(true);
-  expect(strip.textContent).toContain(t("shell.topbar.watcher"));
+  // FXFACTS F15: the top bar carries no watcher word; the strip holds
+  // the placement badge only.
+  expect(screen.queryByTestId("topbar-watcher")).toBeNull();
+  expect(screen.queryByTestId("pairing-label")).toBeNull();
   const badge = strip.textContent ?? "";
   const badgeEl = screen.getByTestId("pairing-badge");
   expect(

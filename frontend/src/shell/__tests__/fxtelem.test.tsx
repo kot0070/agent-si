@@ -185,11 +185,15 @@ describe("fxtelem two-run truth", () => {
   it("names last run and project totals, never an unlabeled global", async () => {
     stubTwoRuns();
     renderInspector();
+    // FXFACTS F10: cards render closed; the card under test is opened.
+    fireEvent.click(await screen.findByTestId("rail-more-toggle"));
+    fireEvent.click(await screen.findByTestId("kit-toggle-fx-tokens"));
     const lastRun = await screen.findByTestId("tokens-last-run");
     expect(lastRun.textContent).toContain("13,938");
     expect(lastRun.textContent).toContain("Last run");
     // FXCARDS C1: the served runs key is newest-first, so Results and the
     // Context Last-run read run-2 (the second run), never run-1.
+    fireEvent.click(screen.getByTestId("rail-toggle-results"));
     const verdict = await screen.findByTestId("result-last-verdict");
     expect(verdict.getAttribute("title")).toContain("run-2");
     expect(verdict.textContent).toContain("second");
@@ -198,6 +202,7 @@ describe("fxtelem two-run truth", () => {
     // Rail "This project" is the project-scoped telemetry total: the same
     // number the project Tokens tab shows, and the per-model rows add up
     // to it.
+    fireEvent.click(screen.getByTestId("rail-toggle-context"));
     const project = await screen.findByTestId("tokens-project");
     expect(project.textContent).toContain("33,180");
     expect(project.textContent).toContain("This project");
@@ -236,18 +241,22 @@ describe("fxtelem two-run truth", () => {
     // Other calls while every call has a role.
     const rows = await screen.findAllByTestId(/^tokens-row-/);
     const text = rows.map((row) => row.textContent ?? "").join("\n");
-    expect(text).toContain("manager");
+    // FXFACTS F3: role names read through the locale.
+    expect(text).toContain("Manager");
     expect(text).toContain("20,000");
-    expect(text).toContain("worker");
+    expect(text).toContain("Worker");
     expect(text).toContain("13,180");
     expect(text).not.toContain("Other calls");
     // Total is the sum of known rows; the unknown row keeps its own
     // Unknown instead of poisoning the total.
     expect(spent.textContent).toContain("33,180");
-    expect(text).toContain("auditor");
+    expect(text).toContain("Auditor");
     expect(text).toContain("Unknown");
     cleanup();
     renderInspector();
+    // FXFACTS F10: the tokens card lives in More, closed by default.
+    fireEvent.click(await screen.findByTestId("rail-more-toggle"));
+    fireEvent.click(await screen.findByTestId("kit-toggle-fx-tokens"));
     const project = await screen.findByTestId("tokens-project");
     expect(project.textContent).toContain("33,180");
   });
@@ -255,6 +264,8 @@ describe("fxtelem two-run truth", () => {
   it("shows the budget state's real numbers, never hiding spend", async () => {
     stubTwoRuns();
     renderInspector();
+    // FXFACTS F10: Budget is a direct card, closed by default.
+    fireEvent.click(await screen.findByTestId("kit-toggle-fx-budget"));
     const budget = await screen.findByTestId("kit-metric-fx-budget");
     // Budget state rows hold numbers (spent 0, limit 5): the card shows
     // them instead of an unknown line.
@@ -265,6 +276,8 @@ describe("fxtelem two-run truth", () => {
   it("names connected providers instead of Unknown", async () => {
     stubTwoRuns();
     renderInspector();
+    // FXFACTS F10: providers live in More, closed by default.
+    fireEvent.click(await screen.findByTestId("rail-more-toggle"));
     const providers = await screen.findByTestId("kit-metric-fx-providers");
     expect(providers.textContent).toContain("meta");
     expect(providers.textContent).not.toContain("Unknown");

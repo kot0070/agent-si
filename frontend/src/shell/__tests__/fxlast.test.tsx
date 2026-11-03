@@ -132,7 +132,8 @@ describe("fxlast stop-all disabled when idle", () => {
     expect(stop.getAttribute("title")).toBeNull();
   });
 
-  it("arm plus confirm posts the stop route exactly once", async () => {
+  it("one click posts the stop route exactly once", async () => {
+    // FXFACTS F12: one click stops at once, no confirmation dialog.
     const seen: SeenRequest[] = [];
     stubFetch(RUNNING, seen);
     renderAppAt("/");
@@ -140,7 +141,6 @@ describe("fxlast stop-all disabled when idle", () => {
     await waitFor(() => {
       expect((stop as HTMLButtonElement).disabled).toBe(false);
     });
-    fireEvent.click(stop);
     fireEvent.click(stop);
     await screen.findByTestId("stop-all-result");
     const posts = seen.filter(

@@ -82,7 +82,9 @@ describe.each([false, true])("k07r1c shell rows (dark=%s)", (dark) => {
     expect(document.querySelectorAll('[data-testid="topbar"]').length).toBe(1);
     const strip = await screen.findByTestId("pairing-strip");
     expect(topbar.contains(strip)).toBe(true);
-    expect(strip.textContent).toContain(t("shell.topbar.watcher"));
+    // FXFACTS F15: the top bar carries no watcher word; the strip holds
+    // the placement badge only.
+    expect(screen.queryByTestId("topbar-watcher")).toBeNull();
     const badge = strip.textContent ?? "";
     const badgeEl = screen.getByTestId("pairing-badge");
     expect(

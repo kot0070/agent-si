@@ -306,9 +306,9 @@ describe("fxgapt F02 pinned binding on the real page", () => {
 
 describe("fxgapt F05 agents live on the real page", () => {
   it("renders the honest empty state with no run (empty is FAIL, never a pass)", async () => {
-    renderAppAt("/");
-    expect(await screen.findByTestId("chat-prompt")).toBeTruthy();
-    fireEvent.click(screen.getByTestId("team-open-agents"));
+    // FXFACTS F10: no-data cards hide their nav links, so the route is
+    // opened directly.
+    renderAppAt("/agents/live");
     expect(await screen.findByTestId("kit-empty-state")).toBeTruthy();
     expect(screen.queryByTestId("agents-live-rows")).toBeNull();
     expect(screen.queryByTestId("agent-row-live-1")).toBeNull();
@@ -355,7 +355,8 @@ describe("fxgapt F06 watcher tab on the real page", () => {
     fireEvent.click(await screen.findByTestId("rail-toggle-watcher"));
     fireEvent.click(await screen.findByTestId("watcher-open"));
     expect(await screen.findByTestId("watcher-tab")).toBeTruthy();
-    expect(screen.getByTestId("watcher-project").textContent).toBe("p1");
+    // FXFACTS F6a: the header names the project, falling back to the id.
+    expect(screen.getByTestId("watcher-project").textContent).toBe("P1");
     expect(await screen.findByTestId("watcher-rule-cards")).toBeTruthy();
     for (const card of ["card-hang", "card-guard", "card-tamper"]) {
       expect(await screen.findByTestId(`rule-card-${card}`)).toBeTruthy();
@@ -420,10 +421,10 @@ describe("fxgapt laptop-B chrome on the real page", () => {
     // RED: topbar-stop-all is always enabled, even with no run
     // (agents/live []). Photo 02: red Stop-all while the rail says
     // "No agents running". Expected: disabled/absent when idle.
+    // FXFACTS F10: no-data Team hides its nav link; the stop assertion
+    // needs no navigation.
     renderAppAt("/");
     expect(await screen.findByTestId("chat-prompt")).toBeTruthy();
-    fireEvent.click(screen.getByTestId("team-open-agents"));
-    expect(await screen.findByTestId("kit-empty-state")).toBeTruthy();
     const stop = screen.getByTestId("topbar-stop-all") as HTMLButtonElement;
     expect(stop.disabled).toBe(true);
   });

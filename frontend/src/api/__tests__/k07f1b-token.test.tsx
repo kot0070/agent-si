@@ -278,7 +278,8 @@ describe("k07f1b session token behaviour", () => {
     expect(sharedCalls).toBe(1);
   });
 
-  it("posts stop-all once with the token after arm plus confirm", async () => {
+  it("posts stop-all once with the token after one click", async () => {
+    // FXFACTS F12: one click stops at once, no confirmation dialog.
     setWindowToken(TOKEN);
     const { seen } = captureFetch((url) => {
       if (url === "/api/v1/stop-all") {
@@ -302,7 +303,6 @@ describe("k07f1b session token behaviour", () => {
         <RouterProvider router={router} />
       </ApiClientProvider>,
     );
-    fireEvent.click(await screen.findByTestId("topbar-stop-all"));
     fireEvent.click(await screen.findByTestId("topbar-stop-all"));
     const result = await screen.findByTestId("stop-all-result");
     expect(result.textContent).toContain("Stopped 1");

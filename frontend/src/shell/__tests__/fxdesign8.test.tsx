@@ -235,7 +235,7 @@ afterEach(() => {
 });
 
 describe("fxdesign8 team one-liner", () => {
-  it("shows role, short model, status chip and step on one line", async () => {
+  it("shows role, short model and status on one line; step in details", async () => {
     stubFx8();
     renderInspector();
     const row = await screen.findByTestId("team-row-agent-1");
@@ -245,11 +245,14 @@ describe("fxdesign8 team one-liner", () => {
     expect(line.textContent).toContain("long-model-name-70b");
     expect(line.textContent).not.toContain("meta-llama/long-model-name-70b");
     expect(line.textContent).toContain(t("tasks.status.running"));
-    expect(line.textContent).toContain("2");
+    // FXFACTS F14: the one-line row is role, short model, status; the
+    // step, attempts and placement moved into the details.
+    expect(line.textContent).not.toContain("2");
     // The rest lives under the row disclosure, still row-visible.
     const detail = await screen.findByTestId("team-detail-agent-1");
     expect(detail.textContent).toContain("scope-1");
     expect(detail.textContent).toContain("edited hello");
+    expect(detail.textContent).toContain("2");
   });
 
   it("keeps finished rows with real state and no Unknown chip", async () => {
@@ -274,6 +277,8 @@ describe("fxdesign8 results from the runs key", () => {
   it("shows the last run verdict plus files with a quiet open link", async () => {
     stubFx8();
     renderInspector();
+    // FXFACTS F10: Results renders closed; the card under test is opened.
+    fireEvent.click(await screen.findByTestId("rail-toggle-results"));
     const verdict = await screen.findByTestId("result-last-verdict");
     // FXZERO R2: the task title (or a short human name) is primary;
     // the raw run id rides the details only (tooltip), never the text.
@@ -295,6 +300,9 @@ describe("fxdesign8 tokens from served totals", () => {
   it("idle shows the last run total, matching the chat Total line", async () => {
     stubFx8({ telemetry: true, live: LIVE_IDLE });
     renderInspector();
+    // FXFACTS F10: metric cards live in More and Context renders closed.
+    fireEvent.click(await screen.findByTestId("rail-more-toggle"));
+    fireEvent.click(await screen.findByTestId("rail-toggle-context"));
     // No run live: the rail reads the runs key, not the ended live rows
     // (which would sum a different number) and never an invented zero.
     const card = await screen.findByTestId("kit-metric-fx-tokens");
@@ -310,6 +318,9 @@ describe("fxdesign8 tokens from served totals", () => {
   it("live shows live-row sums with the per-role legend", async () => {
     stubFx8({ telemetry: true, live: LIVE_MIXED });
     renderInspector();
+    // FXFACTS F10: metric cards live in More and Context renders closed.
+    fireEvent.click(await screen.findByTestId("rail-more-toggle"));
+    fireEvent.click(await screen.findByTestId("rail-toggle-context"));
     const card = await screen.findByTestId("kit-metric-fx-tokens");
     expect(card.textContent).toContain("5,062");
     const legend = await screen.findByTestId("ctx-legend");
@@ -337,12 +348,16 @@ describe("fxdesign8 tokens from served totals", () => {
       },
     );
     renderInspector();
+    // FXFACTS F10: the tokens card lives in More; with no token source
+    // it stays closed on its quiet dash with no toggle.
+    fireEvent.click(await screen.findByTestId("rail-more-toggle"));
     const quiet = await screen.findByTestId("tokens-unknown");
     expect(quiet.textContent).toBe(t("shell.cards.context.noUsage"));
-    // The card shell stays for its heading toggle; its total is Unknown,
+    // The card shell stays on its one-line dash; its total is Unknown,
     // never an invented zero.
     const card = await screen.findByTestId("kit-metric-fx-tokens");
-    expect(card.textContent).toContain(t("shell.common.unknown"));
+    expect(card.textContent).toContain("—");
+    expect(screen.queryByTestId("kit-toggle-fx-tokens")).toBeNull();
   });
 });
 

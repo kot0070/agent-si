@@ -80,6 +80,8 @@ describe("fxpanel P10 tokens toggle", () => {
     setLocale("en");
     renderAppAt("/");
     expect(await screen.findByTestId("chat-prompt")).toBeTruthy();
+    // FXFACTS F10: the tokens card lives in More.
+    fireEvent.click(await screen.findByTestId("rail-more-toggle"));
     const toggle = await screen.findByTestId("kit-toggle-fx-tokens");
     expect(toggle.getAttribute("aria-label")).toBe(t("ui.card.toggle"));
     expect(toggle.classList.contains("fx-kit-toggle")).toBe(true);
@@ -100,6 +102,8 @@ describe("fxpanel P10 tokens toggle", () => {
     setLocale("uk");
     renderAppAt("/");
     expect(await screen.findByTestId("chat-prompt")).toBeTruthy();
+    // FXFACTS F10: the tokens card lives in More.
+    fireEvent.click(await screen.findByTestId("rail-more-toggle"));
     const toggle = await screen.findByTestId("kit-toggle-fx-tokens");
     expect(toggle.getAttribute("aria-label")).toBe("Показати деталі");
     fireEvent.click(toggle);

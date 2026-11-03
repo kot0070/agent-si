@@ -278,7 +278,8 @@ describe("project views", () => {
       </ApiClientProvider>,
     );
     expect((await screen.findByTestId("model-row-0")).textContent).toContain(
-      "prov-9/mod-9 manager",
+      // FXFACTS F3: role names read through the locale.
+      "prov-9/mod-9 Manager",
     );
     models.unmount();
     cleanup();

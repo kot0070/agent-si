@@ -4,7 +4,7 @@
 // project change clears. Real Inspector render, fetch stubbed at the
 // network boundary only.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import type { ReactElement } from "react";
 import { HttpApiClient } from "../../api/client";
@@ -182,6 +182,11 @@ describe("fxcards failed refresh keeps last good values", () => {
   it("first read ok, second read fails: Context and Tokens numbers stay", async () => {
     stubRefresh();
     renderInspector();
+    // FXFACTS F10: the tokens card lives in More, closed by default.
+    // Context renders closed too; open both cards under test.
+    fireEvent.click(await screen.findByTestId("rail-more-toggle"));
+    fireEvent.click(await screen.findByTestId("kit-toggle-fx-tokens"));
+    fireEvent.click(await screen.findByTestId("rail-toggle-context"));
     // First read serves the second run's numbers (newest-first).
     const lastRun = await screen.findByTestId("tokens-last-run");
     expect(lastRun.textContent).toContain("13,938");
@@ -209,6 +214,8 @@ describe("fxcards failed refresh keeps last good values", () => {
       "13,938",
     );
     // Results still names the second run, not an empty state.
+    // FXFACTS F10: Results renders closed; open it.
+    fireEvent.click(await screen.findByTestId("rail-toggle-results"));
     const verdict = await screen.findByTestId("result-last-verdict");
     expect(verdict.textContent).toContain("second");
   });
