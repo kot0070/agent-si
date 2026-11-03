@@ -7,7 +7,11 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { HttpApiClient } from "../../api/client";
 import { ApiClientProvider } from "../../app/ApiClientProvider";
-import { resetLocaleForTests, setLocale } from "../../locale/index";
+import {
+  formatScreenTime,
+  resetLocaleForTests,
+  setLocale,
+} from "../../locale/index";
 import { App } from "../../app/App";
 import { readRuns, runWallS } from "../viewsApi";
 
@@ -150,7 +154,9 @@ describe("fxviews3 runs over the real app", () => {
     const row = await screen.findByTestId("devrun-card-r-1");
     const text = row.textContent ?? "";
     expect(text).toContain("done");
-    expect(text).toContain("2026");
+    // FXTIME: run moments screen through the one 24-hour helper.
+    expect(text).toContain(formatScreenTime("2026-05-01T10:00:00.000Z", "en"));
+    expect(text).not.toContain("2026-05-01T10:00:00.000Z");
     expect(text).toContain("p1: PASS");
     expect(text).toContain("42");
     expect(text).toContain("not known");

@@ -152,40 +152,61 @@ function bcp47(locale: SupportedLocale): string {
   return locale === 'uk' ? 'uk-UA' : 'en-US';
 }
 
+/** FXTIME: short month names per locale (CLDR short form). */
+const EN_MONTHS_SHORT = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+];
+
+/** FXTIME: short month names per locale (CLDR short form). */
+const UK_MONTHS_SHORT = [
+  'січ.', 'лют.', 'бер.', 'квіт.', 'трав.', 'черв.',
+  'лип.', 'серп.', 'вер.', 'жовт.', 'лист.', 'груд.',
+];
+
+/** FXTIME: the ONE helper for every time on screen (en + uk, 24-hour).
+ *
+ * Same form in both locales: "HH:mm" when the stamp falls on the local
+ * day, otherwise "d MMM HH:mm" with the locale month name (uk months in
+ * uk). Hours are always 24-hour, zero-padded, from the PC-local zone
+ * (served UTC ISO stamps render in the viewer's zone). Invalid or empty
+ * input falls back to the raw value, never an invented time.
+ */
+export function formatScreenTime(
+  value: string | number | Date,
+  locale?: SupportedLocale,
+): string {
+  const raw = value instanceof Date ? value.toString() : String(value);
+  const stamp = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(stamp.getTime())) {
+    return raw === 'Invalid Date' ? String(value) : raw;
+  }
+  const pad = (n: number): string => String(n).padStart(2, '0');
+  const hm = `${pad(stamp.getHours())}:${pad(stamp.getMinutes())}`;
+  const now = new Date();
+  if (
+    stamp.getFullYear() === now.getFullYear() &&
+    stamp.getMonth() === now.getMonth() &&
+    stamp.getDate() === now.getDate()
+  ) {
+    return hm;
+  }
+  const months = (locale ?? currentLocale) === 'uk' ? UK_MONTHS_SHORT : EN_MONTHS_SHORT;
+  return `${stamp.getDate()} ${months[stamp.getMonth()]} ${hm}`;
+}
+
 export function formatDate(date: Date, locale?: SupportedLocale): string {
-  return new Intl.DateTimeFormat(bcp47(locale ?? currentLocale), {
-    year: 'numeric',
-    month: 'numeric',
-    day: 'numeric',
-  }).format(date);
+  return formatScreenTime(date, locale);
 }
 
-/** Long locale date ("11 Feb 2026" / "11 лют. 2026"); invalid input falls back to the raw value. */
+/** Date stamp through the one screen-time helper (kept signature). */
 export function formatDateLong(value: string, locale?: SupportedLocale): string {
-  const stamp = new Date(value);
-  if (Number.isNaN(stamp.getTime())) {
-    return value;
-  }
-  return new Intl.DateTimeFormat(bcp47(locale ?? currentLocale), {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  }).format(stamp);
+  return formatScreenTime(value, locale);
 }
 
-/** Local date+time ("11 Feb 2026, 06:42"); invalid input falls back to raw. */
+/** Date+time stamp through the one screen-time helper (kept signature). */
 export function formatDateTime(value: string, locale?: SupportedLocale): string {
-  const stamp = new Date(value);
-  if (Number.isNaN(stamp.getTime())) {
-    return value;
-  }
-  return new Intl.DateTimeFormat(bcp47(locale ?? currentLocale), {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(stamp);
+  return formatScreenTime(value, locale);
 }
 
 export function formatNumber(value: number, locale?: SupportedLocale): string {

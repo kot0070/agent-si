@@ -9,6 +9,7 @@ import {
   detectOsLocale,
   formatDate,
   formatNumber,
+  formatScreenTime,
   resetLocaleForTests,
   setLocale,
   t,
@@ -153,8 +154,11 @@ describe('locale module', () => {
     const ukDate = formatDate(day, 'uk');
     const enDate = formatDate(day, 'en');
     expect(ukDate).not.toBe(enDate);
-    expect(ukDate).toContain('2026');
-    expect(enDate).toContain('2026');
+    // FXTIME: formatDate screens through the one 24-hour helper.
+    expect(enDate).toBe(formatScreenTime(day, 'en'));
+    expect(ukDate).toBe(formatScreenTime(day, 'uk'));
+    expect(enDate).toMatch(/^\d{1,2} [A-Za-z]+\.? \d\d:\d\d$/);
+    expect(ukDate).toMatch(/[\u0400-\u04FF]/);
     const ukNumber = formatNumber(1234.5, 'uk');
     const enNumber = formatNumber(1234.5, 'en');
     expect(ukNumber).not.toBe(enNumber);

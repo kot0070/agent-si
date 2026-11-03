@@ -2,6 +2,7 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppsCardPage, CLOSING_PROMPT } from "./AppsCard";
+import { formatScreenTime, resetLocaleForTests, setLocale } from "../locale/index";
 
 // FAKE-OF: global fetch (fetch-level fake only)
 function fakeFetchOk(body: unknown) {
@@ -32,7 +33,7 @@ describe("AppsCardPage (fetch-level fake only)", () => {
     expect(screen.getByTestId("apps-card-paused").textContent).toBe("Active");
     expect(screen.getByTestId("apps-card-services").textContent).toContain("svc-api");
     expect(screen.getByTestId("apps-card-generated").textContent).toBe(
-      "2026-10-27T00:00:00Z",
+      formatScreenTime("2026-10-27T00:00:00Z", "en"),
     );
     expect(screen.getByTestId("apps-card-closing").textContent).toBe(CLOSING_PROMPT);
     expect(fetchMock).toHaveBeenCalledOnce();

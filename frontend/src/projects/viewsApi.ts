@@ -18,7 +18,7 @@ import type {
 import { placementForRow } from "../agents/agentsApi";
 import type { Placement } from "../agents/agentsApi";
 import type { SupportedLocale } from "../locale/index";
-import { formatDate, t } from "../locale/index";
+import { formatDate, formatScreenTime, t } from "../locale/index";
 
 export interface ShortRef {
   text: string;
@@ -530,8 +530,8 @@ export function sumRunsWall(runs: DevrunRun[]): number | null {
   return served ? total : null;
 }
 
-// Served stamps render as local date + time; UNKNOWN or unparseable
-// stamps stay raw so provenance assertions keep working.
+// Served stamps render through the one screen-time helper; UNKNOWN or
+// unparseable stamps stay raw so provenance assertions keep working.
 export function formatRunMoment(
   value: string,
   locale: SupportedLocale,
@@ -543,14 +543,7 @@ export function formatRunMoment(
   if (Number.isNaN(parsed)) {
     return value;
   }
-  const tag = locale === "uk" ? "uk-UA" : "en-US";
-  return new Intl.DateTimeFormat(tag, {
-    year: "numeric",
-    month: "numeric",
-    day: "numeric",
-    hour: "numeric",
-    minute: "numeric",
-  }).format(new Date(parsed));
+  return formatScreenTime(new Date(parsed), locale);
 }
 
 // Human wall-clock units from served seconds (rounded): "45 s",
