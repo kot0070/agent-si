@@ -2143,7 +2143,7 @@ def _platform_guidance() -> str:
     Installing is a tool call, never text: to install packages the
     worker runs the installer argv (for example ["npm", "install"]),
     which is the permission ask the app shows the user; the worker
-    never asks for installs in prose and never writes stub
+    never asks for installs in prose and never writes placeholder
     lock files or dependency folders to look installed.
     """
     plat = str(sys.platform)
@@ -2394,7 +2394,7 @@ def _director_prompt(message: str, history: str = "") -> str:
         "and that part runs the tests. When the task needs packages "
         "installed, plan an install part whose check reads the real "
         "result (for example a check that runs the installed tool or "
-        "reads the real lock file), never a stub.%s" % (
+        "reads the real lock file), never a placeholder.%s" % (
             message or "(no task text)", _platform_guidance()))
     from agent_si.runtime.devrun import roles as _roles
     base = "%s %s" % (base, _roles.reply_language_line())
@@ -3666,7 +3666,7 @@ def _worker_prompt(spec: dict, message: str, attempt: int,
             "To install packages, run the installer argv (for example "
             "[\"npm\", \"install\"]): the run action IS the permission "
             "ask the app shows the user, so never ask for installs in "
-            "text and never write stub lock files or dependency folders "
+            "text and never write placeholder lock files or dependency folders "
             "to look installed. "
             "Return ONLY {\"actions\": [...], \"done\": bool}: done "
             "true only when the part is complete. Run the project's own "
