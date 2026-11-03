@@ -82,6 +82,7 @@
       "needOneModel": "Tick at least one model, or Cancel to keep the current list.",
       "refusedKey": "The provider refused this key. Paste the full key again.",
       "unreachable": "Could not reach the provider.",
+      "conflict": "This provider is already connected with different settings — disconnect it first, then connect again.",
       "check": "Check",
       "checking": "Checking...",
       "checked": "Key checked. Save to connect.",

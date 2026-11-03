@@ -276,6 +276,7 @@ export type LocaleKey =
   | 'projectView.tokens.empty'
   | 'providers.connect.closeGlyph'
   | 'projectView.tokens.explainer'
+  | 'providers.connect.conflict'
   | 'providers.connect.connected'
   | 'projectView.tokens.model'
   | 'providers.connect.failedCode'
