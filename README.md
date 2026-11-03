@@ -133,3 +133,7 @@ Stop: the top bar has Stop all. Stopping is a two-step control and also answers 
 ## Licence
 
 Agent SI ships under the MIT licence. Copyright (c) 2026 Ivan Soprun. See `LICENSE` at the checkout root. Third-party titles and licences are listed in `docs/third_party_notices/NOTICES.md` and shown on the About screen.
+
+## How this was built
+
+The stress points found while building Agent SI are recorded in a field report (owner-observed: over 100 agents at once; measured in the records: 1060 sessions, 545 recorded runs, peak 16 concurrent sessions). See [docs/MUSE_STRESS_STORY.md](docs/MUSE_STRESS_STORY.md).
