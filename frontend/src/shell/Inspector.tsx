@@ -24,7 +24,7 @@ import { readProjectTelemetry } from "../k07next2/k07next2Api";
 import type { ProjectTelemetry } from "../k07next2/k07next2Api";
 import { ApiError, requestResponse } from "../api/errors";
 import { formatNumber, pluralUnit, t } from "../locale/index";
-import { formatDateTime } from "../locale/index";
+import { formatScreenTime } from "../locale/index";
 import { shortenLiveRef } from "../agents/agentsApi";
 import {
   placementForRow,
@@ -1568,7 +1568,7 @@ export function Inspector(props: InspectorProps): ReactElement {
                   : t("watcher.tab.notKnown")}{" "}
                 · {t("shell.cards.watcher.lastCheck")}{": "}
                 {watcherStatus.last_check_at
-                  ? formatDateTime(watcherStatus.last_check_at)
+                  ? formatScreenTime(watcherStatus.last_check_at)
                   : t("watcher.tab.notKnown")}
               </p>
               {/* FXZERO R4 extra gate: the model names the exact served
@@ -1604,7 +1604,7 @@ export function Inspector(props: InspectorProps): ReactElement {
                 {watcherActionAt === "" ? null : (
                   <>
                     {" \u00b7 "}
-                    {formatDateTime(watcherActionAt)}
+                    {formatScreenTime(watcherActionAt)}
                   </>
                 )}
               </p>

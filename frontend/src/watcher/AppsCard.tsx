@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { formatScreenTime } from "../locale/index";
 
 /** Frozen apps-card payload: stored facts only, never computed values. */
 export interface AppsCardData {
@@ -43,7 +44,7 @@ export function AppsCard({ data }: { data: AppsCardData }) {
           <li key={id}>{id}</li>
         ))}
       </ul>
-      <p data-testid="apps-card-generated">{data.generated_at}</p>
+      <p data-testid="apps-card-generated">{data.generated_at !== "" ? formatScreenTime(data.generated_at) : data.generated_at}</p>
       <p data-testid="apps-card-closing">{CLOSING_PROMPT}</p>
     </section>
   );
