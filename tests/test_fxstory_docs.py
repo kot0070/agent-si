@@ -49,3 +49,34 @@ def test_fxstory_labels_kept():
     blob = STORY.read_text(encoding="utf-8")
     assert "measured" in blob
     assert "owner-observed" in blob or "Owner-observed" in blob
+
+
+#: FXSCRUB R5: docs/reports stay in the repo but scrubbed of internal
+#: folder names (worktree clones, lane task scratch, handoff notes).
+#: Product vocabulary (e.g. DIRECTOR_PER_TASK) is NOT banned.
+REPORTS = ROOT / "docs" / "reports"
+REPORTS_BANNED = (
+    "_task/",
+    "WT\\",
+    "TO_ADVISOR",
+    "AGENT_SI_BUILD",
+    "MODEL_KB",
+    "_director_private",
+    "ui_token",
+    "cdp_port",
+    "C:\\Users",
+    "D:\\API",
+    "D:\\AI_PROJECTS",
+)
+
+
+def test_fxreports_no_internal_folder_names():
+    pages = sorted(REPORTS.glob("*.md"))
+    assert pages, "docs/reports/*.md missing"
+    bad = []
+    for page in pages:
+        blob = page.read_text(encoding="utf-8")
+        hits = [b for b in REPORTS_BANNED if b in blob]
+        if hits:
+            bad.append(f"{page.name}: {hits}")
+    assert not bad, "internal folder names left:\n" + "\n".join(bad)

@@ -116,6 +116,10 @@ def test_installer_entries_ship_licence_and_notices():
     assert shipped >= REQUIRED_ZIP_MEMBERS, (
         "ENTRIES misses: "
         + ", ".join(sorted(REQUIRED_ZIP_MEMBERS - shipped)))
+    # FXSCRUB R5: lane package reports stay repo-only, never in the
+    # shipped bundle (no shipped page links docs/reports/*).
+    assert not [e for e in shipped if e.startswith("docs/reports/")], (
+        "ENTRIES must not ship docs/reports/")
     _status, missing = build.check_entries(ROOT)
     assert not missing, "installer entries missing on disk: " + str(missing)
     out_dir = ROOT / "_task/K10P1UNION/tmp"
@@ -128,3 +132,5 @@ def test_installer_entries_ship_licence_and_notices():
         members = set(archive.namelist())
     assert members >= REQUIRED_ZIP_MEMBERS, (
         "zip misses: " + ", ".join(sorted(REQUIRED_ZIP_MEMBERS - members)))
+    assert not [m for m in members if m.startswith("docs/reports/")], (
+        "zip must not ship docs/reports/")

@@ -5,8 +5,7 @@
 // vitest from an _task/fe_run copy; never against workspace
 // frontend/node_modules.
 //
-// _task/fe_run setup + run (exact commands, WS =
-// D:\AI_PROJECTS\AGENT_SI_BUILD\WT\K03):
+// _task/fe_run setup + run (exact commands, WS = <worktree>):
 //   robocopy WS\frontend\src\teststage WS\_task\fe_run\src\teststage ask_buttons.jsx
 //   robocopy WS\frontend\tests WS\_task\fe_run\tests test_stage_view.test.mjs runner_view.test.mjs
 //   cmd /c "cd /d WS\_task\fe_run && node --preserve-symlinks-main node_modules\vitest\vitest.mjs run tests\test_stage_view.test.mjs 2>&1"
