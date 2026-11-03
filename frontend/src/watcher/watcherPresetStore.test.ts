@@ -6,7 +6,7 @@ import {
   WATCHER_PRESETS,
   loadWatcherPreset,
   saveWatcherPreset,
-} from "./watcherPresets";
+} from "./watcherPresetStore";
 
 beforeEach(() => {
   window.localStorage.clear();
