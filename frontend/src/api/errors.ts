@@ -108,26 +108,40 @@ function missingWhenNotFound(code: string, status: number): ApiError | null {
 
 export function parseErrorBody(data: unknown, status: number): ApiError {
   const checked = ErrorBodySchema.safeParse(data);
-  // Served plain text (message next to code) rides the details so the
-  // UI can show it without ever logging or storing it.
+  // Served plain text next to the code rides the details so the UI shows
+  // a plain sentence instead of a fallback contract code. FastAPI serves
+  // plain HTTPException details as {"detail": "..."}; legacy bodies use
+  // "message" or "error". Only the sentence travels along: every code
+  // below is exactly what the old paths returned.
   let details: ApiErrorDetails | undefined;
   try {
     const record = (checked.success ? checked.data : data) as
-      | { message?: unknown }
+      | { message?: unknown; detail?: unknown; error?: unknown }
       | null;
-    if (typeof record === "object" && record !== null
-      && typeof record.message === "string" && record.message.length > 0) {
-      details = { message: record.message };
+    if (typeof record === "object" && record !== null) {
+      for (const field of ["message", "detail", "error"] as const) {
+        const value = record[field];
+        if (typeof value === "string" && value.length > 0) {
+          details = { message: value };
+          break;
+        }
+      }
     }
   } catch {
     details = undefined;
   }
+  const wrap = (err: ApiError): ApiError => {
+    if (details === undefined || err.details?.message !== undefined) {
+      return err;
+    }
+    return new ApiError(err.code, err.status, { ...err.details, message: details.message });
+  };
   if (checked.success) {
     const raw = (checked.data as { code?: unknown }).code;
     if (typeof raw === "string" && raw.length > 0) {
       const missing = missingWhenNotFound(raw, status);
       if (missing !== null) {
-        return missing;
+        return wrap(missing);
       }
       const err = apiErrorFromCode(raw, status);
       return details === undefined ? err
@@ -139,7 +153,7 @@ export function parseErrorBody(data: unknown, status: number): ApiError {
       if (typeof nested === "string" && nested.length > 0) {
         const missing = missingWhenNotFound(nested, status);
         if (missing !== null) {
-          return missing;
+          return wrap(missing);
         }
         const err = apiErrorFromCode(nested, status);
         return details === undefined ? err
@@ -148,12 +162,12 @@ export function parseErrorBody(data: unknown, status: number): ApiError {
     }
   }
   if (status === 404) {
-    return errorFromStatus("CONTEXT_MISSING", status);
+    return wrap(errorFromStatus("CONTEXT_MISSING", status));
   }
   if (status === 0) {
-    return errorFromStatus("CONTEXT_MISSING", status);
+    return wrap(errorFromStatus("CONTEXT_MISSING", status));
   }
-  return errorFromStatus("CONTEXT_WRONG_CONTRACT_VERSION", status);
+  return wrap(errorFromStatus("CONTEXT_WRONG_CONTRACT_VERSION", status));
 }
 
 export function parseOrThrow<T>(
