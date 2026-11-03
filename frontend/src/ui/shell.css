@@ -193,11 +193,9 @@ div[data-testid^="inspector-card-"] > p[data-testid$="-sub"] {
   }
 }
 
-/* Small screens (narrow phones): the main column goes full width; nav and
-   cards collapse behind the top-bar panels button and open as stacked
-   sections. Kept below 800px so the 800x600 visual contract keeps the
-   three-column layout with navigation visible (FXSHELL1). */
-@media (max-width: 799px) {
+/* Small screens: the main column goes full width; nav and cards collapse
+   behind the top-bar panels button and open as stacked sections. */
+@media (max-width: 800px) {
   div[data-testid="app-shell"]:has(> nav[data-testid="sidebar"]) {
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas:
