@@ -31,7 +31,7 @@ import {
   requestJson,
   requestResponse,
 } from "../api/errors";
-import { DEFAULT_LOCALE, t } from "../locale/index";
+import { DEFAULT_LOCALE, formatScreenTime, t } from "../locale/index";
 import enTable from "../locale/en.json";
 import { ApprovalCard } from "./ApprovalCard";
 import { HierarchyRows } from "./HierarchyRows";
@@ -983,16 +983,9 @@ function CopyGlyph(): ReactElement {
   );
 }
 
-/** Bubble timestamps read time-only ("14:32"), never the date. */
+/** Bubble timestamps through the one screen-time helper (HH:mm today). */
 function formatChatTime(at: number): string {
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(at));
-  } catch {
-    return new Date(at).toLocaleTimeString();
-  }
+  return formatScreenTime(at);
 }
 
 // Best-effort turn persist (USER write). A failed POST never surfaces.
