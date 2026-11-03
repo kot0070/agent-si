@@ -74,7 +74,21 @@ def test_templates_plan_five_first_with_drafts(tmp_path):
         "tpl-pause-90pct",
         "tpl-notify-audit-fail",
     ]
-    assert len(rows) == 11
+    assert len(rows) >= 11
+    known = {row["template_id"] for row in rows}
+    assert known >= {
+        "tpl-reread-3h",
+        "tpl-checkpoint-30m",
+        "tpl-resume-restart",
+        "tpl-pause-90pct",
+        "tpl-notify-audit-fail",
+        "tpl-nightly",
+        "tpl-healthcheck",
+        "tpl-container-audit",
+        "tpl-usage-report",
+        "tpl-watch-sweep",
+        "tpl-outage-drill",
+    }
     second = rows[1]
     assert second["draft"]["when_detail"] == "every-30m"
     assert second["draft"]["do"] == "checkpoint"
