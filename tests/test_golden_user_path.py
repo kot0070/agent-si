@@ -21,6 +21,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 import urllib.request as _urlreq
 
 import pytest
@@ -500,6 +501,22 @@ class Golden:
             self.folders[project] = path
         return self.folders[project]
 
+    def chat_thread(self, project, message, folder=None, task=None):
+        """Blocking chat in a worker thread; the parked run waits in
+        place (FXASK A8) while the test thread decides."""
+        box: dict = {}
+
+        def _go():
+            try:
+                box["resp"] = self.chat(project, message, folder=folder,
+                                        task=task)
+            except Exception as exc:  # noqa: BLE001 - surfaced below
+                box["error"] = exc
+
+        thread = threading.Thread(target=_go, daemon=True)
+        thread.start()
+        return thread, box
+
     def chat(self, project, message, folder=None, task=None):
         body = {"project": project, "message": message}
         if folder is not None:
@@ -563,6 +580,39 @@ def golden(tmp_path_factory):
     rig = Golden(tmp_path_factory.mktemp("fxgold"))
     yield rig
     rig.close()
+
+
+def _wait_parked(tool_id, timeout=90.0):
+    """Wait until the install ask is parked (pin without a decision)."""
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        try:
+            entry = dict(_permissions._BOUND_DECISIONS).get(tool_id)
+        except Exception:
+            entry = None
+        if isinstance(entry, dict) and entry.get("decision") is None:
+            return entry
+        time.sleep(0.2)
+    raise AssertionError("no parked install ask for %s" % (tool_id,))
+
+
+def _join_chat(thread, box, timeout=240.0):
+    thread.join(timeout=timeout)
+    assert not thread.is_alive(), "chat run did not finish"
+    assert not box.get("error"), box.get("error")
+    resp = box.get("resp")
+    assert resp is not None and resp.status_code == 200, resp
+    return resp
+
+
+def _post_decide(golden, tool_id, decision, project_id):
+    decide = golden.client.post(
+        _permissions.PERMISSIONS_DECIDE_ROUTE,
+        json={"tool_id": tool_id, "decision": decision,
+              "project_id": project_id},
+        headers={"x-ui-session-token": TOKEN})
+    assert decide.status_code == 200, decide.text
+    return decide
 
 
 def _project_id(client, name, folder_ref):
@@ -691,7 +741,11 @@ def test_golden_02_hello_file_history_runs_tokens(golden):
     assert not any("approval" in str(t).lower() for t in turns), turns
 
 
-# -- step 3: npm install held, allow once, replay ---------------------------
+# -- step 3: npm install parks, allow once, same run goes on ------------
+# (FXASK A8 shape: the run waits in place on one ask event; no resend,
+# the parked run itself proceeds. The old approval-terminal + resend
+# shape is gone on purpose: the resend path stays for the 15-min
+# fallback only.)
 
 def test_golden_03_npm_install_hold_allow_replay(golden):
     P1 = golden.use(PROJECT, "dock-golden")
@@ -705,35 +759,32 @@ def test_golden_03_npm_install_hold_allow_replay(golden):
     checks = os.path.join(folder, "checks")
     os.makedirs(checks, exist_ok=True)
     _seed(os.path.join(checks, "ping.mjs"), "process.exit(0);\n")
-    first = golden.chat(P1, "Install dependencies with npm install",
-                        folder=folder, task="task-npm")
-    assert first.status_code == 200, first.text
-    events = _parse_sse(first.text)
-    assert _types(events)[-1] == "approval", _types(events)[-3:]
-    held = [e for e in events if e.get("type") == "approval"][-1]
-    assert "npm" in str(held) and "install" in str(held), held
-    assert BAIT not in first.text
-    assert "raw key" not in first.text.lower()
-    tool_id = held.get("tool_id") or "install:%s:npm" % P1
-    assert tool_id == "install:%s:npm" % P1, held
-    decide = golden.client.post(
-        _permissions.PERMISSIONS_DECIDE_ROUTE,
-        json={"tool_id": tool_id, "decision": "allow",
-              "project_id": PROJECT},
-        headers={"x-ui-session-token": TOKEN})
-    assert decide.status_code == 200, decide.text
-    second = golden.chat(P1, "Install dependencies with npm install",
-                         folder=folder, task="task-npm")
-    assert second.status_code == 200, second.text
-    events2 = _parse_sse(second.text)
-    assert "approval" not in _types(events2), _types(events2)
-    assert _types(events2)[-1] == "done", _types(events2)[-3:]
-    assert "exit 0" in _all_text(events2), _all_text(events2)[:800]
-    ledger = golden.client.get("/api/v1/runs/ledger",
-                               params={"project_id": P1},
-                               headers=_auth())
-    assert len(ledger.json().get("runs", [])) == n_before + 2, (
-        ledger.text[:800])
+    tool_id = "install:%s:npm" % P1
+    thread, box = golden.chat_thread(
+        P1, "Install dependencies with npm install",
+        folder=folder, task="task-npm")
+    try:
+        pin = _wait_parked(tool_id)
+        assert list(pin.get("argv") or []) == ["npm", "install"], pin
+        _post_decide(golden, tool_id, "allow", P1)
+        first = _join_chat(thread, box)
+        events = _parse_sse(first.text)
+        assert "ask" in _types(events), _types(events)[-4:]
+        ask = [e for e in events if e.get("type") == "ask"][-1]
+        assert ask.get("tool_id") == tool_id, ask
+        assert list(ask.get("argv") or []) == ["npm", "install"], ask
+        assert _types(events)[-1] == "done", _types(events)[-3:]
+        assert "approval" not in _types(events)
+        assert BAIT not in first.text
+        assert "raw key" not in first.text.lower()
+        assert "exit 0" in _all_text(events), _all_text(events)[:800]
+        ledger = golden.client.get("/api/v1/runs/ledger",
+                                   params={"project_id": P1},
+                                   headers=_auth())
+        assert len(ledger.json().get("runs", [])) == n_before + 1, (
+            ledger.text[:800])
+    finally:
+        thread.join(timeout=60.0)
 
 
 # -- step 4: scopes (one function per probe; no stop at first failure) ----------
@@ -741,10 +792,25 @@ def test_golden_03_npm_install_hold_allow_replay(golden):
 def test_golden_04a_next_turn_asks_again(golden):
     P1 = golden.use(PROJECT, "dock-golden")
     folder = golden.folder(PROJECT)
-    again = golden.chat(P1, "Run npm install again",
-                        folder=folder, task="task-npm2")
-    assert again.status_code == 200, again.text
-    assert "approval" in _types(_parse_sse(again.text)), again.text[:500]
+    tool_id = "install:%s:npm" % P1
+    thread, box = golden.chat_thread(
+        P1, "Run npm install again", folder=folder, task="task-npm2")
+    try:
+        # The spent once-allow does not cover the next run: it parks
+        # again (no silent refusal, no card-free failure).
+        pin = _wait_parked(tool_id)
+        assert pin.get("decision") is None
+        assert thread.is_alive()
+        _post_decide(golden, tool_id, "deny", P1)
+        resp = _join_chat(thread, box)
+        text = _all_text(_parse_sse(resp.text))
+        assert "denied" in text.lower(), text[:800]
+        assert "approval" not in _types(_parse_sse(resp.text))
+        record = (getattr(golden.app.state, "devrun_runs", None)
+                  or {}).get(P1, {})
+        assert record.get("success") is False, record.get("summary")
+    finally:
+        thread.join(timeout=60.0)
 
 
 def test_golden_04b_allow_for_project_later_no_ask(golden):
@@ -756,23 +822,31 @@ def test_golden_04b_allow_for_project_later_no_ask(golden):
     _seed(os.path.join(folder, "checks", "cargo_exists.mjs"),
           "import {existsSync} from 'node:fs'; "
           "process.exit(existsSync('Cargo.toml') ? 0 : 1);\n")
-    first = golden.chat(P1, "Install widget with cargo install",
-                        folder=folder, task="task-grant")
-    assert first.status_code == 200, first.text
-    assert "approval" in _types(_parse_sse(first.text)), first.text[:500]
-    held = [e for e in _parse_sse(first.text)
-            if e.get("type") == "approval"][-1]
-    tool_id = held.get("tool_id") or "install:%s:cargo" % P1
-    assert tool_id == "install:%s:cargo" % P1, held
-    # Merged UI: "For this project" posts the installer grant (same head
-    # + subcommand, this project only), never the exact allow.
-    grant = golden.client.post(
-        "/api/v1/permissions/project-grant",
-        json={"project_id": P1, "tool_id": tool_id},
-        headers={"x-ui-session-token": TOKEN})
-    assert grant.status_code == 200, grant.text
-    assert grant.json().get("installer") == "cargo", grant.text
-    assert grant.json().get("subcommand") == "install", grant.text
+    tool_id = "install:%s:cargo" % P1
+    thread, box = golden.chat_thread(
+        P1, "Install widget with cargo install",
+        folder=folder, task="task-grant")
+    try:
+        pin = _wait_parked(tool_id)
+        assert list(pin.get("argv") or []) == [
+            "cargo", "install", "fxgold-pkg"], pin
+        assert pin.get("decision") is None
+        # Merged UI: "For this project" posts the installer grant (same head
+        # + subcommand, this project only), never the exact allow.
+        grant = golden.client.post(
+            "/api/v1/permissions/project-grant",
+            json={"project_id": P1, "tool_id": tool_id},
+            headers={"x-ui-session-token": TOKEN})
+        assert grant.status_code == 200, grant.text
+        assert grant.json().get("installer") == "cargo", grant.text
+        assert grant.json().get("subcommand") == "install", grant.text
+        first = _join_chat(thread, box)
+        events = _parse_sse(first.text)
+        assert "ask" in _types(events), _types(events)[-4:]
+        assert _types(events)[-1] == "done", _types(events)[-3:]
+        assert "approval" not in _types(events)
+    finally:
+        thread.join(timeout=60.0)
     grants = golden.client.get(
         "/api/v1/permissions/project-grants",
         params={"project_id": P1}, headers=_auth())
@@ -780,20 +854,44 @@ def test_golden_04b_allow_for_project_later_no_ask(golden):
     rows = grants.json().get("grants", [])
     assert any(r.get("installer") == "cargo"
                and r.get("subcommand") == "install" for r in rows), rows
-    later = golden.chat(P1, "Install widget with cargo install",
-                        folder=folder, task="task-grant2")
-    assert later.status_code == 200, later.text
-    assert "approval" not in _types(_parse_sse(later.text)), later.text[:500]
-    assert _types(_parse_sse(later.text))[-1] == "done", later.text[:500]
+    thread2, box2 = golden.chat_thread(
+        P1, "Install widget with cargo install",
+        folder=folder, task="task-grant2")
+    try:
+        # The grant covers the same head + subcommand: the parked wait
+        # never happens, the run completes without any ask event.
+        later = _join_chat(thread2, box2)
+        assert "ask" not in _types(_parse_sse(later.text)), later.text[:500]
+        assert "approval" not in _types(_parse_sse(later.text)), (
+            later.text[:500])
+        assert _types(_parse_sse(later.text))[-1] == "done", (
+            later.text[:500])
+    finally:
+        thread2.join(timeout=60.0)
 
 
 def test_golden_04c_force_args_ask(golden):
     P1 = golden.use(PROJECT, "dock-golden")
     folder = golden.folder(PROJECT)
-    forced = golden.chat(P1, "Install with npm install --force",
-                         folder=folder, task="task-force")
-    assert forced.status_code == 200, forced.text
-    assert "approval" in _types(_parse_sse(forced.text)), forced.text[:500]
+    tool_id = "install:%s:npm" % P1
+    thread, box = golden.chat_thread(
+        P1, "Install with npm install --force",
+        folder=folder, task="task-force")
+    try:
+        # The ask pins the real words (with --force), never a silent run.
+        pin = _wait_parked(tool_id)
+        assert list(pin.get("argv") or []) == [
+            "npm", "install", "--force"], pin
+        _post_decide(golden, tool_id, "deny", P1)
+        forced = _join_chat(thread, box)
+        events = _parse_sse(forced.text)
+        assert "ask" in _types(events), _types(events)[-4:]
+        assert _types(events)[-1] == "done"
+        assert "approval" not in _types(events)
+        assert "denied" in _all_text(events).lower(), (
+            _all_text(events)[:800])
+    finally:
+        thread.join(timeout=60.0)
 
 
 def test_golden_04d_other_project_asks(golden):
@@ -802,12 +900,20 @@ def test_golden_04d_other_project_asks(golden):
     checks = os.path.join(folder, "checks")
     os.makedirs(checks, exist_ok=True)
     _seed(os.path.join(checks, "ping.mjs"), "process.exit(0);\n")
-    other_chat = golden.chat(P2, "Install dependencies with npm install",
-                             folder=folder,
-                             task="task-npm-other")
-    assert other_chat.status_code == 200, other_chat.text
-    assert "approval" in _types(_parse_sse(other_chat.text)), (
-        other_chat.text[:500])
+    tool_id = "install:%s:npm" % P2
+    thread, box = golden.chat_thread(
+        P2, "Install dependencies with npm install",
+        folder=folder, task="task-npm-other")
+    try:
+        pin = _wait_parked(tool_id)
+        assert pin.get("decision") is None
+        assert thread.is_alive()
+        _post_decide(golden, tool_id, "deny", P2)
+        other = _join_chat(thread, box)
+        assert _types(_parse_sse(other.text))[-1] == "done"
+        assert "approval" not in _types(_parse_sse(other.text))
+    finally:
+        thread.join(timeout=60.0)
 
 
 # -- step 5: deny ------------------------------------------------------------
@@ -819,27 +925,26 @@ def test_golden_05_deny_plain_failed_line(golden):
     checks = os.path.join(folder, "checks")
     os.makedirs(checks, exist_ok=True)
     _seed(os.path.join(checks, "ping.mjs"), "process.exit(0);\n")
-    resp = golden.chat(P2, "Install dependencies with npm install",
-                       folder=folder, task="task-deny")
-    assert resp.status_code == 200, resp.text
-    events = _parse_sse(resp.text)
-    held = [e for e in events if e.get("type") == "approval"][-1]
-    tool_id = held.get("tool_id") or "install:%s:npm" % P2
-    deny = golden.client.post(
-        _permissions.PERMISSIONS_DECIDE_ROUTE,
-        json={"tool_id": tool_id, "decision": "deny",
-              "project_id": PROJECT2},
-        headers={"x-ui-session-token": TOKEN})
-    assert deny.status_code == 200, deny.text
-    replay = golden.chat(P2, "Install dependencies with npm install",
-                         folder=folder, task="task-deny")
-    assert replay.status_code == 200, replay.text
-    text = _all_text(_parse_sse(replay.text))
-    assert "FAILED" in text or "refused" in text, text[:800]
-    assert "run failed: internal" not in replay.text.lower(), (
-        replay.text[:500])
-    assert "approval" not in _types(_parse_sse(replay.text))
-    assert len(_journal.stored_rows(P2)) >= before
+    tool_id = "install:%s:npm" % P2
+    thread, box = golden.chat_thread(
+        P2, "Install dependencies with npm install",
+        folder=folder, task="task-deny")
+    try:
+        _wait_parked(tool_id)
+        assert thread.is_alive()
+        _post_decide(golden, tool_id, "deny", P2)
+        resp = _join_chat(thread, box)
+        events = _parse_sse(resp.text)
+        assert _types(events)[-1] == "done"
+        assert "approval" not in _types(events)
+        text = _all_text(events)
+        assert "install permission denied for npm install" in text, (
+            text[:800])
+        assert "run failed: internal" not in resp.text.lower(), (
+            resp.text[:500])
+        assert len(_journal.stored_rows(P2)) >= before
+    finally:
+        thread.join(timeout=60.0)
 
 
 # -- step 6: continue after restart ------------------------------------------
@@ -852,16 +957,33 @@ def test_golden_06_continue_after_restart(golden):
     _seed(os.path.join(folder, "checks", "req_exists.mjs"),
           "import {existsSync} from 'node:fs'; "
           "process.exit(existsSync('requirements.txt') ? 0 : 1);\n")
-    held = golden.chat(P1, "Install helpers with pip install",
-                       folder=folder, task="task-held")
-    assert held.status_code == 200, held.text
-    assert "approval" in _types(_parse_sse(held.text)), held.text[:500]
+    tool_id = "install:%s:pip" % P1
+    thread, box = golden.chat_thread(
+        P1, "Install helpers with pip install",
+        folder=folder, task="task-held")
+    try:
+        pin = _wait_parked(tool_id)
+        assert list(pin.get("argv") or []) == [
+            "pip", "install", "-r", "requirements.txt"], pin
+        _post_decide(golden, tool_id, "deny", P1)
+        held = _join_chat(thread, box)
+        assert "ask" in _types(_parse_sse(held.text))
+        assert _types(_parse_sse(held.text))[-1] == "done"
+    finally:
+        thread.join(timeout=60.0)
     n_runs_before = len(golden.client.get(
         "/api/v1/runs/ledger", params={"project_id": P1},
         headers=_auth()).json().get("runs", []))
     golden.rebuild_app()
-    cont = golden.chat(P1, "продовжуй", folder=folder,
-                       task="task-held")
+    thread2, box2 = golden.chat_thread(
+        P1, "продовжуй", folder=folder, task="task-held")
+    try:
+        _wait_parked(tool_id)
+        assert thread2.is_alive()
+        _post_decide(golden, tool_id, "allow", P1)
+        cont = _join_chat(thread2, box2)
+    finally:
+        thread2.join(timeout=60.0)
     assert cont.status_code == 200, cont.text
     text = _all_text(_parse_sse(cont.text))
     assert "pip" in text.lower() and "install" in text.lower(), text[:800]

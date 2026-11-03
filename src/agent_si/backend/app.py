@@ -2596,25 +2596,35 @@ def create_app(settings: Any = None,
     # POST /api/v1/kb/update sources bound-catalog rows for EVERY
     # connected (registry-ONLINE) provider from the staged provider
     # sections (in-repo sourced evidence with per-field URLs, no
-    # network, no keys): unknown pairs stage as added rows through
-    # updater.propose_from_field_data plus apply_proposal on explicit
-    # approval, then the catalog is bound plus persisted
-    # (kb_catalog.json) with kb_version + 1, so GET /api/v1/kb/status
-    # shows the refreshed timestamp plus source. Writes keep the frozen
-    # USER_WRITE guard (401 missing x-actor, 403 bad token); a missing
-    # approval refuses with 400 documenting the approval shape.
-    # Nothing connected (or nothing sourced) refuses with 409, never an
-    # invented row. No earlier line in this file changes.
+    # network, no keys) through updater.propose_from_field_data, one
+    # proposal per provider, staged server-side for the explicit user
+    # apply (POST /api/v1/kb/proposals/apply): this route never
+    # applies. Each envelope is that provider's own allowlisted docs
+    # base, else the shipped-copy marker (never a foreign URL);
+    # per-field sources keep the true section-cited URL. Nothing to
+    # change answers 200 up-to-date, never a raw code. POST
+    # /api/v1/kb/file-proposal validates one uploaded JSON file the
+    # same way (first problem in one sentence). POST
+    # /api/v1/kb/check-online fetches stale providers' official pages
+    # through the updater allowlist guard (nothing auto-applies) and
+    # stages at most one proposal per provider. POST
+    # /api/v1/kb/proposals/reject drops a staged proposal unseen.
+    # Writes keep the frozen USER_WRITE guard (401 missing x-actor,
+    # 403 bad token); a missing approval refuses with 400 documenting
+    # the approval shape. Nothing connected (or nothing sourced)
+    # refuses with 409, never an invented row. No earlier line in this
+    # file changes.
     _FXKB_UPDATE_APPROVAL_SHAPE = '{"approved_by_user": true}'
+    _FXKB_ONLINE_STALE_DAYS = 90
 
-    @app.post("/api/v1/kb/update")
-    async def _fxkb_post_update(request: Request) -> dict[str, Any]:
+    def _fxkb_guard(request):
+        """Frozen USER_WRITE guard shared by the FXKB write routes."""
         _actor = (request.headers.get("x-actor") or "").strip()
         if not _actor:
             raise HTTPException(status_code=401,
                                 detail="missing x-actor header")
         _token = request.headers.get("x-ui-session-token")
-        _check = getattr(app.state, "auth_hook", None)
+        _check = getattr(request.app.state, "auth_hook", None)
         _allowed = False
         if callable(_check):
             try:
@@ -2622,10 +2632,113 @@ def create_app(settings: Any = None,
             except Exception:
                 _allowed = False
         else:
-            _expected = getattr(app.state, "ui_session_token", None)
+            _expected = getattr(request.app.state,
+                                "ui_session_token", None)
             _allowed = (_expected is not None and _token == _expected)
         if not _allowed:
             raise HTTPException(status_code=403, detail="forbidden")
+        return _actor
+
+    def _fxkb_wanted_pairs(_online, _records):
+        """Connected (provider, model) pairs, verbatim model ids."""
+        _wanted = {}
+        for _rec in _records or []:
+            if not isinstance(_rec, dict):
+                continue
+            _pid = str(_rec.get("provider_id") or "")
+            _model = str(_rec.get("model") or "")
+            _dup = "%s/" % _pid if _pid else ""
+            if _dup and _model.startswith(_dup):
+                _model = _model[len(_dup):]
+            if _pid in _online and _model and _pid not in _wanted:
+                _wanted[_pid] = _model
+        return [(_pid, _wanted[_pid]) for _pid in _online
+                if _pid in _wanted]
+
+    def _fxkb_preview(_proposal, _provider_id, _shipped,
+                      _fetched_from=None):
+        """JSON-safe staged-preview payload for one proposal."""
+        _models = []
+        for _src in list(_proposal.get("added", []) or []
+                         ) + _proposal.get("changes", []):
+            _pair = "%s/%s" % (_src.get("provider_id"),
+                               _src.get("model_id"))
+            if _pair not in _models:
+                _models.append(_pair)
+        _added = []
+        for _item in _proposal.get("added", []) or []:
+            if not isinstance(_item, dict):
+                continue
+            _added.append({
+                "provider_id": _item.get("provider_id"),
+                "model_id": _item.get("model_id"),
+                "fields": _item.get("fields", {}),
+                "source": _item.get("source"),
+                "retrieved_at": _item.get("retrieved_at")})
+        _source = _proposal.get("source_url")
+        _per_model: dict = {}
+        for _src in list(_proposal.get("added", []) or []
+                         ) + _proposal.get("changes", []):
+            _key = ("%s/%s" % (_src.get("provider_id"),
+                               _src.get("model_id")))
+            _slot = _per_model.setdefault(
+                _key, {"provider_id": _src.get("provider_id"),
+                       "model_id": _src.get("model_id"),
+                       "fields": 0})
+            if "field" in _src:
+                _slot["fields"] += 1
+            else:
+                _slot["fields"] += len(_src.get("fields", {}) or {})
+        return {"proposal_id": _proposal.get("proposal_id"),
+                "provider_id": _provider_id,
+                "models": sorted(_models),
+                "per_model": [_per_model[_k] for _k in sorted(_per_model)],
+                "changes": _proposal.get("changes", []),
+                "added": _added,
+                "source": _source,
+                "retrieved_at": _proposal.get("retrieved_at"),
+                "shipped": bool(_shipped),
+                "fetched_from": _fetched_from}
+
+    def _fxkb_row_stamp(_row):
+        """Newest filed retrieved_at on a row, else None."""
+        _best = None
+        for _field in (_row.get("fields") or {}).values():
+            if not isinstance(_field, dict):
+                continue
+            _stamp = _field.get("retrieved_at")
+            if not _stamp or _stamp == "UNKNOWN":
+                continue
+            if _best is None or str(_stamp) > str(_best):
+                _best = _stamp
+        return _best
+
+    def _fxkb_stale_of(_stamp):
+        """(stale, reason): older than 90 days or missing is stale."""
+        import datetime as _stale_dt
+        if not _stamp or _stamp == "UNKNOWN":
+            return True, "no filed retrieval date"
+        try:
+            _day = _stale_dt.date.fromisoformat(str(_stamp)[:10])
+        except (ValueError, TypeError):
+            return True, "unparseable retrieval date"
+        _age = (_stale_dt.date.today() - _day).days
+        if _age > _FXKB_ONLINE_STALE_DAYS:
+            return True, "older than 90 days"
+        return False, ""
+
+    def _fxkb_default_fetch(_url):
+        """Stdlib GET returning decoded text (guarded by fetch_source)."""
+        import urllib.request as _fetch_urlreq
+        _req = _fetch_urlreq.Request(
+            _url, headers={"User-Agent": "agent-si-kb-update"},
+            method="GET")
+        with _fetch_urlreq.urlopen(_req, timeout=15) as _resp:
+            return _resp.read().decode("utf-8", "replace")
+
+    @app.post("/api/v1/kb/update")
+    async def _fxkb_post_update(request: Request) -> dict[str, Any]:
+        _fxkb_guard(request)
         try:
             _body = await request.json()
         except Exception:
@@ -2638,6 +2751,7 @@ def create_app(settings: Any = None,
                         "message": "KB update needs explicit approval "
                         "with body " + _FXKB_UPDATE_APPROVAL_SHAPE})
         try:
+            from agent_si.backend import modelkb as _fxkb_modelkb
             from agent_si.backend import routing_auto as _fxkb_auto
             from agent_si.model_kb import kb as _fxkb_kb
             from agent_si.model_kb import loader as _fxkb_loader
@@ -2659,19 +2773,7 @@ def create_app(settings: Any = None,
             _records = _fxkb_store.load_connections(_k04_dir)
         except Exception:
             _records = []
-        _wanted = {}
-        for _rec in _records or []:
-            if not isinstance(_rec, dict):
-                continue
-            _pid = str(_rec.get("provider_id") or "")
-            _model = str(_rec.get("model") or "")
-            _dup = "%s/" % _pid if _pid else ""
-            if _dup and _model.startswith(_dup):
-                _model = _model[len(_dup):]
-            if _pid in _online and _model and _pid not in _wanted:
-                _wanted[_pid] = _model
-        _pairs = [(_pid, _wanted[_pid]) for _pid in _online
-                  if _pid in _wanted]
+        _pairs = _fxkb_wanted_pairs(_online, _records)
         if not _pairs:
             raise HTTPException(
                 status_code=409,
@@ -2679,7 +2781,6 @@ def create_app(settings: Any = None,
                         "message": "KB update refused: connected "
                         "providers carry no model to source"})
         _staged = _fxkb_loader.staged_section_rows()
-        _envelopes = _fxkb_loader.STAGED_PROVIDER_ENVELOPES
         _retrieved = _fxkb_loader.STAGED_SECTIONS_RETRIEVED_AT
         _entries = []
         _unavailable = []
@@ -2709,55 +2810,301 @@ def create_app(settings: Any = None,
                 detail={"code": "KB_VALIDATION_FAILED",
                         "message": "KB update refused: no staged source "
                         "on file for the connected providers"})
-        _envelope = _envelopes.get(sorted(_have)[0]) or (
-            _fxkb_updater.KB_SOURCE_ALLOWLIST[0])
         import datetime as _fxkb_datetime
         _run_at = _fxkb_datetime.datetime.now(
             _fxkb_datetime.timezone.utc).isoformat()
         _catalog = _fxkb_kb.bound_catalog()
-        _proposal = _fxkb_updater.propose_from_field_data(
-            _catalog, _entries, _envelope, _run_at)
-        _errors = _fxkb_updater.validate_proposal(_catalog, _proposal)
-        if _errors:
-            raise HTTPException(status_code=400,
-                                detail={"code": "KB_VALIDATION_FAILED",
-                                        "message": "KB update rejected: %s"
-                                        % ("; ".join(_errors),)})
-        if not _proposal["changes"] and not _proposal.get("added"):
-            return {"applied": False,
-                    "kb_version": _catalog["version"].get("kb_version"),
-                    "reason": "no schema-valid field changes in entry data",
-                    "unavailable": sorted(_unavailable)}
-        _result = _fxkb_updater.apply_proposal(
-            _catalog, _proposal, user_confirmed=True)
-        _fxkb_kb.bind_catalog(_result["catalog"])
+        _previews = []
+        for _pid in sorted(_have):
+            _mine = [e for e in _entries
+                     if e.get("provider_id") == _pid]
+            _envelope = _fxkb_updater.provider_source_url(
+                _pid, _retrieved)
+            _proposal = _fxkb_updater.propose_from_field_data(
+                _catalog, _mine, _envelope, _run_at)
+            if not _proposal["changes"] and not _proposal.get("added"):
+                continue
+            _errors = _fxkb_updater.validate_proposal(
+                _catalog, _proposal)
+            if _errors:
+                raise HTTPException(
+                    status_code=400,
+                    detail={"code": "KB_VALIDATION_FAILED",
+                            "message": "KB update rejected: %s"
+                            % (str(_errors[0]),)})
+            _fxkb_modelkb.stage_proposal(_proposal)
+            _previews.append(_fxkb_preview(
+                _proposal, _pid,
+                _fxkb_updater.is_shipped_copy_source(_envelope)))
+        if not _previews:
+            return {"staged": False,
+                    "up_to_date": True,
+                    "proposals": [],
+                    "unavailable": sorted(_unavailable),
+                    "message": "already up to date"}
+        if all(p["shipped"] for p in _previews):
+            _message = "shipped copy from %s" % (_retrieved,)
+        else:
+            _message = "staged %d provider update(s)" % len(_previews)
+        return {"staged": True,
+                "up_to_date": False,
+                "proposals": _previews,
+                "unavailable": sorted(_unavailable),
+                "message": _message}
+
+    # FXKBUPDATE K3: one uploaded JSON file stages a proposal, never
+    # applies. The file text is data: parsed as JSON, validated by
+    # validate_proposal, staged for the same explicit apply route. A
+    # bad file answers the first problem in one sentence (never a raw
+    # code on screen: the message travels next to the code).
+    @app.post("/api/v1/kb/file-proposal")
+    async def _fxkb_post_file_proposal(request: Request) -> dict[str, Any]:
+        _fxkb_guard(request)
         try:
-            _fxkb_kb.persist_bound()
-        except Exception as _exc:
+            _body = await request.json()
+        except Exception:
+            _body = None
+        _body = _body if isinstance(_body, dict) else {}
+        _file_name = _body.get("file_name") or "upload.json"
+        _raw = _body.get("raw_text")
+        if not isinstance(_raw, str) or not _raw.strip():
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "KB_VALIDATION_FAILED",
+                        "message": "file %s is empty" % (_file_name,)})
+        import json as _fxkb_json
+        try:
+            _document = _fxkb_json.loads(_raw)
+        except ValueError as _exc:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "KB_VALIDATION_FAILED",
+                        "message": "file %s is not JSON data: %s"
+                        % (_file_name,
+                           str(_exc).splitlines()[0] if str(_exc)
+                           else "unparseable")})
+        if not isinstance(_document, dict) or not isinstance(
+                _document.get("models"), list):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "KB_VALIDATION_FAILED",
+                        "message": "file %s needs a JSON object with a "
+                        "models list" % (_file_name,)})
+        try:
+            from agent_si.backend import modelkb as _fxkb_modelkb
+            from agent_si.model_kb import kb as _fxkb_kb
+            from agent_si.model_kb import updater as _fxkb_updater
+        except ImportError as _exc:
             raise HTTPException(
                 status_code=500,
-                detail="KB update not persisted: %s: %s"
-                % (type(_exc).__name__, _exc))
-        _models_out = []
-        _providers_out = []
-        for _src in list(_proposal.get("added", []) or []
-                         ) + _proposal["changes"]:
-            _pair = "%s/%s" % (_src.get("provider_id"),
-                               _src.get("model_id"))
-            if _pair not in _models_out:
-                _models_out.append(_pair)
-            if _src.get("provider_id") not in _providers_out:
-                _providers_out.append(_src.get("provider_id"))
-        return {"applied": True,
-                "kb_version": _result["version"],
-                "updated_at": _result["catalog"]["version"].get(
-                    "updated_at"),
-                "providers": sorted(_providers_out),
-                "models": sorted(_models_out),
-                "changes": len(_proposal["changes"]),
-                "added": len(_proposal.get("added", []) or []),
-                "source": _envelope,
-                "unavailable": sorted(_unavailable)}
+                detail="KB file proposal unavailable: %s" % (_exc,))
+        _catalog = _fxkb_kb.bound_catalog()
+        _source_url = _document.get("source_url")
+        import datetime as _fxkb_f_datetime
+        _today = _fxkb_f_datetime.date.today().isoformat()
+        if not _fxkb_updater._allowlisted(_source_url):
+            _source_url = _fxkb_updater.shipped_copy_marker(
+                _document.get("retrieved_at") or _today)
+        _retrieved_at = _document.get("retrieved_at") or _today
+        _proposal = _fxkb_updater.propose_update(
+            _catalog, _source_url, _raw, _retrieved_at)
+        if not _proposal["changes"] and not _proposal.get("added"):
+            if _proposal.get("rejected"):
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "code": "KB_VALIDATION_FAILED",
+                        "message": "file %s carries no schema-valid "
+                        "fields" % (_file_name,)})
+            return {"staged": False,
+                    "up_to_date": True,
+                    "proposal_id": None,
+                    "file_name": _file_name,
+                    "changes": [],
+                    "added": [],
+                    "message": "already up to date"}
+        _errors = _fxkb_updater.validate_proposal(_catalog, _proposal)
+        if _errors:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "KB_VALIDATION_FAILED",
+                        "message": "file %s: %s"
+                        % (_file_name, str(_errors[0]))})
+        _fxkb_modelkb.stage_proposal(_proposal)
+        _preview = _fxkb_preview(
+            _proposal, _proposal["changes"][0]["provider_id"]
+            if _proposal["changes"] else
+            (_proposal["added"][0].get("provider_id")
+             if _proposal.get("added") else None),
+            _fxkb_updater.is_shipped_copy_source(_source_url))
+        _preview["file_name"] = _file_name
+        return _preview
+
+    # FXKBUPDATE: drop one staged proposal unseen; the catalog never
+    # moves. Unknown ids answer 404, never a silent no-op.
+    @app.post("/api/v1/kb/proposals/reject")
+    async def _fxkb_post_reject(request: Request) -> dict[str, Any]:
+        _fxkb_guard(request)
+        try:
+            _body = await request.json()
+        except Exception:
+            _body = None
+        _proposal_id = _body.get("proposal_id") if isinstance(
+            _body, dict) else None
+        if not _proposal_id:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "KB_VALIDATION_FAILED",
+                        "message": "proposal_id required"})
+        try:
+            from agent_si.backend import modelkb as _fxkb_modelkb
+        except ImportError as _exc:
+            raise HTTPException(
+                status_code=500,
+                detail="KB reject unavailable: %s" % (_exc,))
+        if _fxkb_modelkb.reject_proposal(_proposal_id):
+            return {"proposal_id": _proposal_id, "rejected": True}
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "KB_VALIDATION_FAILED",
+                    "message": "unknown proposal %s" % (_proposal_id,)})
+
+    # FXKBUPDATE K4: check the official source pages for stale
+    # connected providers, stage proposals, never apply. Only
+    # connected providers are read; a provider whose filed rows are
+    # all fresh (newer than 90 days) is never fetched. Fetches run
+    # through updater.fetch_source (allowlist guard): a denied host
+    # or a fetch failure is a recorded skipped row, never an error.
+    # Fetched page text is data: only JSON model documents parse,
+    # instruction-like values are dropped by the updater, and the
+    # result is staged for the user's Apply/Reject only.
+    @app.post("/api/v1/kb/check-online")
+    async def _fxkb_post_check_online(request: Request) -> dict[str, Any]:
+        _fxkb_guard(request)
+        try:
+            from agent_si.backend import modelkb as _fxkb_modelkb
+            from agent_si.backend import routing_auto as _fxkb_auto
+            from agent_si.model_kb import kb as _fxkb_kb
+            from agent_si.model_kb import loader as _fxkb_loader
+            from agent_si.model_kb import updater as _fxkb_updater
+            from agent_si.providers.registry import (
+                provider_store as _fxkb_store)
+        except ImportError as _exc:
+            raise HTTPException(
+                status_code=500,
+                detail="KB online check unavailable: %s" % (_exc,))
+        _online = _fxkb_auto.registry_online_connected(request)
+        if not _online:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "KB_VALIDATION_FAILED",
+                        "message": "KB online check refused: no ONLINE "
+                        "provider connected"})
+        try:
+            _records = _fxkb_store.load_connections(_k04_dir)
+        except Exception:
+            _records = []
+        _pairs = _fxkb_wanted_pairs(_online, _records)
+        if not _pairs:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "KB_VALIDATION_FAILED",
+                        "message": "KB online check refused: connected "
+                        "providers carry no model to source"})
+        import datetime as _fxkb_c_datetime
+        _now = _fxkb_c_datetime.datetime.now(
+            _fxkb_c_datetime.timezone.utc).isoformat()
+        _catalog = _fxkb_kb.bound_catalog()
+        _staged_rows = _fxkb_loader.staged_section_rows()
+        _fetcher = getattr(request.app.state, "kb_online_fetcher",
+                           None) or _fxkb_default_fetch
+        _provider_rows = []
+        _previews = []
+        _skipped = []
+        for _pid, _model in _pairs:
+            _row = _fxkb_loader.find_row(_catalog, _pid, _model)
+            _stamp = _fxkb_row_stamp(_row) if _row else None
+            _stale, _reason = _fxkb_stale_of(_stamp)
+            _entry = {"provider_id": _pid,
+                      "model_id": _model,
+                      "stale": _stale,
+                      "stale_reason": _reason or None,
+                      "fetched": False,
+                      "fetched_from": None}
+            _provider_rows.append(_entry)
+            if not _stale:
+                continue
+            _envelope = _fxkb_updater.provider_source_url(
+                _pid, _fxkb_loader.STAGED_SECTIONS_RETRIEVED_AT)
+            _pages: list = []
+            for _mid, _fields in _staged_rows.get(_pid, []):
+                if _mid != _model:
+                    continue
+                for _name in sorted(_fields):
+                    _url = _fields[_name][1]
+                    if isinstance(_url, str) and _url.startswith(
+                            "https://") and _url not in _pages:
+                        _pages.append(_url)
+            _pages = _pages[:6]
+            if _fxkb_updater._allowlisted(_envelope) and (
+                    _envelope not in _pages):
+                _pages.append(_envelope)
+            if not _pages:
+                _skipped.append({"provider_id": _pid,
+                                 "source": _envelope,
+                                 "reason": "no source page on file"})
+                continue
+            for _page in _pages:
+                try:
+                    _text = _fxkb_updater.fetch_source(_page, _fetcher)
+                except _fxkb_updater.SourceNotAllowlistedError:
+                    _skipped.append({
+                        "provider_id": _pid,
+                        "source": _page,
+                        "reason": "host outside the KB allowlist"})
+                    continue
+                except Exception as _exc:
+                    _skipped.append({
+                        "provider_id": _pid,
+                        "source": _page,
+                        "reason": "fetch failed"})
+                    continue
+                _entry["fetched"] = True
+                _entry["fetched_from"] = _page
+                _doc_source = (_page if _fxkb_updater._allowlisted(
+                    _page) else _envelope)
+                _proposal = _fxkb_updater.propose_update(
+                    _catalog, _doc_source, _text, _now)
+                if (not _proposal["changes"]
+                        and not _proposal.get("added")):
+                    _skipped.append({
+                        "provider_id": _pid,
+                        "source": _page,
+                        "reason": "page carries no schema-valid field "
+                        "changes"})
+                    continue
+                _errors = _fxkb_updater.validate_proposal(
+                    _catalog, _proposal)
+                if _errors:
+                    _skipped.append({
+                        "provider_id": _pid,
+                        "source": _page,
+                        "reason": str(_errors[0])})
+                    continue
+                _fxkb_modelkb.stage_proposal(_proposal)
+                _preview = _fxkb_preview(
+                    _proposal, _pid,
+                    _fxkb_updater.is_shipped_copy_source(
+                        _doc_source),
+                    _fetched_from=_page)
+                _previews.append(_preview)
+                break
+        return {"checked_at": _now,
+                "providers": _provider_rows,
+                "proposals": _previews,
+                "skipped": _skipped,
+                "up_to_date": not _previews,
+                "message": "staged only, nothing applied"}
 
     # K12OPEN1 Beacon (rows R-350 + HC-3): idea/demo public-text rules
     # plus submission secret/private scan; sibling-mount pattern only.
@@ -4400,9 +4747,10 @@ def create_app(settings: Any = None,
                 },
             )
         _demof13w_grant_head = str(_demof13w_grant_argv[0])
-        _demof13w_grant_second = str(_demof13w_grant_argv[1])
-        if not _demof13w_grant_second or _demof13w_grant_second.startswith(
-                "-"):
+        _demof13w_grant_second = (
+            _demof13w_permissions._install_subcommand(
+                [str(word) for word in _demof13w_grant_argv]))
+        if not _demof13w_grant_second:
             raise HTTPException(
                 status_code=409,
                 detail={

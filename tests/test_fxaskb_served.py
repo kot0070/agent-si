@@ -20,6 +20,8 @@ import json
 import os
 import shutil
 import sys
+import threading
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -298,35 +300,106 @@ def _decide(client, tool_id, decision, project_id, token=TEST_TOKEN):
     )
 
 
-# -- B1: the install ask holds the run -------------------------------------
+# -- B1: the install ask waits in place; the 15-min fallback holds ----
+# (FXASK A8: with no answer the wait falls back to today's hold: the
+# same status line, the terminal approval event, the ledger line,
+# run_end and journal of any run end).
 
-def test_b1_hold_status_line_and_terminal_approval(tmp_path):
+def test_b1_hold_status_line_and_terminal_approval(tmp_path, monkeypatch):
+    now = [0.0]
+    monkeypatch.setattr(_engine, "_ask_wait_clock", lambda: now[0])
     project = "fxaskb-hold"
     folder = _project_dir(tmp_path, project)
     app = _served_app(tmp_path, project, _install_factory())
     client = TestClient(app, raise_server_exceptions=False)
-    resp = _post_chat(client, project, folder)
-    assert resp.status_code == 200, resp.text
-    events = _parse_sse(resp.text)
-    assert _types(events)[0] == "start", events[:2]
-    assert _types(events)[-1] == "approval", _types(events)[-3:]
-    held = [event for event in events
-            if event.get("type") == "approval"][-1]
-    assert held.get("tool_id") == "install:%s:cargo" % project, held
-    assert any(str(event.get("text", "")).startswith(HOLD_STATUS)
-               for event in events), _all_text(events)[:500]
-    assert "Total:" in _all_text(events), _all_text(events)[:500]
-    record = _run_record(app, project)
-    assert record is not None, "devrun run record stored on app state"
-    assert record.get("success") is not True, record.get("summary")
-    assert "held" in str(record.get("summary", "")).lower(), (
-        record.get("summary"))
-    assert record.get("run_end") is not None, "run end ran like any end"
-    rows = _journal.stored_rows(project, "DEVRUN_END")
-    assert rows, "held run journals its end like any run end"
+    box: dict = {}
+    thread = threading.Thread(
+        target=lambda: box.update(resp=_post_chat(
+            client, project, folder)),
+        daemon=True)
+    thread.start()
+    try:
+        tool_id = "install:%s:cargo" % project
+        end = time.monotonic() + 90.0
+        while time.monotonic() < end:
+            if not thread.is_alive():
+                break
+            try:
+                entry = dict(
+                    _permissions._BOUND_DECISIONS).get(tool_id)
+            except Exception:
+                entry = None
+            if isinstance(entry, dict) and entry.get("decision") is None:
+                break
+            time.sleep(0.2)
+        now[0] = 10_000.0
+        thread.join(timeout=240.0)
+        assert not thread.is_alive()
+        resp = box.get("resp")
+        assert resp is not None and resp.status_code == 200, resp
+        events = _parse_sse(resp.text)
+        assert _types(events)[0] == "start", events[:2]
+        assert "ask" in _types(events), _types(events)[-4:]
+        assert _types(events)[-1] == "approval", _types(events)[-3:]
+        held = [event for event in events
+                if event.get("type") == "approval"][-1]
+        assert held.get("tool_id") == "install:%s:cargo" % project, held
+        assert any(str(event.get("text", "")).startswith(HOLD_STATUS)
+                   for event in events), _all_text(events)[:500]
+        assert "Total:" in _all_text(events), _all_text(events)[:500]
+        record = _run_record(app, project)
+        assert record is not None, "devrun run record stored on app state"
+        assert record.get("success") is not True, record.get("summary")
+        assert "held" in str(record.get("summary", "")).lower(), (
+            record.get("summary"))
+        assert record.get("run_end") is not None, "run end ran like any end"
+        rows = _journal.stored_rows(project, "DEVRUN_END")
+        assert rows, "held run journals its end like any run end"
+    finally:
+        thread.join(timeout=60.0)
 
 
-# -- B1+B2: allow records, resend does not ask again ------------------------
+# -- B1 live: the ask event arrives mid-stream while the run waits -----
+
+def test_b1_live_ask_event_mid_stream(tmp_path):
+    project = "fxaskb-ask"
+    folder = _project_dir(tmp_path, project)
+    app = _served_app(tmp_path, project, _install_factory())
+    client = TestClient(app, raise_server_exceptions=False)
+    tool_id = "install:%s:cargo" % project
+    box: dict = {}
+    thread = threading.Thread(
+        target=lambda: box.update(resp=_post_chat(
+            client, project, folder)),
+        daemon=True)
+    thread.start()
+    try:
+        end = time.monotonic() + 90.0
+        pin = None
+        while time.monotonic() < end:
+            if not thread.is_alive():
+                break
+            try:
+                entry = dict(
+                    _permissions._BOUND_DECISIONS).get(tool_id)
+            except Exception:
+                entry = None
+            if isinstance(entry, dict) and entry.get("decision") is None:
+                pin = entry
+                break
+            time.sleep(0.2)
+        assert pin is not None, "install ask parked the run in place"
+        assert list(pin.get("argv") or []) == list(INSTALL_ARGV), pin
+        assert thread.is_alive(), "stream stays open while waiting"
+        assert _decide(client, tool_id, "deny", project).status_code == 200
+        thread.join(timeout=240.0)
+        assert not thread.is_alive()
+    finally:
+        thread.join(timeout=60.0)
+
+
+# -- B2: allow runs the parked install on the same run, no resend ------
+# (FXASK A8: the resend is gone; the parked run itself goes on).
 
 def test_b2_allow_then_resend_does_not_ask(tmp_path, monkeypatch):
     _bind_cargo_shim(tmp_path, monkeypatch)
@@ -334,22 +407,44 @@ def test_b2_allow_then_resend_does_not_ask(tmp_path, monkeypatch):
     folder = _project_dir(tmp_path, project)
     app = _served_app(tmp_path, project, _install_factory())
     client = TestClient(app, raise_server_exceptions=False)
-    first = _post_chat(client, project, folder)
-    assert first.status_code == 200, first.text
-    assert "approval" in _types(_parse_sse(first.text)), first.text[:500]
     tool_id = "install:%s:cargo" % project
-    resp = _decide(client, tool_id, "allow", project)
-    assert resp.status_code == 200, resp.text
-    rows = _journal.stored_rows(project)
-    assert any("PERMISSION_DECISION" in row.summary
-               and tool_id in row.summary and "allow" in row.summary
-               for row in rows), [row.summary for row in rows]
-    second = _post_chat(client, project, folder)
-    assert second.status_code == 200, second.text
-    events = _parse_sse(second.text)
-    assert "approval" not in _types(events), _types(events)
-    assert _types(events)[-1] == "done", _types(events)[-3:]
-    assert "exit" in _all_text(events), _all_text(events)[:800]
+    box: dict = {}
+    thread = threading.Thread(
+        target=lambda: box.update(resp=_post_chat(
+            client, project, folder)),
+        daemon=True)
+    thread.start()
+    try:
+        end = time.monotonic() + 90.0
+        while time.monotonic() < end:
+            if not thread.is_alive():
+                break
+            try:
+                entry = dict(
+                    _permissions._BOUND_DECISIONS).get(tool_id)
+            except Exception:
+                entry = None
+            if isinstance(entry, dict) and entry.get("decision") is None:
+                break
+            time.sleep(0.2)
+        assert thread.is_alive(), "run waits in place for the answer"
+        resp = _decide(client, tool_id, "allow", project)
+        assert resp.status_code == 200, resp.text
+        thread.join(timeout=240.0)
+        assert not thread.is_alive()
+        first = box.get("resp")
+        assert first is not None and first.status_code == 200, first
+        events = _parse_sse(first.text)
+        assert "ask" in _types(events), _types(events)[-4:]
+        assert "approval" not in _types(events), _types(events)
+        assert _types(events)[-1] == "done", _types(events)[-3:]
+        assert "exit" in _all_text(events), _all_text(events)[:800]
+        rows = _journal.stored_rows(project)
+        assert any("PERMISSION_DECISION" in row.summary
+                   and tool_id in row.summary and "allow" in row.summary
+                   for row in rows), [row.summary for row in rows]
+    finally:
+        thread.join(timeout=60.0)
 
 
 # -- B2 deny path: refusal text, no hold -----------------------------------

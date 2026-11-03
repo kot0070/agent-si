@@ -40,6 +40,7 @@ Sections: general, appearance, local LLM, models, routing, optimization, capabil
 - Appearance: theme switch.
 - Local LLM: read-only stored bench path, models, and endpoint.
 - Models and routing: provider list, search, setup wizard, role pools, chat-model picker, leftover-key finder. Connecting is two-step — paste the key, press Check, then Save: only a checked key saves, a wrong key is refused in plain words and nothing is stored; only ticked models reach Auto, the role pools, and the chat picker.
+- Capability database: model knowledge state per provider, last update time, and source. Update stages the shipped copy for every connected provider (each row names its real source and retrieval date, or says `shipped copy from <date>`) and applies it on the same screen; Check online fetches the official docs pages for stale providers (older than 90 days, fresh rows are never fetched) and stages a preview; From file uploads a `.json` file shaped like `docs/kb-update-example.json` (`{"models": [{"provider_id", "model_id", "fields": {...}}]}`) and stages a preview the same way. Every preview shows old values next to new ones with Apply and Reject; applying stacks a new version, rejecting leaves the version untouched. When nothing changed the screen reads Already up to date.
 - Project: role profile editor, defaults bar, one-time risk acceptance switch.
 - Local bench: scan and run benchmark for local models.
 - Diagnostics: locale, telemetry, gateway, and history checks.
