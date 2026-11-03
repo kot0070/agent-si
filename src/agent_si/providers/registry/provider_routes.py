@@ -38,6 +38,7 @@ from .provider_api import (
     LIVE_LINKED,
     NOT_FOUND,
     NOT_OWN_PREFIX,
+    PROVIDER_CONFLICT_CODE,
     TOKEN_REQUIRED,
     list_leftover_keys,
     request_delete_entry,
@@ -260,7 +261,11 @@ def connect_provider(ctx: ProviderCtx, query, body) -> Tuple[int, Dict]:
     try:
         view = ctx.facade.register_provider(descriptor, key_ref)
     except ValueError as exc:
-        return 400, {"error": str(exc)}
+        message = str(exc)
+        if message.startswith(PROVIDER_CONFLICT_CODE + ":"):
+            return 400, {"code": PROVIDER_CONFLICT_CODE,
+                         "message": message.split(":", 1)[1].strip()}
+        return 400, {"error": message}
     _refresh_best_effort(ctx, preset["provider_id"], view, model)
     return 200, {"provider": view.describe()}
 
