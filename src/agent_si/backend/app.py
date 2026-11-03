@@ -1174,6 +1174,20 @@ def create_app(settings: Any = None,
                 return "memory"
             if _low == "os":
                 return "os"
+        # S4: documented product setting (env.example). Explicit settings
+        # win; the env decides only when settings stay silent, so tests
+        # (conftest defaults it to memory) never touch the OS store
+        # while the product default stays "os" below.
+        try:
+            _env_raw = os.environ.get("AGENT_SI_SECRET_STORE")
+        except Exception:
+            _env_raw = None
+        if isinstance(_env_raw, str) and _env_raw.strip():
+            _env_low = _env_raw.strip().lower()
+            if _env_low == "memory":
+                return "memory"
+            if _env_low == "os":
+                return "os"
         if isinstance(_settings, Mapping):
             if _settings.get("testing") is True:
                 return "memory"
