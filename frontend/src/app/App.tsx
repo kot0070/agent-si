@@ -36,7 +36,7 @@ import {
 import type { SupportedLocale } from "../locale/index";
 import { SETTINGS_ROUTES, AcceptedRiskSwitch, FirstRunGate, InstallGrantsList, RoleProfileEditor, markFirstRunDone } from "../settings/index";
 import { OptimizationPolicySection } from "../settings/optimizationPolicy";
-import { ProvidersPage } from "../settings/ProvidersPage";
+import { LocalConnectSection, ProvidersPage } from "../settings/ProvidersPage";
 import {
   LocalBenchDecisionList,
   LocalBenchTab,
@@ -687,7 +687,10 @@ function SettingsSectionRoute(): ReactElement {
           <ThemeToggle />
         </span>
       ) : route.path === "localAI" ? (
-        <LocalAiStoredPanel />
+        <>
+          <LocalConnectSection />
+          <LocalAiStoredPanel />
+        </>
       ) : route.path === "localbench" ? (
         <span data-testid="settings-section-body">
           <LocalBenchTab client={new HttpLocalBenchClient()} />
