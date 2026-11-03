@@ -82,7 +82,9 @@
       "check": "Check",
       "checking": "Checking...",
       "checked": "Key checked. Save to connect.",
-      "checkFirst": "Check the key first."
+      "checkFirst": "Check the key first.",
+      "localFound": "Local server answered: found {count} models. Save to connect.",
+      "localNotRunning": "Local server is not running. Start {label} first, then Check again."
     },
     "disconnect": {
       "title": "Disconnect {label}",
@@ -342,6 +344,7 @@
     "title": "Welcome to Agent SI",
     "greeting": "Hello, {name}!",
     "next": "Next",
+    "back": "Back",
     "skip": "Skip",
     "optionalNote": "Optional steps are skippable.",
     "steps": {
@@ -358,6 +361,16 @@
     },
     "provider": {
       "localNote": "Runs on this PC, no key"
+    },
+    "folder": {
+      "label": "Project folder",
+      "hint": "The folder this project works in.",
+      "required": "Choose or type a project folder first.",
+      "choose": "Choose folder"
+    },
+    "team": {
+      "nameRequired": "Name your team first.",
+      "needProvider": "Connect a provider first — the team needs one."
     }
   },
   "migration": {
@@ -696,7 +709,8 @@
       "empty": "Nothing to show yet."
     },
     "error": {
-      "retry": "Try again"
+      "retry": "Try again",
+      "details": "Details"
     },
     "loading": {
       "more": "Loading more"
