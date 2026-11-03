@@ -158,7 +158,9 @@ describe("L2 success only after a real save", () => {
     // FXR2E two-step: the unreachable store fails at Check (Save never
     // enables), with the same honest error and nothing stored.
     fireEvent.click(within(dialog).getByText("Check"));
-    expect(await within(dialog).findByText("Could not reach the provider.")).toBeTruthy();
+    // S3: slow/unreachable keeps the key; the page names Connect again,
+    // never the re-paste hint.
+    expect(await within(dialog).findByText("The provider is slow or unreachable. Your key is saved. Press Connect again.")).toBeTruthy();
     expect(screen.queryByText(/Reference saved/)).toBeNull();
     // Nothing was saved: the Meta card still offers Connect, never
     // Disconnect (the open dialog shares the accessible name, so the

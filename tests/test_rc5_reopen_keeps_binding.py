@@ -152,6 +152,9 @@ def _cleanup(client):
 
 def test_reopen_keeps_connected_key_and_binding(tmp_path, monkeypatch):
     """Connect, send, rebuild twice: still Connected, send works."""
+    # S4: asserts the real OS default, so it opts out of the
+    # conftest memory default for this test only.
+    monkeypatch.delenv("AGENT_SI_SECRET_STORE", raising=False)
     _online(monkeypatch)
     store_dir = str(tmp_path / "appdata")
     client, _app = _make_client(store_dir)
@@ -195,6 +198,9 @@ def test_reopen_keeps_connected_key_and_binding(tmp_path, monkeypatch):
 
 def test_offline_boot_keeps_binding(tmp_path, monkeypatch):
     """Provider unreachable at boot: binding kept, no reconnect needed."""
+    # S4: asserts the real OS default, so it opts out of the
+    # conftest memory default for this test only.
+    monkeypatch.delenv("AGENT_SI_SECRET_STORE", raising=False)
     _online(monkeypatch)
     store_dir = str(tmp_path / "appdata-off")
     client, _app = _make_client(store_dir)

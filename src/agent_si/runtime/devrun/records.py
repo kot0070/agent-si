@@ -241,6 +241,7 @@ def ledger_add(
     attempt: int = 0,
     usage: Any = None,
     cost: Any = None,
+    reasoning_effort: Any = None,
 ) -> dict[str, Any]:
     """Append one ledger row for one model call; return the row."""
     tokens = {"input": None, "output": None}
@@ -263,6 +264,9 @@ def ledger_add(
             "attempt": int(attempt),
             "tokens": tokens,
             "cost": "UNKNOWN" if cost is None else str(cost),
+            # FXRUNSPEED S1: the reasoning level sent with this call
+            # (None when no params travelled).
+            "reasoning_effort": reasoning_effort,
         }
         record.setdefault("ledger", []).append(row)
     # FXPARALLEL END run-lock.

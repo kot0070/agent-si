@@ -2044,6 +2044,10 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
             parsed = _protocol.parse_director_reply(
                 director_text.output_text or "")
         except _protocol.PlanError as exc:
+            # FXRUNSPEED S2: one journal line with the re-ask reason
+            # only (never the model text).
+            _journal("DEVRUN_PLAN",
+                     "director plan re-ask (parse): %s" % (exc,))
             _check_stop()
             try:
                 repair = _call(
@@ -2096,6 +2100,11 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
             # built: re-ask once for parts. A second answer is shown,
             # but the run is not a success ("Nothing was built.").
             _check_stop()
+            # FXRUNSPEED S2: one journal line with the re-ask reason
+            # only (never the model text).
+            _journal("DEVRUN_PLAN",
+                     "director plan re-ask (build-answer): "
+                     "answer on a build task needs parts")
             try:
                 _retry_text = _call(
                     "director", director, director_adapter,
@@ -2139,6 +2148,11 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                 _check_stop()
                 _names = "; ".join(
                     "%s (part %s)" % (cell, pid) for pid, cell in _missing)
+                # FXRUNSPEED S2: one journal line with the re-ask
+                # reason only (never the model text).
+                _journal("DEVRUN_PLAN",
+                         "director plan re-ask (missing-check): %s"
+                         % (_names,))
                 try:
                     _mrepair = _call(
                         "director", director, director_adapter,

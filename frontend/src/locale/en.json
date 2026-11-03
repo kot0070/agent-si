@@ -84,8 +84,7 @@
       "unknownModelsNote": "Some models are not in the capability base.",
       "needOneModel": "Tick at least one model, or Cancel to keep the current list.",
       "refusedKey": "The provider refused this key. Paste the full key again.",
-      "unreachable": "Could not reach the provider.",
-      "conflict": "This provider is already connected with different settings — disconnect it first, then connect again.",
+      "unreachable": "The provider is slow or unreachable. Your key is saved. Press Connect again.",
       "check": "Check",
       "checking": "Checking...",
       "checked": "Key checked. Save to connect.",
@@ -102,7 +101,8 @@
       "done": "Done",
       "priceUnknown": "not known",
       "localFound": "Local server answered: found {count} models. Save to connect.",
-      "localNotRunning": "Local server is not running. Start {label} first, then Check again."
+      "localNotRunning": "Local server is not running. Start {label} first, then Check again.",
+      "conflict": "This provider is already connected with different settings — disconnect it first, then connect again."
     },
     "disconnect": {
       "title": "Disconnect {label}",
