@@ -281,11 +281,8 @@ export function Inspector(props: InspectorProps): ReactElement {
         }
       } catch {
         ok = false;
-        if (alive) {
-          setLedger([]);
-          setRuns([]);
-          setNudge(null);
-        }
+        // FXCARDS C2: a failed refresh keeps last good values for the same
+        // project; only a project change clears (the projectId null branch).
       }
       // FXDESIGN8: the runs key of the same ledger route is already
       // loaded above with the package rows; no second round trip.
@@ -298,9 +295,7 @@ export function Inspector(props: InspectorProps): ReactElement {
           setTelemetry(doc);
         }
       } catch {
-        if (alive) {
-          setTelemetry(null);
-        }
+        // FXCARDS C2: keep last good telemetry on a failed refresh.
       }
       try {
         const next = await client.listTasks(target);
@@ -308,9 +303,7 @@ export function Inspector(props: InspectorProps): ReactElement {
           setTasks(next);
         }
       } catch {
-        if (alive) {
-          setTasks([]);
-        }
+        // FXCARDS C2: keep last good tasks on a failed refresh.
       }
       try {
         const next = await client.readBudget(target);
@@ -318,9 +311,7 @@ export function Inspector(props: InspectorProps): ReactElement {
           setBudget(next);
         }
       } catch {
-        if (alive) {
-          setBudget(null);
-        }
+        // FXCARDS C2: keep last good budget on a failed refresh.
       }
       try {
         const [status, entries] = await Promise.all([
@@ -333,11 +324,7 @@ export function Inspector(props: InspectorProps): ReactElement {
           setWatcherFailed(false);
         }
       } catch {
-        if (alive) {
-          setWatcherStatus(null);
-          setJournal(null);
-          setWatcherFailed(true);
-        }
+        // FXCARDS C2: keep last good watcher/app rows on a failed refresh.
       }
       try {
         const card = await fetchAppsCard(target);
@@ -346,10 +333,7 @@ export function Inspector(props: InspectorProps): ReactElement {
           setAppsFailed(false);
         }
       } catch {
-        if (alive) {
-          setApps(null);
-          setAppsFailed(true);
-        }
+        // FXCARDS C2: keep last good apps card on a failed refresh.
       }
       // FXTELEM: providers name connected ids from GET /api/v1/providers
       // (never an invented Unknown); tests read the latest staged run when
@@ -380,9 +364,7 @@ export function Inspector(props: InspectorProps): ReactElement {
           setProviders(names);
         }
       } catch {
-        if (alive) {
-          setProviders(null);
-        }
+        // FXCARDS C2: keep last good providers on a failed refresh.
       }
       try {
         const planResponse = await fetch(
@@ -414,9 +396,7 @@ export function Inspector(props: InspectorProps): ReactElement {
           );
         }
       } catch {
-        if (alive) {
-          setTestRuns(null);
-        }
+        // FXCARDS C2: keep last good test runs on a failed refresh.
       }
       try {
         const response = await fetch("/api/v1/local/models");
@@ -437,9 +417,7 @@ export function Inspector(props: InspectorProps): ReactElement {
           setLocalModels(names);
         }
       } catch {
-        if (alive) {
-          setLocalModels(null);
-        }
+        // FXCARDS C2: keep last good local models on a failed refresh.
       }
       return ok;
     }
@@ -628,7 +606,7 @@ export function Inspector(props: InspectorProps): ReactElement {
       .filter((item) => !item.primary)
       .sort(
         (left, right) =>
-          right.runRank - left.runRank ||
+          left.runRank - right.runRank ||
           left.statusRank - right.statusRank,
       );
     return { primary, secondary };
