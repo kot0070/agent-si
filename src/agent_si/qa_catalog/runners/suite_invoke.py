@@ -18,6 +18,13 @@ import subprocess
 import sys
 import time
 
+try:
+    from agent_si.backend.proc_tree import quiet_flags
+except ImportError:  # bare-script run without src on sys.path
+    def quiet_flags() -> int:
+        """CREATE_NO_WINDOW on Windows, else 0 (script-mode fallback)."""
+        return int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
 RUNNER_ID = "suite_invoke"
 RUNNER_VERSION = "1.0.0"
 RUNNER_TIMEOUT_S = 180
@@ -163,6 +170,7 @@ def main() -> int:
             capture_output=True,
             timeout=timeout_s,
             shell=False,
+            creationflags=quiet_flags(),
         )
         duration_ms = (time.perf_counter() - started) * 1000.0
         tail = (completed.stdout or b"")[-65536:].decode("utf-8", "replace")
