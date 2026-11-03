@@ -241,15 +241,15 @@ describe('FXFOLDER folder picker on the first-run folder step', () => {
     fireEvent.click(screen.getByRole('button', { name: en.firstrun.next }));
     fireEvent.click(screen.getByRole('button', { name: en.firstrun.next }));
     const input = (await screen.findByRole('textbox', {
-      name: en.settings.localbench.pathLabel,
+      name: en.firstrun.folder.label,
     })) as HTMLInputElement;
-    fireEvent.click(screen.getByRole('button', { name: 'Choose folder' }));
+    fireEvent.click(screen.getByRole('button', { name: en.firstrun.folder.choose }));
     await waitFor(() => {
       expect(input.value).toBe('/chosen/dir');
     });
     fireEvent.change(input, { target: { value: 'typed-folder' } });
     fireEvent.click(
-      screen.getByRole('button', { name: en.tasks.creator.create }),
+      screen.getByRole('button', { name: en.projects.list.create }),
     );
     const result = await screen.findByTestId('firstrun-project-result');
     expect(result.textContent).toContain('p-');
@@ -272,15 +272,15 @@ describe('FXFOLDER folder picker on the first-run folder step', () => {
     fireEvent.click(screen.getByRole('button', { name: en.firstrun.next }));
     fireEvent.click(screen.getByRole('button', { name: en.firstrun.next }));
     await screen.findByRole('textbox', {
-      name: en.settings.localbench.pathLabel,
+      name: en.firstrun.folder.label,
     });
     expect(
-      screen.getByRole('button', { name: 'Choose folder' }),
+      screen.getByRole('button', { name: en.firstrun.folder.choose }),
     ).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Choose folder' }));
+    fireEvent.click(screen.getByRole('button', { name: en.firstrun.folder.choose }));
     await waitFor(() => {
       expect(
-        screen.queryByRole('button', { name: 'Choose folder' }),
+        screen.queryByRole('button', { name: en.firstrun.folder.choose }),
       ).toBeNull();
     });
   });

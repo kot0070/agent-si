@@ -44,22 +44,24 @@ export function About(props: AboutProps): ReactElement {
     <section>
       <h2>{AGENT_SI_NAME}</h2>
       <p>{LICENCE_LINE}</p>
-      <p>{mitText(props.locale)}</p>
+      <pre data-testid="about-licence-text">{mitText(props.locale)}</pre>
       {props.showThirdParty !== true ? null : (
         <div data-testid="about-third-party">
           <h3>{t('about.thirdParty.title')}</h3>
-          <ul>
-            {THIRD_PARTY_NOTICES.map((notice) => (
-              <li
-                key={notice.name}
-                data-testid={`third-party-${notice.name}`}
-              >
-                <span>{notice.name}</span>
-                <span>{notice.version}</span>
-                <span>{notice.licence}</span>
-              </li>
-            ))}
-          </ul>
+          <table>
+            <tbody>
+              {THIRD_PARTY_NOTICES.map((notice) => (
+                <tr
+                  key={notice.name}
+                  data-testid={`third-party-${notice.name}`}
+                >
+                  <td>{notice.name}</td>
+                  <td>{notice.version}</td>
+                  <td>{notice.licence}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </section>

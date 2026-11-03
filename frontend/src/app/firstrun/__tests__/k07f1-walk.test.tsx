@@ -43,11 +43,11 @@ describe('K07F1 first-run walk', () => {
     expect(screen.getByRole('heading', { name: en.firstrun.steps.oneClickTeam })).toBeTruthy();
   });
 
-  it('Next advances and Back retreats under the previous step title', () => {
+  it('Next advances and Back retreats', () => {
     render(<FirstRunFlow onComplete={() => undefined} />);
     expect(screen.getAllByRole('button').length).toBe(6);
     fireEvent.click(screen.getByRole('button', { name: en.firstrun.next }));
-    const back = screen.getByRole('button', { name: en.firstrun.steps.connectProvider });
+    const back = screen.getByRole('button', { name: en.firstrun.back });
     expect(back).toBeTruthy();
     fireEvent.click(back);
     expect(screen.getByRole('heading', { name: en.firstrun.steps.connectProvider })).toBeTruthy();
@@ -117,7 +117,7 @@ describe('K07F1 first-run walk', () => {
     expect(screen.getByRole('textbox', { name: en.shell.topbar.project })).toBeTruthy();
     expect(screen.getByRole('button', { name: en.settings.roleProfile.title })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: en.firstrun.next }));
-    expect(screen.getByRole('textbox', { name: en.settings.localbench.pathLabel })).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: en.firstrun.folder.label })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: en.firstrun.next }));
     expect(screen.getByRole('heading', { name: en.tasks.creator.title })).toBeTruthy();
   });
@@ -135,9 +135,9 @@ describe('K07F1 first-run walk', () => {
     fireEvent.click(screen.getByRole('button', { name: en.firstrun.next }));
     fireEvent.click(screen.getByRole('button', { name: en.firstrun.next }));
     expect(currentStep(container)).toBe(en.firstrun.steps.projectFolder);
-    fireEvent.click(screen.getByRole('button', { name: en.firstrun.steps.oneClickTeam }));
+    fireEvent.click(screen.getByRole('button', { name: en.firstrun.back }));
     expect(currentStep(container)).toBe(en.firstrun.steps.oneClickTeam);
-    fireEvent.click(screen.getByRole('button', { name: en.firstrun.steps.connectProvider }));
+    fireEvent.click(screen.getByRole('button', { name: en.firstrun.back }));
     expect(currentStep(container)).toBe(en.firstrun.steps.connectProvider);
   });
 });

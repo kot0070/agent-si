@@ -64,7 +64,7 @@ describe('LIVE0-05 first-run wizard setup steps', () => {
     expect(done).toBe(true);
   });
 
-  it('Back retreats under the previous step title without completing', () => {
+  it('Back retreats without completing', () => {
     let done = false;
     const { container } = render(
       <FirstRunFlow onComplete={() => { done = true; }} />,
@@ -72,7 +72,7 @@ describe('LIVE0-05 first-run wizard setup steps', () => {
     fireEvent.click(screen.getByRole('button', { name: en.firstrun.next }));
     fireEvent.click(screen.getByRole('button', { name: en.firstrun.next }));
     expect(currentStep(container)).toBe(en.firstrun.steps.projectFolder);
-    fireEvent.click(screen.getByRole('button', { name: en.firstrun.steps.oneClickTeam }));
+    fireEvent.click(screen.getByRole('button', { name: en.firstrun.back }));
     expect(currentStep(container)).toBe(en.firstrun.steps.oneClickTeam);
     expect(done).toBe(false);
   });

@@ -12,6 +12,7 @@ import {
   checkKey,
   connectCloud,
   connectLocal,
+  probeLocalModels,
   saveKey,
 } from "./connectApi";
 import { ApiError } from "../../api/errors";
@@ -221,6 +222,11 @@ export function ConnectDialog({
     return null;
   }
 
+  // FXFIRST: local presets need no key — Check and Save stay enabled
+  // with an empty key and probe the local URL instead (cloud rows keep
+  // the key-first two-step and its check-first hint).
+  const isLocal = preset.kind === "local";
+
   const showHintWarning =
     apiKey.length > 0 && preset.keyStartsWith.length > 0 && !apiKey.startsWith(preset.keyStartsWith);
 
@@ -228,7 +234,9 @@ export function ConnectDialog({
     // Step 1 of the two-step dialog: paste + Check, then Save. The check
     // hits the read-only route (same live preflight, never stores), so a
     // wrong key reports the plain reason and leaves every store alone.
-    if (apiKey.length === 0 || checking || saving || preset === null) {
+    // FXFIRST: local presets need no key, so Check stays enabled with an
+    // empty key and really probes the local URL instead of self-approving.
+    if (checking || saving || preset === null) {
       return;
     }
     const activePreset: ProviderPreset = preset;
@@ -237,8 +245,32 @@ export function ConnectDialog({
       return;
     }
     if (activePreset.kind === "local") {
-      setChecked(true);
-      setResult({ kind: "success", text: t("providers.connect.checked") });
+      setChecking(true);
+      setResult(null);
+      try {
+        const count = await probeLocalModels(activePreset.baseUrl);
+        if (count === null) {
+          setChecked(false);
+          setResult({
+            kind: "error",
+            text: t("providers.connect.localNotRunning", { label: activePreset.label }),
+          });
+        } else {
+          setChecked(true);
+          setResult({
+            kind: "success",
+            text: t("providers.connect.localFound", { count: String(count) }),
+          });
+        }
+      } catch (err: unknown) {
+        setChecked(false);
+        setResult({ kind: "error", text: connectFailure(err) });
+      } finally {
+        setChecking(false);
+      }
+      return;
+    }
+    if (apiKey.length === 0) {
       return;
     }
     setChecking(true);
@@ -256,14 +288,14 @@ export function ConnectDialog({
   }
 
   async function handleSave(): Promise<void> {
-    if (apiKey.length === 0 || saving || preset === null) {
+    if (saving || preset === null) {
       return;
     }
     // Two-step: Save runs only after a successful Check for cloud
-    // presets (local presets need no key check). The save itself
-    // re-checks before storing, so a key swapped after Check still
-    // cannot store a refused value.
-    if (preset.kind !== "local" && !checked) {
+    // presets (local presets need no key check, so an empty key saves).
+    // The save itself re-checks before storing, so a key swapped after
+    // Check still cannot store a refused value.
+    if (preset.kind !== "local" && (apiKey.length === 0 || !checked)) {
       setResult({ kind: "error", text: t("providers.connect.checkFirst") });
       return;
     }
@@ -485,7 +517,7 @@ export function ConnectDialog({
       <button
         type="button"
         data-variant="quiet"
-        disabled={apiKey.length === 0 || checking || saving}
+        disabled={(!isLocal && apiKey.length === 0) || checking || saving}
         onClick={() => {
           void handleCheck();
         }}
@@ -496,7 +528,7 @@ export function ConnectDialog({
         type="button"
         data-variant="primary"
         style={{ fontWeight: 700 }}
-        disabled={apiKey.length === 0 || saving || (preset.kind !== "local" && !checked)}
+        disabled={saving || (!isLocal && (apiKey.length === 0 || !checked))}
         onClick={() => {
           void handleSave();
         }}

@@ -43,14 +43,6 @@ const FIRST_RUN_PRESET_IDS = ['meta', 'openai', 'anthropic', 'ollama'];
 const FOLDER_PICK_URL = '/api/v1/sidecar/pick-folder';
 const FOLDER_PICK_UNAVAILABLE = 409;
 
-function folderLabel(key: string, fallback: string): string {
-  try {
-    return t(key);
-  } catch {
-    return fallback;
-  }
-}
-
 async function requestFolderPick(): Promise<string | null> {
   const response = await requestResponse(FOLDER_PICK_URL, {
     method: 'POST',
@@ -84,8 +76,11 @@ function toStepError(error: unknown): StepError {
   return { errorKey: 'errors.generic', code: 'CONTEXT_MISSING' };
 }
 
-function emptyError(): StepError {
-  return { errorKey: 'errors.generic', code: 'CONTEXT_WRONG_CONTRACT_VERSION' };
+function validationError(errorKey: string): StepError {
+  // FXFIRST: empty required fields are honest client-side validation, never
+  // a fabricated contract code (the H73 raw-enum report). The code below
+  // is StepError-local and renders behind Details only, never as text.
+  return { errorKey, code: 'VALIDATION_REQUIRED' };
 }
 
 // Optional context reads: bare unit mounts render FirstRunFlow with no
@@ -162,6 +157,12 @@ export function FirstRunFlow(props: FirstRunFlowProps): ReactElement {
     setSkipped((prev: OptionalFirstRunStep[]) => (prev.includes(step) ? prev : [...prev, step]));
   };
   const providerGate = current === 'connectProvider' && served && !hasConnected && !providerSkipped;
+  // FXFIRST item 4: one-click team with no provider is disabled with the
+  // reason on screen plus a link to step 1. Skipping step 1 is an explicit
+  // providerless choice, so the gate lifts for skipped runs (the server
+  // decides the team write); bare unit mounts (not served) keep the legacy
+  // enabled button.
+  const teamBlocked = served && !hasConnected && !providerSkipped;
   const goNext = (): void => {
     if (providerGate) {
       return;
@@ -186,7 +187,7 @@ export function FirstRunFlow(props: FirstRunFlowProps): ReactElement {
     }
     const name = teamName.trim();
     if (name === '') {
-      setTeamError(emptyError());
+      setTeamError(validationError('firstrun.team.nameRequired'));
       return;
     }
     setTeamBusy(true);
@@ -223,7 +224,7 @@ export function FirstRunFlow(props: FirstRunFlowProps): ReactElement {
     }
     const folderRef = folder.trim();
     if (folderRef === '') {
-      setFolderError(emptyError());
+      setFolderError(validationError('firstrun.folder.required'));
       return;
     }
     setFolderBusy(true);
@@ -269,7 +270,7 @@ export function FirstRunFlow(props: FirstRunFlowProps): ReactElement {
     }
     const title = taskTitle.trim();
     if (title === '') {
-      setTaskError(emptyError());
+      setTaskError(validationError('tasks.creator.titleRequired'));
       return;
     }
     setTaskBusy(true);
@@ -403,13 +404,28 @@ export function FirstRunFlow(props: FirstRunFlowProps): ReactElement {
             </label>
             <button
               type="button"
-              disabled={teamBusy}
+              disabled={teamBusy || teamBlocked}
               onClick={() => {
                 void handleOneClickTeam();
               }}
             >
               {t('settings.roleProfile.title')}
             </button>
+            {teamBlocked ? (
+              <>
+                <p data-testid="firstrun-team-need-provider">{t('firstrun.team.needProvider')}</p>
+                <button
+                  type="button"
+                  className="fx-btn-quiet"
+                  data-testid="firstrun-team-back"
+                  onClick={() => {
+                    setIndex(0);
+                  }}
+                >
+                  {t('firstrun.steps.connectProvider')}
+                </button>
+              </>
+            ) : null}
             {teamResult !== null ? (
               <p data-testid="firstrun-team-result">
                 {teamResult.name} · {teamResult.projectId} · {teamRolesLine}
@@ -423,11 +439,11 @@ export function FirstRunFlow(props: FirstRunFlowProps): ReactElement {
         {current === 'projectFolder' ? (
           <>
             <label>
-              {t('settings.localbench.pathLabel')}
+              {t('firstrun.folder.label')}
               <input
                 type="text"
-                aria-label={t('settings.localbench.pathLabel')}
-                placeholder={t('settings.localbench.pathHint')}
+                aria-label={t('firstrun.folder.label')}
+                placeholder={t('firstrun.folder.hint')}
                 value={folder}
                 onChange={(event) => {
                   setFolder(event.target.value);
@@ -442,7 +458,7 @@ export function FirstRunFlow(props: FirstRunFlowProps): ReactElement {
                   void handleChooseFolder();
                 }}
               >
-                {folderLabel('firstrun.folder.choose', 'Choose folder')}
+                {t('firstrun.folder.choose')}
               </button>
             ) : null}
             <button
@@ -452,7 +468,7 @@ export function FirstRunFlow(props: FirstRunFlowProps): ReactElement {
                 void handleCreateProject();
               }}
             >
-              {t('tasks.creator.create')}
+              {t('projects.list.create')}
             </button>
             {folderProjectId !== null ? (
               <p data-testid="firstrun-project-result">{folderProjectId}</p>
@@ -497,7 +513,7 @@ export function FirstRunFlow(props: FirstRunFlowProps): ReactElement {
           <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
             {previous === undefined ? null : (
               <button type="button" className="fx-btn-quiet" onClick={goBack}>
-                {t(`firstrun.steps.${previous}`)}
+                {t('firstrun.back')}
               </button>
             )}
             <button type="button" disabled={providerGate} onClick={goNext}>
