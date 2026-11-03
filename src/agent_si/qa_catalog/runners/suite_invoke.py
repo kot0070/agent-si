@@ -135,15 +135,15 @@ def main() -> int:
             _low = str(resolved).lower()
         except Exception:
             _low = ""
-        _is_stub = ("windowsapps" in _low)
-        if not _is_stub:
+        _is_alias_shim = ("windowsapps" in _low)
+        if not _is_alias_shim:
             try:
                 import os as _os
                 if _os.path.isfile(resolved) and _os.path.getsize(resolved) == 0:
-                    _is_stub = True
+                    _is_alias_shim = True
             except OSError:
-                _is_stub = False
-        if _is_stub:
+                _is_alias_shim = False
+        if _is_alias_shim:
             resolved = None
     if resolved is None:
         path = fail("tool not installed: %s" % tool)
