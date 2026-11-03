@@ -298,9 +298,16 @@ aside[data-testid="inspector"] dl dd {
       visibility 0.15s ease-out;
   }
 
-  aside[data-testid="inspector"]:not(.fx-drawer-hidden) {
+  aside[data-testid="inspector"][data-open="true"] {
     visibility: visible;
     transform: none;
+  }
+
+  /* The hidden class carries the same closed state as the data-open
+     attribute; both ride the same boolean. */
+  aside[data-testid="inspector"].fx-drawer-hidden {
+    visibility: hidden;
+    transform: translateX(105%);
   }
 
   main[data-testid="app-main"] input {
@@ -1322,22 +1329,94 @@ div[data-testid="app-shell"]:has(> nav[data-testid="sidebar"]) {
   grid-template-columns: 240px minmax(280px, 1fr) 320px;
 }
 
-@media (max-width: 1100px) {
-  div[data-testid="app-shell"]:has(> nav[data-testid="sidebar"]) {
-    grid-template-columns: 200px minmax(280px, 1fr) 260px;
-  }
+/* FXFACTS F14 rail density (owner board compactness, tokens only, no new
+   colours): small type, tight rows, numbers right-aligned in tabular
+   figures, a thin line between groups. Lengths only, no colours. */
+aside[data-testid="inspector"] {
+  font-size: 13px;
+  line-height: 1.3;
 }
 
-/* FXDESIGN7 item 19: at or below 1024px the right rail collapses to
-   one-line rows (ref 7 pattern); content re-opens at wider widths. */
-@media (max-width: 1024px) {
-  div[data-testid="app-shell"]:has(> nav[data-testid="sidebar"]) {
-    grid-template-columns: 200px minmax(0, 1fr) 240px;
-  }
+aside[data-testid="inspector"] section {
+  padding: 8px 4px;
+}
 
-  aside[data-testid="inspector"] section[data-testid^="inspector-card-"] > *:not(:first-child) {
-    display: none;
-  }
+aside[data-testid="inspector"] .fx-rail-head {
+  min-height: 24px;
+  max-height: 40px;
+}
+
+aside[data-testid="inspector"] .fx-rail-titlevalue {
+  font-size: 13px;
+}
+
+aside[data-testid="inspector"] .fx-quiet,
+aside[data-testid="inspector"] .fx-quiet-line,
+aside[data-testid="inspector"] .fx-notset {
+  font-size: 11px;
+}
+
+aside[data-testid="inspector"] p {
+  margin: 2px 0;
+}
+
+aside[data-testid="inspector"] dl {
+  margin: 2px 0;
+}
+
+aside[data-testid="inspector"] dl > div {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 22px;
+}
+
+aside[data-testid="inspector"] dl dt {
+  flex: none;
+  opacity: 0.75;
+  font-size: 11px;
+}
+
+aside[data-testid="inspector"] dl dd {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+aside[data-testid="inspector"] .fx-rail-value,
+aside[data-testid="inspector"] .fx-legend-tokens,
+aside[data-testid="inspector"] .fx-legend-pct {
+  font-variant-numeric: tabular-nums;
+}
+
+aside[data-testid="inspector"] ul {
+  margin: 2px 0;
+}
+
+aside[data-testid="inspector"] .fx-team-field,
+aside[data-testid="inspector"] .fx-result-row,
+aside[data-testid="inspector"] .fx-bg-row,
+aside[data-testid="inspector"] .fx-legend-row {
+  font-size: 12px;
+}
+
+/* FXFACTS F14: a Team row is one line (role, short model, status, middle
+   dots in CSS so no separator is a text node); details open below. */
+.fx-team-line {
+  flex-wrap: nowrap;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.fx-team-line > span + span::before {
+  content: "\00B7";
+  margin: 0 6px;
+  opacity: 0.65;
+}
+
+.fx-team-line .fx-truncate {
+  max-width: 16ch;
 }
 
 /* CRAWL-3 + J10: provider model rows wrap safely at narrow widths.
@@ -1522,9 +1601,11 @@ details[data-testid^="team-detail-"] > summary::-webkit-details-marker {
 
 .fx-team-line {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: baseline;
   gap: 4px 12px;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 .fx-team-detail {

@@ -2,8 +2,9 @@
 // FXDESIGN5 S1-S7: Claude-desktop polish bar over the REAL App (only global
 // fetch is faked; served shapes quoted from src/agent_si/backend/*) plus
 // unit renders over FakeApiClient. RED before the fix, GREEN after.
-// S1 shell fills the viewport incl. a <=1000px no-overlap rule; rails scroll
-// only on overflow with token scrollbars. S2 chat fills the centre column
+// S1 shell fills the viewport incl. a below-1200px drawer rule with no
+// page sideways scroll; rails scroll only on overflow with token
+// scrollbars. S2 chat fills the centre column
 // (max-width 900px) with an in-flow composer (normal flow, after messages,
 // never sticky/fixed/absolute/overlapping) and no inline overlay override. S3 one thin top strip: project dropdown first, right group
 // after, every control named. S4 one primary per form/card: quiet
@@ -176,10 +177,14 @@ describe("fxdesign5 S1 shell fills the viewport without overlap", () => {
     }
   });
 
-  it("keeps three non-overlapping columns at 1000px with no page sideways scroll", () => {
-    expect(SHELL_CSS).toMatch(/max-width:\s*1000px/);
-    const narrow = SHELL_CSS.split("@media (max-width: 1000px)")[1] ?? "";
+  it("opens the rail as an overlay drawer below 1200px with no page sideways scroll", () => {
+    // FXFACTS F8: below 1200px the rail is an overlay drawer, never a
+    // squeezed column; the main column takes the full width.
+    expect(SHELL_CSS).toMatch(/max-width:\s*1199px/);
+    const narrow = SHELL_CSS.split("@media (max-width: 1199px)")[1] ?? "";
     expect(narrow).toMatch(/minmax\(0,\s*1fr\)/);
+    expect(narrow).toMatch(/position:\s*fixed/);
+    expect(narrow).toMatch(/data-open/);
     expect(SHELL_CSS).toContain("overflow-x: clip");
   });
 });

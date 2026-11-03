@@ -32,6 +32,7 @@ import {
   statusHumanKey,
 } from "../agents/agentsApi";
 import { Icon } from "../ui/icons";
+import { Spinner } from "../ui/Spinner";
 import { remainingBudget } from "../projects/projectsApi";
 import { MetricCard } from "../ui/MetricCard";
 import { fetchAppsCard } from "../watcher/AppsCard";
@@ -1078,16 +1079,16 @@ export function Inspector(props: InspectorProps): ReactElement {
                     className="fx-team-row"
                   >
                     <details data-testid={`team-detail-${row.agent}`}>
+                      {/* FXFACTS F14: one line (role, short model,
+                          status, middle dots in CSS); the rest opens. */}
                       <summary
                         data-testid={`team-line-${row.agent}`}
                         className="fx-team-line"
+                        title={row.agent}
                       >
-                        <span className="fx-team-field">{row.agent}</span>
-                        {roleKnown ? (
-                          <span className="fx-team-field">
-                            {readRoleText(roleRaw)}
-                          </span>
-                        ) : null}
+                        <span className="fx-team-field">
+                          {roleKnown ? readRoleText(roleRaw) : row.agent}
+                        </span>
                         {modelShort === null ? null : (
                           <span
                             className="fx-team-field fx-truncate"
@@ -1102,36 +1103,21 @@ export function Inspector(props: InspectorProps): ReactElement {
                         )}
                         <span
                           data-testid={`team-status-${row.agent}`}
-                          className="fx-status-chip"
+                          className="fx-team-field"
                         >
                           {t(statusHumanKey(row.status))}
                         </span>
-                        {stepKnown ? (
-                          <span className="fx-team-field">
-                            {t("shell.cards.team.step")}{": "}
-                            {String(stepRaw)}
-                          </span>
-                        ) : null}
-                        {entry.attempts > 1 ? (
-                          <span
-                            data-testid={`team-attempts-${row.agent}`}
-                            className="fx-team-field"
-                          >
-                            {t("projectView.attempts", {
-                              count: entry.attempts,
-                            })}
-                          </span>
-                        ) : null}
-                        {place === "UNKNOWN" ? null : (
-                          <span
-                            data-testid={`team-place-${row.agent}`}
-                            className="fx-place-badge"
-                          >
-                            {t(placementKey(place))}
-                          </span>
-                        )}
+                        {item.running ? <Spinner /> : null}
                       </summary>
                       <div className="fx-team-detail">
+                        <span className="fx-team-field">
+                          <span
+                            className="fx-team-value fx-truncate"
+                            title={row.agent}
+                          >
+                            {row.agent}
+                          </span>
+                        </span>
                         <span className="fx-team-field">
                           {t("agents.row.scope")}{": "}
                           <span
@@ -1193,6 +1179,24 @@ export function Inspector(props: InspectorProps): ReactElement {
                           {t("shell.cards.team.waiting")}{": "}
                           {readWaiting(readExtra(row, "waits"))}
                         </span>
+                        {entry.attempts > 1 ? (
+                          <span
+                            data-testid={`team-attempts-${row.agent}`}
+                            className="fx-team-field"
+                          >
+                            {t("projectView.attempts", {
+                              count: entry.attempts,
+                            })}
+                          </span>
+                        ) : null}
+                        {place === "UNKNOWN" ? null : (
+                          <span
+                            data-testid={`team-place-${row.agent}`}
+                            className="fx-place-badge"
+                          >
+                            {t(placementKey(place))}
+                          </span>
+                        )}
                       </div>
                     </details>
                   </li>

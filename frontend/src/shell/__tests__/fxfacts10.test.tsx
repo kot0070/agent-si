@@ -262,6 +262,31 @@ describe("fxfacts10 rail one-line cards", () => {
     expect(screen.getByTestId("watcher-open").textContent).toBe("Open journal");
   });
 
+  it("closed rail shows every card header with data served", async () => {
+    // FXFACTS F14, part 1 (presence): the closed rail names every card.
+    // Part 2 (no scroll at 1366x768) is measured on the real exe in
+    // HD-CHECK, where layout exists.
+    stubServed();
+    renderAppAt("/");
+    expect(await screen.findByTestId("chat-prompt")).toBeTruthy();
+    await screen.findByTestId("inspector-card-team");
+    for (const toggle of [
+      "rail-toggle-team",
+      "rail-toggle-context",
+      "rail-toggle-results",
+      "rail-toggle-background",
+      "rail-toggle-watcher",
+      "kit-toggle-fx-budget",
+      "rail-more-toggle",
+    ]) {
+      expect(await screen.findByTestId(toggle)).toBeTruthy();
+    }
+    // One-line team row: role, short model, status, no agent pill row.
+    const line = await screen.findByTestId("team-line-agent-1");
+    expect(line.textContent).toContain("Manager");
+    expect(line.textContent).toContain("m-1");
+  });
+
   it("team, results, background and watcher cards toggle their content", async () => {
     stubServed();
     renderAppAt("/");
