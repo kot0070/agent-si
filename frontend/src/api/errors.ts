@@ -86,6 +86,9 @@ const ErrorBodySchema = z.object({
   code: z.unknown().optional(),
   detail: z.unknown().optional(),
   detail_ref: z.unknown().optional(),
+  // R1: the backend serves plain reasons as {"error": "..."}; keep the
+  // field so the reason survives (the extractor below already reads it).
+  error: z.unknown().optional(),
 });
 
 function errorFromStatus(code: ApiErrorCode, status: number): ApiError {

@@ -228,3 +228,27 @@ a:focus-visible {
   outline: 2px solid var(--fx-focus-ring);
   outline-offset: 2px;
 }
+
+/* R6: radio directly before its label, one compact row. The global
+   `label { display: grid }` rule used to push every radio far right
+   with its label on another line. */
+.fx-modes-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin: 6px 0;
+}
+
+label.fx-radio-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* R6: fieldsets share one card look. */
+fieldset.fx-card {
+  border: 1px solid var(--fx-input-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 12px 0;
+}

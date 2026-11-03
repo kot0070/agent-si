@@ -34,6 +34,8 @@ export type ProviderKind = "cloud" | "compatible" | "local";
 export type ModelOption = {
   id: string;
   label: string;
+  /** Served KB fields for the merged row (capability filter); absent on static catalog rows. */
+  kb?: unknown;
 };
 
 export type ProviderPreset = {
