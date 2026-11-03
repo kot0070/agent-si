@@ -8,7 +8,10 @@ covers them; `npm --prefix ../out test` stays refused (outside root).
 from __future__ import annotations
 
 import os
+import pathlib
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -60,10 +63,22 @@ def test_prefix_test_passes_guard_not_installer_denied():
 
 
 def test_prefix_outside_root_still_refused(tmp_path):
-    outside = tmp_path / "out"
-    verdict = guard.evaluate(
-        ["npm", "--prefix", str(outside), "test"], "R0", dict(TASK_AUTH))
-    assert verdict["decision"] == "deny", verdict
+    # Location-independent: the outside dir lives in the system temp
+    # area, never under the workspace root (in-clone pytest basetemp
+    # puts tmp_path itself under cwd, where an absolute prefix is
+    # correctly allowed).
+    outside_base = pathlib.Path(tempfile.mkdtemp(prefix="fxask-outside-"))
+    outside = outside_base / "out"
+    outside.mkdir(exist_ok=True)
+    try:
+        verdict = guard.evaluate(
+            ["npm", "--prefix", str(outside), "test"],
+            "R0", dict(TASK_AUTH))
+        assert verdict["decision"] == "deny", verdict
+        assert "outside the workspace root" in str(
+            verdict.get("reason", "")), verdict
+    finally:
+        shutil.rmtree(outside_base, ignore_errors=True)
 
 
 def test_prefix_real_outside_refused():
