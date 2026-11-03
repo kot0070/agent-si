@@ -33,6 +33,23 @@ function storageKey(projectId: string): string {
   return `agentsi.hierarchy.collapsed.${projectId}`;
 }
 
+// FXPANEL: the rows must never sit on a pending load forever (a hung
+// route fetch left the expanded section an empty box in the live
+// trial). Past this budget the load degrades to the Connect state.
+const PROVIDER_LOAD_TIMEOUT_MS = 10000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const gate = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), ms);
+  });
+  return Promise.race([promise, gate]).finally(() => {
+    if (timer !== null) {
+      clearTimeout(timer);
+    }
+  });
+}
+
 function readCollapsed(projectId: string): boolean {
   try {
     return window.localStorage.getItem(storageKey(projectId)) !== "expanded";
@@ -123,6 +140,7 @@ export function HierarchyRows({
 }): ReactElement | null {
   const [connected, setConnected] = useState<string[] | null>(null);
   const [profiles, setProfiles] = useState<RoleProfileMap | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [expanded, setExpanded] = useState<boolean>(
     () => !readCollapsed(projectId),
   );
@@ -130,6 +148,7 @@ export function HierarchyRows({
   useEffect(() => {
     setConnected(null);
     setProfiles(null);
+    setLoadFailed(false);
     setExpanded(!readCollapsed(projectId));
   }, [projectId]);
 
@@ -141,16 +160,29 @@ export function HierarchyRows({
       return;
     }
     let alive = true;
+    // FXPANEL: listConnectedProviders swallows its own failures, but the
+    // request layer can still reject or hang the Promise.all below
+    // (offline, non-2xx, bad JSON, a hung route). A rejection or a past-
+    // budget load degrades to the plain Connect state, never to a stuck
+    // null that renders an empty box.
     void Promise.all([
-      listConnectedProviders(),
-      readRoleProfiles(projectId).catch(
-        (): RoleProfileMap => ({}),
-      ),
+      withTimeout(listConnectedProviders(), PROVIDER_LOAD_TIMEOUT_MS),
+      withTimeout(
+        readRoleProfiles(projectId).catch(
+          (): RoleProfileMap => ({}),
+        ),
+        PROVIDER_LOAD_TIMEOUT_MS,
+      ).then((map): RoleProfileMap => map ?? {}),
     ]).then(([ids, map]) => {
       if (!alive) {
         return;
       }
-      setConnected(ids);
+      if (ids === null) {
+        setLoadFailed(true);
+        setConnected([]);
+      } else {
+        setConnected(ids);
+      }
       setProfiles(map);
     });
     return () => {
@@ -162,6 +194,20 @@ export function HierarchyRows({
     writeCollapsed(projectId, !expandedNext);
     setExpanded(expandedNext);
     onExpandedChange?.(expandedNext);
+    if (expandedNext) {
+      // FXPANEL: providers may have changed while the rows were hidden
+      // (connect/disconnect in Settings): expanding re-reads the list
+      // instead of serving the stale one.
+      setLoadFailed(false);
+      setConnected(null);
+      setProfiles(null);
+    }
+  }
+
+  function retry(): void {
+    setLoadFailed(false);
+    setConnected(null);
+    setProfiles(null);
   }
 
   function refresh(): void {
@@ -349,9 +395,15 @@ export function HierarchyRows({
     );
   }
 
-  const emptyRows = connected !== null && connected.length === 0;
+  const emptyProviders = connected !== null && connected.length === 0;
+  const loadingRows = connected === null || profiles === null;
+  // FXPANEL: rejection degrades to the empty list (see the loader
+  // above), so failure and genuinely-empty providers share one plain
+  // Connect state with its action; the rows below keep their contract
+  // (the Director row carries the link, no selects render).
+  const connectText = pt("chat.hierarchy.connect", "Connect a provider");
   const rows =
-    connected !== null && profiles !== null ? (
+    connected !== null && profiles !== null && connected.length > 0 ? (
       <>
         {renderRow(
           "director",
@@ -359,7 +411,27 @@ export function HierarchyRows({
           profiles.director,
           connected,
           false,
-          emptyRows,
+          false,
+        )}
+        {renderRow("manager", managerLabel, profiles.manager, connected, false, false)}
+        {renderRow(
+          "agents",
+          agentsLabel,
+          profiles.worker,
+          connected,
+          isSplitAuditor(profiles.worker, profiles.auditor),
+          false,
+        )}
+      </>
+    ) : connected !== null && profiles !== null ? (
+      <>
+        {renderRow(
+          "director",
+          directorLabel,
+          profiles.director,
+          connected,
+          false,
+          emptyProviders,
         )}
         {renderRow("manager", managerLabel, profiles.manager, connected, false, false)}
         {renderRow(
@@ -387,6 +459,26 @@ export function HierarchyRows({
       >
         {pt("chat.hierarchy.collapse", "Hide model hierarchy")}
       </button>
+      {loadingRows ? (
+        <p data-testid="hierarchy-loading">
+          {pt("watcher.tab.loading", "Loading...")}
+        </p>
+      ) : null}
+      {emptyProviders ? (
+        <>
+          <p data-testid="hierarchy-empty">{connectText}</p>
+          {loadFailed ? (
+            <button
+              type="button"
+              data-testid="hierarchy-retry"
+              className="fx-btn-quiet"
+              onClick={retry}
+            >
+              {pt("chat.error.retry", "Retry")}
+            </button>
+          ) : null}
+        </>
+      ) : null}
       {rows}
     </section>
   );
