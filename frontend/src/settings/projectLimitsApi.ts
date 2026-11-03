@@ -68,6 +68,53 @@ const TeamModeSchema = z.object({
 
 export type TeamMode = z.infer<typeof TeamModeSchema>;
 
+// R10: routine-offload switch (R-333): open GET plus guarded PUT on
+// /api/v1/projects/{project_id}/offload for one role. The change is
+// journaled server-side (decision_ref); a refusal carries the reason.
+const OffloadSwitchSchema = z.object({
+  project_id: z.string().min(1),
+  role: z.string().min(1),
+  enabled: z.boolean(),
+  decision_ref: z.string().optional(),
+});
+
+export type OffloadSwitch = z.infer<typeof OffloadSwitchSchema>;
+
+export function offloadSwitchPath(projectId: string, role: string): string {
+  return `/api/v1/projects/${encodeURIComponent(projectId)}/offload?role=${encodeURIComponent(role)}`;
+}
+
+export function offloadSwitchWritePath(projectId: string): string {
+  return `/api/v1/projects/${encodeURIComponent(projectId)}/offload`;
+}
+
+export async function readOffloadSwitch(
+  projectId: string,
+  role: string,
+): Promise<OffloadSwitch> {
+  return requestJson(
+    offloadSwitchPath(projectId, role),
+    { method: "GET", kind: "read" },
+    OffloadSwitchSchema,
+  );
+}
+
+export async function saveOffloadSwitch(
+  projectId: string,
+  role: string,
+  enabled: boolean,
+): Promise<OffloadSwitch> {
+  return requestJson(
+    offloadSwitchWritePath(projectId),
+    {
+      method: "PUT",
+      kind: "write",
+      body: { role, enabled },
+    },
+    OffloadSwitchSchema,
+  );
+}
+
 export function teamModePath(projectId: string): string {
   return `/api/v1/projects/${encodeURIComponent(projectId)}/team`;
 }

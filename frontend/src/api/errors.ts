@@ -138,6 +138,19 @@ export function parseErrorBody(data: unknown, status: number): ApiError {
           break;
         }
       }
+      // R10/R11: FastAPI serves reason dicts as {"detail": {"code",
+      // "message"}}; the nested message rides along the same way.
+      if (details === undefined) {
+        const nested = record.detail as { message?: unknown } | null;
+        if (
+          typeof nested === "object" &&
+          nested !== null &&
+          typeof nested.message === "string" &&
+          nested.message.length > 0
+        ) {
+          details = { message: nested.message };
+        }
+      }
     }
   } catch {
     details = undefined;

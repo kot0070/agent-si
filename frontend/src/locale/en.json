@@ -326,7 +326,10 @@
       "taskStepsLabel": "Task step limit (steps)",
       "chatStepsLabel": "Chat step limit (steps)",
       "stepsHint": "Each limit caps how many steps one task or chat reply may take.",
-      "spendCaps": "Spend caps per provider"
+      "spendCaps": "Spend caps per provider",
+      "offload": "Routine offload",
+      "offloadHint": "Routine worker parts hand over to a cheaper agent when the switch is on.",
+      "saved": "Saved."
     },
     "providers": {
       "searchPlaceholder": "Search providers or models"
@@ -796,6 +799,13 @@
       "kind": "Kind",
       "purpose": "Purpose",
       "submit": "Attach KB"
+    },
+    "kbDetach": {
+      "title": "Attached knowledge bases",
+      "empty": "No knowledge base is attached to this project.",
+      "detach": "Detach",
+      "detached": "Detached {kb_id}.",
+      "detachFailed": "Detach failed: {reason}."
     },
     "folder": {
       "choose": "Choose folder",

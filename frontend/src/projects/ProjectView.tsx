@@ -73,6 +73,7 @@ import { HealthView } from "./observe/HealthView";
 import { MatrixView } from "./observe/MatrixView";
 import { VerifierView } from "./observe/VerifierView";
 import { AttachControl } from "../kb/AttachControl";
+import { DetachControl } from "../kb/DetachControl";
 
 export type { ProjectViewName };
 export { PROJECT_VIEWS };
@@ -925,6 +926,7 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
               <LocalTestsSwitch projectId={props.projectId} />
             </LimitsSectionBoundary>
             <AttachControl projectId={props.projectId} />
+            <DetachControl projectId={props.projectId} />
           </div>
         );
       }
