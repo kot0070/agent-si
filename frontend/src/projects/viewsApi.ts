@@ -255,7 +255,11 @@ export type TelemetryRoleRow = z.infer<typeof TelemetryRoleRowSchema>;
 
 const TelemetrySummarySchema = z.object({
   project: z
-    .object({ tasks: TelemetryCountSchema, audits: TelemetryCountSchema })
+    .object({
+      tasks: TelemetryCountSchema,
+      audits: TelemetryCountSchema,
+      tokens: z.union([z.number(), z.literal("UNAVAILABLE"), z.null()]).optional(),
+    })
     .optional(),
   models: z.array(TelemetryModelRowSchema).optional(),
   providers: z
