@@ -1,0 +1,1045 @@
+{
+  "about": {
+    "licence": {
+      "line": "Copyright (c) 2026 Ivan Soprun",
+      "mitText": "MIT License\n\nCopyright (c) 2026 Ivan Soprun\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the \"Software\"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE."
+    },
+    "thirdParty": {
+      "title": "Third-party notices"
+    }
+  },
+  "agents": {
+    "badge": {
+      "cloud": "Cloud",
+      "local": "Local",
+      "split": "Split"
+    },
+    "live": {
+      "empty": "No agents running right now.",
+      "openChat": "Ask in Chat",
+      "subtitle": "Who works on what right now, updating live.",
+      "title": "Live agents"
+    },
+    "row": {
+      "agent": "Agent",
+      "deliverable": "Result",
+      "scope": "Scope",
+      "tokens": "Tokens"
+    }
+  },
+  "api": {
+    "error": {
+      "audit_independence_rejected": "The audit independence check failed.",
+      "budget_capped": "The budget limit has been reached.",
+      "budget_hard_blocked": "Blocked: the budget is exhausted.",
+      "budget_soft_warn": "Budget warning: spending is close to the limit.",
+      "context_missing": "The required context is missing.",
+      "context_wrong_contract_version": "The context uses the wrong contract version.",
+      "credential_entry_missing": "The credential entry is missing.",
+      "delta_over_bound": "The change exceeds the allowed bound.",
+      "duplicate_settlement_refused": "Refused: duplicate settlement.",
+      "gate_not_passed": "The quality gate did not pass.",
+      "invalid_hierarchy_chain": "The task hierarchy chain is invalid.",
+      "kb_proposal_not_approved": "The knowledge base proposal was not approved.",
+      "kb_validation_failed": "Knowledge base validation failed.",
+      "key_save_timeout": "Saving the key timed out.",
+      "missing_integration_task": "The integration task is missing.",
+      "modality_mismatch": "Model capabilities do not match the task.",
+      "no_eligible_candidate": "No eligible model found.",
+      "no_profile_blocked": "Blocked: no role profile.",
+      "pending_reconciliation": "Waiting for usage reconciliation.",
+      "policy_conflict": "Conflicting policies.",
+      "price_unknown_expensive": "The price is unknown, so it counts as expensive.",
+      "project_folder_in_use": "This folder is already used by another project.",
+      "project_folder_missing": "The project folder is missing. Pick another folder in Projects, then send again.",
+      "provider_unevidenced": "The provider has no recorded evidence.",
+      "rejected_scope_overlap": "Rejected: task scopes overlap.",
+      "scope_overlap": "Task scopes overlap.",
+      "unknown_limit_kind": "Unknown limit type."
+    }
+  },
+  "chat": {
+    "abort": {
+      "cancel": "Stop"
+    },
+    "approval": {
+      "accept": "Accept",
+      "edit": "Edit",
+      "reject": "Reject"
+    },
+    "composer": {
+      "draft": "Draft",
+      "noModel": "No model bound yet.",
+      "prompt": "Type a message",
+      "send": "Send",
+      "statusReady": "Ready",
+      "statusWorking": "Working"
+    },
+    "empty": {
+      "line": "Describe a task. The team plans it, does it, runs checks and audits the result.",
+      "sample1": "Count words in notes.txt and add pytest tests",
+      "sample2": "List the project files and summarize the README"
+    },
+    "error": {
+      "keyMissing": "The key for {label} is not available. Connect it again.",
+      "noProvider": "Connect a provider first, then send your task again.",
+      "retry": "Retry",
+      "storeUnreadable": "The credential store cannot be read."
+    },
+    "hierarchy": {
+      "agents": "Agents",
+      "auditorSplit": "The auditor uses a different provider.",
+      "auto": "Auto",
+      "collapse": "Hide model hierarchy",
+      "connect": "Connect a provider",
+      "director": "Director",
+      "expand": "Show model hierarchy",
+      "manager": "Manager",
+      "noProject": "Choose a project to set the model hierarchy.",
+      "openSettings": "Open Settings",
+      "title": "Model hierarchy"
+    },
+    "permission": {
+      "allowOnce": "Allow once",
+      "allowProject": "For this project",
+      "allowed": "Install permission granted for {command}",
+      "body": "The run wants to execute “{command}”.",
+      "denied": "Install permission denied for {command}",
+      "deniedRun": "Stopped: you denied {command}. Nothing was installed.",
+      "deny": "Deny",
+      "title": "Install permission",
+      "waitingHold": "Waiting for your permission to run {command}.",
+      "why": "It installs packages the task needs to continue."
+    },
+    "run": {
+      "emptyPlan": "Nothing was built — the plan had no parts. Say what you want built, for example: “{example}”",
+      "emptyPlanExample": "Add a contact page with a test.",
+      "noModelLine": "{provider} has no model chosen",
+      "noProviderLine": "Connect a provider first",
+      "stopped": "Stopped."
+    },
+    "stream": {
+      "offline": "Connection lost. Reconnecting.",
+      "spinner": "Working on it",
+      "timestamp": "Message time"
+    }
+  },
+  "diagnostics": {
+    "benchCheck": "Benchmark gateway",
+    "benchHistory": "Benchmark history",
+    "localeCoverage": "Locale coverage",
+    "logFiles": "Log files: {path}",
+    "needItNow": "Only when something looks wrong.",
+    "openLogs": "Open log folder",
+    "purpose": "Developer screens that read live app state.",
+    "telemetry": "Telemetry usage",
+    "telemetryThemes": "Telemetry themes",
+    "title": "Diagnostics"
+  },
+  "empty": {
+    "generic": "Nothing here yet."
+  },
+  "errors": {
+    "generic": "Something went wrong. Try again."
+  },
+  "firstrun": {
+    "back": "Back",
+    "folder": {
+      "choose": "Choose folder",
+      "hint": "The folder this project works in.",
+      "label": "Project folder",
+      "required": "Choose or type a project folder first."
+    },
+    "greeting": "Hello, {name}!",
+    "next": "Next",
+    "optional": {
+      "automations": "Automations",
+      "kbs": "Knowledge bases",
+      "localAI": "Local LLM",
+      "watcherPreset": "Watcher preset"
+    },
+    "optionalNote": "Optional steps are skippable.",
+    "provider": {
+      "localNote": "Runs on this PC, no key"
+    },
+    "skip": "Skip",
+    "steps": {
+      "connectProvider": "Connect a provider",
+      "firstTask": "Run your first task",
+      "oneClickTeam": "Create your team in one click",
+      "projectFolder": "Choose a project folder"
+    },
+    "team": {
+      "nameRequired": "Name your team first.",
+      "needProvider": "Connect a provider first — the team needs one."
+    },
+    "title": "Welcome to Agent SI"
+  },
+  "howItWorks": {
+    "codeTests": {
+      "body": "code tests = the project's own test suite.",
+      "title": "Code tests"
+    },
+    "localTests": {
+      "body": "local tests = catalog tests the app runs locally.",
+      "title": "Local tests"
+    },
+    "runs": {
+      "body": "Runs = agent work.",
+      "title": "Runs"
+    }
+  },
+  "migration": {
+    "done": "Migration finished. Old copies were kept.",
+    "keepsOldCopies": "Your old data and credentials are moved into the app, and the old copies are kept.",
+    "title": "Moving your data"
+  },
+  "projectForm": {
+    "folder": {
+      "label": "Project folder",
+      "placeholder": "my-app-folder"
+    },
+    "name": {
+      "label": "Project name",
+      "placeholder": "My project"
+    }
+  },
+  "projectView": {
+    "attempts": "{count} attempts",
+    "audits": {
+      "attention": "Rows needing attention",
+      "projectAudits": "Project audits",
+      "projectTasks": "Project tasks"
+    },
+    "blockedNote": "Blocked at run end: the row waits on a failed guard. Open the Errors tab for the served reason.",
+    "cost": {
+      "limit": "Budget limit (total)",
+      "limitExplainer": "Total N is the budget limit: spending stops when it is reached.",
+      "notKnown": "cost not known (no price)",
+      "remaining": "Money left to spend",
+      "reserved": "Money reserved",
+      "spent": "Money spent"
+    },
+    "errors": {
+      "blockedAgents": "Blocked agents",
+      "failedTasks": "Tasks with errors",
+      "stoppedAtEnd": "Stopped when the run ended."
+    },
+    "finished": "Finished",
+    "live": {
+      "cost": "Cost",
+      "model": "Model",
+      "role": "Role",
+      "tokens": "Tokens"
+    },
+    "models": {
+      "liveTitle": "Models from served runs"
+    },
+    "noLedger": "No run records yet.",
+    "noLive": "No live agent rows right now.",
+    "overview": {
+      "ageDays": "Age (days)",
+      "created": "Created"
+    },
+    "purpose": {
+      "aiUsage": "Served agent activity and current live presence.",
+      "audits": "Served counts plus rows that need attention.",
+      "chat": "Talk to the project: messages, runs and results in one stream.",
+      "cloudAi": "Work running with cloud providers, one row per agent.",
+      "cost": "Money spent, reserved and left, against the budget limit.",
+      "errors": "Only served failures: blocked agents and failed tasks.",
+      "localAi": "Work running on this machine, one row per agent.",
+      "models": "Which model did which role, from served records.",
+      "overview": "Key facts for this project, each from a served record.",
+      "reports": "Readable totals from served records; the raw export stays behind Show more.",
+      "routing": "Why the router chose this model, from the stored decision.",
+      "runs": "One row per package with agents, time and the install note.",
+      "tasks": "Every task with its current status and creation date.",
+      "tests": "Latest run results: code tests, AI checks and human verdicts, one row per test.",
+      "time": "Wall-clock seconds per package from the served ledger.",
+      "tokens": "Tokens used per role and model; money lives on the Cost tab."
+    },
+    "reports": {
+      "agents": "Agents",
+      "changedFiles": "Changed files",
+      "noFiles": "No changed files recorded.",
+      "packages": "Packages",
+      "peak": "Peak concurrency",
+      "remaining": "Money left",
+      "reserved": "Money reserved",
+      "spent": "Money spent",
+      "tasks": "Tasks",
+      "wall": "Wall time (s)"
+    },
+    "routing": {
+      "autoWhy": "Auto: cheapest known price among connected providers."
+    },
+    "runs": {
+      "agents": "Agents",
+      "done": "done",
+      "failed": "failed",
+      "files": "Changed files",
+      "notRun": "not run",
+      "package": "Package",
+      "peak": "Peak",
+      "verdict": "Verdict",
+      "verdictPass": "passed",
+      "verdictPending": "pending",
+      "wall": "Wall time (s)"
+    },
+    "tabs": {
+      "scrollNext": "Show later tabs",
+      "scrollPrev": "Show earlier tabs"
+    },
+    "tabsLabel": "Project sections",
+    "time": {
+      "package": "Package",
+      "run": "Run",
+      "seconds": "Seconds"
+    },
+    "tokens": {
+      "calls": "Calls",
+      "empty": "No token records yet.",
+      "explainer": "Tokens used per role and model, from served records only. No money here.",
+      "model": "Model",
+      "role": "Role",
+      "used": "Tokens used"
+    }
+  },
+  "projects": {
+    "ai_usage": {
+      "title": "AI usage"
+    },
+    "audits": {
+      "title": "Audits"
+    },
+    "cloud_ai": {
+      "title": "Cloud AI"
+    },
+    "cost": {
+      "title": "Cost"
+    },
+    "derived": {
+      "label": "Calculated value"
+    },
+    "details": {
+      "open": "Project details"
+    },
+    "errors": {
+      "title": "Errors"
+    },
+    "folder": {
+      "choose": "Choose folder",
+      "missing": "Project folder not found: {path}. Choose another folder in Projects."
+    },
+    "kbAttach": {
+      "kbId": "Knowledge base ID",
+      "kind": "Kind",
+      "purpose": "Purpose",
+      "submit": "Attach KB",
+      "title": "Attach knowledge base"
+    },
+    "kbDetach": {
+      "detach": "Detach",
+      "detachFailed": "Detach failed: {reason}.",
+      "detached": "Detached {kb_id}.",
+      "empty": "No knowledge base is attached to this project.",
+      "title": "Attached knowledge bases"
+    },
+    "list": {
+      "create": "Create project",
+      "created": "Created",
+      "duplicate": "A project with this name already exists.",
+      "empty": "No projects yet.",
+      "newProject": "New project",
+      "open": "Open",
+      "subtitle": "Every project in one list; open one to work.",
+      "title": "Projects"
+    },
+    "local_ai": {
+      "title": "Local LLM"
+    },
+    "models": {
+      "title": "Models"
+    },
+    "overview": {
+      "title": "Overview"
+    },
+    "reports": {
+      "subtitle": "Latest reports with files, ready to open.",
+      "title": "Reports"
+    },
+    "routing": {
+      "title": "Routing"
+    },
+    "row": {
+      "leaveTitle": "Leave: archive this project and remove it from the list",
+      "stopTitle": "Stop: pause this project here only; the server keeps no record of it"
+    },
+    "runs": {
+      "empty": "No runs yet.",
+      "title": "Runs"
+    },
+    "tests": {
+      "counter": {
+        "active": "active",
+        "passed": "passed",
+        "remaining": "remaining"
+      },
+      "emptyHow": "No test run has started for this project yet. Start a run for the latest plan, then this tab shows counters and one row per test.",
+      "explainer": "Runs = agent work; code tests = the project's own test suite; local tests = catalog tests the app runs locally. This tab shows the latest run: served counters and one row per test. It never changes settings.",
+      "hideOutput": "Hide output",
+      "kind": {
+        "ai": "AI",
+        "code": "code",
+        "human": "human",
+        "unknown": "unknown"
+      },
+      "local": {
+        "body": "Catalog checks this machine runs before spend. One switch only.",
+        "label": "Local tests",
+        "off": "off",
+        "on": "on",
+        "title": "Local tests"
+      },
+      "showOutput": "Show output",
+      "title": "Tests"
+    },
+    "time": {
+      "title": "Time"
+    },
+    "tokens": {
+      "title": "Tokens"
+    },
+    "why_this_model": {
+      "detail": "Each model row carries its own reason. Open a routing decision to read why this model was chosen.",
+      "title": "Why this model"
+    }
+  },
+  "providers": {
+    "chat": {
+      "contributorWarning": "Contributor tier: prompts and completions may be used by Meta to train future models (https://dev.meta.ai/docs/pricing-rate-limits).",
+      "label": "Chat model",
+      "selectOption": "Select a model"
+    },
+    "connect": {
+      "apiKey": "API key",
+      "baseUrl": "Base URL",
+      "cancel": "Cancel",
+      "check": "Check",
+      "checkFirst": "Check the key first.",
+      "checked": "Key checked. Save to connect.",
+      "checking": "Checking...",
+      "close": "Close",
+      "closeGlyph": "X",
+      "conflict": "This provider is already connected with different settings — disconnect it first, then connect again.",
+      "connected": "Connected {label}.",
+      "done": "Done",
+      "failedCode": "Connect failed: {code} (status {status}).",
+      "failedGeneric": "Connect failed before the server answered.",
+      "failedMessage": "Connect failed: {message}",
+      "filterModels": "Filter models",
+      "getKey": "Get a key from your {label} account.",
+      "hintMismatch": "This key does not match the expected format.",
+      "kbIn": "in capability base",
+      "kbOut": "not in capability base",
+      "kbUnknown": "capability unknown",
+      "keyFormat": "Key format: {hint}",
+      "kind": "Type",
+      "knownListNote": "showing the known list",
+      "loadingModels": "Loading models...",
+      "localFound": "Local server answered: found {count} models. Save to connect.",
+      "localNotRunning": "Local server is not running. Start {label} first, then Check again.",
+      "needOneModel": "Tick at least one model, or Cancel to keep the current list.",
+      "priceUnknown": "not known",
+      "providerId": "Provider ID",
+      "refreshFailed": "Couldn't refresh the live list — keeping the last list.",
+      "refreshModels": "Refresh models",
+      "refreshingModels": "Refreshing models...",
+      "refusedKey": "The provider refused this key. Paste the full key again.",
+      "refusedMismatch": "Refused: preset mismatch for {id}.",
+      "refusedNoModel": "Refused: no model for preset {id}.",
+      "retryHint": "Re-paste the full key and make sure you picked the matching provider.",
+      "save": "Save",
+      "saveFailed": "The key was not saved: the store gave no answer.",
+      "saving": "Saving...",
+      "storeNote": "The key stays in your Windows store.",
+      "timeout": "Save timed out after {ms} ms.",
+      "title": "Connect {label}",
+      "unknownModelsNote": "Some models are not in the capability base.",
+      "unreachable": "The provider is slow or unreachable. Your key is saved. Press Connect again."
+    },
+    "disconnect": {
+      "body": "Removes the saved key for {label}.",
+      "busy": "Disconnecting...",
+      "cancel": "Cancel",
+      "close": "Close",
+      "closeGlyph": "X",
+      "confirm": "Disconnect",
+      "failed": "Disconnect failed.",
+      "failedCode": "Disconnect failed: {code} (status {status}).",
+      "failedGeneric": "Disconnect failed.",
+      "failedMessage": "Disconnect failed: {message}",
+      "refused": "Refused: secret {secret} is not bound to provider {provider}.",
+      "title": "Disconnect {label}"
+    },
+    "group": {
+      "cloud": "Cloud",
+      "compatible": "Compatible",
+      "local": "Local"
+    },
+    "leftover": {
+      "cancel": "Cancel",
+      "confirmDelete": "Confirm delete",
+      "created": "Created: {date}",
+      "delete": "Delete",
+      "deleteAria": "Delete {id}",
+      "deleteFailed": "Delete failed.",
+      "deleted": "Deleted {id}.",
+      "empty": "No leftover keys.",
+      "inUse": "In use",
+      "inUseTitle": "In use by a live provider",
+      "listFailed": "Could not list entries.",
+      "rotated": "Rotated: {date}"
+    },
+    "model": {
+      "advanced": "Advanced",
+      "chat": "Chat",
+      "embeddings": "Embeddings",
+      "standard": "Standard"
+    },
+    "page": {
+      "chatSaveError": "save chat model failed: {status}",
+      "chatSaveFailed": "Save failed for chat model.",
+      "chatSaved": "Saved chat model.",
+      "chatTitle": "Chat",
+      "connectCta": "Connect {label}",
+      "connectLabel": "Connect",
+      "connectedModel": "{label} connected · {model}",
+      "disconnectCta": "Disconnect {label}",
+      "disconnectLabel": "Disconnect",
+      "enabledCount": "{count} enabled",
+      "leftoverTitle": "Leftover keys",
+      "manageModels": "Manage models",
+      "manageModelsCta": "Manage {label} models",
+      "noneEnabled": "None enabled — open Manage models to choose.",
+      "poolSaveFailed": "Save failed for {role}.",
+      "poolSaved": "Saved {role}.",
+      "rolePoolsTitle": "Role pools",
+      "searchLabel": "Search models",
+      "setupHide": "Hide setup wizard",
+      "setupSaved": "Setup saved.",
+      "setupShow": "Show setup wizard",
+      "setupTitle": "Setup",
+      "showAllModels": "Show all {count}",
+      "showFewerModels": "Show fewer",
+      "title": "Providers"
+    },
+    "preset": {
+      "anthropic": {
+        "keyHint": "Starts with \"sk-ant-\"."
+      },
+      "any-openai-compatible": {
+        "keyHint": "Any OpenAI-style key or token for your server."
+      },
+      "claude": {
+        "keyHint": "Starts with \"sk-ant-\"."
+      },
+      "deepseek": {
+        "keyHint": "Starts with \"sk-\"."
+      },
+      "gemini": {
+        "keyHint": "Key from AI Studio (starts with \"AIza\")."
+      },
+      "groq": {
+        "keyHint": "Starts with \"gsk-\"."
+      },
+      "lm-studio": {
+        "keyHint": "Local server: usually no key is needed."
+      },
+      "meta": {
+        "keyHint": "Key from your Meta dashboard."
+      },
+      "mistral": {
+        "keyHint": "Key from the Mistral console."
+      },
+      "ollama": {
+        "keyHint": "Local server: usually no key is needed."
+      },
+      "openai": {
+        "keyHint": "Starts with \"sk-\"."
+      },
+      "openrouter": {
+        "keyHint": "Starts with \"sk-or-\"."
+      },
+      "xai": {
+        "keyHint": "Key from the xAI console."
+      }
+    },
+    "role": {
+      "auditor": "Auditor",
+      "director": "Director",
+      "manager": "Manager",
+      "watcher": "Watcher",
+      "worker": "Worker"
+    },
+    "rolepool": {
+      "emptyPoolHint": "Pick at least one model: an empty pool never saves.",
+      "helpAuto": "Route on task fit, price and quality. No fixed model.",
+      "helpPinned": "Always use this one model for the role.",
+      "helpPool": "Choose from these models by strategy.",
+      "modeAuto": "Automatic",
+      "modePinned": "Pinned model",
+      "modePool": "Model pool",
+      "pinnedAria": "{role} pinned model",
+      "selectOption": "Select a model",
+      "strategyAria": "{role} pool strategy",
+      "strategyAuto": "Automatic routing",
+      "strategyDirectorPerTask": "Director picks per task",
+      "strategyFallbackOrder": "Try in order, fall back on failure",
+      "strategyHelpAuto": "Pool members are chosen automatically on task fit, price and quality.",
+      "strategyHelpDirectorPerTask": "The Director chooses a pool member per task.",
+      "strategyHelpFallbackOrder": "Pool members are tried in listed order; on failure the next member takes over.",
+      "strategyHelpSplitParallel": "A local draft is verified in the cloud.",
+      "strategySplitParallel": "Draft locally, verify in the cloud"
+    },
+    "setup": {
+      "autoOption": "Automatic",
+      "finish": "Finish setup",
+      "hint": "Choose a model per role, or leave a role on Automatic.",
+      "title": "Setup wizard"
+    }
+  },
+  "settings": {
+    "appearance": {
+      "dark": "dark",
+      "light": "light",
+      "needItNow": "Only to switch between dark and light themes.",
+      "purpose": "Theme and readability.",
+      "title": "Appearance"
+    },
+    "backToSettings": "Back to Settings",
+    "capabilityDb": {
+      "apply": "Apply",
+      "busy": {
+        "apply": "applying",
+        "check": "checking online",
+        "file": "reading file",
+        "reject": "rejecting",
+        "update": "updating"
+      },
+      "changeTo": "to",
+      "changes": "Changes",
+      "checkOnline": "Check online",
+      "fresh": "fresh",
+      "fromFile": "From file",
+      "needItNow": "Only to inspect the evidence behind a model.",
+      "proposalsLine": "Proposals",
+      "purpose": "What each model is evidenced to do.",
+      "reject": "Reject",
+      "result": "Result",
+      "skipped": "skipped",
+      "sourcesLine": "Sources",
+      "stale": "stale",
+      "title": "Capability Database",
+      "upToDate": "Already up to date",
+      "update": "Update",
+      "updatedFields": "{count} fields updated for {model}",
+      "updatedLine": "updated {time}",
+      "versionLine": "Version {version}"
+    },
+    "general": {
+      "needItNow": "Open this only when the defaults feel wrong.",
+      "purpose": "Basic application preferences.",
+      "resetDone": "The setup was reset. The wizard will show again.",
+      "resetSetup": "Reset the setup",
+      "resetTitle": "Start over",
+      "title": "General",
+      "whereText": "Language switches here. Theme lives under Appearance; models and routing live under Models and Routing."
+    },
+    "grants": {
+      "empty": "No install grants for this project. Choose “For this project” on the next install ask to add one.",
+      "remove": "Remove",
+      "title": "Install grants"
+    },
+    "groups": {
+      "app": "App",
+      "help": "Help",
+      "limits": "Limits",
+      "measure": "Measure",
+      "modelsProviders": "Models and providers"
+    },
+    "hub": {
+      "about": "About",
+      "aboutPurpose": "Version, licence and third-party notices.",
+      "howItWorks": "How it works",
+      "howItWorksPurpose": "How the app carries out tasks step by step.",
+      "migration": "Migration",
+      "migrationPurpose": "Move data over from an older version."
+    },
+    "index": {
+      "benchModels": "{count} models",
+      "connectedState": "{count} connected",
+      "needItNow": "Open only the section you need.",
+      "purpose": "Settings sections by group.",
+      "subtitle": "Defaults live here; open only the page you need.",
+      "title": "Settings"
+    },
+    "localAi": {
+      "connectedModels": "Connected {label}, {count} models.",
+      "empty": "There are no local presets. Add Ollama or LM Studio to connect on this machine.",
+      "modelsLabel": "Local models",
+      "needItNow": "Only when you want work to stay on this machine.",
+      "noCapability": "No capability data for {model}; it can still be used.",
+      "purpose": "Run models on this PC.",
+      "title": "Local LLM",
+      "useFailed": "Worker model not set: {reason}.",
+      "useForAgents": "Use for agents",
+      "workerPinned": "Worker model set to {model}."
+    },
+    "localbench": {
+      "colDuration": "Duration",
+      "colEvidence": "Evidence",
+      "colModel": "Model",
+      "colScore": "Score",
+      "decisionEmpty": "Each finished run is recorded here.",
+      "decisionLine": "{model} · {level} · {evidence} · {seconds} s · {at}",
+      "decisionTitle": "Decision record",
+      "durationEstimate": "Estimated duration: {seconds} s.",
+      "durationValue": "{seconds} s",
+      "durationWarning": "This run may take a while. The PC stays busy until it finishes.",
+      "evidenceMeasured": "Measured",
+      "evidenceProxy": "Proxy",
+      "evidenceUnknown": "Unknown",
+      "levelDeep": "Deep",
+      "levelLabel": "Benchmark level",
+      "levelQuick": "Quick",
+      "levelStandard": "Standard",
+      "loadWarning": "High PC load expected. Close other heavy programs first.",
+      "modelsEmpty": "No local models found in this folder yet.",
+      "modelsTitle": "Local models",
+      "needItNow": "Only to compare local models before a long run.",
+      "pathHint": "Folder with the benchmark cases.",
+      "pathLabel": "Benchmark folder",
+      "purpose": "Measure local models on this PC before using them.",
+      "resultsEmpty": "No benchmark results yet.",
+      "resultsTitle": "Results per model",
+      "runButton": "Run benchmark",
+      "runNeedsScan": "Run is disabled until a scan finishes.",
+      "running": "Running…",
+      "runtimeNone": "No local runtime is connected.",
+      "scanButton": "Scan models",
+      "scanning": "Scanning…",
+      "sourceFolder": "Folder",
+      "sourceLabel": "Scan source",
+      "sourceRuntime": "Connected runtime: {label}",
+      "statusComplete": "Done",
+      "statusFailed": "Failed",
+      "title": "Local benchmark"
+    },
+    "models": {
+      "needItNow": "Only to review or change the model list.",
+      "purpose": "Which models the app may use.",
+      "title": "Models"
+    },
+    "optimization": {
+      "needItNow": "Only to tune spending or speed.",
+      "purpose": "Cost and speed trade-offs.",
+      "requiredQuality": "Required quality",
+      "riskCeiling": "Risk ceiling",
+      "title": "Optimization",
+      "weights": "Weights"
+    },
+    "project": {
+      "chatStepsLabel": "Chat step limit (steps)",
+      "limitsBlank": "Enter a whole number of 1 or more.",
+      "needItNow": "Only the project owner touches risk acceptance.",
+      "offload": "Routine offload",
+      "offloadHint": "Routine worker parts hand over to a cheaper agent when the switch is on.",
+      "parallel": "Parts running at the same time",
+      "purpose": "Project settings and accepted risk.",
+      "save": "Save",
+      "saved": "Saved.",
+      "spendCaps": "Spend caps per provider",
+      "stepsHint": "Each limit caps how many steps one task or chat reply may take.",
+      "taskStepsLabel": "Task step limit (steps)",
+      "team": "Team: on / off",
+      "teamOff": "Off",
+      "teamOn": "On",
+      "title": "Project"
+    },
+    "providers": {
+      "searchPlaceholder": "Search providers or models"
+    },
+    "qacatalog": {
+      "needItNow": "Only to inspect which tests the app runs.",
+      "purpose": "Which test catalog the app runs, and its versions.",
+      "title": "Test catalog"
+    },
+    "risk": {
+      "label": "I accept the risk",
+      "warning": "Accepted risk lets a task finish without a clean audit. Only the project owner can change this."
+    },
+    "roleProfile": {
+      "modeLabel": "Mode",
+      "modelLabel": "Model",
+      "modes": {
+        "auto": "Automatic",
+        "pinned": "Pinned",
+        "pool": "Pool"
+      },
+      "notSet": "Not set",
+      "providerLabel": "Provider",
+      "roleLabel": "Role",
+      "title": "Role profile"
+    },
+    "routing": {
+      "needItNow": "Only when a routing choice surprises you.",
+      "purpose": "How tasks reach models.",
+      "title": "Routing"
+    },
+    "validation": {
+      "modeInvalid": "Mode is not supported.",
+      "pinnedBindingRequired": "A pinned profile needs both a provider and a model.",
+      "roleRequired": "Role is required."
+    }
+  },
+  "shell": {
+    "cards": {
+      "apps": {
+        "active": "Active",
+        "connected": "connected",
+        "paused": "Paused",
+        "subtitle": "Connected third-party apps.",
+        "title": "Third-party apps",
+        "total": "Connected apps"
+      },
+      "background": {
+        "subtitle": "Running and queued tasks.",
+        "title": "Background work"
+      },
+      "budget": {
+        "remaining": "Remaining",
+        "reserved": "Reserved",
+        "spent": "Spent",
+        "subtitle": "Spending against the limit.",
+        "title": "Budget",
+        "total": "Spent of limit",
+        "unknownPrice": "not known, no price yet"
+      },
+      "context": {
+        "chatAnswers": "In chat answers",
+        "input": "Input",
+        "lastRun": "Last run",
+        "noUsage": "No usage yet",
+        "output": "Output",
+        "percent": "Used",
+        "percentValue": "Used {value}",
+        "projectTotal": "This project",
+        "running": "Running",
+        "source": "Source",
+        "sourceLive": "Agents live",
+        "subtitle": "Tokens used of the model window.",
+        "title": "Context",
+        "window": "Window",
+        "windowValue": "Window {value}"
+      },
+      "localai": {
+        "emptyLine": "Not set up",
+        "subtitle": "On-machine models.",
+        "title": "Local LLM",
+        "total": "On-machine models"
+      },
+      "providers": {
+        "emptyLine": "No providers connected",
+        "subtitle": "Connected model providers.",
+        "title": "Providers",
+        "total": "Connected providers"
+      },
+      "results": {
+        "latestRun": "Latest run",
+        "next": "Next",
+        "open": "Open",
+        "openFolder": "Open folder",
+        "subtitle": "Latest reports with open links.",
+        "title": "Results"
+      },
+      "showLess": "Show less",
+      "showMore": "Show more",
+      "team": {
+        "file": "File",
+        "lastAction": "Last action",
+        "openAgents": "Open agents",
+        "silentMin": "Silent {minutes} min",
+        "step": "Step",
+        "subtitle": "Who works on what now.",
+        "title": "Team now",
+        "waiting": "Waits for",
+        "warnings": "Warnings"
+      },
+      "tests": {
+        "emptyLine": "No test runs yet",
+        "subtitle": "Project test results.",
+        "title": "Tests",
+        "total": "Recorded test results"
+      },
+      "tokens": {
+        "subtitle": "Token usage by kind.",
+        "title": "Tokens",
+        "total": "Total tokens"
+      },
+      "watcher": {
+        "agents": {
+          "few": "agents",
+          "many": "agents",
+          "one": "agent",
+          "other": "agents"
+        },
+        "alerts": "Alerts",
+        "calls": "Model calls",
+        "checks": "Checks",
+        "failed": "Attention needed",
+        "lastCheck": "Last check",
+        "notKnown": "not known",
+        "ok": "Watching",
+        "open": "Open watcher",
+        "runs": {
+          "few": "runs",
+          "many": "runs",
+          "one": "run",
+          "other": "runs"
+        },
+        "state": "State",
+        "subtitle": "Watcher state and last action.",
+        "title": "Watcher",
+        "watches": "Watches"
+      }
+    },
+    "closing": {
+      "confirm": "Close anyway?",
+      "leave": "Leave",
+      "runWorking": "Run still working. Leave this page?",
+      "stay": "Stay"
+    },
+    "common": {
+      "unknown": "Unknown"
+    },
+    "inspector": {
+      "live_agents": "Live agents"
+    },
+    "sidebar": {
+      "agents_live": "Agents live",
+      "chat": "Chat",
+      "projects": "Projects",
+      "resultsHint": "Select a project to see its reports.",
+      "settings": "Settings",
+      "tasks": "Tasks"
+    },
+    "skipToComposer": "Skip to composer",
+    "topbar": {
+      "brand": "Agent SI",
+      "langEn": "English",
+      "langUk": "Українська",
+      "language": "Language",
+      "noProject": "No project yet",
+      "panels": "Panels",
+      "project": "Project",
+      "projectPlaceholder": "Select a project",
+      "stop_all": "Stop all",
+      "stop_all_idle": "No runs active",
+      "stop_clear": "Clear",
+      "stop_result": "{status}",
+      "watcher": "Watcher"
+    }
+  },
+  "tasks": {
+    "creator": {
+      "cancel": "Cancel",
+      "create": "Create task",
+      "subtitle": "Start here: one message creates the first project and task.",
+      "title": "New task",
+      "titleRequired": "Title is required."
+    },
+    "list": {
+      "empty": "No tasks yet.",
+      "title": "Tasks"
+    },
+    "status": {
+      "accepted": "Accepted",
+      "blocked": "Blocked",
+      "handoff": "Handed off",
+      "queued": "Queued",
+      "rejected": "Rejected",
+      "returned": "Returned",
+      "running": "Running"
+    }
+  },
+  "telemetry": {
+    "audits": "Audits",
+    "calls": "Calls",
+    "cost": "Cost",
+    "model": "Model",
+    "perModel": "Per-model",
+    "perProvider": "Per-provider",
+    "project": "Project",
+    "provider": "Provider",
+    "tasks": "Tasks",
+    "tokens": "Tokens",
+    "unavailable": "UNAVAILABLE"
+  },
+  "ui": {
+    "card": {
+      "toggle": "Show details",
+      "total": "Total"
+    },
+    "disclosure": {
+      "less": "Show less",
+      "more": "Show more"
+    },
+    "error": {
+      "details": "Details",
+      "retry": "Try again"
+    },
+    "loading": {
+      "more": "Loading more"
+    },
+    "table": {
+      "empty": "Nothing to show yet."
+    }
+  },
+  "watcher": {
+    "tab": {
+      "actionAllowed": "Checked, all quiet",
+      "actionBlocked": "Blocked a problem",
+      "actionEscalated": "Escalated for review",
+      "alerts": "Alerts",
+      "checks": "Rule checks",
+      "cloudFallback": "Cloud fallback",
+      "failed": "FAILED",
+      "fallbackNote": "Off means the watcher never uses cloud models.",
+      "fired": "fired",
+      "journalTitle": "Journal",
+      "lastAction": "Last action",
+      "lastCheck": "Last check",
+      "loading": "Loading...",
+      "looksGuard": "Looks for workspace escapes",
+      "looksHang": "Looks for hung agents with no fresh heartbeat",
+      "looksTamper": "Looks for tampered files",
+      "model": "Model",
+      "modelApi": "API",
+      "modelCalls": "Model calls",
+      "modelLocal": "Local",
+      "modelOff": "Off",
+      "modelTokens": "Model tokens",
+      "noActionYet": "No action yet",
+      "noChecksYet": "No checks yet",
+      "notKnown": "not known",
+      "notUsedYet": "not used yet",
+      "ok": "OK",
+      "rulesTitle": "Rules",
+      "settings": "Watcher settings",
+      "subtitle": "Independent watch over agents: state, journal and rules.",
+      "watches": "Watches now"
+    }
+  }
+}
