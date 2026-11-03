@@ -577,18 +577,19 @@ export function Inspector(props: InspectorProps): ReactElement {
     }
     return 2;
   }
+  // FXCARDS C1: the served runs key is newest-first (records.py sorts
+  // reverse=True and serves as-is), so runs[0] is the latest run.
   const latestTeamRunId =
-    (runs ?? []).length === 0
-      ? null
-      : (runs?.[(runs?.length ?? 0) - 1]?.run_id ?? null);
+    (runs ?? []).length === 0 ? null : (runs?.[0]?.run_id ?? null);
   function teamRunRank(runId: string | null): number {
     // Latest run and unattributed rows stay visible; older listed runs
-    // sort behind Show more, newest run first (higher runs index first).
+    // sort behind Show more, newest run first (lower runs index first).
     if (runId === null || runId === latestTeamRunId) {
       return Number.MAX_SAFE_INTEGER;
     }
     const at = (runs ?? []).findIndex((run) => run.run_id === runId);
-    return at < 0 ? -1 : at;
+    // A run id with no served row sorts after every listed older run.
+    return at < 0 ? Number.MAX_SAFE_INTEGER - 1 : at;
   }
   interface TeamItem {
     entry: (typeof foldedTeam)[number];
@@ -757,7 +758,9 @@ export function Inspector(props: InspectorProps): ReactElement {
   const lastPackages = (ledger ?? []).slice(-3);
   // FXDESIGN8: the last run of the runs key carries the verdict plus the
   // produced files; package rows stay as the per-package list below.
-  const lastRun = (runs ?? []).length === 0 ? null : runs?.[(runs?.length ?? 0) - 1] ?? null;
+  // FXCARDS C1: served runs are newest-first, so the last run is
+  // runs[0], never runs[length-1] (length-1 is the oldest run).
+  const lastRun = (runs ?? []).length === 0 ? null : (runs?.[0] ?? null);
   const lastRunTokens =
     lastRun !== null &&
     typeof lastRun.tokens === "number" &&

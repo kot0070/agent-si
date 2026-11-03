@@ -1653,8 +1653,10 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
         // (first served part reason, else the run summary); with no reason
         // served it reads "Stopped when the run ended." Never served/guard
         // jargon, and no pointer back at this tab.
+        // FXCARDS C1: served runs are newest-first, so the latest run is
+        // runs[0], never runs[length-1] (length-1 is the oldest run).
         const latestRun =
-          runs.length === 0 ? null : (runs[runs.length - 1] ?? null);
+          runs.length === 0 ? null : (runs[0] ?? null);
         const runReason =
           latestRun === null
             ? null
