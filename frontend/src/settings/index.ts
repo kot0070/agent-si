@@ -115,6 +115,45 @@ export function markFirstRunDone(): void {
   }
 }
 
+// R6 General: re-run the guided setup from Settings.
+export function clearFirstRunDone(): void {
+  try {
+    window.localStorage.removeItem(FIRST_RUN_DONE_KEY);
+  } catch {
+    return;
+  }
+}
+
+export interface SettingsGroup {
+  id: string;
+  titleKey: string;
+  paths: string[];
+}
+
+// R6: the settings index groups sections (plus Help below): Models
+// and providers (Models, Routing, Local LLM, Capability Database),
+// Limits (Optimization, Project), App (General, Appearance,
+// Diagnostics), Measure (Local benchmark).
+export const SETTINGS_GROUPS: SettingsGroup[] = [
+  { id: 'models-providers', titleKey: 'settings.groups.modelsProviders', paths: ['models', 'routing', 'localAI', 'capabilityDB'] },
+  { id: 'limits', titleKey: 'settings.groups.limits', paths: ['optimization', 'project'] },
+  { id: 'app', titleKey: 'settings.groups.app', paths: ['general', 'appearance', 'diagnostics'] },
+  { id: 'measure', titleKey: 'settings.groups.measure', paths: ['localbench'] },
+];
+
+// R9: info pages reachable from the settings index (Help group).
+export interface SettingsHelpRow {
+  path: string;
+  testId: string;
+  titleKey: string;
+  purposeKey: string;
+}
+
+export const SETTINGS_HELP_ROWS: SettingsHelpRow[] = [
+  { path: '/how-it-works', testId: 'settings-how-it-works', titleKey: 'settings.hub.howItWorks', purposeKey: 'settings.hub.howItWorksPurpose' },
+  { path: '/about', testId: 'settings-about', titleKey: 'settings.hub.about', purposeKey: 'settings.hub.aboutPurpose' },
+  { path: '/migration', testId: 'settings-migration', titleKey: 'settings.hub.migration', purposeKey: 'settings.hub.migrationPurpose' },
+];
 export const SETTINGS_ROUTES: SettingsRoute[] = [
   { path: 'general', titleKey: 'settings.general.title', purposeKey: 'settings.general.purpose', needItNowKey: 'settings.general.needItNow' },
   { path: 'appearance', titleKey: 'settings.appearance.title', purposeKey: 'settings.appearance.purpose', needItNowKey: 'settings.appearance.needItNow' },
@@ -594,35 +633,7 @@ export function FirstRunGate(): ReactElement | null {
     navigate(to);
   }
   if (location.pathname === '/settings' && settled) {
-    // U9: settings hub links reach the info pages; the old hub link
-    // wore the wrong label (a run title pointing at how-it-works).
-    return createElement(
-      'nav',
-      { 'data-testid': 'settings-hub-links' },
-      createElement(
-        'a',
-        {
-          'data-testid': 'settings-about',
-          href: '/about',
-          onClick: (event: { preventDefault(): void }) => {
-            go(event, '/about');
-          },
-        },
-        t('settings.hub.about'),
-      ),
-      ' ',
-      createElement(
-        'a',
-        {
-          'data-testid': 'settings-how-it-works',
-          href: '/how-it-works',
-          onClick: (event: { preventDefault(): void }) => {
-            go(event, '/how-it-works');
-          },
-        },
-        t('settings.hub.howItWorks'),
-      ),
-    );
+    return null;
   }
   if (location.pathname === '/firstrun') {
     return createElement(

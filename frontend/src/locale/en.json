@@ -231,11 +231,28 @@
     "general": {
       "needItNow": "Open this only when the defaults feel wrong.",
       "purpose": "Basic application preferences.",
-      "title": "General"
+      "title": "General",
+      "resetTitle": "Start over",
+      "resetSetup": "Reset the setup",
+      "resetDone": "The setup was reset. The wizard will show again.",
+      "whereText": "Language switches here. Theme lives under Appearance; models and routing live under Models and Routing."
     },
     "index": {
-      "subtitle": "Defaults live here; open only the page you need."
+      "subtitle": "Defaults live here; open only the page you need.",
+      "title": "Settings",
+      "purpose": "Settings sections by group.",
+      "needItNow": "Open only the section you need.",
+      "connectedState": "{count} connected",
+      "benchModels": "{count} models"
     },
+    "groups": {
+      "modelsProviders": "Models and providers",
+      "limits": "Limits",
+      "app": "App",
+      "measure": "Measure",
+      "help": "Help"
+    },
+    "backToSettings": "Back to Settings",
     "localAi": {
       "needItNow": "Only when you want work to stay on this machine.",
       "purpose": "Run models on this PC.",
@@ -348,7 +365,11 @@
     },
     "hub": {
       "about": "About",
-      "howItWorks": "How it works"
+      "howItWorks": "How it works",
+      "migration": "Migration",
+      "howItWorksPurpose": "How the app carries out tasks step by step.",
+      "aboutPurpose": "Version, licence and third-party notices.",
+      "migrationPurpose": "Move data over from an older version."
     }
   },
   "diagnostics": {

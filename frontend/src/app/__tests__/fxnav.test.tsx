@@ -133,11 +133,11 @@ describe("FXNAV P16-purpose rail captions", () => {
 });
 
 describe("FXNAV P16-needitnow project settings card", () => {
-  it("shows purpose plus need-it-now in the kit project card", async () => {
+  it("shows purpose in the kit project card, need-it-now only on models and routing", async () => {
     renderAppAt("/settings/project");
     const card = await screen.findByTestId("kit-card-needitnow-project");
     expect(card.textContent).toContain(en.settings.project.purpose);
-    expect(card.textContent).toContain(en.settings.project.needItNow);
+    expect(card.textContent).not.toContain(en.settings.project.needItNow);
   });
 });
 

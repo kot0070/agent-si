@@ -347,12 +347,10 @@ describe("fxkitui settings need-it-now notes", () => {
     localbench: en.settings.localbench.needItNow,
   };
 
-  it("shows purpose plus need-it-now on every settings page", async () => {
+  it("shows purpose on every settings page, need-it-now only on models and routing", async () => {
     renderApp("/settings");
-    expect(await screen.findByText(en.settings.general.purpose)).toBeTruthy();
-    expect(
-      await screen.findByText(en.settings.general.needItNow),
-    ).toBeTruthy();
+    expect(await screen.findByText(en.settings.index.purpose)).toBeTruthy();
+    expect(screen.queryByText(en.settings.general.needItNow)).toBeNull();
     cleanup();
     for (const section of sections) {
       renderApp(`/settings/${section.path}`);
@@ -362,14 +360,20 @@ describe("fxkitui settings need-it-now notes", () => {
       expect(
         await screen.findByText(purposes[section.path] as string),
       ).toBeTruthy();
-      expect(
-        await screen.findByText(needItNow[section.path] as string),
-      ).toBeTruthy();
+      if (section.path === "models" || section.path === "routing") {
+        expect(
+          await screen.findByText(needItNow[section.path] as string),
+        ).toBeTruthy();
+      } else {
+        expect(
+          screen.queryByText(needItNow[section.path] as string),
+        ).toBeNull();
+      }
       cleanup();
     }
     renderApp("/settings/diagnostics");
     expect(await screen.findByText(en.diagnostics.purpose)).toBeTruthy();
-    expect(await screen.findByText(en.diagnostics.needItNow)).toBeTruthy();
+    expect(screen.queryByText(en.diagnostics.needItNow)).toBeNull();
   });
 });
 
