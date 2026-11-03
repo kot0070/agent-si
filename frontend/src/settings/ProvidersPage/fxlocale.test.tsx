@@ -87,7 +87,7 @@ describe("fxlocale provider connect screens", () => {
     // Step 2 in the same dialog carries the quiet line; the card shows it
     // too once Done closes the dialog.
     expect(await within(dialog).findByText("Під’єднано OpenAI.")).toBeTruthy();
-    fireEvent.click(within(dialog).getByText("Done"));
+    fireEvent.click(within(dialog).getByText("Готово"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await waitFor(() => expect(screen.getByLabelText("Від'єднати OpenAI")).toBeTruthy());
   });
