@@ -426,6 +426,12 @@
         "DEVRUN_PART": "Run part",
         "DEVRUN_AUDIT": "Run audit",
         "DEVRUN_END": "Run end"
+      },
+      "minutesValue": "{count} min",
+      "area": {
+        "hang": "Hang",
+        "guard": "Guard",
+        "tamper": "Tamper"
       }
     }
   },
@@ -555,7 +561,7 @@
         "state": "State",
         "ok": "Watching",
         "failed": "Attention needed",
-        "open": "Open watcher",
+        "open": "Open journal",
         "lastCheck": "Last check",
         "watches": "Watches",
         "checks": "Checks",
@@ -573,7 +579,9 @@
           "few": "agents",
           "many": "agents",
           "other": "agents"
-        }
+        },
+        "online": "Online",
+        "offline": "Offline"
       },
       "tokens": {
         "title": "Tokens",

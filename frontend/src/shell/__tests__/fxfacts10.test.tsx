@@ -101,7 +101,44 @@ function stubServed(): void {
       });
     }
     if (url === "/api/v1/watcher/journal?project_id=p-1") {
-      return jsonBody([]);
+      return jsonBody([
+        {
+          entry_id: "evt-1",
+          timestamp: "2026-11-02T10:00:00Z",
+          hash: "h1",
+          kind: "SERVICE_STATE",
+          source: "watcher",
+          summary: "boot",
+          refs: [],
+        },
+        {
+          entry_id: "evt-2",
+          timestamp: "2026-11-02T10:01:00Z",
+          hash: "h2",
+          kind: "DEVRUN_END",
+          source: "runner",
+          summary: "run success: all 1 parts PASS",
+          refs: ["r-9"],
+        },
+        {
+          entry_id: "evt-3",
+          timestamp: "2026-11-02T10:02:00Z",
+          hash: "h3",
+          kind: "WATCH_DECISION",
+          source: "watcher",
+          summary: "rule-tamper ESCALATE no watcher model: default action",
+          refs: ["rule-tamper"],
+        },
+        {
+          entry_id: "evt-4",
+          timestamp: "2026-11-02T10:03:00Z",
+          hash: "h4",
+          kind: "DEVRUN_END",
+          source: "runner",
+          summary: "run success: all 1 parts PASS",
+          refs: ["r-9"],
+        },
+      ]);
     }
     if (url === "/api/v1/apps/card?project_id=p-1") {
       return jsonBody({
@@ -193,6 +230,36 @@ describe("fxfacts10 rail one-line cards", () => {
     expect(
       closed.querySelector('[data-testid="kit-sub-fx-tokens"]'),
     ).toBeNull();
+  });
+
+  it("rail watcher card reads online with model, minutes and journal rows", async () => {
+    stubServed();
+    renderAppAt("/");
+    expect(await screen.findByTestId("chat-prompt")).toBeTruthy();
+    await screen.findByTestId("inspector-card-watcher");
+    // Closed line names the served state.
+    expect(
+      screen.getByTestId("inspector-card-watcher").textContent,
+    ).toContain("Online");
+    fireEvent.click(await screen.findByTestId("rail-toggle-watcher"));
+    // Model with a link to where it is set.
+    const model = await screen.findByTestId("watcher-model");
+    expect(model.textContent).toContain("not known");
+    expect(screen.getByTestId("watcher-model-settings").getAttribute("href")).toBe(
+      "/watcher",
+    );
+    // Check minutes from the stored settings.
+    expect(
+      screen.getByTestId("rail-watcher-minutes-card-hang").textContent,
+    ).toContain("20");
+    // Last three journal rows in the plain form; the oldest stays out.
+    expect(await screen.findByTestId("journal-row-evt-4")).toBeTruthy();
+    expect(screen.getByTestId("journal-row-evt-2")).toBeTruthy();
+    expect(screen.queryByTestId("journal-row-evt-1")).toBeNull();
+    expect(screen.getByTestId("watcher-open").getAttribute("href")).toBe(
+      "/watcher",
+    );
+    expect(screen.getByTestId("watcher-open").textContent).toBe("Open journal");
   });
 
   it("team, results, background and watcher cards toggle their content", async () => {

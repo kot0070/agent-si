@@ -41,7 +41,10 @@ import {
   describeLastAction,
   fetchWatcherJournal,
   fetchWatcherStatus,
+  WatcherJournalList,
 } from "../watcher/WatcherTab";
+import { RULE_CARDS } from "../watcher/ruleCards";
+import { loadCardHangMinutes } from "../watcher/watcherSettings";
 import { WATCHER_JOURNAL_ROUTE } from "../watcher/WatcherTab";
 import type {
   WatcherJournalEntry,
@@ -1688,9 +1691,9 @@ export function Inspector(props: InspectorProps): ReactElement {
               watcherStatus === null || watcherFailed ? (
                 <>&mdash;</>
               ) : watcherStatus.integrity_ok ? (
-                t("shell.cards.watcher.ok")
+                t("shell.cards.watcher.online")
               ) : (
-                t("shell.cards.watcher.failed")
+                t("shell.cards.watcher.offline")
               )
             }
             expanded={watcherOpen}
@@ -1746,9 +1749,9 @@ export function Inspector(props: InspectorProps): ReactElement {
                   : t("watcher.tab.noChecksYet")}
                 </dd>
               </div>
-              {/* FXZERO R4 extra gate: the model names the exact served
-                  watcher model (the one that answered), never a setting
-                  label; with no answering model it reads unavailable. */}
+              {/* FXFACTS F13: model names the served answering model with
+                  a link to where it is set; check minutes read the same
+                  stored settings as the Watcher tab inputs. */}
               <div data-testid="watcher-model">
                 <dt>{t("watcher.tab.model")}</dt>
                 <dd>
@@ -1768,6 +1771,33 @@ export function Inspector(props: InspectorProps): ReactElement {
                   ? formatNumber(watcherStatus.watcher_tokens)
                   : t("watcher.tab.notKnown")}{" "}
                 tokens
+                {" · "}
+                <Link
+                  data-testid="watcher-model-settings"
+                  to="/watcher"
+                  className="fx-why-quiet"
+                >
+                  {t("watcher.tab.settings")}
+                </Link>
+                </dd>
+              </div>
+              <div data-testid="rail-watcher-minutes">
+                <dt>{t("watcher.tab.minutes")}</dt>
+                <dd>
+                  {RULE_CARDS.map((card) => (
+                    <span
+                      key={card.cardId}
+                      data-testid={`rail-watcher-minutes-${card.cardId}`}
+                    >
+                      {t(`watcher.tab.area.${card.area}`)}:{" "}
+                      {t("watcher.tab.minutesValue", {
+                        count: formatNumber(
+                          loadCardHangMinutes(card.cardId, projectId),
+                        ),
+                      })}
+                      {" · "}
+                    </span>
+                  ))}
                 </dd>
               </div>
               {/* FXTABS T9: the last action reads as plain words plus the
@@ -1788,6 +1818,12 @@ export function Inspector(props: InspectorProps): ReactElement {
                 </dd>
               </div>
               </dl>
+              {/* FXFACTS F13: the last journal rows in the F6a form. */}
+              <WatcherJournalList
+                entries={(journal ?? []).slice(-3)}
+                initialLimit={3}
+                showMore={false}
+              />
               <Link data-testid="watcher-open" to="/watcher">
                 {t("shell.cards.watcher.open")}
               </Link>
