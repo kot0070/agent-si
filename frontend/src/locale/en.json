@@ -10,15 +10,15 @@
   },
   "howItWorks": {
     "codeTests": {
-      "body": "Code tests are the project's own test suite.",
+      "body": "code tests = the project's own test suite.",
       "title": "Code tests"
     },
     "localTests": {
-      "body": "Local tests are catalog checks the app runs on this machine.",
+      "body": "local tests = catalog tests the app runs locally.",
       "title": "Local tests"
     },
     "runs": {
-      "body": "A run is one agent working on one task.",
+      "body": "Runs = agent work.",
       "title": "Runs"
     }
   },
@@ -731,7 +731,7 @@
     },
     "tests": {
       "title": "Tests",
-      "explainer": "A run is one agent working on one task; code tests are the project's own suite; local tests are catalog checks this machine runs before spend. This tab shows the latest run: served counters and one row per test. It never changes settings.",
+      "explainer": "Runs = agent work; code tests = the project's own test suite; local tests = catalog tests the app runs locally. This tab shows the latest run: served counters and one row per test. It never changes settings.",
       "emptyHow": "No test run has started for this project yet. Start a run for the latest plan, then this tab shows counters and one row per test.",
       "counter": {
         "active": "active",
