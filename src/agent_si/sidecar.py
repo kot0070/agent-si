@@ -1743,6 +1743,15 @@ def main(argv: list[str] | None = None) -> int:
     if not server.started:
         reason = "server did not start"
         _log("agent-si-sidecar: " + reason)
+        if data_root:
+            try:
+                from agent_si import startup_log as _fxstart_log
+
+                _fxstart_log.write_boot_log(
+                    data_root, None, boot="FAILED",
+                    reason="server-did-not-start")
+            except Exception:
+                pass
         if window is not None and _webview is not None:
             _failure_target = _failure_html(
                 reason, _logs_dir_for_failure(data_root),
@@ -1763,6 +1772,13 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         return 1
     _log(f"agent-si-sidecar: listening on http://{HOST}:{port}/")
+    if data_root:
+        try:
+            from agent_si import startup_log as _fxstart_log
+
+            _fxstart_log.write_boot_log(data_root, None, boot="OK")
+        except Exception:
+            pass
 
     url = f"http://{HOST}:{port}/?token={token}"
     port_path: str | None = None

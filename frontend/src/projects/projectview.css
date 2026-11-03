@@ -60,6 +60,8 @@
 }
 
 /* FXTABS T3: short cells never break inside a word. Long refs scroll
+   inside their own row (never the page); the only wrapping allowed is
+   between words. */
 
 .fxpv-fact {
   display: flex;
