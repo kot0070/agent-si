@@ -72,9 +72,15 @@ def test_ca_no_provider_plain_line_tasks_engine():
     import inspect
     from agent_si.runtime.devrun import engine as _engine
 
+    assert _engine._NO_PROVIDER_SUMMARY == "Connect a provider first"
+    summary, code, href = _engine._stop_before_model_call(
+        Exception("plain"))
+    assert summary == "Connect a provider first"
+    assert code == "NO_PROVIDER_BOUND"
+    assert href == "/providers"
     src = inspect.getsource(_engine)
-    assert 'record["summary"] = "Connect a provider first"' in src
-    assert '"connectHref": "/providers"' in src
+    assert "_stop_before_model_call" in src
+    assert '"connectHref": href' in src
     assert "role unbound" in src.lower()  # verbatim stays in journal only
 
 

@@ -841,6 +841,45 @@ def _team_lines(team: list) -> list[str]:
             for role_name, res in team]
 
 
+#: R8(b): a run stopped before any model call reads its reason as
+#: the main line. "Connect a provider first" keeps its served words;
+#: a profile pinned to a provider with no model chosen names it.
+_NO_PROVIDER_SUMMARY = "Connect a provider first"
+
+
+def _provider_display_label(provider_id: Any) -> str:
+    """Product label for a provider id (preset label, else the id)."""
+    text = str(provider_id or "")
+    if not text:
+        return text
+    try:
+        from agent_si.providers.registry import presets as _presets
+        label = (_presets.get_preset(text).get("label") or "").strip()
+        if label:
+            return label
+    except Exception:
+        pass
+    return text
+
+
+def _stop_before_model_call(exc: BaseException) -> tuple:
+    """(summary, code, connect_href) for a run stopped before any call.
+
+    A pinned provider with no model chosen names it
+    (PROVIDER_NO_MODEL, Settings fix link); anything else keeps the
+    plain connect line (NO_PROVIDER_BOUND). Every resolve-failure
+    path in this module stops through here, never through the
+    no-parts verdict.
+    """
+    provider = getattr(exc, "provider", None)
+    kind = getattr(exc, "kind", "no_provider")
+    if kind == "no_model" and provider:
+        return ("%s has no model chosen"
+                % (_provider_display_label(provider),),
+                "PROVIDER_NO_MODEL", "/settings/models")
+    return (_NO_PROVIDER_SUMMARY, "NO_PROVIDER_BOUND", "/providers")
+
+
 def _journal_event(project: str, kind: str, summary: str) -> None:
     """One devrun journal row; a journal failure never breaks the run."""
     try:
@@ -1328,26 +1367,32 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
             try:
                 solo_worker = _roles.resolve_role(app, project, "worker")
             except _roles.RoleUnbound as exc:
-                record["summary"] = "run failed: %s" % (exc,)
+                summary, code, href = _stop_before_model_call(exc)
+                record["summary"] = summary
                 record["success"] = False
                 _finish_task()
                 yield _run_event("delta", turn, task_id, record["summary"],
-                                 {"run_id": run_id, "success": False})
+                                 {"run_id": run_id, "success": False,
+                                  "code": code, "connectHref": href})
                 turn += 1
                 yield _run_event("done", turn, task_id, record["summary"],
-                                 {"run_id": run_id, "success": False})
+                                 {"run_id": run_id, "success": False,
+                                  "code": code, "connectHref": href})
                 return
             try:
                 solo_adapter = _roles.build_adapter(app, solo_worker)
             except _roles.RoleUnbound as exc:
-                record["summary"] = "run failed: %s" % (exc,)
+                summary, code, href = _stop_before_model_call(exc)
+                record["summary"] = summary
                 record["success"] = False
                 _finish_task()
                 yield _run_event("delta", turn, task_id, record["summary"],
-                                 {"run_id": run_id, "success": False})
+                                 {"run_id": run_id, "success": False,
+                                  "code": code, "connectHref": href})
                 turn += 1
                 yield _run_event("done", turn, task_id, record["summary"],
-                                 {"run_id": run_id, "success": False})
+                                 {"run_id": run_id, "success": False,
+                                  "code": code, "connectHref": href})
                 return
             record["team"] = "off"
             record["manager_why"] = "team off"
@@ -1664,18 +1709,19 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
             # with one plain line, same words on chat + Tasks, no role word.
             # The verbatim role detail stays in the journal, never on screen.
             _journal("DEVRUN_NOPROVIDER", "role unbound: %s" % (exc,))
-            record["summary"] = "Connect a provider first"
+            summary, code, href = _stop_before_model_call(exc)
+            record["summary"] = summary
             record["success"] = False
             _finish_task()
             yield _run_event("delta", turn, task_id, record["summary"],
                              {"run_id": run_id, "success": False,
-                              "code": "NO_PROVIDER_BOUND",
-                              "connectHref": "/providers"})
+                              "code": code,
+                              "connectHref": href})
             turn += 1
             yield _run_event("done", turn, task_id, record["summary"],
                              {"run_id": run_id, "success": False,
-                              "code": "NO_PROVIDER_BOUND",
-                              "connectHref": "/providers"})
+                              "code": code,
+                              "connectHref": href})
             return
         # FXPARALLEL BEGIN adapters: one auditor adapter per part is
         # built inside the part thread (A4); only plan-phase adapters
@@ -1687,18 +1733,19 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         # FXPARALLEL END adapters.
             # FXCLASS CA-1/CA-3/CA-4: same plain line as the resolve path.
             _journal("DEVRUN_NOPROVIDER", "adapter unbound: %s" % (exc,))
-            record["summary"] = "Connect a provider first"
+            summary, code, href = _stop_before_model_call(exc)
+            record["summary"] = summary
             record["success"] = False
             _finish_task()
             yield _run_event("delta", turn, task_id, record["summary"],
                              {"run_id": run_id, "success": False,
-                              "code": "NO_PROVIDER_BOUND",
-                              "connectHref": "/providers"})
+                              "code": code,
+                              "connectHref": href})
             turn += 1
             yield _run_event("done", turn, task_id, record["summary"],
                              {"run_id": run_id, "success": False,
-                              "code": "NO_PROVIDER_BOUND",
-                              "connectHref": "/providers"})
+                              "code": code,
+                              "connectHref": href})
             return
         # U8: the team line reads once per team, not every turn: a
         # repeat run with the same roles/providers shows no Team line.

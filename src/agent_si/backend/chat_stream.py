@@ -1486,6 +1486,10 @@ def _gateway_transport(base_url: str, credential_store: Any,
 
     secret_id = str((secret_ref or {}).get("secret_id", ""))
     endpoint = str(base_url or "").rstrip("/")
+    lowered = endpoint.lower()
+    loopback = lowered.startswith(("http://localhost",
+                                   "http://127.0.0.1",
+                                   "http://[::1]"))
 
     def _transport(request: Mapping[str, Any]) -> dict[str, Any]:
         import http.client as _httpclient
@@ -1493,7 +1497,20 @@ def _gateway_transport(base_url: str, credential_store: Any,
         import urllib.error as _urlerror
         import urllib.request as _urlrequest
 
-        value = _read_secret_value(credential_store, secret_id)
+        # R8(a): local loopback runtimes need no key: a missing key
+        # on loopback proceeds keyless instead of refusing. Any other
+        # endpoint without a key keeps the existing refusal (never an
+        # anonymous cloud call); an unreadable store still raises.
+        value = ""
+        if secret_id:
+            try:
+                value = _read_secret_value(credential_store, secret_id)
+            except SecretValueMissing:
+                if not loopback:
+                    raise
+                value = ""
+        elif not loopback:
+            value = _read_secret_value(credential_store, secret_id)
         chat_path = str(request.get("chat_path") or "/chat/completions")
         url = endpoint + chat_path
         raw_model = str(request.get("model", "") or "")
@@ -1520,10 +1537,12 @@ def _gateway_transport(base_url: str, credential_store: Any,
             if max_tokens > 0:
                 body_out["max_tokens"] = max_tokens
         payload = _json.dumps(body_out).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        if value:
+            headers["Authorization"] = "Bearer " + value
         http_request = _urlrequest.Request(
             url, data=payload,
-            headers={"Content-Type": "application/json",
-                     "Authorization": "Bearer " + value},
+            headers=headers,
             method="POST",
         )
         try:
@@ -1558,6 +1577,15 @@ def _gateway_transport(base_url: str, credential_store: Any,
             if isinstance(message, Mapping):
                 content = str(message.get("content", "") or "")
             finish = str(first.get("finish_reason", "") or "stop")
+        if not content and isinstance(body, dict):
+            # R8(a): Ollama-native reply shapes on the same transport
+            # (/api/chat answers {"message": {"content"}}; /api/generate
+            # answers {"response"}), so a bound local model really runs.
+            native = body.get("message", {})
+            if isinstance(native, Mapping) and native.get("content"):
+                content = str(native.get("content") or "")
+            elif isinstance(body.get("response"), str) and body.get("response"):
+                content = str(body.get("response"))
         usage = body.get("usage", {}) if isinstance(body, dict) else {}
         return {
             "output_text": content,
