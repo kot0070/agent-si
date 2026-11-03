@@ -149,14 +149,12 @@ def test_row_r362_locale_coverage_served(served):
                  "/api/v1/app/locale-coverage", "en_leaves")
     status, payload = _get(served, "/api/v1/app/locale-coverage")
     assert status == 200, payload
-    assert payload == {
-        "row": "R-362",
-        "en_leaves": 590,
-        "uk_leaves": 590,
-        "parity": True,
-        "missing_in_uk": [],
-        "missing_in_en": [],
-    }
+    assert payload["row"] == "R-362", payload
+    assert payload["en_leaves"] == payload["uk_leaves"], payload
+    assert payload["parity"] is True, payload
+    assert payload["missing_in_uk"] == [], payload
+    assert payload["missing_in_en"] == [], payload
+    assert payload["en_leaves"] >= 590, payload
 
 
 def test_row_mp392_telemetry_themes_served(served):

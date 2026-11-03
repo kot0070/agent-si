@@ -250,17 +250,17 @@ def test_shell_real_look(served_base, edge, theme, width, height):
                 }"""
             )
 
-        # Wide viewports only below: the topbar quiet-control token look
-        # is stale product-wide since the FXDESIGN restyle
-        # (.fx-topbar select.fx-topbar-control is background:none by
-        # design now; defect filed for the owning lane), and the label
-        # gap is a 1000px-era assertion. The narrow branch above proves
-        # the ordered 800 contract instead.
+        # Wide viewports only below: the top-bar quiet-control design
+        # (FXDESIGN restyle): select.fx-topbar-control and button.fx-btn-quiet
+        # are background:none with token ink, and the select reads underlined.
+        # The values below come from the real stylesheet tokens, never from
+        # literals copied out of the CSS file; the not-browser-default asserts
+        # stay. The narrow branch above proves the ordered 800 contract instead.
         if not narrow:
             controls = page.evaluate(
             """() => {
-              const sel = document.querySelector('header[data-testid="topbar"] select');
-              const btn = document.querySelector('header[data-testid="topbar"] button');
+              const sel = document.querySelector('header[data-testid="topbar"] select[data-testid="topbar-language"]');
+              const btn = document.querySelector('header[data-testid="topbar"] button.fx-btn-quiet');
               const refS = document.createElement('select');
               const refB = document.createElement('button');
               refB.textContent = 'x';
@@ -269,21 +269,27 @@ def test_shell_real_look(served_base, edge, theme, width, height):
               const root = getComputedStyle(document.documentElement);
               const out = {
                 selBg: getComputedStyle(sel).backgroundColor,
+                selColor: getComputedStyle(sel).color,
+                selDeco: getComputedStyle(sel).textDecorationLine,
                 btnBg: getComputedStyle(btn).backgroundColor,
+                btnColor: getComputedStyle(btn).color,
                 refSelBg: getComputedStyle(refS).backgroundColor,
                 refBtnBg: getComputedStyle(refB).backgroundColor,
-                card: root.getPropertyValue('--agent-si-card-border').trim(),
+                ink: root.getPropertyValue('--fx-ink').trim(),
+                quietInk: root.getPropertyValue('--fx-btn-quiet-ink').trim(),
               };
               refS.remove();
               refB.remove();
               return out;
             }"""
             )
-            token_bg = _hex_to_rgb(controls["card"])
             assert controls["selBg"] != controls["refSelBg"], "select keeps browser-default bg: %r" % (controls,)
             assert controls["btnBg"] != controls["refBtnBg"], "button keeps browser-default bg: %r" % (controls,)
-            assert controls["selBg"] == token_bg, "select bg is not the token: %r" % (controls,)
-            assert controls["btnBg"] == token_bg, "button bg is not the token: %r" % (controls,)
+            assert controls["selBg"] == "rgba(0, 0, 0, 0)", "select is not background:none: %r" % (controls,)
+            assert controls["btnBg"] == "rgba(0, 0, 0, 0)", "button is not background:none: %r" % (controls,)
+            assert controls["selColor"] == _hex_to_rgb(controls["ink"]), "select ink is not the token: %r" % (controls,)
+            assert controls["btnColor"] == _hex_to_rgb(controls["quietInk"]), "button ink is not the token: %r" % (controls,)
+            assert controls["selDeco"] == "underline", "select lost its underline: %r" % (controls,)
 
             labels = page.evaluate(
             """() => Array.from(
