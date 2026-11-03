@@ -23,7 +23,7 @@ import { dedupeLiveRows, readLiveExtras } from "../projects/viewsApi";
 import { readProjectTelemetry } from "../k07next2/k07next2Api";
 import type { ProjectTelemetry } from "../k07next2/k07next2Api";
 import { ApiError, requestResponse } from "../api/errors";
-import { formatNumber, t } from "../locale/index";
+import { formatNumber, pluralUnit, t } from "../locale/index";
 import { formatDateTime } from "../locale/index";
 import { shortenLiveRef } from "../agents/agentsApi";
 import {
@@ -1559,13 +1559,11 @@ export function Inspector(props: InspectorProps): ReactElement {
               <p data-testid="watcher-watches">
                 {t("shell.cards.watcher.watches")}{": "}
                 {typeof watcherStatus.watched_runs === "number"
-                  ? formatNumber(watcherStatus.watched_runs)
-                  : t("watcher.tab.notKnown")}{" "}
-                runs ·{" "}
+                  ? `${formatNumber(watcherStatus.watched_runs)} ${pluralUnit("shell.cards.watcher.runs", watcherStatus.watched_runs)}`
+                  : t("watcher.tab.notKnown")}{" · "}
                 {typeof watcherStatus.watched_agents === "number"
-                  ? formatNumber(watcherStatus.watched_agents)
-                  : t("watcher.tab.notKnown")}{" "}
-                agents
+                  ? `${formatNumber(watcherStatus.watched_agents)} ${pluralUnit("shell.cards.watcher.agents", watcherStatus.watched_agents)}`
+                  : t("watcher.tab.notKnown")}
               </p>
               <p data-testid="watcher-checks">
                 {t("shell.cards.watcher.checks")}{": "}

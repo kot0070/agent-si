@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { t } from "../locale/index";
+import { pluralUnit, t } from "../locale/index";
 import { ApiError, apiErrorLocaleKey, parseErrorBody } from "../api/errors";
 import { ErrorPanel } from "../ui/ErrorPanel";
 import {
@@ -300,9 +300,15 @@ export function WatcherTab({ projectId }: { projectId: string }) {
       <p data-testid="watcher-watches">
         {t("watcher.tab.watches")}:{" "}
         {typeof status.watched_runs === "number" ? status.watched_runs : notKnown()}{" "}
-        runs ·{" "}
-        {typeof status.watched_agents === "number" ? status.watched_agents : notKnown()}{" "}
-        agents
+        {typeof status.watched_runs === "number"
+          ? pluralUnit("shell.cards.watcher.runs", status.watched_runs)
+          : null}{" · "}
+        {typeof status.watched_agents === "number"
+          ? status.watched_agents
+          : notKnown()}{" "}
+        {typeof status.watched_agents === "number"
+          ? pluralUnit("shell.cards.watcher.agents", status.watched_agents)
+          : null}
       </p>
       <p data-testid="watcher-last-action">
         {t("watcher.tab.lastAction")}: {describeLastAction(status.last_action)}

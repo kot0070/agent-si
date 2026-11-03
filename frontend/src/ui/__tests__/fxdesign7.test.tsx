@@ -337,6 +337,8 @@ describe("fxdesign7 inspector deferred", () => {
             integrity_ok: true,
             journal_head: "jh-1",
             generated_at: "t-0",
+            watched_runs: 0,
+            watched_agents: 1,
             last_action:
               "rule-tamper BLOCK model=fx-local-1 action=scripts/tamper_check.py",
             last_check_at: "2026-02-11T06:42:44Z",
@@ -435,6 +437,10 @@ describe("fxdesign7 inspector deferred", () => {
     const checks = await screen.findByTestId("watcher-checks");
     expect(checks.textContent).toContain("2026");
     expect(checks.textContent).not.toContain("T06:42:44Z");
+    // FXZERO R3: counts render with plural units, never "1 agents".
+    const watches = await screen.findByTestId("watcher-watches");
+    expect(watches.textContent).toContain("1 agent");
+    expect(watches.textContent).not.toContain("1 agents");
   });
 
   it("metric cards keep a heading toggle", async () => {
