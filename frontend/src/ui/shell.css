@@ -108,11 +108,26 @@ span[data-testid="kit-collapsed-line"] {
 }
 
 /* W14: the kit toggle is icon-only (label via aria-label); the chevron
-   is pure CSS so no literal text enters the DOM. */
+   is pure CSS so no literal text enters the DOM. FXDESIGN4 L5: one
+   primary per card — the kit chevron stays quiet (transparent, token
+   border). P10: the hit box is explicit (32px, flex none, no padding):
+   an empty icon-only button never collapses to zero size in any
+   cascade, so the toggle stays a visible, clickable target. */
 .fx-kit-toggle {
-  min-width: 28px;
-  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
   line-height: 1;
+  background-color: transparent;
+  color: var(--fx-btn-quiet-ink);
+  border: 1px solid var(--fx-input-border);
+  border-radius: 6px;
 }
 
 .fx-kit-toggle::after {
@@ -252,15 +267,10 @@ nav [data-testid^="project-menu-"]:focus-visible {
   outline-offset: 2px;
 }
 
-/* FXDESIGN4 L5: one primary per card. The kit chevron, the hierarchy
+/* FXDESIGN4 L5: one primary per card. The hierarchy
    toggle and the project row Stop/Leave controls are secondary; the
-   project name stays a link style; the date keeps its own gap. */
-.fx-kit-toggle {
-  background-color: transparent;
-  color: var(--fx-btn-quiet-ink);
-  border: 1px solid var(--fx-input-border);
-  border-radius: 6px;
-}
+   project name stays a link style; the date keeps its own gap. (The
+   kit chevron rule lives with the W14 block above: one rule only.) */
 
 .fx-kit-toggle:hover:not(:disabled) {
   background-color: transparent;
