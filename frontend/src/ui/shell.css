@@ -318,6 +318,10 @@ aside[data-testid="inspector"] dl dd {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .fx-spin {
+    animation: none;
+    border-top-color: currentColor;
+  }
   aside[data-testid="inspector"] {
     transition: none;
   }
@@ -1066,6 +1070,22 @@ ul[data-testid="ctx-legend"].fx-legend {
   border: 1px solid var(--fx-card-border);
   border-radius: 999px;
   font-size: 12px;
+}
+
+/* FXFACTS F11: tight option lists — no bullets, radio directly before
+   its label, one compact column. Lengths only, no colours. */
+.fx-tight-list {
+  list-style: none;
+  margin: 2px 0;
+  padding: 0;
+}
+
+.fx-tight-list > li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 2px 0;
+  padding: 0;
 }
 
 /* D6(e): live agents read plain: no card box on the panel, the project

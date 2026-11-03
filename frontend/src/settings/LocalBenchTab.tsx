@@ -10,6 +10,8 @@
 import { useState } from "react";
 import type { ReactElement } from "react";
 import { formatNumber, t } from "../locale/index";
+import { ApiError } from "../api/errors";
+import { requestResponse } from "../api/errors";
 import type { LocalBenchClient } from "./LocalBenchClient";
 import {
   BENCHMARK_LEVELS,
@@ -228,7 +230,7 @@ type ScanState =
   | { status: "idle" }
   | { status: "scanning" }
   | { status: "ready"; path: string; models: Array<LocalBenchModel> }
-  | { status: "error" };
+  | { status: "error"; reason: string };
 
 type RunState =
   | { status: "idle" }
@@ -248,9 +250,17 @@ function hardwareSummary(hardware: LocalBenchHardwareProfile): string {
   return `${hardware.gpu_vendor} ${hardware.gpu_model} · ${ram}`;
 }
 
+/** Folder picker route shared with the projects page (native sidecar
+ * dialog, 409 when no native dialog exists). */
+const FOLDER_PICK_URL = "/api/v1/sidecar/pick-folder";
+const FOLDER_PICK_UNAVAILABLE = 409;
+
 export function LocalBenchTab(props: LocalBenchTabProps): ReactElement {
   const { client } = props;
-  const [path, setPath] = useState("");
+  // FXFACTS F11: the field pre-fills the last used path from storage.
+  const [path, setPath] = useState<string>(
+    () => readStoredLocalBench().path ?? "",
+  );
   const [scan, setScan] = useState<ScanState>({ status: "idle" });
   const [modelId, setModelId] = useState("");
   const [level, setLevel] = useState<BenchmarkLevel>("quick");
@@ -258,6 +268,42 @@ export function LocalBenchTab(props: LocalBenchTabProps): ReactElement {
   const [decisions, setDecisions] = useState<Array<LocalBenchDecisionRecord>>(
     [],
   );
+  const [pickOpen, setPickOpen] = useState(true);
+
+  async function handlePickFolder(): Promise<void> {
+    try {
+      const response = await requestResponse(FOLDER_PICK_URL, {
+        method: "POST",
+        kind: "write",
+        body: {},
+      });
+      let data: unknown = null;
+      try {
+        data = await response.json();
+      } catch {
+        data = null;
+      }
+      const picked =
+        typeof data === "object" && data !== null
+          ? (data as { path?: unknown }).path
+          : null;
+      if (typeof picked === "string" && picked.length > 0) {
+        setPath(picked);
+      }
+    } catch (error) {
+      if (error instanceof ApiError && error.status === FOLDER_PICK_UNAVAILABLE) {
+        setPickOpen(false);
+        return;
+      }
+      setScan({
+        status: "error",
+        reason:
+          error instanceof ApiError
+            ? (error.details?.message ?? error.code)
+            : "pick failed",
+      });
+    }
+  }
 
   const scanned = scan.status === "ready" ? scan : null;
   const canRun =
@@ -277,8 +323,14 @@ export function LocalBenchTab(props: LocalBenchTabProps): ReactElement {
       setModelId(first === undefined ? "" : first.model_id);
       setRun({ status: "idle" });
       storeScanState(result.path, result.models);
-    } catch {
-      setScan({ status: "error" });
+    } catch (error) {
+      setScan({
+        status: "error",
+        reason:
+          error instanceof ApiError
+            ? (error.details?.message ?? error.code)
+            : "scan failed",
+      });
     }
   }
 
@@ -330,6 +382,18 @@ export function LocalBenchTab(props: LocalBenchTabProps): ReactElement {
           placeholder={t("settings.localbench.pathHint")}
           onChange={(event) => setPath(event.target.value)}
         />
+        {pickOpen ? (
+          <button
+            type="button"
+            data-testid="localbench-choose"
+            className="fx-btn-quiet"
+            onClick={() => {
+              void handlePickFolder();
+            }}
+          >
+            {t("settings.localbench.chooseFolder")}
+          </button>
+        ) : null}
         <button
           type="button"
           data-testid="localbench-scan"
@@ -345,14 +409,31 @@ export function LocalBenchTab(props: LocalBenchTabProps): ReactElement {
               : "settings.localbench.scanButton",
           )}
         </button>
+        {path.trim().length === 0 && scan.status !== "scanning" ? (
+          <p data-testid="localbench-scan-hint" className="fx-quiet-line">
+            {t("settings.localbench.scanHint")}
+          </p>
+        ) : null}
       </div>
-      {scan.status === "error" ? <p>{t("errors.generic")}</p> : null}
+      {scan.status === "error" ? (
+        <p data-testid="localbench-scan-error">
+          {t("settings.localbench.scanError", { reason: scan.reason })}
+        </p>
+      ) : null}
       <div>
         <h3>{t("settings.localbench.modelsTitle")}</h3>
-        {scanned === null || scanned.models.length === 0 ? (
-          <p>{t("settings.localbench.modelsEmpty")}</p>
+        {scan.status === "idle" || scan.status === "scanning" ? (
+          <p data-testid="localbench-choose-hint">
+            {t("settings.localbench.modelsChoose")}
+          </p>
+        ) : scanned === null || scanned.models.length === 0 ? (
+          <p data-testid="localbench-models-empty">
+            {t("settings.localbench.modelsEmptyPath", {
+              path: scanned === null ? path.trim() : scanned.path,
+            })}
+          </p>
         ) : (
-          <ul>
+          <ul className="fx-tight-list">
             {scanned.models.map((model) => (
               <li key={model.model_id}>
                 <label>
@@ -373,7 +454,7 @@ export function LocalBenchTab(props: LocalBenchTabProps): ReactElement {
       </div>
       <div>
         <h3>{t("settings.localbench.levelLabel")}</h3>
-        <ul>
+        <ul className="fx-tight-list">
           {BENCHMARK_LEVELS.map((option) => (
             <li key={option}>
               <label>
