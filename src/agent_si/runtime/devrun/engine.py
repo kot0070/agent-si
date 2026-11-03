@@ -1742,9 +1742,16 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
             if _build_answer_twice:
                 record["success"] = False
                 record["summary"] = "Nothing was built."
-            else:
+            elif _looks_like_question(user_message):
                 record["success"] = True
                 record["summary"] = "run answered: plain answer, no parts"
+            else:
+                # FXZERO R1: a statement-like message answered with no
+                # parts built nothing: not success, with the guidance
+                # sentence on every surface (chat, Results, reports).
+                # A phrased question keeps the pinned answer behaviour.
+                record["success"] = False
+                record["summary"] = _EMPTY_PLAN_SUMMARY
             yield _run_event("delta", turn, task_id, answer,
                              {"run_id": run_id})
             turn += 1
@@ -3435,6 +3442,24 @@ _BUILD_VERBS = (
     "напиши", "створи", "зроби", "виправ", "додай", "онови",
     "згенеруй", "запусти", "побудуй", "реалізуй",
 )
+
+#: FXZERO R1 plain sentence for a statement-like run that ends with
+#: zero parts: nothing built, the plan had no parts, what to say next
+#: plus one example. Served on the run record, the stream and the task
+#: mirror, so chat, Results and reports all read not-success.
+_EMPTY_PLAN_SUMMARY = (
+    "Nothing was built \u2014 the plan had no parts. "
+    "Say what you want built, for example: "
+    "\"Add a status page with a test.\""
+)
+
+
+def _looks_like_question(message: Any) -> bool:
+    """True when the user text is phrased as a question (keeps answers)."""
+    try:
+        return str(message or "").strip().endswith("?")
+    except Exception:
+        return False
 
 
 def _looks_like_build_task(message: Any) -> bool:

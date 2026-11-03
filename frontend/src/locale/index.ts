@@ -75,6 +75,27 @@ export function setLocale(locale: SupportedLocale): void {
   persistLocale(locale);
 }
 
+/** FXZERO R3: plural unit for a count key base (en one/other, uk
+one/few/many/other). Falls back through other/one to the base key,
+never throws, never invents a word. */
+export function pluralUnit(base: string, count: number): string {
+  const n = typeof count === 'number' && Number.isFinite(count) ? count : 0;
+  let category = 'other';
+  try {
+    category = new Intl.PluralRules(currentLocale).select(n);
+  } catch {
+    category = 'other';
+  }
+  const table = TABLES[currentLocale];
+  for (const key of [`${base}.${category}`, `${base}.other`, `${base}.one`]) {
+    const hit = lookup(table, key);
+    if (hit !== undefined) {
+      return hit;
+    }
+  }
+  return base;
+}
+
 const LocaleContext = createContext<{ locale: SupportedLocale }>({ locale: DEFAULT_LOCALE });
 
 export function useLocale(): { locale: SupportedLocale } {

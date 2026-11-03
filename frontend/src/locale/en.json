@@ -431,7 +431,8 @@
         "subtitle": "Latest reports with open links.",
         "open": "Open",
         "next": "Next",
-        "openFolder": "Open folder"
+        "openFolder": "Open folder",
+        "latestRun": "Latest run"
       },
       "background": {
         "title": "Background work",
@@ -449,7 +450,19 @@
         "checks": "Checks",
         "alerts": "Alerts",
         "calls": "Model calls",
-        "notKnown": "not known"
+        "notKnown": "not known",
+        "runs": {
+          "one": "run",
+          "few": "runs",
+          "many": "runs",
+          "other": "runs"
+        },
+        "agents": {
+          "one": "agent",
+          "few": "agents",
+          "many": "agents",
+          "other": "agents"
+        }
       },
       "tokens": {
         "title": "Tokens",
@@ -500,6 +513,31 @@
     "skipToComposer": "Skip to composer"
   },
   "chat": {
+    "abort": {
+      "cancel": "Stop"
+    },
+    "approval": {
+      "accept": "Accept",
+      "edit": "Edit",
+      "reject": "Reject"
+    },
+    "composer": {
+      "prompt": "Type a message",
+      "send": "Send",
+      "draft": "Draft",
+      "noModel": "No model bound yet.",
+      "statusReady": "Ready",
+      "statusWorking": "Working"
+    },
+    "empty": {
+      "line": "Describe a task. The team plans it, does it, runs checks and audits the result.",
+      "sample1": "Count words in notes.txt and add pytest tests",
+      "sample2": "List the project files and summarize the README"
+    },
+    "error": {
+      "retry": "Retry",
+      "noProvider": "Connect a provider first, then send your task again."
+    },
     "hierarchy": {
       "title": "Model hierarchy",
       "director": "Director",
@@ -513,27 +551,6 @@
       "auditorSplit": "The auditor uses a different provider.",
       "openSettings": "Open Settings"
     },
-    "composer": {
-      "prompt": "Type a message",
-      "send": "Send",
-      "draft": "Draft",
-      "noModel": "No model bound yet.",
-      "statusReady": "Ready",
-      "statusWorking": "Working"
-    },
-    "stream": {
-      "spinner": "Working on it",
-      "timestamp": "Message time",
-      "offline": "Connection lost. Reconnecting."
-    },
-    "abort": {
-      "cancel": "Stop"
-    },
-    "approval": {
-      "accept": "Accept",
-      "edit": "Edit",
-      "reject": "Reject"
-    },
     "permission": {
       "title": "Install permission",
       "body": "The run wants to execute “{command}”.",
@@ -544,14 +561,14 @@
       "allowed": "Install permission granted for {command}",
       "denied": "Install permission denied for {command}"
     },
-    "empty": {
-      "line": "Describe a task. The team plans it, does it, runs checks and audits the result.",
-      "sample1": "Count words in notes.txt and add pytest tests",
-      "sample2": "List the project files and summarize the README"
+    "run": {
+      "emptyPlan": "Nothing was built — the plan had no parts. Say what you want built, for example: “{example}”",
+      "emptyPlanExample": "Add a contact page with a test."
     },
-    "error": {
-      "retry": "Retry",
-      "noProvider": "Connect a provider first, then send your task again."
+    "stream": {
+      "spinner": "Working on it",
+      "timestamp": "Message time",
+      "offline": "Connection lost. Reconnecting."
     }
   },
   "tasks": {
