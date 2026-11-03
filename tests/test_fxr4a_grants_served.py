@@ -8,6 +8,8 @@ import copy
 import json
 import os
 import sys
+import threading
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -217,12 +219,39 @@ def rig(tmp_path):
            "folder": str(folder), "factory": factory}
 
 
-def _chat(rig, message, task):
-    return rig["client"].post(
-        "/api/v1/chat/stream",
-        json={"project": rig["pid"], "folder": rig["folder"],
-              "task": task, "message": message},
-        headers=_auth())
+def _chat_thread(rig, message, task):
+    box: dict = {}
+
+    def _go():
+        try:
+            box["resp"] = rig["client"].post(
+                "/api/v1/chat/stream",
+                json={"project": rig["pid"], "folder": rig["folder"],
+                      "task": task, "message": message},
+                headers=_auth())
+        except Exception as exc:  # noqa: BLE001 - surfaced below
+            box["error"] = exc
+
+    thread = threading.Thread(target=_go, daemon=True)
+    thread.start()
+    return thread, box
+
+
+def _wait_pin(rig, thread, tool_id, timeout=90.0):
+    """Wait until the install ask is parked (pin without a decision)."""
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        if not thread.is_alive():
+            raise AssertionError("chat stream ended before the ask parked")
+        try:
+            entry = dict(
+                _permissions._BOUND_DECISIONS).get(tool_id)
+        except Exception:
+            entry = None
+        if isinstance(entry, dict) and entry.get("decision") is None:
+            return entry
+        time.sleep(0.2)
+    raise AssertionError("no parked install ask for %s" % (tool_id,))
 
 
 def _decide(rig, tool_id, decision):
@@ -233,63 +262,110 @@ def _decide(rig, tool_id, decision):
         headers={"x-ui-session-token": TOKEN})
 
 
-def _held_tool_id(resp):
-    events = _parse_sse(resp.text)
-    assert _types(events)[-1] == "approval", _types(events)[-3:]
-    held = [e for e in events if e.get("type") == "approval"][-1]
-    assert "npm" in str(held) and "install" in str(held), held
-    return held.get("tool_id")
-
-
-# D4: allow once is consumed by the replay; the next run asks again.
+# D4 (FXASK A8 shape): the once-allow runs the parked install on the
+# same run (no resend, stream never closes); the next run asks again.
 def test_fxr4a_once_allow_consumed_next_run_asks(rig):
-    first = _chat(rig, "Install dependencies with npm install",
-                  task="t-hold")
-    assert first.status_code == 200, first.text
-    tool_id = _held_tool_id(first)
-    assert _decide(rig, tool_id, "allow").status_code == 200
-    replay = _chat(rig, "Install dependencies with npm install",
-                   task="t-hold")
-    assert replay.status_code == 200, replay.text
-    assert "approval" not in _types(_parse_sse(replay.text))
-    assert _types(_parse_sse(replay.text))[-1] == "done"
-    assert "exit 0" in _all_text(_parse_sse(replay.text))
-    again = _chat(rig, "Install dependencies with npm install",
-                  task="t-again")
-    assert again.status_code == 200, again.text
-    assert "approval" in _types(_parse_sse(again.text)), again.text[:600]
+    tool_id = _permissions.install_tool_id(rig["pid"], "npm")
+    thread, box = _chat_thread(
+        rig, "Install dependencies with npm install", task="t-hold")
+    try:
+        _wait_pin(rig, thread, tool_id)
+        assert _decide(rig, tool_id, "allow").status_code == 200
+        thread.join(timeout=240.0)
+        assert not thread.is_alive()
+        assert not box.get("error"), box.get("error")
+        first = box.get("resp")
+        assert first is not None and first.status_code == 200, first
+        events = _parse_sse(first.text)
+        assert _types(events)[-1] == "done"
+        assert "approval" not in _types(events)
+        assert "exit 0" in _all_text(events)
+        record = (getattr(rig["app"].state, "devrun_runs", None)
+                  or {}).get(rig["pid"], {})
+        assert record.get("success") is True, record.get("summary")
+    finally:
+        thread.join(timeout=60.0)
+    thread2, box2 = _chat_thread(
+        rig, "Install dependencies with npm install", task="t-again")
+    try:
+        # The spent once-allow does not cover the next run: the spawn
+        # re-points the pin at this run with no decision, so it parks
+        # and asks again (no silent refusal, no FAILED).
+        pin = _wait_pin(rig, thread2, tool_id)
+        assert thread2.is_alive()
+        assert pin.get("decision") is None
+        assert pin.get("run"), pin
+        assert _decide(rig, tool_id, "allow").status_code == 200
+        thread2.join(timeout=240.0)
+        assert not thread2.is_alive()
+        again = box2.get("resp")
+        assert again is not None and again.status_code == 200, again
+        assert _types(_parse_sse(again.text))[-1] == "done"
+    finally:
+        thread2.join(timeout=60.0)
 
 
 # D5: --force after an allow must ask with the real words, never run silent.
 def test_fxr4a_force_args_ask_with_real_words(rig):
     rig["factory"].scripts["director"] = _force_plan
-    forced = _chat(rig, "Install with npm install --force",
-                   task="t-force")
-    assert forced.status_code == 200, forced.text
-    events = _parse_sse(forced.text)
-    assert "approval" in _types(events), forced.text[:600]
-    held = [e for e in events if e.get("type") == "approval"][-1]
-    assert "npm" in str(held) and "install" in str(held), held
-    assert "--force" in str(held), held
+    tool_id = _permissions.install_tool_id(rig["pid"], "npm")
+    thread, box = _chat_thread(
+        rig, "Install with npm install --force", task="t-force")
+    try:
+        pin = _wait_pin(rig, thread, tool_id)
+        assert list(pin.get("argv") or []) == [
+            "npm", "install", "--force"], pin
+        assert _decide(rig, tool_id, "deny").status_code == 200
+        thread.join(timeout=240.0)
+        assert not thread.is_alive()
+        forced = box.get("resp")
+        assert forced is not None and forced.status_code == 200
+        events = _parse_sse(forced.text)
+        assert _types(events)[-1] == "done"
+        assert "approval" not in _types(events)
+        assert "FAILED" in _all_text(events), _all_text(events)[:900]
+    finally:
+        thread.join(timeout=60.0)
 
 
-# D6: deny replay closes the part FAILED with a plain line, no loop.
-def test_fxr4a_deny_replay_fails_plain(rig):
-    first = _chat(rig, "Install dependencies with npm install",
-                  task="t-deny")
-    assert first.status_code == 200, first.text
-    tool_id = _held_tool_id(first)
-    assert _decide(rig, tool_id, "deny").status_code == 200
-    replay = _chat(rig, "Install dependencies with npm install",
-                   task="t-deny2")
-    assert replay.status_code == 200, replay.text
-    text = _all_text(_parse_sse(replay.text))
-    assert "FAILED" in text, text[:900]
-    assert "internal" not in replay.text.lower(), replay.text[:600]
-    assert "approval" not in _types(_parse_sse(replay.text))
-    assert _types(_parse_sse(replay.text))[-1] in ("done", "error")
-    record = (getattr(rig["app"].state, "devrun_runs", None) or {}).get(
-        rig["pid"], {})
-    assert record.get("success") is False, record.get("summary")
-    assert "denied" in str(record.get("summary", "")).lower(), (
-        record.get("summary"))
+# FXASK A4 (supersedes D6): a deny covers that run only. A new task
+# asks again (parked ask, never a silent refusal); allowing that ask
+# runs the install on. The old D6 FAILED-without-card shape is gone on
+# purpose: a denied run that is asked again is never a refusal.
+def test_fxr4a_deny_next_run_asks_again(rig):
+    tool_id = _permissions.install_tool_id(rig["pid"], "npm")
+    thread, box = _chat_thread(
+        rig, "Install dependencies with npm install", task="t-deny")
+    try:
+        _wait_pin(rig, thread, tool_id)
+        assert _decide(rig, tool_id, "deny").status_code == 200
+        thread.join(timeout=240.0)
+        assert not thread.is_alive()
+        first = box.get("resp")
+        assert first is not None and first.status_code == 200, first
+        events = _parse_sse(first.text)
+        assert _types(events)[-1] == "done"
+        assert "approval" not in _types(events)
+        record = (getattr(rig["app"].state, "devrun_runs", None)
+                  or {}).get(rig["pid"], {})
+        assert record.get("success") is False, record.get("summary")
+        assert "denied" in str(record.get("summary", "")).lower(), (
+            record.get("summary"))
+    finally:
+        thread.join(timeout=60.0)
+    thread2, box2 = _chat_thread(
+        rig, "Install dependencies with npm install", task="t-deny2")
+    try:
+        time.sleep(8.0)
+        assert thread2.is_alive()
+        assert _decide(rig, tool_id, "allow").status_code == 200
+        thread2.join(timeout=240.0)
+        assert not thread2.is_alive()
+        again = box2.get("resp")
+        assert again is not None and again.status_code == 200, again
+        events = _parse_sse(again.text)
+        assert _types(events)[-1] == "done"
+        assert "approval" not in _types(events)
+        assert "exit 0" in _all_text(events)
+    finally:
+        thread2.join(timeout=60.0)

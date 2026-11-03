@@ -65,8 +65,9 @@ _INSTALLER_COMMANDS = frozenset(
 )
 
 #: Manager verbs that run a project script (a runnable check, never
-#: the install class): npm needs run/run-script or the test/start
-#: shorthands; yarn/pnpm/bun run a bare script name (run included).
+#: the install class): npm needs run/run-script, the test/start
+#: shorthands or the read-only ls/list queries; yarn/pnpm/bun run a
+#: bare script name (run included).
 _SCRIPT_RUN_MANAGERS = frozenset({"npm", "yarn", "pnpm", "bun"})
 
 #: Manager verbs that install no matter what follows; anything else
@@ -79,16 +80,55 @@ _MANAGER_INSTALL_VERBS = frozenset({
 })
 
 
+#: Manager path flags that carry a directory value, before the verb:
+#: skipped (both `--flag value` and `--flag=value`) so the verb is read
+#: by name, never by position. A project in a subfolder (`npm
+#: --prefix node-add test`) is a script run, not an installer refusal.
+_MANAGER_PATH_FLAGS = frozenset({"--prefix", "--cwd", "--dir", "-C"})
+
+
+def _skip_manager_path_flags(words: list[str]) -> list[str]:
+    """Words minus manager path flags plus their values.
+
+    Long flags drop their `--flag=value` form whole; a bare long flag
+    or ``-C`` drops the next word too (its directory). Anything else
+    (verbs, script names, install flags) passes through untouched.
+    """
+    kept: list[str] = []
+    skip_next = False
+    for word in words:
+        text = str(word)
+        if skip_next:
+            skip_next = False
+            continue
+        if text in _MANAGER_PATH_FLAGS:
+            skip_next = True
+            continue
+        if text.startswith("--") and "=" in text:
+            flag = text.split("=", 1)[0]
+            if flag in _MANAGER_PATH_FLAGS:
+                continue
+        kept.append(text)
+    return kept
+
+
 def _is_script_run(name: str, words: list[str]) -> bool:
-    """True when argv runs a project script through a manager."""
+    """True when argv runs a project script through a manager.
+
+    npm runs scripts via run/run-script plus the test/start
+    shorthands; ``npm ls``/``npm list`` are read-only manager queries
+    (never the install class); yarn/pnpm/bun run a bare script name
+    (run included). Classify by verb, never by position: manager path
+    flags plus their values are skipped first.
+    """
     if name not in _SCRIPT_RUN_MANAGERS or len(words) < 2:
         return False
-    rest = [str(word) for word in words[1:]]
+    rest = _skip_manager_path_flags([str(word) for word in words[1:]])
     if not rest:
         return False
     first = rest[0]
     if name == "npm":
-        if first in ("test", "start"):
+        if first in ("test", "start", "ls", "list"):
             return True
         return (first in ("run", "run-script") and len(rest) > 1
                 and not rest[1].startswith("-"))

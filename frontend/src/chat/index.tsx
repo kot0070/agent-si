@@ -175,6 +175,10 @@ interface ChatPump {
   runner: ChatRunner;
   prompt: string;
   assistantId: string;
+  // FXASK A8: a parked install ask arrived on this open stream (the run
+  // waits in place). Answering records the decision only, never resends;
+  // the flag clears on answer or when the stream ends.
+  askOpen: boolean;
 }
 
 const pumps = new Map<string, ChatPump>();
@@ -366,6 +370,30 @@ function consumeProjectAsk(projectId: string): InstallPermissionAsk | null {
     return stashed;
   }
   return readProjectMirror(projectId);
+}
+
+/** Assistants whose runs really ended (done, failed or stopped — never
+a hold, which ends the stream but leaves the answer pending). A parked
+card for one of them never restores: the card closes when its run ends
+(FXASK A7). Precedent: deadAssistants/stoppedAssistants below. */
+const endedAssistants = new Set<string>();
+
+export function markAssistantRunEnded(id: string): void {
+  endedAssistants.add(id);
+}
+
+export function isAssistantRunEnded(id: string): boolean {
+  return endedAssistants.has(id);
+}
+
+/** Close the project card when it belongs to the ended run. Only an
+exact bubble match closes: a live hold for another run never loses its
+card because this run ended. */
+function closeAskForEndedRun(projectId: string, assistantId: string): void {
+  const stashed = readProjectAsk(projectId);
+  if (stashed !== null && stashed.messageId === assistantId) {
+    clearProjectAsk(projectId);
+  }
 }
 
 function clearProjectAsk(projectId: string): void {
@@ -652,6 +680,14 @@ export interface EngineSummary {
   passed: number;
   files: string[];
   lines: string[];
+  /** FXASK A7: install-hold command (`Waiting for your permission to
+  run <command>.`), null when the text holds no run-held line. A held
+  run is never Done, never a 0-parts line. */
+  held: string | null;
+  /** FXASK A3: denied install command (`Install permission denied
+  for <command>`), null when no deny line. A denied run never says
+  Done. */
+  denied: string | null;
   /** FXOPEN O4: one plain line when the text announces a second plan
   ("Director: plan of 2 parts" then "of 3 parts"); null otherwise. */
   planChanged: string | null;
@@ -737,7 +773,34 @@ export function summarizeEngineTurn(
   const lines = text.split("\n");
   const verdicts = new Map<string, boolean>();
   const files: string[] = [];
+  // FXASK A7: a run-held line names the waiting command. A held
+  // run is never Done, never a 0-parts line: the verdict is the
+  // Waiting sentence, from the engine's own words.
+  let held: string | null = null;
+  // FXASK A3: a denied install line closes the turn failed. A denied
+  // run never says Done, even with files listed and zero part rows.
+  let denied: string | null = null;
   for (const line of lines) {
+    if (held === null) {
+      const waiting =
+        /waiting for your permission to run\s+([^\n]+?)\s*\.?\s*$/i.exec(
+          line,
+        );
+      if (waiting?.[1] !== undefined) {
+        const command = waiting[1].trim().replace(/\s*\.\s*$/, "");
+        held = command !== "" ? command : null;
+      }
+    }
+    if (denied === null) {
+      const refused = /install permission denied for\s+([^\n]+)/i.exec(
+        line,
+      );
+      if (refused?.[1] !== undefined) {
+        const words = refused[1].trim().split(/\s+/).slice(0, 2);
+        const command = words.join(" ");
+        denied = command !== "" ? command : null;
+      }
+    }
     const part = /^Part\s+([^:]+):\s*(PASS|FAIL)\b/i.exec(line);
     if (part !== null && part[1] !== undefined && part[2] !== undefined) {
       verdicts.set(part[1].trim(), part[2].toUpperCase() === "PASS");
@@ -794,11 +857,18 @@ export function summarizeEngineTurn(
       }
     }
   }
+  // FXASK A3 + FXANSWER: model text is not evidence. Zero part rows
+  // with no engine evidence (success count, announced plan, solo
+  // marker, plain answer) is hollow even when the text lists files:
+  // files alone never say Done, and a 0-part run with no answer never
+  // says Done.
   const hollow =
-    wholeParts === 0 && files.length === 0 && !soloDone && plainAnswer === null;
+    wholeParts === 0 && !soloDone && plainAnswer === null;
   const failed =
     status !== "ok" ||
     hollow ||
+    held !== null ||
+    denied !== null ||
     (wholeParts > 0 ? wholePassed < wholeParts : /run fail/i.test(text));
   return {
     done: !failed,
@@ -806,6 +876,8 @@ export function summarizeEngineTurn(
     passed: wholePassed,
     files,
     lines,
+    held,
+    denied,
     planChanged: planChangedLine(text),
     answer: plainAnswer,
     folder,
@@ -848,6 +920,23 @@ export function engineVerdictLine(
   summary: EngineSummary,
   costNote = "",
 ): string {
+  // FXASK A7: a held run waits, never Done, never a 0-parts line.
+  if (summary.held !== null) {
+    return pt(
+      "chat.permission.waitingHold",
+      "Waiting for your permission to run {command}.",
+      { command: summary.held },
+    );
+  }
+  // FXASK A3: a denied install closes Stopped with what was refused
+  // and why (nothing was installed), never Done, never 0-parts.
+  if (summary.denied !== null) {
+    return pt(
+      "chat.permission.deniedRun",
+      "Stopped: you denied {command}. Nothing was installed.",
+      { command: summary.denied },
+    );
+  }
   if (summary.answer !== null && summary.answer !== "") {
     return summary.answer;
   }
@@ -1397,6 +1486,13 @@ function handleRunError(
     );
     return;
   }
+  // FXASK A7: a non-hold error ends the run for real: mark it so a
+  // parked card for this bubble never restores, and close its own card.
+  markAssistantRunEnded(assistantId);
+  closeAskForEndedRun(
+    record?.projectId ?? sliceProjectId.get(key) ?? "",
+    assistantId,
+  );
   const current = getChatState(key).messages.find(
     (message) => message.id === assistantId,
   );
@@ -1518,6 +1614,16 @@ function startChatRun(
             });
           }
         },
+        // FXASK A8: mid-stream install ask (the run waits in place).
+        // Marks this open stream as ask-open and shows the card; the
+        // stream itself keeps going.
+        onAsk: (ask) => {
+          const pump = pumps.get(key);
+          if (pump !== undefined) {
+            pump.askOpen = true;
+          }
+          emitAsk(key, { toolName: ask.toolName, messageId: assistantId });
+        },
         isCancelled: () => pumps.get(key)?.cancelled ?? true,
       },
     );
@@ -1538,6 +1644,7 @@ function startChatRun(
     runner,
     prompt: text,
     assistantId,
+    askOpen: false,
   });
   emitPumpsChanged();
   runner.done.then(
@@ -1545,6 +1652,10 @@ function startChatRun(
       pumps.delete(key);
       emitPumpsChanged();
       setChatRunner(key, { streamId: null, streaming: false });
+      // FXASK A7: the run really ended with no hold (a hold rejects
+      // the stream, never resolves it): its own card, if any, closes.
+      markAssistantRunEnded(assistantId);
+      closeAskForEndedRun(projectId, assistantId);
       const answer =
         getChatState(key).messages.find(
           (message) => message.id === assistantId,
@@ -1887,8 +1998,15 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
     pendingAskRef.current = null;
     const stashedAsk = consumeProjectAsk(props.projectId);
     if (stashedAsk !== null) {
-      pendingAskRef.current = stashedAsk;
-      setPendingAsk(stashedAsk);
+      if (isAssistantRunEnded(stashedAsk.messageId)) {
+        // FXASK A7: its run really ended with no hold pending from it:
+        // the card closes instead of restoring a dead dialog.
+        clearProjectAsk(props.projectId);
+        endedAssistants.delete(stashedAsk.messageId);
+      } else {
+        pendingAskRef.current = stashedAsk;
+        setPendingAsk(stashedAsk);
+      }
     }
     const ui: SliceUI = {
       onBlocking: (error) => {
@@ -2162,6 +2280,10 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
   // flags, this project only) and replays, "deny" closes the part with
   // a plain FAILED line and never resends. The card and the chat lines
   // name the real command, never the raw tool key.
+  // FXASK A8: when the stream of that run is still open (mid-stream
+  // ask, the run waits in place), answering only records the decision
+  // (routes unchanged) and closes the card: no resend, the run itself
+  // goes on. When no stream is open (fallback hold), as today.
   const answerAsk = (mode: "once" | "project" | "deny"): void => {
     const ask = pendingAskRef.current;
     if (ask === null) {
@@ -2170,6 +2292,12 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
     pendingAskRef.current = null;
     setPendingAsk(null);
     clearProjectAsk(props.projectId);
+    const pump = pumps.get(key);
+    const streamOpen =
+      pump !== undefined && !pump.cancelled && pump.askOpen === true;
+    if (pump !== undefined) {
+      pump.askOpen = false;
+    }
     const command = installDisplayCommand(
       ask.toolName,
       props.projectId,
@@ -2180,7 +2308,9 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
         void recordProjectGrant(props.projectId, ask.toolName).then(
           () => {
             noteInstallAnswer(ask, command, true);
-            replayParkedRun();
+            if (!streamOpen) {
+              replayParkedRun();
+            }
           },
           () => {
             emitBlocking(key, {
@@ -2239,7 +2369,9 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
       }).then(
         () => {
           noteInstallAnswer(ask, command, true);
-          replayParkedRun();
+          if (!streamOpen) {
+            replayParkedRun();
+          }
         },
         () => {
           emitBlocking(key, { errorKey: "errors.generic", code: "UNKNOWN" });

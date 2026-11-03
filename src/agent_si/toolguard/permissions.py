@@ -411,6 +411,94 @@ def get_decision(store_dir: Any = None, memory: Any = None,
     return None
 
 
+def decision_denies_run(store_dir: Any = None, memory: Any = None,
+                          tool_id: str = "",
+                          run_id: Any = None) -> bool:
+    """True when a recorded deny refuses this run (FXASK A4).
+
+    A deny covers that run only, like the once-allow: a deny pinned to
+    the run it was decided in refuses that run (the denied run closes
+    FAILED with the plain line); any later run asks again. A deny with
+    no pinned run (decided without any ask) stays fail-closed and
+    refuses.
+    """
+    store_dir, memory = _resolve_ledger(store_dir, memory)
+    key = str(tool_id)
+    entry = None
+    if isinstance(memory, dict):
+        entry = memory.get(key)
+    if entry is None and store_dir:
+        entry = load_decisions(store_dir).get(key)
+    if not isinstance(entry, dict):
+        return False
+    if entry.get("decision") != DECISION_DENY:
+        return False
+    pinned = entry.get("run")
+    if not isinstance(pinned, str) or not pinned:
+        return True
+    if run_id is None:
+        return True
+    return pinned == str(run_id)
+
+
+def reset_decision_for_run(store_dir: Any = None, memory: Any = None,
+                           tool_id: str = "", argv: Any = None,
+                           project_id: str = "",
+                           run_id: Any = None) -> dict[str, Any] | None:
+    """Drop a stale decision so this run asks again (FXASK A4).
+
+    Replaced by a fresh pin (this run's words, this run): a deny pinned
+    to a DIFFERENT run, or an allow spent by a DIFFERENT run (a spent
+    once-allow never covers a new run, and keeping its pin would route
+    a later deny at the wrong run). A decision for this run, an
+    unconsumed allow, a run-less deny, or a non-decision is never
+    touched (None). The next allow or deny then lands on this run's
+    words, never a stale pin.
+    """
+    argv_words = _valid_decision_argv(argv)
+    if argv_words is None:
+        return None
+    if run_id is None or not str(run_id):
+        return None
+    store_dir, memory = _resolve_ledger(store_dir, memory)
+    key = str(tool_id)
+    if not key:
+        return None
+    merged = load_decisions(store_dir)
+    if isinstance(memory, dict):
+        for known_key, known in memory.items():
+            if isinstance(known, dict):
+                merged[known_key] = known
+    prior = merged.get(key)
+    if not isinstance(prior, dict):
+        return None
+    if prior.get("decision") == DECISION_DENY:
+        pinned = prior.get("run")
+        if not isinstance(pinned, str) or not pinned:
+            return None
+        if pinned == str(run_id):
+            return None
+    elif prior.get("decision") == DECISION_ALLOW:
+        spent = prior.get("consumed_by_run")
+        if not isinstance(spent, str) or not spent:
+            return None
+        if spent == str(run_id):
+            return None
+    else:
+        return None
+    record: dict[str, Any] = {
+        "time": _decision_now(),
+        "project": str(project_id),
+        "argv": argv_words,
+        "run": str(run_id),
+    }
+    if isinstance(memory, dict):
+        memory[key] = record
+    merged[key] = record
+    save_decisions(store_dir, merged)
+    return dict(record)
+
+
 def decision_allows_run(store_dir: Any = None, memory: Any = None,
                         tool_id: str = "",
                         run_id: Any = None) -> bool:
@@ -474,7 +562,8 @@ def note_decision_consumed(store_dir: Any = None, memory: Any = None,
 
 def repin_install_request(store_dir: Any = None, memory: Any = None,
                           tool_id: str = "", argv: Any = None,
-                          project_id: str = "") -> dict[str, Any] | None:
+                          project_id: str = "",
+                          run_id: Any = None) -> dict[str, Any] | None:
     """Point the pending ask pin at genuinely new words (FXR4A D5).
 
     A recorded deny is never touched. Otherwise the pin moves to the
@@ -507,6 +596,8 @@ def repin_install_request(store_dir: Any = None, memory: Any = None,
             "project": str(project_id),
             "argv": argv_words,
         }
+    if run_id is not None and str(run_id):
+        record["run"] = str(run_id)
     if isinstance(memory, dict):
         memory[key] = record
     merged[key] = record
@@ -547,14 +638,19 @@ def record_decision(store_dir: Any = None, memory: Any = None,
     }
     # A fresh decision is a fresh once-allow: drop any spent marker so
     # the next run that uses it consumes it anew (FXR4A D4).
+    prior = merged.get(key)
     if argv_words is not None:
         record["argv"] = argv_words
-    else:
-        prior = merged.get(key)
-        if (isinstance(prior, dict)
-                and isinstance(prior.get("argv"), list)
-                and prior["argv"]):
-            record["argv"] = [str(word) for word in prior["argv"]]
+    elif (isinstance(prior, dict)
+            and isinstance(prior.get("argv"), list)
+            and prior["argv"]):
+        record["argv"] = [str(word) for word in prior["argv"]]
+    if (isinstance(prior, dict)
+            and isinstance(prior.get("run"), str)
+            and prior["run"]):
+        # FXASK A4: the decision keeps the run it was asked in, so the
+        # deny covers that run only and the next run asks again.
+        record["run"] = prior["run"]
     if isinstance(memory, dict):
         memory[key] = record
     merged[key] = record
@@ -608,7 +704,8 @@ def get_install_argv(store_dir: Any = None, memory: Any = None,
 
 def record_install_request(store_dir: Any = None, memory: Any = None,
                            tool_id: str = "", argv: Any = None,
-                           project_id: str = "") -> dict[str, Any] | None:
+                           project_id: str = "",
+                           run_id: Any = None) -> dict[str, Any] | None:
     """Pin the exact argv that triggered one install ask.
 
     First ask wins: a recorded allow/deny is never touched and an
@@ -640,6 +737,10 @@ def record_install_request(store_dir: Any = None, memory: Any = None,
         "project": str(project_id),
         "argv": argv_words,
     }
+    if run_id is not None and str(run_id):
+        # FXASK A4: the asking run rides the pin, so a later deny
+        # covers that run only and the next run asks again.
+        record["run"] = str(run_id)
     if isinstance(memory, dict):
         memory[key] = record
     merged[key] = record
@@ -753,10 +854,21 @@ def require_grant_word(value: Any, field: str) -> str:
 
 
 def _install_subcommand(words: list[str]) -> str:
-    """Subcommand word of one install argv, or empty when flag-led."""
+    """Subcommand word of one install argv, or empty when flag-led.
+
+    Manager path flags (`--prefix`, `--cwd`, `--dir`, `-C`) plus their
+    values are skipped first, so a flag-led install still resolves its
+    verb and a project grant covers it; a flag-led run resolves no
+    verb and stays empty.
+    """
     if len(words) < 2:
         return ""
-    second = str(words[1])
+    from agent_si.toolguard import guard as _guard
+
+    rest = _guard._skip_manager_path_flags([str(word) for word in words[1:]])
+    if not rest:
+        return ""
+    second = rest[0]
     if not second or second.startswith("-"):
         return ""
     return second

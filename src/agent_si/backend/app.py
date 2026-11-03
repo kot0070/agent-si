@@ -4747,9 +4747,10 @@ def create_app(settings: Any = None,
                 },
             )
         _demof13w_grant_head = str(_demof13w_grant_argv[0])
-        _demof13w_grant_second = str(_demof13w_grant_argv[1])
-        if not _demof13w_grant_second or _demof13w_grant_second.startswith(
-                "-"):
+        _demof13w_grant_second = (
+            _demof13w_permissions._install_subcommand(
+                [str(word) for word in _demof13w_grant_argv]))
+        if not _demof13w_grant_second:
             raise HTTPException(
                 status_code=409,
                 detail={
