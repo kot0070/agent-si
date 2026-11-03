@@ -1,0 +1,206 @@
+"""FXSHELLV focused test: sidebar stays visible at 800x600 (gate red fix).
+
+RED->GREEN: on the unpatched tree this test FAILS at 800x600
+(`wait_for_selector(sidebar)` times out — the nav resolves to hidden
+because `@media (max-width: 800px)` sets `display: none` on the sidebar).
+After the FXSHELLV fix (collapse narrowed to 799px) it PASSES: the
+three-column layout persists at 800px, the nav is one column left of the
+content, and the first rail link keeps the accent token with no underline.
+
+Method (same as frozen F6 in test_fxshell1_visual.py): build the real
+production frontend, serve frontend/dist on a local port, drive it with
+Playwright (channel msedge, headless). The ONLY fake is at the network
+boundary (one page.route fulfills /api calls); every HTML/JS/CSS byte is
+the real production build.
+"""
+
+import json
+import os
+import shutil
+import subprocess
+import threading
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+
+import pytest
+
+pytest.importorskip("playwright.sync_api")
+from playwright.sync_api import sync_playwright
+
+WS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+FRONTEND = os.path.join(WS, "frontend")
+DIST = os.path.join(FRONTEND, "dist")
+
+THEME_KEY = "agentsi.theme"
+
+CASES = [
+    ("dark", 800, 600),
+    ("light", 800, 600),
+]
+
+
+def _hex_to_rgb(value):
+    text = value.strip()
+    assert text.startswith("#") and len(text) == 7, "expected #rrggbb, got %r" % (value,)
+    return "rgb(%d, %d, %d)" % (int(text[1:3], 16), int(text[3:5], 16), int(text[5:7], 16))
+
+
+def _build_frontend():
+    npm = shutil.which("npm")
+    if npm is not None:
+        if os.name == "nt":
+            completed = subprocess.run(
+                '"%s" --prefix frontend run build' % npm,
+                cwd=WS,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=600,
+            )
+        else:
+            completed = subprocess.run(
+                [npm, "--prefix", "frontend", "run", "build"],
+                cwd=WS,
+                capture_output=True,
+                text=True,
+                timeout=600,
+            )
+    else:
+        node = shutil.which("node") or shutil.which("nodejs")
+        assert node is not None, "neither npm nor node found on PATH"
+        completed = subprocess.run(
+            [node, os.path.join("node_modules", "vite", "bin", "vite.js"), "build"],
+            cwd=FRONTEND,
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+    tail = (completed.stdout + completed.stderr)[-4000:]
+    assert completed.returncode == 0, "frontend build failed:\n" + tail
+    assert os.path.isfile(os.path.join(DIST, "index.html")), "dist/index.html missing after build"
+
+
+class _DistHandler(SimpleHTTPRequestHandler):
+    extensions_map = dict(
+        SimpleHTTPRequestHandler.extensions_map,
+        **{
+            ".js": "text/javascript",
+            ".mjs": "text/javascript",
+            ".css": "text/css",
+            ".html": "text/html",
+            ".json": "application/json",
+            ".svg": "image/svg+xml",
+        },
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, directory=DIST, **kwargs)
+
+    def log_message(self, *args):
+        pass
+
+
+@pytest.fixture(scope="session")
+def served_base():
+    _build_frontend()
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _DistHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield "http://127.0.0.1:%d" % server.server_port
+    finally:
+        server.shutdown()
+        thread.join(timeout=10)
+        server.server_close()
+
+
+@pytest.fixture(scope="session")
+def edge():
+    playwright = sync_playwright().start()
+    try:
+        browser = playwright.chromium.launch(channel="msedge", headless=True)
+    except Exception:
+        playwright.stop()
+        raise
+    try:
+        yield browser
+    finally:
+        browser.close()
+        playwright.stop()
+
+
+def _box(page, selector):
+    return page.evaluate(
+        """(sel) => {
+          const el = document.querySelector(sel);
+          if (!el) return null;
+          const r = el.getBoundingClientRect();
+          return {x: r.x, y: r.y, width: r.width, height: r.height};
+        }""",
+        selector,
+    )
+
+
+@pytest.mark.parametrize("theme,width,height", CASES)
+def test_sidebar_visible_at_800x600(served_base, edge, theme, width, height):
+    context = edge.new_context(viewport={"width": width, "height": height})
+    try:
+        page = context.new_page()
+        errors = []
+        page.on("pageerror", lambda exc: errors.append(str(exc)))
+
+        def _api(route):
+            if route.request.url.endswith("/api/v1/projects") and route.request.method == "GET":
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps({"projects": []}),
+                )
+            else:
+                route.fulfill(
+                    status=404,
+                    content_type="application/json",
+                    body=json.dumps({"code": "FXSHELLV_UNEXPECTED_API"}),
+                )
+
+        page.route("**/api/**", _api)
+
+        page.goto(served_base + "/", wait_until="load")
+        page.evaluate("window.localStorage.setItem('%s', '%s')" % (THEME_KEY, theme))
+        page.reload(wait_until="networkidle")
+
+        assert page.evaluate("document.documentElement.dataset.theme") == theme
+        # Gate red: at 800x600 the sidebar resolved to hidden. Visible now.
+        for testid in ("topbar", "sidebar", "app-main", "menu-new-task"):
+            page.wait_for_selector('[data-testid="%s"]' % testid)
+
+        nav = _box(page, '[data-testid="sidebar"]')
+        main = _box(page, '[data-testid="app-main"]')
+        assert nav is not None and main is not None, "app shell regions missing"
+        assert nav["width"] > 0 and nav["height"] > 0, "sidebar has no size: %r" % (nav,)
+        assert nav["x"] + nav["width"] <= main["x"] + 1, (
+            "nav is not one column left of content: nav=%r main=%r" % (nav, main)
+        )
+
+        scroll_wide = page.evaluate("document.documentElement.scrollWidth")
+        assert scroll_wide <= width, "horizontal page scroll at %dpx: scrollWidth %d" % (width, scroll_wide)
+
+        link_look = page.evaluate(
+            """() => {
+              const a = document.querySelector('nav[data-testid="sidebar"] a');
+              const cs = getComputedStyle(a);
+              const root = getComputedStyle(document.documentElement);
+              return {
+                deco: cs.textDecorationLine,
+                color: cs.color,
+                accent: root.getPropertyValue('--agent-si-accent').trim(),
+              };
+            }"""
+        )
+        assert link_look["deco"] == "none", "nav link is underlined: %r" % (link_look,)
+        assert link_look["color"] == _hex_to_rgb(link_look["accent"]), (
+            "nav link is not the token colour: %r" % (link_look,)
+        )
+
+        assert errors == [], "page errors: %r" % (errors,)
+    finally:
+        context.close()
