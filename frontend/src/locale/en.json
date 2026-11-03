@@ -365,6 +365,14 @@
     "hub": {
       "about": "About",
       "howItWorks": "How it works"
+    },
+    "automations": {
+      "title": "Automations",
+      "purpose": "Small jobs on a schedule, a number or an event - every run recorded.",
+      "needItNow": "Open it when the same instruction repeats: checkpoint, pause, notify."
+    },
+    "group": {
+      "watcherAutomations": "Watcher and automations"
     }
   },
   "diagnostics": {
@@ -971,6 +979,103 @@
     },
     "routing": {
       "autoWhy": "Auto: cheapest known price among connected providers."
+    }
+  },
+  "fxauto": {
+    "purpose": "Automations run small jobs for you on a schedule, on a number, or on an event. Every run is recorded; nothing runs while the stop switch is on.",
+    "globalStop": "Stop all automations",
+    "projectStop": "Stop automations for this project",
+    "on": "On",
+    "off": "Off",
+    "rulesTitle": "Rules",
+    "rulesEmpty": "No rules yet. Start from a template or build a new rule.",
+    "newRule": "New rule",
+    "templatesButton": "Templates",
+    "templatesTitle": "Templates",
+    "templateUse": "Use",
+    "builderTitle": "New rule",
+    "builderName": "Name",
+    "builderWhen": "When",
+    "whenSchedule": "Schedule",
+    "whenMetric": "Number",
+    "whenEvent": "Event",
+    "builderIf": "Only if (optional, under 500 characters)",
+    "builderDo": "Do",
+    "builderMiss": "If missed",
+    "missSkip": "skip",
+    "missOnce": "run once",
+    "builderPreview": "Preview",
+    "builderValidate": "Validate",
+    "builderSave": "Save",
+    "builderCancel": "Cancel",
+    "builderValid": "Looks good.",
+    "builderStrongNote": "Strong actions run only after you approve them below.",
+    "needProject": "Open a project to manage its rules.",
+    "builderNameRequired": "Give the rule a name.",
+    "builderIfTooLong": "Keep it under 500 characters.",
+    "ruleSentence": "{name} - {when}, {do}.",
+    "state": "State",
+    "runNow": "Run now",
+    "historyTitle": "History",
+    "historyEmpty": "No runs yet.",
+    "noNextRun": "no next run",
+    "nextRun": "Next: {when}",
+    "approvalsTitle": "Approvals",
+    "approvalsEmpty": "No pending approvals.",
+    "approve": "Approve",
+    "reject": "Reject",
+    "approvalPending": "waiting",
+    "approvalApproved": "approved",
+    "approvalRejected": "rejected",
+    "checkpointsTitle": "Checkpoints",
+    "checkpointsEmpty": "No checkpoints yet.",
+    "resumeAvailable": "Resume available: {id}",
+    "resume": "Resume",
+    "checkpointDigest": "digest",
+    "pausedRefused": "Automations are stopped - turn the stop switch off first.",
+    "turnedOffRefused": "This rule is turned off - turn it on to run it.",
+    "openAutomations": "Open automations",
+    "when": {
+      "every3h": "every 3 hours",
+      "every30m": "every 30 minutes",
+      "daily2200": "daily at 22:00",
+      "budget90": "when budget used reaches 90%",
+      "context70": "when context reaches 70%",
+      "turns40": "when turns reach 40",
+      "appStarted": "when the app starts",
+      "auditFinished": "when an audit finishes",
+      "auditFailed": "when an audit fails"
+    },
+    "do": {
+      "startNextTask": "starts the next task",
+      "rereadContext": "re-reads the context",
+      "checkpoint": "writes a checkpoint",
+      "pauseProject": "pauses the project",
+      "switchModel": "switches the model within policy",
+      "runAudit": "runs an audit",
+      "notify": "sends a notice to the journal"
+    },
+    "chips": {
+      "every3h": "Every 3 h",
+      "every30m": "Every 30 min",
+      "onRestart": "On restart",
+      "budget90": "Budget 90%",
+      "auditFailed": "Audit fails",
+      "onDemand": "On demand",
+      "reread": "Re-read",
+      "checkpoint": "Checkpoint",
+      "pauseProject": "Pause",
+      "notify": "Notify"
+    },
+    "results": {
+      "waitingApproval": "Waiting for approval: {name}.",
+      "checkpoint": "Checkpoint {id} written for {name}.",
+      "notified": "{name}: notice sent to the journal.",
+      "reread": "Context re-read for {name}: {register} register rows, {checkpoints} checkpoints.",
+      "paused": "Project {project} paused by {name}.",
+      "approvedRecorded": "{name}: {action} approved and recorded.",
+      "rejected": "{name}: approval rejected.",
+      "unknown": "Finished."
     }
   }
 }

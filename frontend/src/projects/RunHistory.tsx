@@ -340,6 +340,17 @@ export function RunHistory(props: RunHistoryProps): ReactElement {
               </div>
             )}
           </div>
+          {/* FXAUTO: checkpoints live on the Automations page; the Runs
+              tab links there (plain anchor: RunHistory mounts router-free
+              in unit tests, and this is a cross-page link). */}
+          <div>
+            <a
+              data-testid="runhistory-open-automations"
+              href="/settings/automations"
+            >
+              {t("fxauto.openAutomations")}
+            </a>
+          </div>
         </div>
       )}
     </div>
