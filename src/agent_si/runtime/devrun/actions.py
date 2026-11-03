@@ -858,9 +858,7 @@ class _ExecTool:
             if venv_bin is not None:
                 env["PATH"] = (venv_bin + os.pathsep
                                + env.get("PATH", ""))
-            flags = 0
-            if os.name == "nt":
-                flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            flags = _proc_tree.quiet_flags()
             try:
                 with _retry_av_lock(
                         lambda: open(log_path, "ab")) as handle:
