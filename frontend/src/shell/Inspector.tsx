@@ -1550,7 +1550,7 @@ export function Inspector(props: InspectorProps): ReactElement {
                 · {t("shell.cards.watcher.lastCheck")}{": "}
                 {watcherStatus.last_check_at
                   ? formatScreenTime(watcherStatus.last_check_at)
-                  : t("watcher.tab.notKnown")}
+                  : t("watcher.tab.noChecksYet")}
               </p>
               {/* FXZERO R4 extra gate: the model names the exact served
                   watcher model (the one that answered), never a setting
