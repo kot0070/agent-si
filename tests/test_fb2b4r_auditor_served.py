@@ -107,10 +107,10 @@ def _unknown_catalog():
     return _kb.make_catalog([row], kb_version=1, updated_at="2026-10-11")
 
 
-def _create_project_and_task(client):
+def _create_project_and_task(client, tag=""):
     resp = client.post("/api/v1/projects",
                        json={"name": "fb2b4r-test",
-                             "folder_ref": "dock-fb2b4r"},
+                             "folder_ref": "dock-fb2b4r%s" % tag},
                        headers=HEADERS)
     assert resp.status_code == 200, resp.text
     project_id = resp.json()["project"]["project_id"]
@@ -237,7 +237,7 @@ def test_openai_only_no_refs_eligible_with_b1_rows_served(
         proj.mkdir()
         app = create_app(_settings(str(store)))
         client = _tc.TestClient(app, raise_server_exceptions=False)
-        _create_project_and_task(client)
+        _create_project_and_task(client, "-green1")
         _save_and_connect_openai(client)
         resp = client.post("/api/v1/kb/update",
                            json={"approved_by_user": True},
@@ -256,7 +256,7 @@ def test_openai_only_no_refs_eligible_with_b1_rows_served(
         assert selection.auditor.provider_id == OPENAI_PROVIDER
         assert selection.auditor.model == OPENAI_MODEL
         assert selection.independence_level == "L2"
-        project_id, task_id = _create_project_and_task(client)
+        project_id, task_id = _create_project_and_task(client, "-green2")
         resp = client.post(
             "/api/v1/assurance/finalize",
             json=_finalize_body(

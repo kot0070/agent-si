@@ -38,13 +38,6 @@ nav[data-testid="sidebar"] {
   padding-right: 16px;
 }
 
-/* Links restyle stays inside the sidebar nav (link-colours lane stays open). */
-nav[data-testid="sidebar"] a {
-  display: block;
-  color: var(--fx-accent);
-  text-decoration: none;
-}
-
 /* FXPOINT1 P3: one-sentence purpose per tab reads as its own line. */
 nav[data-testid="sidebar"] > span {
   display: block;
@@ -562,26 +555,28 @@ nav[data-testid="sidebar"] a.fx-nav-active {
   white-space: nowrap;
 }
 
-/* --- Left rail: icon + short label rows with a soft selected fill. --- */
+/* --- Left rail: icon + short label rows with a soft selected fill.
+   Link colour is the accent token (FXSHELL1 visual contract +
+   FXDESIGN3 S5); the soft fill carries the selected state. --- */
 nav[data-testid="sidebar"] a {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 7px 10px;
   border-radius: 8px;
-  color: var(--fx-ink);
+  color: var(--fx-accent);
   text-decoration: none;
 }
 
 nav[data-testid="sidebar"] a:hover {
-  color: var(--fx-ink);
+  color: var(--fx-accent);
   text-decoration: none;
 }
 
 nav[data-testid="sidebar"] a.fx-nav-active {
   font-weight: 600;
   text-decoration: none;
-  color: var(--fx-ink);
+  color: var(--fx-accent);
   background-color: var(--fx-card-bg);
 }
 

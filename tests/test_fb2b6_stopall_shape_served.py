@@ -2,10 +2,15 @@
 
 Through create_app + HTTP TestClient only (loopback, no network/keys),
 mirroring the tests/test_ock08_stop_served.py client pattern:
-- a body carrying `project` instead of `project_id` either stops the
-  named project (alias) or is answered 4xx -- never a silent stop of
-  scope "";
-- a body with no project_id at all is answered 4xx.
+- a body carrying `project` instead of `project_id` stops the
+  named project (alias);
+- a bare user body `{actor: "user"}` is the TopBar one-click stop
+  (TopBar.tsx sends exactly this when no project is selected): it is
+  ACCEPTED and stops every project's work, never 4xx
+  (kit BUILD_PLAN one-click Stop all: always visible, user-only).
+The stop fact is journaled under the all-projects (empty system) scope
+("across N projects" totals row); no STOP_ALL row ever carries a phantom
+project id.
 """
 
 import sys
@@ -74,5 +79,11 @@ def test_project_alias_or_4xx():
         assert 400 <= resp.status_code < 500, resp.text
 
     resp_bare = _post(client, {"actor": "user"})
-    assert 400 <= resp_bare.status_code < 500, resp_bare.text
-    assert tuple(_journal.stored_rows("", "STOP_ALL")) == ()
+    assert resp_bare.status_code == 200, resp_bare.text
+    bare = resp_bare.json()
+    assert bare["accepted"] is True, bare
+    rows = _journal.stored_rows("", "STOP_ALL")
+    assert any(
+        "stop-all by user" in r.summary and "across" in r.summary
+        for r in rows
+    ), [r.summary for r in rows]

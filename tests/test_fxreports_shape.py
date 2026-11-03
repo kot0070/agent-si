@@ -7,6 +7,11 @@ K10 = ROOT / "docs" / "reports" / "K10.md"
 K11 = ROOT / "docs" / "reports" / "K11.md"
 INLINE = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
 
+#: Real placeholder markers look like <<NAME>> (shipped NOTICES once
+#: carried <<FINAL...>>); prose that merely names the marker check
+#: (backtick-quoted "<<", K10.md:64) is not a placeholder.
+PLACEHOLDER = re.compile(r"<<[^`\s]*>>")
+
 K13_SHA = "f256bab4d31be3cd9e86c22a1bdcef90b08ad62500a8eca2051705cc0a9b0690"
 K04_SHA = "931cac1eec2532f6f5cdc98038725628435f6d4db91f8c64f6147c0838f01d7c10207348ab"
 
@@ -31,7 +36,7 @@ def test_fxreports_titles_and_sections():
 def test_fxreports_no_placeholder_markers():
     for page in (K10, K11):
         for i, line in enumerate(_text(page).splitlines(), 1):
-            assert "<<" not in line, f"{page.name}:{i}"
+            assert not PLACEHOLDER.search(line), f"{page.name}:{i}: {line}"
 
 
 def test_fxreports_no_dead_links():
