@@ -715,6 +715,40 @@ def wants_devrun(request: Any, bound_provider: Any, app: Any) -> bool:
                 and app is not None)
 
 
+#: FXSTORE machine codes for secret-store terminals (mirror the chat
+#: layer codes; matched duck-typed so the engine never imports it).
+_FXSTORE_SECRET_CODES = ("SECRET_VALUE_MISSING",
+                         "CREDENTIAL_STORE_UNREADABLE")
+
+
+def _fxstore_secret_terminal(exc: Any) -> Any:
+    """Plain terminal triple for secret-store failures (FXSTORE).
+
+    Returns (code, provider_id, summary) for the two proven FXSTORE
+    failures, else None. A missing key says the key is not available;
+    an unreadable store says the store cannot be read; the two are
+    never mixed. Ids only in the summary, never the value, never
+    engine jargon (the UI renders its own line from the code).
+    """
+    try:
+        code = getattr(exc, "code", None)
+    except Exception:
+        return None
+    if code not in _FXSTORE_SECRET_CODES:
+        return None
+    try:
+        provider = str(getattr(exc, "provider_id", "") or "")
+    except Exception:
+        provider = ""
+    if code == "SECRET_VALUE_MISSING":
+        summary = ("The key for '%s' is not available. "
+                   "Connect it again." % (provider or "provider",))
+    else:
+        summary = ("The credential store cannot be read for '%s'."
+                   % (provider or "provider",))
+    return (code, provider, summary)
+
+
 def _run_event(event: str, turn: int, subtask: str, detail: str,
                data: Any = None) -> Any:
     """One chat-consumable RunEvent (the manager's own class).
@@ -2131,6 +2165,31 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         raise
     except Exception as exc:
         record["success"] = False
+        # FXSTORE: a missing key (or an unreadable store) ends the run
+        # as a plain terminal, never engine jargon on screen. The chat
+        # SSE mapper forwards the code + provider id (ids only, never
+        # the value) so the UI names the key and links Settings.
+        _fxstore_terminal = _fxstore_secret_terminal(exc)
+        if _fxstore_terminal is not None:
+            _fxstore_code, _fxstore_provider, _fxstore_summary = \
+                _fxstore_terminal
+            record["summary"] = _fxstore_summary
+            try:
+                from agent_si import file_log as _file_log
+
+                _file_log.log_exception("devrun-engine", run_id, exc)
+            except Exception:
+                pass
+            _finish_task()
+            _publish()
+            _close_live("BLOCKED")
+            _journal("DEVRUN_END", _end_summary())
+            yield _run_event(
+                "error", turn, task_id, _fxstore_summary,
+                {"run_id": run_id, "success": False,
+                 "code": _fxstore_code,
+                 "provider_id": _fxstore_provider})
+            return
         record["summary"] = "run failed: internal %s: %s" % (
             type(exc).__name__, exc)
         try:

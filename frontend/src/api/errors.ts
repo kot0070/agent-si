@@ -34,6 +34,9 @@ export interface ApiErrorDetails {
   // unreachable provider (the message travels in the error body next
   // to the code; the UI names well-known failures, never raw codes).
   message?: string;
+  // FXSTORE: the routed provider id on secret-store terminals (ids
+  // only, never the value) so the UI names the missing key plainly.
+  providerId?: string;
 }
 
 const ERROR_CODES: ReadonlyArray<ApiErrorCode> = [
@@ -65,6 +68,8 @@ const ERROR_CODES: ReadonlyArray<ApiErrorCode> = [
   "PROJECT_FOLDER_IN_USE",
   "PROJECT_FOLDER_MISSING",
   "NO_PROVIDER_BOUND",
+  "SECRET_VALUE_MISSING",
+  "CREDENTIAL_STORE_UNREADABLE",
 ];
 
 export const API_ERROR_CODES: ReadonlyArray<ApiErrorCode> = ERROR_CODES;
@@ -401,6 +406,10 @@ export function apiErrorLocaleKey(code: string): string {
       return "api.error.project_folder_missing";
     case "NO_PROVIDER_BOUND":
       return "firstrun.steps.connectProvider";
+    case "SECRET_VALUE_MISSING":
+      return "chat.error.keyMissing";
+    case "CREDENTIAL_STORE_UNREADABLE":
+      return "chat.error.storeUnreadable";
     default:
       return "errors.generic";
   }
