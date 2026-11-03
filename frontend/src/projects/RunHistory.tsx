@@ -243,7 +243,7 @@ export function RunHistory(props: RunHistoryProps): ReactElement {
               // lives in dedupeLiveRows); when the latest run ended, a stale
               // served RUNNING reads as the run's end state, never Running.
               const latest =
-                runs.length === 0 ? null : runs[runs.length - 1] ?? null;
+                runs.length === 0 ? null : (runs[0] ?? null);
               const latestEnded =
                 latest !== null && runWallS(latest) !== null;
               return dedupeLiveRows(parts).map((row) => {

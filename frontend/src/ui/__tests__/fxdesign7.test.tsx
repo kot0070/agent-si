@@ -15,7 +15,7 @@ import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { HttpApiClient } from "../../api/client";
 import { ApiClientProvider } from "../../app/ApiClientProvider";
 import { resetLocaleForTests, setLocale, t } from "../../locale/index";
-import { formatDateLong } from "../../locale/index";
+import { formatDateLong, formatScreenTime } from "../../locale/index";
 import { App } from "../../app/App";
 import { RoleProfileEditor } from "../../settings/index";
 import { dedupeProjects } from "../../projects/ProjectsPage";
@@ -227,8 +227,11 @@ describe("fxdesign7 projects", () => {
 
   it("long dates carry a label and a month name", () => {
     const text = formatDateLong("2026-02-11T06:42:44Z");
-    expect(text).toContain("2026");
-    expect(text).toMatch(/Feb|Feb\.|Feb/);
+    // FXTIME: long dates screen through the one 24-hour helper.
+    expect(text).toBe(formatScreenTime("2026-02-11T06:42:44Z", "en"));
+    expect(text).toMatch(/Feb/);
+    expect(text).not.toMatch(/AM|PM/);
+    expect(text).not.toContain("T06:42:44Z");
     expect(formatDateLong("not-a-date")).toBe("not-a-date");
   });
 
@@ -236,7 +239,10 @@ describe("fxdesign7 projects", () => {
     renderAppAt("/projects");
     const created = await screen.findByTestId("project-created-p1");
     expect(created.textContent).toContain(t("projects.list.created"));
-    expect(created.textContent).toContain("2026");
+    expect(created.textContent).toContain(
+      formatScreenTime("2026-02-11T06:42:44Z", "en"),
+    );
+    expect(created.textContent).not.toContain("2026-02-11T06:42:44Z");
     const dupes = await screen.findAllByTestId("project-row-p1");
     expect(dupes).toHaveLength(1);
   });
@@ -254,7 +260,9 @@ describe("fxdesign7 capability db", () => {
     const status = await screen.findByTestId("kb-status");
     expect(status.textContent).toContain("Version");
     expect(status.textContent).not.toContain("kb_version");
-    expect(status.textContent).toContain("2026");
+    expect(status.textContent).toContain(
+      formatScreenTime("2026-02-11T06:42:44Z", "en"),
+    );
   });
 });
 
@@ -438,7 +446,9 @@ describe("fxdesign7 inspector deferred", () => {
     expect(action.textContent).toContain(t("watcher.tab.actionBlocked"));
     expect(action.textContent).not.toContain("e-1");
     const checks = await screen.findByTestId("watcher-checks");
-    expect(checks.textContent).toContain("2026");
+    expect(checks.textContent).toContain(
+      formatScreenTime("2026-02-11T06:42:44Z", "en"),
+    );
     expect(checks.textContent).not.toContain("T06:42:44Z");
     // FXZERO R3: counts render with plural units, never "1 agents".
     const watches = await screen.findByTestId("watcher-watches");

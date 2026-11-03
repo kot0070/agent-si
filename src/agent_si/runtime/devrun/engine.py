@@ -715,6 +715,40 @@ def wants_devrun(request: Any, bound_provider: Any, app: Any) -> bool:
                 and app is not None)
 
 
+#: FXSTORE machine codes for secret-store terminals (mirror the chat
+#: layer codes; matched duck-typed so the engine never imports it).
+_FXSTORE_SECRET_CODES = ("SECRET_VALUE_MISSING",
+                         "CREDENTIAL_STORE_UNREADABLE")
+
+
+def _fxstore_secret_terminal(exc: Any) -> Any:
+    """Plain terminal triple for secret-store failures (FXSTORE).
+
+    Returns (code, provider_id, summary) for the two proven FXSTORE
+    failures, else None. A missing key says the key is not available;
+    an unreadable store says the store cannot be read; the two are
+    never mixed. Ids only in the summary, never the value, never
+    engine jargon (the UI renders its own line from the code).
+    """
+    try:
+        code = getattr(exc, "code", None)
+    except Exception:
+        return None
+    if code not in _FXSTORE_SECRET_CODES:
+        return None
+    try:
+        provider = str(getattr(exc, "provider_id", "") or "")
+    except Exception:
+        provider = ""
+    if code == "SECRET_VALUE_MISSING":
+        summary = ("The key for '%s' is not available. "
+                   "Connect it again." % (provider or "provider",))
+    else:
+        summary = ("The credential store cannot be read for '%s'."
+                   % (provider or "provider",))
+    return (code, provider, summary)
+
+
 def _run_event(event: str, turn: int, subtask: str, detail: str,
                data: Any = None) -> Any:
     """One chat-consumable RunEvent (the manager's own class).
@@ -1354,8 +1388,13 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                         "the run action IS the permission ask the app shows "
                         "the user. You may run checks. Return ONLY "
                         "{\"actions\": [...], \"done\": bool}: done true only "
-                        "when the task is complete.%s" % (
-                            message or "(no task text)",
+                        "when the task is complete. Project folder: %s. If the "
+                        "task names a place outside the project folder, never "
+                        "claim the file went there: work inside the project "
+                        "folder only, done true only when the inside work is "
+                        "complete - the run verdict names where every file "
+                        "went.%s" % (
+                            message or "(no task text)", folder,
                             _platform_guidance()))}]
             solo_spec: dict[str, Any] = {
                 "part_id": "solo", "goal": message or "(no task text)",
@@ -1655,7 +1694,7 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                 "director", director, director_adapter,
                 [{"role": "user", "content": _director_prompt(
                     message, _director_history_block(
-                        app, project, folder, run_id))}],
+                        app, project, folder, run_id), folder)}],
                 None, 0, waits=["plan"])
         except _roles.ContextOverflow:
             yield from _context_dead()
@@ -1675,7 +1714,7 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                     [{"role": "user",
                       "content": _director_prompt(
                           message, _director_history_block(
-                              app, project, folder, run_id))},
+                              app, project, folder, run_id), folder)},
                      {"role": "assistant", "content": ""},
                      {"role": "user",
                       "content": ("Your previous reply never arrived: "
@@ -1708,7 +1747,7 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                     [{"role": "user",
                       "content": _director_prompt(
                           message, _director_history_block(
-                              app, project, folder, run_id))},
+                              app, project, folder, run_id), folder)},
                      {"role": "assistant",
                       "content": director_text.output_text or ""},
                      {"role": "user",
@@ -1759,7 +1798,7 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                     [{"role": "user",
                       "content": _director_prompt(
                           message, _director_history_block(
-                              app, project, folder, run_id))},
+                              app, project, folder, run_id), folder)},
                      {"role": "assistant",
                       "content": director_text.output_text or ""},
                      {"role": "user",
@@ -1802,7 +1841,7 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                         [{"role": "user",
                           "content": _director_prompt(
                               message, _director_history_block(
-                                  app, project, folder, run_id))},
+                                  app, project, folder, run_id), folder)},
                          {"role": "assistant",
                           "content": director_text.output_text or ""},
                          {"role": "user",
@@ -1993,7 +2032,7 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                             [{"role": "user",
                               "content": _director_prompt(
                                   message, _director_history_block(
-                                      app, project, folder, run_id))},
+                                      app, project, folder, run_id), folder)},
                              {"role": "assistant",
                               "content": director_text.output_text or ""},
                              {"role": "user",
@@ -2254,6 +2293,31 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
         raise
     except Exception as exc:
         record["success"] = False
+        # FXSTORE: a missing key (or an unreadable store) ends the run
+        # as a plain terminal, never engine jargon on screen. The chat
+        # SSE mapper forwards the code + provider id (ids only, never
+        # the value) so the UI names the key and links Settings.
+        _fxstore_terminal = _fxstore_secret_terminal(exc)
+        if _fxstore_terminal is not None:
+            _fxstore_code, _fxstore_provider, _fxstore_summary = \
+                _fxstore_terminal
+            record["summary"] = _fxstore_summary
+            try:
+                from agent_si import file_log as _file_log
+
+                _file_log.log_exception("devrun-engine", run_id, exc)
+            except Exception:
+                pass
+            _finish_task()
+            _publish()
+            _close_live("BLOCKED")
+            _journal("DEVRUN_END", _end_summary())
+            yield _run_event(
+                "error", turn, task_id, _fxstore_summary,
+                {"run_id": run_id, "success": False,
+                 "code": _fxstore_code,
+                 "provider_id": _fxstore_provider})
+            return
         record["summary"] = "run failed: internal %s: %s" % (
             type(exc).__name__, exc)
         try:
@@ -2507,11 +2571,14 @@ def _director_history_block(app: Any, project: str, folder: str,
     return block
 
 
-def _director_prompt(message: str, history: str = "") -> str:
+def _director_prompt(message: str, history: str = "",
+                     folder: str = "") -> str:
     """The Director brief: strict plan-or-answer JSON, no prose.
 
     ``history`` is an optional server-built prior-run block (DATA);
     empty keeps the brief byte-identical to the history-free shape.
+    ``folder`` names the project folder; empty keeps the brief
+    byte-identical to the pre-FXWHERE shape.
     """
     base = (
         "You are the Director. Project task: %s\n\n"
@@ -2540,6 +2607,22 @@ def _director_prompt(message: str, history: str = "") -> str:
             message or "(no task text)", _platform_guidance()))
     from agent_si.runtime.devrun import roles as _roles
     base = "%s %s" % (base, _roles.reply_language_line())
+    if folder:
+        # FXWHERE: a task naming a place outside the project folder is
+        # never faked: plan the inside work (the run verdict names where
+        # every file went), or answer plainly with the folder path, or
+        # ask to pick that other folder as the project. Never a bare
+        # Done, never a claim the file went outside the project folder.
+        base += (
+            " Project folder: %s. When the task names a place outside "
+            "the project folder, never fake it: plan the work inside "
+            "the project folder (the run verdict names where every "
+            "file went), or return {\"answer\": \"...\"} saying plainly "
+            "\"Agent SI works only inside the project folder %s. "
+            "I wrote it there.\" when the work landed inside, or asking "
+            "to pick that other folder as the project folder. "
+            "Never a bare Done, never a claim the file went outside "
+            "the project folder." % (folder, folder))
     if history:
         return "%s\n\n%s" % (base, history)
     return base
@@ -3099,6 +3182,7 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
                     part_diff=part_diff,
                     checks=check_rows,
                     part_files=after,
+                    folder=folder,
                     artifact_refs=["%s/%s" % (part_id, path)
                                    for path in spec["files"]],
                     lock=lock, stop_seen=stop_seen,
@@ -3651,7 +3735,7 @@ def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
     history: list[dict[str, str]] = [
         {"role": "user", "content": _worker_prompt(
             spec, message, attempt, failing, reasons,
-            prior_files=prior_files, last_fail=last_fail)}]
+            prior_files=prior_files, last_fail=last_fail, folder=folder)}]
     repeat_counts: dict[str, int] = {}
     overflowed = False
     accum: list = [[], [], []]
@@ -3821,8 +3905,13 @@ def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
 def _worker_prompt(spec: dict, message: str, attempt: int,
                    failing: list, reasons: list,
                    prior_files: Any = None,
-                   last_fail: str = "") -> str:
-    """Worker brief for one attempt: its part only, never other parts."""
+                   last_fail: str = "",
+                   folder: str = "") -> str:
+    """Worker brief for one attempt: its part only, never other parts.
+
+    ``folder`` names the project folder; empty keeps the brief
+    byte-identical to the pre-FXWHERE shape.
+    """
     head = ("You are the worker for part %s (attempt %d). Goal: %s. "
             "Project task: %s. Files you may write: %s. "
             "Actions: read_file {path}, list_dir {path}, "
@@ -3861,6 +3950,15 @@ def _worker_prompt(spec: dict, message: str, attempt: int,
                          ", ".join(known) if known else "(none)",
                          last_text[:2000] if last_text else "(none)"))
     head += _platform_guidance()
+    if folder:
+        # FXWHERE: a task naming a place outside the project folder is
+        # never faked by the worker: inside writes only, and no claim
+        # the file went outside (the run verdict names where it went).
+        head += (
+            " Project folder: %s. If the task names a place outside "
+            "the project folder, never claim the file went there: "
+            "write inside the project folder only - the run verdict "
+            "names where every file went." % (folder,))
     from agent_si.runtime.devrun import roles as _roles
     head = "%s %s" % (head, _roles.reply_language_line())
     return head

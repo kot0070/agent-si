@@ -188,6 +188,8 @@ export type ApiErrorCode =
   | "PROJECT_FOLDER_MISSING"
   | "NO_PROVIDER_BOUND"
   | "GENERIC_ERROR"
+  | "SECRET_VALUE_MISSING"
+  | "CREDENTIAL_STORE_UNREADABLE"
   | "APPROVAL_REQUIRED";
 
 export interface ApiErrorBody {

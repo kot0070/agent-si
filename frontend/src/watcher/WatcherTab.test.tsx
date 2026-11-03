@@ -8,6 +8,7 @@ import {
   watcherSettingsKey,
 } from "./watcherSettings";
 import { WatcherTab } from "./WatcherTab";
+import { formatScreenTime } from "../locale/index";
 
 // FAKE-OF: global fetch (fetch-level fake only)
 function fakeFetchByRoute(
@@ -62,7 +63,7 @@ describe("WatcherTab (fetch-level fake only)", () => {
       "evt-0007",
     );
     expect(screen.getByTestId("watcher-generated").textContent).toBe(
-      "2026-10-27T00:00:00Z",
+      formatScreenTime("2026-10-27T00:00:00Z", "en"),
     );
     const journal = screen.getByTestId("watcher-journal");
     expect(journal.textContent).toContain("evt-0006");

@@ -1653,8 +1653,10 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
         // (first served part reason, else the run summary); with no reason
         // served it reads "Stopped when the run ended." Never served/guard
         // jargon, and no pointer back at this tab.
+        // FXCARDS C1: served runs are newest-first, so the latest run is
+        // runs[0], never runs[length-1] (length-1 is the oldest run).
         const latestRun =
-          runs.length === 0 ? null : (runs[runs.length - 1] ?? null);
+          runs.length === 0 ? null : (runs[0] ?? null);
         const runReason =
           latestRun === null
             ? null
@@ -1769,29 +1771,73 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
                 panelError(ledgerError)
               ) : budgetError !== null ? (
                 panelError(budgetError)
-              ) : tasks === null || ledger === null || budget === null ? (
+              ) : tasks === null || ledger === null || budget === null || runs === null ? (
                 <LoadingState loadingKey="ui.loading.more" />
               ) : (
                 <>
                   <span>{t("projects.derived.label")}:</span>
-                  {(
-                    [
-                      ["projectView.reports.packages", ledger.length === 0 ? null : formatNumber(sumLedger(ledger).packages, locale)],
-                      ["projectView.reports.tasks", formatNumber(tasks.length, locale)],
-                      ["projectView.reports.agents", ledger.length === 0 ? null : formatNumber(sumLedger(ledger).agents, locale)],
-                      ["projectView.reports.peak", ledger.length === 0 ? null : formatNumber(sumLedger(ledger).peak, locale)],
-                      ["projectView.reports.wall", ledger.length === 0 ? null : formatNumber(sumLedger(ledger).wall, locale)],
-                      ["projectView.reports.spent", `${formatNumber(budget.spent, locale)} ${budget.currency}`],
-                      ["projectView.reports.reserved", `${formatNumber(budget.reserved, locale)} ${budget.currency}`],
+                  {(() => {
+                    // FXCARDS C3: every derived number traces to a served
+                    // record of this project: package rows when served, else
+                    // the served run records (runs key, newest-first) plus
+                    // the served tasks/live rows. A truly-unrecorded value
+                    // stays OUT of the list, never Unknown beside known ones.
+                    const sums = sumLedger(ledger);
+                    const hasLedger = ledger.length > 0;
+                    const runsWall = sumRunsWall(runs);
+                    const liveAgents =
+                      live === null ? null : dedupeLiveRows(live).length;
+                    const facts: Array<[string, string | null]> = [
+                      [
+                        "projectView.reports.packages",
+                        hasLedger || runs.length > 0
+                          ? formatNumber(sums.packages + runs.length, locale)
+                          : null,
+                      ],
+                      [
+                        "projectView.reports.tasks",
+                        formatNumber(tasks.length, locale),
+                      ],
+                      [
+                        "projectView.reports.agents",
+                        hasLedger
+                          ? formatNumber(sums.agents, locale)
+                          : liveAgents !== null && liveAgents > 0
+                            ? formatNumber(liveAgents, locale)
+                            : null,
+                      ],
+                      [
+                        "projectView.reports.peak",
+                        hasLedger ? formatNumber(sums.peak, locale) : null,
+                      ],
+                      [
+                        "projectView.reports.wall",
+                        hasLedger
+                          ? formatNumber(sums.wall, locale)
+                          : runsWall !== null
+                            ? formatNumber(runsWall, locale)
+                            : null,
+                      ],
+                      [
+                        "projectView.reports.spent",
+                        `${formatNumber(budget.spent, locale)} ${budget.currency}`,
+                      ],
+                      [
+                        "projectView.reports.reserved",
+                        `${formatNumber(budget.reserved, locale)} ${budget.currency}`,
+                      ],
                       [
                         "projectView.reports.remaining",
                         `${formatNumber(remainingBudget(budget), locale)} ${budget.currency}`,
                       ],
-                    ] as Array<[string, string | null]>
-                  ).map(([labelKey, value]) => (
+                    ];
+                    return facts.filter(
+                      (fact): fact is [string, string] => fact[1] !== null,
+                    );
+                  })().map(([labelKey, value]) => (
                     <div key={labelKey} className="fxpv-fact">
                       <span>{t(labelKey)}:</span>
-                      <span>{value ?? t("shell.common.unknown")}</span>
+                      <span>{value}</span>
                     </div>
                   ))}
                 </>

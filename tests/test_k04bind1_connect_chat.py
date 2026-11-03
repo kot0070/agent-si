@@ -204,9 +204,18 @@ def test_restart_persists_and_disconnect_clears(tmp_path, monkeypatch):
     listed = client2.get("/api/v1/providers", headers=HEADERS)
     assert listed.status_code == 200, listed.text
     rows = {r["provider_id"]: r for r in listed.json()["providers"]}
-    assert "openai" in rows, rows
-    assert rows["openai"]["evidenced"] is True, rows
-    assert BAIT not in listed.text
+    # FXSTORE: the memory store loses the key on restart, so the served
+    # list drops the provider (the card shows Connect) and chat names
+    # the missing key instead of running.
+    assert rows == {}, rows
+    pre = client2.post("/api/v1/chat/stream",
+                       json={"project": pid, "message": "hi before resave"},
+                       headers=HEADERS)
+    assert pre.status_code == 200, pre.text
+    assert "SECRET_VALUE_MISSING" in pre.text, pre.text
+    assert "NO_PROVIDER_BOUND" not in pre.text, pre.text
+    assert "AdapterConfigError" not in pre.text, pre.text
+    assert BAIT not in pre.text
     # memory store loses the key on restart; re-save restores it
     # (OS store keeps it, no re-save needed there).
     resave = client2.post("/api/v1/providers/keys",

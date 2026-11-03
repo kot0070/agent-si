@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { pluralUnit, t } from "../locale/index";
+import { formatScreenTime, pluralUnit, t } from "../locale/index";
 import { ApiError, apiErrorLocaleKey, parseErrorBody } from "../api/errors";
 import { ErrorPanel } from "../ui/ErrorPanel";
 import {
@@ -282,7 +282,7 @@ export function WatcherTab({ projectId }: { projectId: string }) {
         {status.integrity_ok ? t("watcher.tab.ok") : t("watcher.tab.failed")}
       </p>
       <p data-testid="watcher-journal-head">{status.journal_head}</p>
-      <p data-testid="watcher-generated">{status.generated_at}</p>
+      <p data-testid="watcher-generated">{status.generated_at !== "" ? formatScreenTime(status.generated_at) : notKnown()}</p>
       <p data-testid="watcher-checks">
         {t("watcher.tab.checks")}:{" "}
         {typeof status.checks_done === "number" ? status.checks_done : notKnown()}
@@ -292,7 +292,7 @@ export function WatcherTab({ projectId }: { projectId: string }) {
         {typeof status.alerts_raised === "number" ? status.alerts_raised : notKnown()}
       </p>
       <p data-testid="watcher-last-check">
-        {t("watcher.tab.lastCheck")}: {status.last_check_at || notKnown()}
+        {t("watcher.tab.lastCheck")}: {status.last_check_at ? formatScreenTime(status.last_check_at) : notKnown()}
       </p>
       <p data-testid="watcher-calls">
         {t("watcher.tab.modelCalls")}:{" "}
