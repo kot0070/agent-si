@@ -407,7 +407,7 @@ export function ConnectDialog({
       },
       () => {
         setRefreshing(false);
-        setRefreshNote("Couldn't refresh the live list — keeping the last list.");
+        setRefreshNote(t("providers.connect.refreshFailed"));
       },
     );
   }
@@ -517,7 +517,7 @@ export function ConnectDialog({
         {t("providers.connect.connected", { label: preset.label })}
       </p>
       {modelsLoading ? (
-        <p role="status">Loading models...</p>
+        <p role="status">{t("providers.connect.loadingModels")}</p>
       ) : (
       <>
       <div>
@@ -527,21 +527,21 @@ export function ConnectDialog({
         disabled={refreshing}
         onClick={handleRefresh}
       >
-        {refreshing ? "Refreshing models..." : "Refresh models"}
+        {refreshing ? t("providers.connect.refreshingModels") : t("providers.connect.refreshModels")}
       </button>
       {refreshNote !== null ? <p data-variant="quiet">{refreshNote}</p> : null}
       </div>
       <label>
-        Filter models
+        {t("providers.connect.filterModels")}
         <input
           type="search"
-          aria-label="Filter models"
+          aria-label={t("providers.connect.filterModels")}
           value={modelQuery}
           onChange={(event) => setModelQuery(event.target.value)}
         />
       </label>
       {modelSource === "catalog" ? (
-        <p data-variant="quiet">showing the known list</p>
+        <p data-variant="quiet">{t("providers.connect.knownListNote")}</p>
       ) : null}
       {/* J10: one header line names the unknown models; the per-row
           chips stay, but the repetition reads once up front. */}
@@ -572,10 +572,10 @@ export function ConnectDialog({
               {" · "}
               <span data-testid={`connect-model-kb-${row.id}`} data-variant="quiet">
                 {row.kbKnown === false
-                  ? "not in capability base"
+                  ? t("providers.connect.kbOut")
                   : row.kbKnown === true
-                    ? "in capability base"
-                    : "capability unknown"}
+                    ? t("providers.connect.kbIn")
+                    : t("providers.connect.kbUnknown")}
               </span>
             </li>
           ))}
@@ -594,7 +594,7 @@ export function ConnectDialog({
         style={{ fontWeight: 700 }}
         onClick={handleDone}
       >
-        Done
+        {t("providers.connect.done")}
       </button>
       </div>
       {doneNote !== null ? (

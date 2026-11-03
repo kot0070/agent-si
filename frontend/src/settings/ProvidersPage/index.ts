@@ -1,6 +1,6 @@
 // Public surface of the ProvidersPage lane.
 
-export { PROVIDER_CATALOG, catalogOrder, getPreset } from "./catalog";
+export { PROVIDER_CATALOG, catalogOrder, getPreset, getProviderCatalog } from "./catalog";
 export { ChatSelector, enabledChatChoices } from "./ChatSelector";
 export type { ChatChoice } from "./ChatSelector";
 export { CONNECT_TIMEOUT_MS, ConnectDialog, saveWithTimeout } from "./ConnectDialog";

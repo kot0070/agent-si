@@ -4,7 +4,7 @@
 // built from the internally resolved enabled choices.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { PROVIDER_CATALOG } from "./catalog";
+import { getProviderCatalog } from "./catalog";
 import { enabledChatChoices } from "./ChatSelector";
 import type { ChatChoice } from "./ChatSelector";
 import { readRolePoolState } from "../roleProfilesApi";
@@ -200,7 +200,7 @@ const DEFAULT_VALUE: RolePoolValue = { mode: "AUTO", pinnedKey: "", poolKeys: []
 export function RolePoolPicker({ role, project_id = "local", options, onChange }: RolePoolPickerProps) {
   const project = project_id;
   const baseOptions = useMemo<PoolOption[]>(
-    () => options ?? choicesToPoolOptions(enabledChatChoices(PROVIDER_CATALOG, {})),
+    () => options ?? choicesToPoolOptions(enabledChatChoices(getProviderCatalog(), {})),
     [options],
   );
   // Keys the server saved but the current options no longer list (a
