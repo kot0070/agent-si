@@ -1401,10 +1401,40 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                 "files": []}
             solo_row: dict[str, Any] = {"part_id": "solo"}
 
+            def _solo_written_files() -> list:
+                """FXANSWERb-1: solo spec files that exist under the folder.
+
+                Only real files under the project folder are named, so
+                the verdict never claims a file that is not on disk.
+                """
+                out: list = []
+                try:
+                    names = solo_spec.get("files") or []
+                except Exception:
+                    return out
+                for name in names:
+                    try:
+                        rel = str(name).replace("\\", "/")
+                    except Exception:
+                        continue
+                    if not rel or rel in out:
+                        continue
+                    try:
+                        full = os.path.join(str(folder), rel)
+                    except Exception:
+                        continue
+                    try:
+                        if os.path.isfile(full):
+                            out.append(rel)
+                    except Exception:
+                        continue
+                return out
+
             def _solo_end(success: bool, summary: str,
                           first: str = "") -> Any:
                 """FXANSWER terminal tail: an optional answer delta
-                first, then the ledger line, the summary and done."""
+                first, then the ledger line, the written-files marker,
+                the summary and done."""
                 nonlocal turn
                 record["success"] = success
                 record["summary"] = summary
@@ -1421,6 +1451,13 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                     _ledger_total_line(record),
                     {"run_id": run_id})
                 turn += 1
+                _solo_files = _solo_written_files()
+                if _solo_files:
+                    yield _run_event(
+                        "delta", turn, task_id,
+                        "[files: %s]" % (", ".join(_solo_files),),
+                        {"run_id": run_id})
+                    turn += 1
                 yield _run_event("delta", turn, task_id, summary,
                                  {"run_id": run_id,
                                   "success": bool(success)})
@@ -1601,6 +1638,16 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                              _ledger_total_line(record),
                              {"run_id": run_id})
             turn += 1
+            # FXANSWERb-1: name the files the solo run really wrote (only
+            # files that exist under the project folder), because no
+            # Part row carries them.
+            _solo_done_files = _solo_written_files()
+            if _solo_done_files:
+                yield _run_event(
+                    "delta", turn, task_id,
+                    "[files: %s]" % (", ".join(_solo_done_files),),
+                    {"run_id": run_id})
+                turn += 1
             yield _run_event("delta", turn, task_id, record["summary"],
                              {"run_id": run_id, "success": True})
             turn += 1

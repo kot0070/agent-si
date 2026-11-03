@@ -201,6 +201,37 @@ def test_fxanswer_reconcile_marks_running_turns_interrupted(tmp_path):
 
 # -- team: answer without a question mark is a plain answer ------------------
 
+
+# -- solo: file task names the real file in a [files:] marker --------------
+
+def _worker_write_once(n_calls, messages):
+    if n_calls == 0:
+        return json.dumps({
+            "actions": [{"action": "write_file", "path": "test.txt",
+                         "content": "hello\n"}],
+            "done": False})
+    return json.dumps({"actions": [], "done": True})
+
+
+def test_fxanswerb1_solo_file_task_marker_and_file(tmp_path):
+    project = "fxans-file"
+    folder = _project_dir(tmp_path, project)
+    app, factory = _solo_app(tmp_path, project, [_worker_write_once])
+    from fastapi.testclient import TestClient
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = _post_chat(
+        client, project, folder,
+        message="Create test.txt containing hello")
+    assert resp.status_code == 200, resp.text
+    assert (folder / "test.txt").is_file(), "the file is on disk"
+    text = _all_text(_parse_sse(resp.text))
+    assert "[files: test.txt]" in text, text[:800]
+    assert "Done, not audited." in text, text[:800]
+    assert "Nothing was built" not in text, text[:800]
+    record = _run_record(app, project)
+    assert record is not None
+    assert record.get("success") is True, record.get("summary")
+
 def test_fxanswer_team_answer_no_question_mark(tmp_path):
     project = "fxans-team"
     folder = _project_dir(tmp_path, project)

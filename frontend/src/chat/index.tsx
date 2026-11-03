@@ -658,6 +658,10 @@ export interface EngineSummary {
   /** FXANSWER: the plain answer text when the run ended as an answer
   (server marker below); null when the run answered nothing. */
   answer: string | null;
+  /** FXANSWERb-1: the run is a team-off solo run (its own "Done, not
+  audited." line); solo runs have no Part rows, so the verdict reads
+  the solo line plus the real files instead of the empty-plan line. */
+  solo: boolean;
   /** FXWHERE: the project folder the files went into (resolved from
   the runs ledger by run id); null when unknown, then the verdict
   keeps the pre-FXWHERE shape. */
@@ -711,6 +715,7 @@ export function extractPlainAnswer(text: string): string | null {
     (line) =>
       line !== "" &&
       line !== PLAIN_ANSWER_MARKER &&
+      !line.startsWith("[files:") &&
       !ENGINE_LOG_MARKERS.test(line),
   );
   const kept = stripped.length > 0
@@ -804,6 +809,7 @@ export function summarizeEngineTurn(
     planChanged: planChangedLine(text),
     answer: plainAnswer,
     folder,
+    solo: soloDone,
   };
 }
 
@@ -844,6 +850,27 @@ export function engineVerdictLine(
 ): string {
   if (summary.answer !== null && summary.answer !== "") {
     return summary.answer;
+  }
+  if (summary.solo) {
+    // FXANSWERb-1: a solo run has no Part rows: the verdict reads the
+    // solo line plus the real files, never the empty-plan line while
+    // the files are on disk. A solo run that wrote nothing and
+    // answered nothing stays not Done.
+    const where =
+      summary.folder !== null && summary.folder !== ""
+        ? `, in ${verdictFolderLabel(summary.folder)}`
+        : "";
+    if (summary.done) {
+      const files =
+        summary.files.length > 0
+          ? `, files: ${summary.files.join(", ")}`
+          : "";
+      return `Done, not audited${files}${where}${costNote}.`;
+    }
+    if (summary.files.length === 0) {
+      return emptyPlanLine(costNote);
+    }
+    return `Failed — 0 parts, 0 passed, files: ${summary.files.join(", ")}${where}${costNote}.`;
   }
   if (summary.parts === 0) {
     return emptyPlanLine(costNote);

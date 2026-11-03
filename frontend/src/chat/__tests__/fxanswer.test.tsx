@@ -157,6 +157,52 @@ describe("fxanswer plain-answer verdict", () => {
   });
 });
 
+describe("fxanswerb-1 solo file task names its real files", () => {
+  const SOLO_FILE_TEXT =
+    `Team off: one worker, no audit\n` +
+    `Total: 4 input + 2 output = 6 tokens; cost not known (no price)\n` +
+    `[files: test.txt]\n` +
+    `Done, not audited.`;
+
+  it("solo file row reads Done, not audited plus the file", () => {
+    const summary = summarizeEngineTurn(SOLO_FILE_TEXT, "ok");
+    expect(summary.solo).toBe(true);
+    expect(summary.done).toBe(true);
+    expect(engineVerdictLine(summary)).toBe(
+      "Done, not audited, files: test.txt.",
+    );
+  });
+
+  it("solo file row names the folder when known", () => {
+    const summary = summarizeEngineTurn(
+      SOLO_FILE_TEXT,
+      "ok",
+      "C:\\H104\\ws",
+    );
+    expect(engineVerdictLine(summary)).toBe(
+      "Done, not audited, files: test.txt, in C:\\H104\\ws.",
+    );
+  });
+
+  it("solo answer row reads the answer, never the solo line", () => {
+    const summary = summarizeEngineTurn(ANSWER_TEXT, "ok");
+    expect(engineVerdictLine(summary)).toBe("pear");
+  });
+
+  it("solo nothing row stays not Done", () => {
+    const summary = summarizeEngineTurn(
+      "Team off: one worker, no audit\n" +
+        "Total: 0 input + 0 output = 0 tokens; cost not known (no price)\n" +
+        "Stopped after 10 steps: the task is not finished.",
+      "ok",
+    );
+    expect(summary.solo).toBe(false);
+    expect(summary.done).toBe(false);
+    expect(engineVerdictLine(summary)).toContain("Nothing was built");
+    expect(engineVerdictLine(summary)).not.toContain("Done");
+  });
+});
+
 describe("fxanswer stopped is not an error", () => {
   it("a stored stopped turn says Stopped, no error line, no retry", async () => {
     historyTurns = [
