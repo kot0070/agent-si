@@ -293,12 +293,13 @@ describe("ChatSelector", () => {
     };
     const choices = enabledChatChoices(PROVIDER_CATALOG, states);
     expect(choices.map((choice) => choice.modelId)).toEqual(["openai/gpt-4o-mini"]);
+    expect(choices.map((choice) => choice.label)).toEqual(["OpenAI — gpt-4o-mini"]);
     render(<ChatSelector catalog={PROVIDER_CATALOG} states={states} value="" onChange={() => {}} />);
     const text = screen
       .getAllByRole("option")
       .map((option) => option.textContent ?? "")
       .join(" ");
-    expect(text).toContain("Standard");
+    expect(text).toContain("gpt-4o-mini");
     expect(text).not.toContain("model-1");
   });
 });
@@ -360,7 +361,7 @@ describe("ProvidersPage", () => {
     const box = screen.getByLabelText("OpenAI Standard") as HTMLInputElement;
     expect(box.disabled).toBe(false);
     expect(box.checked).toBe(true);
-    expect(screen.getByRole("combobox").textContent ?? "").toContain("Standard");
+    expect(screen.getByRole("combobox").textContent ?? "").toContain("gpt-4o-mini");
     fireEvent.click(screen.getByLabelText("Disconnect OpenAI"));
     const disconnectDialog = screen.getByRole("dialog");
     fireEvent.click(within(disconnectDialog).getByText("Disconnect"));
@@ -552,9 +553,9 @@ describe("ProvidersPage role pools wiring (page-level)", () => {
     const labels = Array.from(select.options)
       .map((option) => option.textContent ?? "")
       .join(" | ");
-    expect(labels).toContain("OpenAI — Standard");
+    expect(labels).toContain("OpenAI — gpt-4o-mini");
     const text = worker.textContent ?? "";
-    expect(text).toContain("OpenAI — Standard");
+    expect(text).toContain("OpenAI — gpt-4o-mini");
     expect(text).not.toContain("openai/model-1");
     expect(text).not.toContain("pool-opt-1");
   });
@@ -604,7 +605,7 @@ describe("ProvidersPage role pools wiring (page-level)", () => {
     const fetchMock = await connectOpenaiAndEnableStandard();
     const worker = roleCard("worker");
     fireEvent.click(within(worker).getByLabelText("Model pool"));
-    fireEvent.click(within(worker).getByLabelText("OpenAI — Standard"));
+    fireEvent.click(within(worker).getByLabelText("OpenAI — gpt-4o-mini"));
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     expect(await screen.findByText("Saved Worker.")).toBeTruthy();
     const { init } = lastFetchCall(fetchMock);
@@ -626,7 +627,7 @@ describe("ProvidersPage role pools wiring (page-level)", () => {
     const labels = Array.from(select.options)
       .map((option) => option.textContent ?? "")
       .join(" | ");
-    expect(labels).toContain("OpenAI — Standard");
+    expect(labels).toContain("OpenAI — gpt-4o-mini");
     const text = chat.textContent ?? "";
     expect(text).not.toContain("openai/model-1");
   });
@@ -643,7 +644,7 @@ describe("ProvidersPage role pools wiring (page-level)", () => {
     expect(select.value).toBe((target as HTMLOptionElement).value);
     const selectedLabel =
       Array.from(select.options).find((option) => option.value === select.value)?.textContent ?? "";
-    expect(selectedLabel).toContain("Standard");
+    expect(selectedLabel).toContain("gpt-4o-mini");
     const text = chat.textContent ?? "";
     expect(text).not.toContain("openai/model-1");
   });
@@ -826,6 +827,6 @@ describe("ProvidersPage chat model save wiring (page-level)", () => {
     expect(select.value).toBe("openai/gpt-4o-mini");
     const selectedLabel =
       Array.from(select.options).find((option) => option.value === select.value)?.textContent ?? "";
-    expect(selectedLabel).toContain("Standard");
+    expect(selectedLabel).toContain("gpt-4o-mini");
   });
 });

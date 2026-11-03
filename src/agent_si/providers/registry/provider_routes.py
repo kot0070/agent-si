@@ -75,7 +75,8 @@ class ProviderCtx:
                  live_provider_ids: Any = None,
                  credential_store: Any = None,
                  model_state_dir: Any = None, http_get: Any = None,
-                 kb_rows: Any = None) -> None:
+                 kb_rows: Any = None,
+                 local_models: Any = None) -> None:
         self.facade = facade if facade is not None else _default_facade
         self.models: Dict[str, list] = dict(models or {})
         self.app_prefix = app_prefix
@@ -83,11 +84,14 @@ class ProviderCtx:
         self.store = store
         self.audit_sink = audit_sink
         self.live_provider_ids = live_provider_ids
+        self.local_models = local_models
         # FXPROVBE ports (all optional; unbound keeps the legacy read):
         # credential_store resolves the stored key at refresh time,
         # model_state_dir persists merged lists + ticks beside
         # provider_connections.json, http_get is the FAKE network seam,
-        # kb_rows carries catalog rows with price fields for the merge.
+        # kb_rows carries catalog rows with price fields for the merge,
+        # local_models maps a local provider id to its attached
+        # runtime's real model names (None when nothing attached).
         self.credential_store = credential_store
         self.model_state_dir = model_state_dir
         self.http_get = http_get
@@ -340,6 +344,74 @@ def _is_local_provider(provider_id: str, view: Any = None) -> bool:
     return isinstance(base, str) and base.startswith("http://localhost")
 
 
+#: Provider ids served off the attached local runtime (never a cloud
+#: fetch): the real names come from the runtime itself, never a
+#: placeholder. any-openai-compatible rides the same loopback rule.
+LOCAL_PROVIDER_IDS = ("ollama", "lm-studio", "any-openai-compatible")
+
+
+def _local_runtime_names(ctx: ProviderCtx, provider_id: str) -> Any:
+    """Real model names for a local provider id, or None when unserved.
+
+    None means the local lane serves nothing for this id right now
+    (no reader port or no attached runtime): callers keep the legacy
+    404. A list (possibly empty) means the runtime answered, so the
+    routes answer too, never a placeholder.
+    """
+    reader = getattr(ctx, "local_models", None)
+    if not callable(reader):
+        return None
+    try:
+        names = reader(provider_id)
+    except Exception:
+        return None
+    if names is None:
+        return None
+    out = []
+    for name in names:
+        text = str(name or "").strip()
+        if text and text not in out:
+            out.append(text)
+    return out
+
+
+def _local_rows(ctx: ProviderCtx, provider_id: str,
+                names: list) -> Tuple[list, list, list]:
+    """Merged display rows plus tick list and KB rows for local names."""
+    kb_rows = _kb_rows_for(ctx, provider_id)
+    try:
+        state_enabled = _model_lists.load_enabled(
+            getattr(ctx, "model_state_dir", None), provider_id)
+    except Exception:
+        state_enabled = None
+    enabled = [str(i) for i in state_enabled
+               if isinstance(i, str) and i] \
+        if isinstance(state_enabled, list) else []
+    ticked = {_model_lists.canonical_model_id(provider_id, i)
+              for i in enabled}
+    rows = []
+    for name in names:
+        ident = _model_lists.canonical_model_id(provider_id, name)
+        hit = _model_lists.resolve_kb_row(kb_rows, provider_id, ident)
+        kb_known = isinstance(hit, Mapping)
+        fields = None
+        if kb_known and isinstance(hit.get("fields"), Mapping):
+            fields = dict(hit.get("fields"))
+        rows.append({
+            "model": name,
+            "enabled": ident in ticked,
+            "in_base": kb_known,
+            "kb": fields,
+            "id": ident,
+            "name": name,
+            "wire_id": _model_lists.wire_model_id(ident),
+            "price": None,
+            "kb_known": kb_known,
+            "listed": True,
+        })
+    return rows, enabled, kb_rows
+
+
 def _refresh_best_effort(ctx: ProviderCtx, provider_id: str,
                          view: Any, default_model: Any) -> None:
     """Refresh after a good connect; failure never breaks the connect."""
@@ -374,7 +446,10 @@ def provider_models(ctx: ProviderCtx, query, body) -> Tuple[int, Dict]:
     source, enabled}``. Legacy row keys stay (``model`` is the id,
     ``enabled`` is ticked, ``in_base`` is kb_known, ``kb`` the fields).
     GET never performs network I/O: it reads the last stored list, or
-    the catalog rows when nothing was ever stored.
+    the catalog rows when nothing was ever stored. Local provider ids
+    (LOCAL_PROVIDER_IDS) the facade never registered answer off the
+    attached runtime's real names instead (a loopback read, possibly
+    zero rows), never a placeholder.
     """
     query = query or {}
     provider_id = query.get("id")
@@ -385,6 +460,18 @@ def provider_models(ctx: ProviderCtx, query, body) -> Tuple[int, Dict]:
     except ValueError as exc:
         return 400, {"error": str(exc)}
     if view is None:
+        # R2 local branch: a local provider id the facade never
+        # registered still answers off the attached runtime's real
+        # names (possibly zero rows), never a placeholder and never a
+        # cloud fetch. Nothing attached means the legacy 404.
+        if provider_id in LOCAL_PROVIDER_IDS:
+            names = _local_runtime_names(ctx, provider_id)
+            if names is not None:
+                rows, enabled, _kb_rows = _local_rows(
+                    ctx, provider_id, names)
+                return 200, {"provider_id": provider_id,
+                             "models": rows, "source": "local",
+                             "enabled": enabled}
         return 404, {"error": "unknown provider %r" % (provider_id,)}
     merged, state, _kb_rows = _merged_for(ctx, provider_id)
     verbatim: Dict[str, str] = {}
@@ -445,8 +532,22 @@ def refresh_provider_models(ctx: ProviderCtx, query,
     except ValueError as exc:
         return 400, {"error": str(exc)}
     if view is None:
+        # R2 local branch: refresh re-reads the attached runtime's
+        # real names (a loopback read, never a pull); nothing attached
+        # means the legacy 404.
+        if provider_id in LOCAL_PROVIDER_IDS:
+            names = _local_runtime_names(ctx, provider_id)
+            if names is not None:
+                rows, enabled, _kb_rows = _local_rows(
+                    ctx, provider_id, names)
+                return 200, {"provider_id": provider_id, "models": [
+                    {"id": str(m.get("id", "") or ""),
+                     "name": str(m.get("name", "") or ""),
+                     "price": m.get("price"),
+                     "kb_known": bool(m.get("kb_known", False))}
+                    for m in rows], "source": "local",
+                    "enabled": enabled}
         return 404, {"error": "unknown provider %r" % (provider_id,)}
-    if _is_local_provider(provider_id, view):
         merged, state, _kb_rows = _merged_for(ctx, provider_id)
         enabled = []
         if state is not None and isinstance(state.get("enabled"), list):
@@ -499,6 +600,56 @@ def put_provider_models(ctx: ProviderCtx, query, body) -> Tuple[int, Dict]:
     except ValueError as exc:
         return 400, {"error": str(exc)}
     if view is None:
+        # R2 local branch: ticks persist against the runtime's real
+        # names. An empty tick list clears the stored ticks (legacy
+        # allow), so Use-for-agents never needs a PUT first.
+        if provider_id in LOCAL_PROVIDER_IDS:
+            names = _local_runtime_names(ctx, provider_id)
+            if names is None:
+                return 404, {
+                    "error": "unknown provider %r" % (provider_id,)}
+            if not isinstance(body, Mapping):
+                return 400, {
+                    "error": "models save needs a JSON object body"}
+            hit = _find_raw_secret(body)
+            if hit:
+                return 400, {"error": "raw secret material refused at %s "
+                                      "(pass model ids, never raw)" % hit}
+            ids = body.get("ids")
+            if not isinstance(ids, list):
+                return 400, {"error": "models save needs an ids list"}
+            rows, _prev_enabled, _kb_rows = _local_rows(
+                ctx, provider_id, names)
+            known = {str(m.get("id", "") or "") for m in rows}
+            enabled = []
+            for ident in ids:
+                if not isinstance(ident, str) or not ident.strip():
+                    return 400, {
+                        "error": "model ids must be non-empty strings"}
+                canonical = _model_lists.canonical_model_id(
+                    provider_id, ident.strip())
+                if canonical not in known:
+                    return 400, {"error": "unknown model %r for provider %r "
+                                          "(ticks must be known to the "
+                                          "served list)" % (ident,
+                                                             provider_id)}
+                if canonical not in enabled:
+                    enabled.append(canonical)
+            if not enabled:
+                _model_lists.drop_state(
+                    getattr(ctx, "model_state_dir", None), provider_id)
+            else:
+                previous = {
+                    "provider_id": provider_id, "models": rows,
+                    "source": "local",
+                    "updated_at": _model_lists._utcnow(),
+                    "enabled": enabled}
+                if getattr(ctx, "model_state_dir", None) is not None:
+                    _model_lists.save_state(
+                        getattr(ctx, "model_state_dir", None),
+                        provider_id, previous)
+            return 200, {"ok": True, "provider_id": provider_id,
+                         "enabled": enabled}
         return 404, {"error": "unknown provider %r" % (provider_id,)}
     if not isinstance(body, Mapping):
         return 400, {"error": "models save needs a JSON object body"}

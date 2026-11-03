@@ -83,6 +83,32 @@ function stubChatBoundary(): void {
     if (url === "/api/v1/local/models" && method === "GET") {
       return jsonBody({ models: [] });
     }
+    const modelsMatch = url.match(/^\/api\/v1\/providers\/([^/]+)\/models$/);
+    if (modelsMatch !== null && method === "GET") {
+      const id = modelsMatch[1] as string;
+      const rows =
+        id === "anthropic"
+          ? [
+              { id: "anthropic/claude-haiku-4-5", name: "claude-haiku-4-5", kb_known: true },
+              { id: "anthropic/claude-haiku-5-5", name: "claude-haiku-5-5", kb_known: true },
+            ]
+          : id === "openai"
+            ? [
+                { id: "openai/gpt-4o-mini", name: "gpt-4o-mini", kb_known: true },
+                { id: "openai/gpt-4o", name: "gpt-4o", kb_known: true },
+              ]
+            : id === "meta"
+              ? [
+                  { id: "meta/muse-spark-1.3", name: "muse-spark-1.3", kb_known: true },
+                ]
+              : [];
+      return jsonBody({
+        provider_id: id,
+        models: rows,
+        source: "provider",
+        enabled: rows.map((row) => (row as { id: string }).id),
+      });
+    }
     throw new Error(`unexpected fetch ${method} ${url}`);
   });
 }
@@ -223,7 +249,7 @@ describe("fxpanel roles-composer provider failure", () => {
       const values = Array.from(select.options).map(
         (option) => (option as HTMLOptionElement).value,
       );
-      expect(values).toContain("meta");
+      expect(values).toContain("meta/muse-spark-1.3");
     });
   });
 

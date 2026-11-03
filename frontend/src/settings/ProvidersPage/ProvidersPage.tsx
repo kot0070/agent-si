@@ -3,13 +3,13 @@
 // a chat picker (enabled models only) and the leftover-key finder.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { getUiToken } from "../../api/errors";
+import { ApiError, getUiToken } from "../../api/errors";
 import { deleteLeftoverKey, listConnectedProviders, listLeftoverKeys } from "./connectApi";
 import { listProviderModels, listServedModels, mergeModelList, modelPriceText } from "./modelsApi";
 import type { ServedModelRow } from "./modelsApi";
 import { getProviderCatalog } from "./catalog";
 import { ChatModelSelector } from "./ChatModelSelector";
-import { enabledChatChoices } from "./ChatSelector";
+import { buildRoleChoices } from "./roleChoices";
 import { ConnectDialog } from "./ConnectDialog";
 import { DisconnectDialog } from "./DisconnectDialog";
 import { LeftoverKeyFinder } from "./LeftoverKeyFinder";
@@ -206,6 +206,7 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
         models: (displayModels[preset.id] ?? []).map((model) => ({
           id: model.id,
           label: model.label,
+          kb: model.kb,
         })),
       })),
     [catalog, displayModels],
@@ -227,18 +228,41 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
     }));
   }, [displayCatalog]);
 
-  const choices = useMemo(() => enabledChatChoices(displayCatalog, states), [displayCatalog, states]);
+  // R1: role/wizard/chat options: connected providers, then each
+  // provider instance's model list — the enabled models as full
+  // `provider/model` ids (placeholders, `unknown` and KB-proven
+  // non-text rows never reach the list).
+  const choices = useMemo(
+    () => buildRoleChoices(displayCatalog, displayModels, states),
+    [displayCatalog, displayModels, states],
+  );
   const poolOptions = useMemo(() => choicesToPoolOptions(choices), [choices]);
   const [poolSaveMessage, setPoolSaveMessage] = useState("");
   const [chatSaveMessage, setChatSaveMessage] = useState("");
   const needle = query.trim().toLowerCase();
 
+  // R1: a save refusal names the server's own reason in one
+  // sentence (the generic line alone never ships).
+  function saveFailure(base: string, err: unknown): string {
+    if (err instanceof ApiError) {
+      const reason = err.details?.message;
+      if (typeof reason === "string" && reason.trim() !== "") {
+        return `${base}: ${reason.trim()}`;
+      }
+    } else if (err instanceof Error && err.message.trim() !== "") {
+      return `${base}: ${err.message.trim()}`;
+    }
+    return base;
+  }
+
   async function handleRolePoolChange(role: string, value: RolePoolValue): Promise<void> {
     try {
       await saveRolePool(project, role, value, poolOptions);
       setPoolSaveMessage(t("providers.page.poolSaved", { role: roleLabel(role) }));
-    } catch {
-      setPoolSaveMessage(t("providers.page.poolSaveFailed", { role: roleLabel(role) }));
+    } catch (err) {
+      setPoolSaveMessage(
+        saveFailure(t("providers.page.poolSaveFailed", { role: roleLabel(role) }), err),
+      );
     }
   }
 
@@ -246,8 +270,10 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
     try {
       await saveChatModel(project, modelId, sessionToken);
       setChatSaveMessage(t("providers.page.chatSaved"));
-    } catch {
-      setChatSaveMessage(t("providers.page.chatSaveFailed"));
+    } catch (err) {
+      setChatSaveMessage(
+        saveFailure(t("providers.page.chatSaveFailed"), err),
+      );
     }
   }
 
@@ -287,8 +313,13 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
 
   function handleConnected(presetId: string): void {
     // Fresh connect ticks only the default model (the connect id): never
-    // everything, even when the account lists 100+ models.
-    const defaultId = catalog.find((entry) => entry.id === presetId)?.models[0]?.id;
+    // everything, even when the account lists 100+ models. Local presets
+    // are served-driven (the runtime's real names): nothing is ticked
+    // up front, the seeded list offers them instead.
+    const preset = catalog.find((entry) => entry.id === presetId);
+    const defaultId = preset?.kind === "local"
+      ? undefined
+      : preset?.models[0]?.id;
     setStates((prev) => {
       const current = prev[presetId] as ProviderState | undefined;
       const enabled = current !== undefined && current.enabledModels.length > 0

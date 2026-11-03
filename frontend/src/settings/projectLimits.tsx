@@ -8,10 +8,12 @@ import { ApiError, apiErrorLocaleKey } from "../api/errors";
 import { t } from "../locale/index";
 import {
   readBudgetLine,
+  readOffloadSwitch,
   readParallelParts,
   readStepLimits,
   readTeamMode,
   saveBudgetLimits,
+  saveOffloadSwitch,
   saveParallelParts,
   saveStepLimits,
   saveTeamMode,
@@ -45,6 +47,10 @@ export function ProjectLimitsSection(
   const [parallelSaving, setParallelSaving] = useState(false);
   const [teamSaving, setTeamSaving] = useState(false);
   const [capsSaving, setCapsSaving] = useState(false);
+  const [offloadEnabled, setOffloadEnabled] = useState(false);
+  const [offloadSaving, setOffloadSaving] = useState(false);
+  const [offloadSaved, setOffloadSaved] = useState(false);
+  const [offloadError, setOffloadError] = useState<string | null>(null);
   const [errorKey, setErrorKey] = useState<string | null>(null);
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
@@ -93,6 +99,18 @@ export function ProjectLimitsSection(
         } catch {
           team = "on";
         }
+        // R10: the offload switch reads best-effort; an unreadable
+        // switch renders off and the save still works.
+        let offload = false;
+        try {
+          const storedOffload = await readOffloadSwitch(
+            props.projectId,
+            "worker",
+          );
+          offload = storedOffload.enabled;
+        } catch {
+          offload = false;
+        }
         if (!alive) {
           return;
         }
@@ -100,6 +118,7 @@ export function ProjectLimitsSection(
         setChatText(String(limits.chat_max_steps));
         setParallelText(String(parallel));
         setTeamText(team);
+        setOffloadEnabled(offload);
         setBudgetText(
           `${budget.budget.spent} / ${budget.budget.hard_limit} ${budget.budget.currency}`,
         );
@@ -244,6 +263,46 @@ export function ProjectLimitsSection(
     }
   }
 
+  // R10: one routine-offload switch with one plain hint. The change
+  // is journaled server-side; a refusal shows plain words, never a
+  // bare code.
+  function offloadReason(error: unknown): string {
+    if (error instanceof ApiError) {
+      const message = error.details?.message;
+      if (typeof message === "string" && message.trim() !== "") {
+        return message.trim().replace(/^[A-Z][A-Z_0-9]*:\s*/, "");
+      }
+      return t(apiErrorLocaleKey(error.code));
+    }
+    if (error instanceof Error && error.message.trim() !== "") {
+      return error.message.trim().replace(/^[A-Z][A-Z_0-9]*:\s*/, "");
+    }
+    return t("errors.generic");
+  }
+
+  async function onSaveOffload(): Promise<void> {
+    setOffloadSaving(true);
+    setOffloadSaved(false);
+    try {
+      const saved = await saveOffloadSwitch(
+        props.projectId,
+        "worker",
+        offloadEnabled,
+      );
+      if (saved.project_id !== props.projectId) {
+        setOffloadError(t("errors.generic"));
+        return;
+      }
+      setOffloadEnabled(saved.enabled);
+      setOffloadError(null);
+      setOffloadSaved(true);
+    } catch (error) {
+      setOffloadError(offloadReason(error));
+    } finally {
+      setOffloadSaving(false);
+    }
+  }
+
   if (!loaded) {
     return (
       <section data-testid="project-limits-section">
@@ -358,6 +417,38 @@ export function ProjectLimitsSection(
       >
         {t("chat.composer.send")}
       </button>
+      {/* R10: one routine-offload switch with one plain hint. */}
+      <label htmlFor="project-limits-offload">{t("settings.project.offload")}</label>
+      <input
+        id="project-limits-offload"
+        data-testid="project-limits-offload"
+        type="checkbox"
+        checked={offloadEnabled}
+        disabled={offloadSaving}
+        onChange={() => {
+          setOffloadEnabled((next) => !next);
+          setOffloadSaved(false);
+        }}
+      />
+      <p data-testid="project-limits-offload-hint" className="fx-quiet-line">
+        {t("settings.project.offloadHint")}
+      </p>
+      <button
+        type="button"
+        data-testid="project-limits-offload-save"
+        disabled={offloadSaving}
+        onClick={() => {
+          void onSaveOffload();
+        }}
+      >
+        {t("settings.project.save")}
+      </button>
+      {offloadSaved ? <p role="status">{t("settings.project.saved")}</p> : null}
+      {offloadError !== null ? (
+        <p data-testid="project-limits-offload-error" role="alert">
+          {offloadError}
+        </p>
+      ) : null}
       {budgetText !== null ? (
         <div data-testid="project-limits-budget">
           <span>{t("projects.cost.title")}</span>{" "}

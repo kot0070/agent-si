@@ -86,6 +86,9 @@ const ErrorBodySchema = z.object({
   code: z.unknown().optional(),
   detail: z.unknown().optional(),
   detail_ref: z.unknown().optional(),
+  // R1: the backend serves plain reasons as {"error": "..."}; keep the
+  // field so the reason survives (the extractor below already reads it).
+  error: z.unknown().optional(),
 });
 
 function errorFromStatus(code: ApiErrorCode, status: number): ApiError {
@@ -133,6 +136,19 @@ export function parseErrorBody(data: unknown, status: number): ApiError {
         if (typeof value === "string" && value.length > 0) {
           details = { message: value };
           break;
+        }
+      }
+      // R10/R11: FastAPI serves reason dicts as {"detail": {"code",
+      // "message"}}; the nested message rides along the same way.
+      if (details === undefined) {
+        const nested = record.detail as { message?: unknown } | null;
+        if (
+          typeof nested === "object" &&
+          nested !== null &&
+          typeof nested.message === "string" &&
+          nested.message.length > 0
+        ) {
+          details = { message: nested.message };
         }
       }
     }

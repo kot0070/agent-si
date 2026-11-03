@@ -67,11 +67,11 @@ describe('U9 settings hub reaches the info pages', () => {
     renderApp('/settings');
     const about = await screen.findByTestId('settings-about');
     expect(about.getAttribute('href')).toBe('/about');
-    expect(about.textContent).toBe(en.settings.hub.about);
+    expect(about.textContent).toContain(en.settings.hub.about);
     const how = await screen.findByTestId('settings-how-it-works');
     expect(how.getAttribute('href')).toBe('/how-it-works');
-    expect(how.textContent).toBe(en.settings.hub.howItWorks);
-    expect(how.textContent).not.toBe(en.howItWorks.runs.title);
+    expect(how.textContent).toContain(en.settings.hub.howItWorks);
+    expect(how.textContent).not.toContain(en.howItWorks.runs.title);
   });
 
   it('the About hub link opens the licence page', async () => {

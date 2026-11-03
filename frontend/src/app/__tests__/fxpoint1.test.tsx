@@ -242,13 +242,18 @@ describe("fxpoint1 R2 sidebar tab purposes", () => {
   });
 });
 
-describe("fxpoint1 R3 settings project need-it-now note", () => {
-  it("shows the project need-it-now note", async () => {
+describe("fxpoint1 R3 settings need-it-now note placement", () => {
+  it("shows the need-it-now note on routing, never on project", async () => {
     seedProject();
-    renderApp("/settings/project");
+    renderApp("/settings/routing");
     expect(
       (await screen.findByTestId("settings-need-it-now")).textContent,
-    ).toContain(en.settings.project.needItNow);
+    ).toContain(en.settings.routing.needItNow);
+    cleanup();
+    seedProject();
+    renderApp("/settings/project");
+    await screen.findByTestId("kit-card-needitnow-project");
+    expect(screen.queryByTestId("settings-need-it-now")).toBeNull();
   });
 });
 

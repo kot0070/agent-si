@@ -21,6 +21,7 @@
 // and stay on the old rows).
 
 import { requestResponse } from "../../api/errors";
+import { isPlaceholderId } from "./roleChoices";
 import { t } from "../../locale/index";
 
 // Project chat-model save/read (K04P2-CHATSAVE plus FXSAVED item 1).
@@ -226,6 +227,10 @@ export function parseModelsPayload(
     if (servedId === null || servedId === "") {
       continue;
     }
+    // R2: placeholder ids never reach any list.
+    if (isPlaceholderId(servedId)) {
+      continue;
+    }
     const qualified =
       servedId.includes("/") || providerId === ""
         ? servedId
@@ -327,6 +332,10 @@ export function mergeModelList(
   const seen = new Set<string>();
   const out: Array<{ id: string; label: string; kb: unknown }> = [];
   for (const row of served) {
+    // R2: placeholder ids never reach any list.
+    if (isPlaceholderId(row.model)) {
+      continue;
+    }
     const qualified =
       row.model.includes("/") || providerId === ""
         ? row.model
@@ -344,6 +353,10 @@ export function mergeModelList(
     out.push({ id, label: catalogEntry?.label ?? id, kb: row.kb });
   }
   for (const entry of catalogModels) {
+    // R2: placeholder ids never reach any list.
+    if (isPlaceholderId(entry.id)) {
+      continue;
+    }
     if (seen.has(entry.id)) {
       continue;
     }

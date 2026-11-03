@@ -7,10 +7,12 @@
 // and decision record in window.localStorage (see STORED_*_KEY) so the
 // Local AI view renders the stored config without re-running the flow.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { formatNumber, t } from "../locale/index";
 import type { LocalBenchClient } from "./LocalBenchClient";
+import { listConnectedProviders } from "./ProvidersPage/connectApi";
+import { getProviderCatalog } from "./ProvidersPage/catalog";
 import {
   BENCHMARK_LEVELS,
   DURATION_WARNING_S,
@@ -251,6 +253,13 @@ function hardwareSummary(hardware: LocalBenchHardwareProfile): string {
 export function LocalBenchTab(props: LocalBenchTabProps): ReactElement {
   const { client } = props;
   const [path, setPath] = useState("");
+  // R5: scan source — a folder path or a connected local runtime (no
+  // folder needed). "folder" is the default; runtime ids come from
+  // the served connected list.
+  const [source, setSource] = useState<string>("folder");
+  const [runtimes, setRuntimes] = useState<
+    Array<{ id: string; label: string; endpoint: string }> | null
+  >(null);
   const [scan, setScan] = useState<ScanState>({ status: "idle" });
   const [modelId, setModelId] = useState("");
   const [level, setLevel] = useState<BenchmarkLevel>("quick");
@@ -258,20 +267,81 @@ export function LocalBenchTab(props: LocalBenchTabProps): ReactElement {
   const [decisions, setDecisions] = useState<Array<LocalBenchDecisionRecord>>(
     [],
   );
+  const runAlive = useRef(true);
+  useEffect(() => {
+    runAlive.current = true;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const ids = await listConnectedProviders();
+        if (cancelled) {
+          return;
+        }
+        const local = getProviderCatalog().filter(
+          (preset) => preset.kind === "local" && ids.includes(preset.id),
+        );
+        setRuntimes(
+          local.map((preset) => ({
+            id: preset.id,
+            label: preset.label,
+            endpoint: preset.baseUrl,
+          })),
+        );
+      } catch {
+        if (!cancelled) {
+          setRuntimes([]);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+      runAlive.current = false;
+    };
+  }, []);
 
   const scanned = scan.status === "ready" ? scan : null;
   const canRun =
     scanned !== null && modelId.length > 0 && run.status !== "running";
+  // R5: the run button stays disabled until a scan, with the reason shown.
+  const runDisabledReason =
+    run.status === "running"
+      ? null
+      : scanned === null
+        ? t("settings.localbench.runNeedsScan")
+        : modelId.length === 0
+          ? t("settings.localbench.modelsEmpty")
+          : null;
   const finished = run.status === "ready" ? run : null;
 
   async function handleScan(): Promise<void> {
-    const target = path.trim();
-    if (target.length === 0 || scan.status === "scanning") {
+    if (source === "folder") {
+      const target = path.trim();
+      if (target.length === 0 || scan.status === "scanning") {
+        return;
+      }
+      setScan({ status: "scanning" });
+      try {
+        const result = await client.scanModels(target);
+        setScan({ status: "ready", path: result.path, models: result.models });
+        const first = result.models[0];
+        setModelId(first === undefined ? "" : first.model_id);
+        setRun({ status: "idle" });
+        storeScanState(result.path, result.models);
+      } catch {
+        setScan({ status: "error" });
+      }
+      return;
+    }
+    // Runtime source: the attached runtime's real models, no folder.
+    if (scan.status === "scanning" || client.scanRuntimeModels === undefined) {
+      if (client.scanRuntimeModels === undefined) {
+        setScan({ status: "error" });
+      }
       return;
     }
     setScan({ status: "scanning" });
     try {
-      const result = await client.scanModels(target);
+      const result = await client.scanRuntimeModels(source);
       setScan({ status: "ready", path: result.path, models: result.models });
       const first = result.models[0];
       setModelId(first === undefined ? "" : first.model_id);
@@ -282,6 +352,8 @@ export function LocalBenchTab(props: LocalBenchTabProps): ReactElement {
     }
   }
 
+  // R5: the run shows progress (the running state while polling for
+  // result rows) and ends on its result rows or a plain failure.
   async function handleRun(): Promise<void> {
     if (scanned === null || modelId.length === 0) {
       return;
@@ -290,9 +362,24 @@ export function LocalBenchTab(props: LocalBenchTabProps): ReactElement {
     try {
       const estimate = await client.readEstimate(modelId, level);
       const runId = await client.startRun({ model_id: modelId, level });
-      const rows = (await client.readResults(runId)).filter(
-        (row) => row.model_id === modelId,
-      );
+      let rows: Array<LocalBenchResultRow> = [];
+      for (let attempt = 0; attempt < 60; attempt += 1) {
+        if (!runAlive.current) {
+          return;
+        }
+        rows = (await client.readResults(runId)).filter(
+          (row) => row.model_id === modelId,
+        );
+        if (rows.length > 0) {
+          break;
+        }
+        await new Promise((resolve) => {
+          setTimeout(resolve, 1000);
+        });
+      }
+      if (!runAlive.current) {
+        return;
+      }
       const accepted: LocalBenchRunAccepted = {
         run_id: runId,
         estimated_duration_s: estimateSeconds(estimate),
@@ -320,6 +407,47 @@ export function LocalBenchTab(props: LocalBenchTabProps): ReactElement {
 
   return (
     <div data-testid="localbench-tab">
+      {/* R5: scan source — a folder path or a connected local runtime
+          (no folder needed). */}
+      <div>
+        <h3>{t("settings.localbench.sourceLabel")}</h3>
+        <ul>
+          <li>
+            <label className="fx-radio-row">
+              <input
+                type="radio"
+                data-testid="localbench-source-folder"
+                name="localbench-source"
+                checked={source === "folder"}
+                onChange={() => setSource("folder")}
+              />
+              {t("settings.localbench.sourceFolder")}
+            </label>
+          </li>
+          {(runtimes ?? []).map((runtime) => (
+            <li key={runtime.id}>
+              <label className="fx-radio-row">
+                <input
+                  type="radio"
+                  data-testid={`localbench-source-${runtime.id}`}
+                  name="localbench-source"
+                  checked={source === runtime.id}
+                  onChange={() => setSource(runtime.id)}
+                />
+                {t("settings.localbench.sourceRuntime", {
+                  label: runtime.label,
+                })}{" "}
+                <span className="fx-quiet-line">{runtime.endpoint}</span>
+              </label>
+            </li>
+          ))}
+        </ul>
+        {(runtimes ?? []).length === 0 ? (
+          <p data-testid="localbench-runtime-none" className="fx-quiet-line">
+            {t("settings.localbench.runtimeNone")}
+          </p>
+        ) : null}
+      </div>
       <div>
         <label htmlFor="localbench-path">{t("settings.localbench.pathLabel")}</label>
         <input
@@ -334,7 +462,10 @@ export function LocalBenchTab(props: LocalBenchTabProps): ReactElement {
           type="button"
           data-testid="localbench-scan"
           className="fx-btn-quiet"
-          disabled={path.trim().length === 0 || scan.status === "scanning"}
+          disabled={
+            (source === "folder" && path.trim().length === 0) ||
+            scan.status === "scanning"
+          }
           onClick={() => {
             void handleScan();
           }}
@@ -355,7 +486,7 @@ export function LocalBenchTab(props: LocalBenchTabProps): ReactElement {
           <ul>
             {scanned.models.map((model) => (
               <li key={model.model_id}>
-                <label>
+                <label className="fx-radio-row">
                   <input
                     type="radio"
                     data-testid={`localbench-model-${model.model_id}`}
@@ -376,7 +507,7 @@ export function LocalBenchTab(props: LocalBenchTabProps): ReactElement {
         <ul>
           {BENCHMARK_LEVELS.map((option) => (
             <li key={option}>
-              <label>
+              <label className="fx-radio-row">
                 <input
                   type="radio"
                   data-testid={`localbench-level-${option}`}
@@ -406,6 +537,11 @@ export function LocalBenchTab(props: LocalBenchTabProps): ReactElement {
               : "settings.localbench.runButton",
           )}
         </button>
+        {runDisabledReason !== null ? (
+          <p data-testid="localbench-run-reason" className="fx-quiet-line">
+            {runDisabledReason}
+          </p>
+        ) : null}
         {run.status === "error" ? <p>{t("errors.generic")}</p> : null}
       </div>
       {finished === null ? null : (

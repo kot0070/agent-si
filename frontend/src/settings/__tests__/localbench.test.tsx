@@ -301,7 +301,7 @@ describe('LocalBenchTab on the real settings page', () => {
 
 describe('localbench locale parity', () => {
   it('adds the same real-text keys in en and uk', () => {
-    expect(NEW_KEYS).toHaveLength(33);
+    expect(NEW_KEYS).toHaveLength(38);
     expect(Object.keys(UK_LOCALBENCH).sort()).toEqual(
       Object.keys(EN_LOCALBENCH).sort(),
     );

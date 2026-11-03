@@ -275,19 +275,22 @@ export function RolePoolPicker({ role, project_id = "local", options, onChange }
   }
 
   return (
-    <fieldset data-testid="role-pool-picker" data-role={role} data-project-id={project}>
+    <fieldset data-testid="role-pool-picker" data-role={role} data-project-id={project} className="fx-card">
       <legend>{label}</legend>
-      {MODES.map((mode) => (
-        <label key={mode}>
-          <input
-            type="radio"
-            name={group}
-            checked={current.mode === mode}
-            onChange={() => emit({ ...current, mode })}
-          />
-          {modeLabel(mode)}
-        </label>
-      ))}
+      {/* R6: radio directly before its label, one compact row. */}
+      <div className="fx-modes-row">
+        {MODES.map((mode) => (
+          <label key={mode} className="fx-radio-row">
+            <input
+              type="radio"
+              name={group}
+              checked={current.mode === mode}
+              onChange={() => emit({ ...current, mode })}
+            />
+            {modeLabel(mode)}
+          </label>
+        ))}
+      </div>
       <p>{modeHelp(current.mode)}</p>
       {current.mode === "pool" && current.poolKeys.length === 0 ? (
         <p data-testid="pool-empty-hint" role="note">
@@ -322,7 +325,7 @@ export function RolePoolPicker({ role, project_id = "local", options, onChange }
           <ul>
             {poolOptions.map((option) => (
               <li key={option.key}>
-                <label>
+                <label className="fx-radio-row">
                   <input
                     type="checkbox"
                     checked={current.poolKeys.includes(option.key)}

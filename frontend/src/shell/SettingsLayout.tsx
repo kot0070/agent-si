@@ -7,7 +7,9 @@ import { useCurrentProject } from '../app/ApiClientProvider';
 export interface SettingsLayoutProps {
   titleKey: string;
   purposeKey: string;
-  needItNowKey: string;
+  // R6: the need-it-now block shows only on Models and Routing; other
+  // sections omit the key and render no block.
+  needItNowKey?: string;
   children: ReactNode;
   advanced?: ReactNode;
   // FXNAV P16-needitnow: optional kit probe id on the section (the
@@ -51,7 +53,9 @@ export function SettingsLayout(props: SettingsLayoutProps): ReactElement {
     <section data-testid={props.sectionTestId}>
       <h2>{t(props.titleKey)}</h2>
       <p data-testid="settings-purpose">{t(props.purposeKey)}</p>
-      <p data-testid="settings-need-it-now">{t(props.needItNowKey)}</p>
+      {props.needItNowKey !== undefined ? (
+        <p data-testid="settings-need-it-now">{t(props.needItNowKey)}</p>
+      ) : null}
       {inRouter ? (
         <WhyChipWithRouter />
       ) : (

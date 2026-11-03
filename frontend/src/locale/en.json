@@ -256,51 +256,71 @@
     "general": {
       "needItNow": "Open this only when the defaults feel wrong.",
       "purpose": "Basic application preferences.",
-      "title": "General"
+      "resetDone": "The setup was reset. The wizard will show again.",
+      "resetSetup": "Reset the setup",
+      "resetTitle": "Start over",
+      "title": "General",
+      "whereText": "Language switches here. Theme lives under Appearance; models and routing live under Models and Routing."
     },
     "index": {
-      "subtitle": "Defaults live here; open only the page you need."
+      "benchModels": "{count} models",
+      "connectedState": "{count} connected",
+      "needItNow": "Open only the section you need.",
+      "purpose": "Settings sections by group.",
+      "subtitle": "Defaults live here; open only the page you need.",
+      "title": "Settings"
     },
     "localAi": {
+      "connectedModels": "Connected {label}, {count} models.",
+      "empty": "There are no local presets. Add Ollama or LM Studio to connect on this machine.",
+      "modelsLabel": "Local models",
       "needItNow": "Only when you want work to stay on this machine.",
+      "noCapability": "No capability data for {model}; it can still be used.",
       "purpose": "Run models on this PC.",
       "title": "Local LLM",
-      "empty": "There are no local presets. Add Ollama or LM Studio to connect on this machine."
+      "useFailed": "Worker model not set: {reason}.",
+      "useForAgents": "Use for agents",
+      "workerPinned": "Worker model set to {model}."
     },
     "localbench": {
-      "title": "Local benchmark",
-      "purpose": "Measure local models on this PC before using them.",
-      "needItNow": "Only to compare local models before a long run.",
-      "pathLabel": "Benchmark folder",
-      "pathHint": "Folder with the benchmark cases.",
-      "scanButton": "Scan models",
-      "scanning": "Scanning…",
-      "modelsTitle": "Local models",
-      "modelsEmpty": "No local models found in this folder yet.",
+      "colDuration": "Duration",
+      "colEvidence": "Evidence",
+      "colModel": "Model",
+      "colScore": "Score",
+      "decisionEmpty": "Each finished run is recorded here.",
+      "decisionLine": "{model} · {level} · {evidence} · {seconds} s · {at}",
+      "decisionTitle": "Decision record",
+      "durationEstimate": "Estimated duration: {seconds} s.",
+      "durationValue": "{seconds} s",
+      "durationWarning": "This run may take a while. The PC stays busy until it finishes.",
+      "evidenceMeasured": "Measured",
+      "evidenceProxy": "Proxy",
+      "evidenceUnknown": "Unknown",
+      "levelDeep": "Deep",
       "levelLabel": "Benchmark level",
       "levelQuick": "Quick",
       "levelStandard": "Standard",
-      "levelDeep": "Deep",
-      "runButton": "Run benchmark",
-      "running": "Running…",
-      "durationEstimate": "Estimated duration: {seconds} s.",
-      "durationWarning": "This run may take a while. The PC stays busy until it finishes.",
       "loadWarning": "High PC load expected. Close other heavy programs first.",
-      "resultsTitle": "Results per model",
+      "modelsEmpty": "No local models found in this folder yet.",
+      "modelsTitle": "Local models",
+      "needItNow": "Only to compare local models before a long run.",
+      "pathHint": "Folder with the benchmark cases.",
+      "pathLabel": "Benchmark folder",
+      "purpose": "Measure local models on this PC before using them.",
       "resultsEmpty": "No benchmark results yet.",
-      "colModel": "Model",
-      "colScore": "Score",
-      "colEvidence": "Evidence",
-      "colDuration": "Duration",
-      "durationValue": "{seconds} s",
+      "resultsTitle": "Results per model",
+      "runButton": "Run benchmark",
+      "runNeedsScan": "Run is disabled until a scan finishes.",
+      "running": "Running…",
+      "runtimeNone": "No local runtime is connected.",
+      "scanButton": "Scan models",
+      "scanning": "Scanning…",
+      "sourceFolder": "Folder",
+      "sourceLabel": "Scan source",
+      "sourceRuntime": "Connected runtime: {label}",
       "statusComplete": "Done",
       "statusFailed": "Failed",
-      "evidenceUnknown": "Unknown",
-      "evidenceProxy": "Proxy",
-      "evidenceMeasured": "Measured",
-      "decisionTitle": "Decision record",
-      "decisionEmpty": "Each finished run is recorded here.",
-      "decisionLine": "{model} · {level} · {evidence} · {seconds} s · {at}"
+      "title": "Local benchmark"
     },
     "models": {
       "needItNow": "Only to review or change the model list.",
@@ -316,19 +336,22 @@
       "weights": "Weights"
     },
     "project": {
-      "needItNow": "Only the project owner touches risk acceptance.",
-      "purpose": "Project settings and accepted risk.",
-      "title": "Project",
-      "parallel": "Parts running at the same time",
-      "limitsBlank": "Enter a whole number of 1 or more.",
-      "team": "Team: on / off",
-      "teamOn": "On",
-      "teamOff": "Off",
-      "save": "Save",
-      "taskStepsLabel": "Task step limit (steps)",
       "chatStepsLabel": "Chat step limit (steps)",
+      "limitsBlank": "Enter a whole number of 1 or more.",
+      "needItNow": "Only the project owner touches risk acceptance.",
+      "offload": "Routine offload",
+      "offloadHint": "Routine worker parts hand over to a cheaper agent when the switch is on.",
+      "parallel": "Parts running at the same time",
+      "purpose": "Project settings and accepted risk.",
+      "save": "Save",
+      "saved": "Saved.",
+      "spendCaps": "Spend caps per provider",
       "stepsHint": "Each limit caps how many steps one task or chat reply may take.",
-      "spendCaps": "Spend caps per provider"
+      "taskStepsLabel": "Task step limit (steps)",
+      "team": "Team: on / off",
+      "teamOff": "Off",
+      "teamOn": "On",
+      "title": "Project"
     },
     "providers": {
       "searchPlaceholder": "Search providers or models"
@@ -367,12 +390,24 @@
     },
     "hub": {
       "about": "About",
-      "howItWorks": "How it works"
+      "aboutPurpose": "Version, licence and third-party notices.",
+      "howItWorks": "How it works",
+      "howItWorksPurpose": "How the app carries out tasks step by step.",
+      "migration": "Migration",
+      "migrationPurpose": "Move data over from an older version."
     },
     "qacatalog": {
       "needItNow": "Only to inspect which tests the app runs.",
       "purpose": "Which test catalog the app runs, and its versions.",
       "title": "Test catalog"
+    },
+    "backToSettings": "Back to Settings",
+    "groups": {
+      "app": "App",
+      "help": "Help",
+      "limits": "Limits",
+      "measure": "Measure",
+      "modelsProviders": "Models and providers"
     }
   },
   "diagnostics": {
@@ -678,10 +713,10 @@
       "reject": "Reject"
     },
     "composer": {
-      "prompt": "Type a message",
-      "send": "Send",
       "draft": "Draft",
       "noModel": "No model bound yet.",
+      "prompt": "Type a message",
+      "send": "Send",
       "statusReady": "Ready",
       "statusWorking": "Working"
     },
@@ -691,45 +726,47 @@
       "sample2": "List the project files and summarize the README"
     },
     "error": {
-      "retry": "Retry",
       "keyMissing": "The key for {label} is not available. Connect it again.",
-      "storeUnreadable": "The credential store cannot be read.",
-      "noProvider": "Connect a provider first, then send your task again."
+      "noProvider": "Connect a provider first, then send your task again.",
+      "retry": "Retry",
+      "storeUnreadable": "The credential store cannot be read."
     },
     "hierarchy": {
-      "title": "Model hierarchy",
-      "director": "Director",
-      "manager": "Manager",
       "agents": "Agents",
+      "auditorSplit": "The auditor uses a different provider.",
       "auto": "Auto",
-      "expand": "Show model hierarchy",
       "collapse": "Hide model hierarchy",
       "connect": "Connect a provider",
+      "director": "Director",
+      "expand": "Show model hierarchy",
+      "manager": "Manager",
       "noProject": "Choose a project to set the model hierarchy.",
-      "auditorSplit": "The auditor uses a different provider.",
-      "openSettings": "Open Settings"
+      "openSettings": "Open Settings",
+      "title": "Model hierarchy"
     },
     "permission": {
-      "title": "Install permission",
-      "body": "The run wants to execute “{command}”.",
-      "why": "It installs packages the task needs to continue.",
       "allowOnce": "Allow once",
       "allowProject": "For this project",
-      "deny": "Deny",
       "allowed": "Install permission granted for {command}",
+      "body": "The run wants to execute “{command}”.",
       "denied": "Install permission denied for {command}",
       "deniedRun": "Stopped: you denied {command}. Nothing was installed.",
-      "waitingHold": "Waiting for your permission to run {command}."
+      "deny": "Deny",
+      "title": "Install permission",
+      "waitingHold": "Waiting for your permission to run {command}.",
+      "why": "It installs packages the task needs to continue."
     },
     "run": {
       "emptyPlan": "Nothing was built — the plan had no parts. Say what you want built, for example: “{example}”",
       "emptyPlanExample": "Add a contact page with a test.",
+      "noModelLine": "{provider} has no model chosen",
+      "noProviderLine": "Connect a provider first",
       "stopped": "Stopped."
     },
     "stream": {
+      "offline": "Connection lost. Reconnecting.",
       "spinner": "Working on it",
-      "timestamp": "Message time",
-      "offline": "Connection lost. Reconnecting."
+      "timestamp": "Message time"
     }
   },
   "tasks": {
@@ -855,6 +892,13 @@
     "row": {
       "stopTitle": "Stop: pause this project here only; the server keeps no record of it",
       "leaveTitle": "Leave: archive this project and remove it from the list"
+    },
+    "kbDetach": {
+      "detach": "Detach",
+      "detachFailed": "Detach failed: {reason}.",
+      "detached": "Detached {kb_id}.",
+      "empty": "No knowledge base is attached to this project.",
+      "title": "Attached knowledge bases"
     }
   },
   "agents": {

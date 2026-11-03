@@ -8,6 +8,7 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import {
+  Link,
   Navigate,
   NavLink,
   Route,
@@ -31,10 +32,14 @@ import {
   DEFAULT_LOCALE,
   LOCALE_STORAGE_KEY,
   LocaleProvider,
+  setLocale,
   t,
+  useLocale,
 } from "../locale/index";
 import type { SupportedLocale } from "../locale/index";
-import { SETTINGS_ROUTES, AcceptedRiskSwitch, FirstRunGate, InstallGrantsList, RoleProfileEditor, markFirstRunDone } from "../settings/index";
+import { SETTINGS_GROUPS, SETTINGS_HELP_ROWS, SETTINGS_ROUTES, AcceptedRiskSwitch, FirstRunGate, InstallGrantsList, RoleProfileEditor, clearFirstRunDone, markFirstRunDone } from "../settings/index";
+import { listConnectedProviders } from "../settings/ProvidersPage/connectApi";
+import { getProviderCatalog } from "../settings/ProvidersPage/catalog";
 import { OptimizationPolicySection } from "../settings/optimizationPolicy";
 import { LocalConnectSection, ProvidersPage } from "../settings/ProvidersPage";
 import {
@@ -51,6 +56,7 @@ import { LoadingState } from "../ui/LoadingState";
 import { TopBar, TOPBAR_LOCALE_EVENT } from "../shell/TopBar";
 import { Sidebar } from "../shell/Sidebar";
 import { ThemeToggle } from "../shell/ThemeToggle";
+import { readTheme } from "../shell/theme";
 import { ContractDefaultsBar } from "../settings/ContractDefaultsBar";
 import { Inspector } from "../shell/Inspector";
 import { ClosingGuard } from "../shell/ClosingGuard";
@@ -604,21 +610,255 @@ function SettingsTabs(): ReactElement {
   );
 }
 
-function SettingsIndexRoute(): ReactElement {
-  const general = SETTINGS_ROUTES[0];
-  if (general === undefined) {
+// R6: one quiet Back link on every settings section (Diagnostics
+// included, which also closes R4).
+function SettingsBackLink(): ReactElement {
+  return (
+    <Link to="/settings" data-testid="settings-back">
+      {t("settings.backToSettings")}
+    </Link>
+  );
+}
+
+// R6: one grouped index row: icon, title, one-line purpose, current
+// state at the right (from the section's real source; purpose only
+// when the state cannot be read), chevron. Quiet links, no card
+// buttons. Existing settings-link-* testids stay.
+function SettingsRow(props: { path: string; marker: string }): ReactElement {
+  const route = SETTINGS_ROUTES.find((entry) => entry.path === props.path);
+  const [state, setState] = useState<string | null>(null);
+  const current = useCurrentProject();
+  const { locale } = useLocale();
+  useEffect(() => {
+    let alive = true;
+    async function load(): Promise<void> {
+      let next: string | null = null;
+      try {
+        if (props.path === "models") {
+          const ids = await listConnectedProviders();
+          next = t("settings.index.connectedState", {
+            count: String(ids.length),
+          });
+        } else if (props.path === "localAI") {
+          const ids = await listConnectedProviders();
+          const catalog = getProviderCatalog();
+          const local = catalog
+            .filter(
+              (preset) => preset.kind === "local" && ids.includes(preset.id),
+            )
+            .map((preset) => preset.label);
+          next = local.length > 0 ? local.join(", ") : null;
+        } else if (props.path === "localbench") {
+          try {
+            const raw = window.localStorage.getItem("agentsi.localbench.scan");
+            if (raw !== null) {
+              const doc = JSON.parse(raw) as { models?: unknown[] };
+              if (Array.isArray(doc.models)) {
+                next = t("settings.index.benchModels", {
+                  count: String(doc.models.length),
+                });
+              }
+            }
+          } catch {
+            next = null;
+          }
+        } else if (props.path === "project") {
+          next = current.projectId;
+        } else if (props.path === "general") {
+          next = t(
+            locale === "uk" ? "shell.topbar.langUk" : "shell.topbar.langEn",
+          );
+        } else if (props.path === "appearance") {
+          try {
+            const theme = readTheme();
+            next = t(
+              theme === "dark"
+                ? "settings.appearance.dark"
+                : "settings.appearance.light",
+            );
+          } catch {
+            next = null;
+          }
+        }
+      } catch {
+        next = null;
+      }
+      if (alive) {
+        setState(next);
+      }
+    }
+    void load();
+    return () => {
+      alive = false;
+    };
+  }, [props.path, current.projectId, locale]);
+  if (props.path === "diagnostics") {
+    return (
+      <li className="fx-settings-row">
+        <NavLink
+          to="/settings/diagnostics"
+          data-testid="settings-link-diagnostics"
+          className="fx-settings-row-link"
+        >
+          <span aria-hidden="true" className="fx-settings-row-marker">
+            {props.marker}
+          </span>
+          <span className="fx-settings-row-text">
+            <span className="fx-settings-row-title">
+              {t("diagnostics.title")}
+            </span>
+            <span className="fx-settings-row-purpose">
+              {state ?? t("diagnostics.purpose")}
+            </span>
+          </span>
+          <span aria-hidden="true" className="fx-settings-row-chevron">
+            ›
+          </span>
+        </NavLink>
+      </li>
+    );
+  }
+  if (route === undefined) {
     return (
       <EmptyState stateKey="ui.table.empty" actionKey={null} onAction={null} />
     );
   }
   return (
+    <li className="fx-settings-row">
+      <NavLink
+        to={`/settings/${route.path}`}
+        data-testid={`settings-link-${route.path}`}
+        end
+        className="fx-settings-row-link"
+      >
+        <span aria-hidden="true" className="fx-settings-row-marker">
+          {props.marker}
+        </span>
+        <span className="fx-settings-row-text">
+          <span className="fx-settings-row-title">{t(route.titleKey)}</span>
+          <span className="fx-settings-row-purpose">
+            {state ?? t(route.purposeKey)}
+          </span>
+        </span>
+        <span aria-hidden="true" className="fx-settings-row-chevron">
+          ›
+        </span>
+      </NavLink>
+    </li>
+  );
+}
+
+// R6 + R9: grouped index (Help group carries How it works, About,
+// Migration) — a grouped list, not a link strip.
+function SettingsIndexRoute(): ReactElement {
+  const markers: Record<string, string> = {
+    "models-providers": "▦",
+    limits: "◐",
+    app: "⚙",
+    measure: "▤",
+    help: "?",
+  };
+  return (
     <SettingsLayout
-      titleKey={general.titleKey}
-      purposeKey={general.purposeKey}
-      needItNowKey={general.needItNowKey}
+      titleKey="settings.index.title"
+      purposeKey="settings.index.purpose"
+      needItNowKey="settings.index.needItNow"
     >
-      <SettingsTabs />
+      {SETTINGS_GROUPS.map((group) => (
+        <section key={group.id} aria-label={t(group.titleKey)}>
+          <h3>{t(group.titleKey)}</h3>
+          <ul className="fx-settings-rows">
+            {group.paths.map((path) => (
+              <SettingsRow
+                key={path}
+                path={path}
+                marker={markers[group.id] ?? "•"}
+              />
+            ))}
+          </ul>
+        </section>
+      ))}
+      <section aria-label={t("settings.groups.help")}>
+        <h3>{t("settings.groups.help")}</h3>
+        <ul className="fx-settings-rows">
+          {SETTINGS_HELP_ROWS.map((row) => (
+            <li key={row.testId} className="fx-settings-row">
+              <Link
+                to={row.path}
+                data-testid={row.testId}
+                className="fx-settings-row-link"
+              >
+                <span aria-hidden="true" className="fx-settings-row-marker">
+                  {markers.help}
+                </span>
+                <span className="fx-settings-row-text">
+                  <span className="fx-settings-row-title">
+                    {t(row.titleKey)}
+                  </span>
+                  <span className="fx-settings-row-purpose">
+                    {t(row.purposeKey)}
+                  </span>
+                </span>
+                <span aria-hidden="true" className="fx-settings-row-chevron">
+                  ›
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </section>
     </SettingsLayout>
+  );
+}
+
+function GeneralSection(): ReactElement {
+  const { locale } = useLocale();
+  const navigate = useNavigate();
+  const [resetNote, setResetNote] = useState(false);
+  return (
+    <span data-testid="settings-section-body">
+      <h3>{t("shell.topbar.language")}</h3>
+      <div>
+        <button
+          type="button"
+          data-testid="settings-general-lang-en"
+          className="fx-btn-quiet"
+          onClick={() => setLocale("en")}
+        >
+          {t("shell.topbar.langEn")}
+        </button>{" "}
+        <button
+          type="button"
+          data-testid="settings-general-lang-uk"
+          className="fx-btn-quiet"
+          onClick={() => setLocale("uk")}
+        >
+          {t("shell.topbar.langUk")}
+        </button>
+        <p data-testid="settings-general-lang-current">
+          {locale === "uk"
+            ? t("shell.topbar.langUk")
+            : t("shell.topbar.langEn")}
+        </p>
+      </div>
+      <h3>{t("settings.general.resetTitle")}</h3>
+      <button
+        type="button"
+        data-testid="settings-general-reset"
+        className="fx-btn-quiet"
+        onClick={() => {
+          clearFirstRunDone();
+          setResetNote(true);
+          navigate("/firstrun");
+        }}
+      >
+        {t("settings.general.resetSetup")}
+      </button>
+      {resetNote ? (
+        <p role="status">{t("settings.general.resetDone")}</p>
+      ) : null}
+      <p>{t("settings.general.whereText")}</p>
+    </span>
   );
 }
 
@@ -630,8 +870,9 @@ function SettingsSectionRoute(): ReactElement {
       <SettingsLayout
         titleKey="diagnostics.title"
         purposeKey="diagnostics.purpose"
-        needItNowKey="diagnostics.needItNow"
       >
+        <SettingsTabs />
+        <SettingsBackLink />
         <DiagnosticsSection />
       </SettingsLayout>
     );
@@ -643,11 +884,13 @@ function SettingsSectionRoute(): ReactElement {
     );
   }
   const projectId = current.projectId;
+  // R6: the need-it-now block shows only on Models and Routing.
+  const showNeedItNow = route.path === "models" || route.path === "routing";
   return (
     <SettingsLayout
       titleKey={route.titleKey}
       purposeKey={route.purposeKey}
-      needItNowKey={route.needItNowKey}
+      needItNowKey={showNeedItNow ? route.needItNowKey : undefined}
       // FXNAV P16-needitnow: the Project page renders purpose plus
       // need-it-now like the other settings pages; the kit probe id
       // rides the section.
@@ -656,6 +899,7 @@ function SettingsSectionRoute(): ReactElement {
       }
     >
       <SettingsTabs />
+      <SettingsBackLink />
       {route.path === "project" ? (
         // FXPOINT1 P1: the role editor stays mounted even with no project
         // selected so its labelled Mode/Role controls always resolve; the
@@ -671,6 +915,8 @@ function SettingsSectionRoute(): ReactElement {
             </>
           ) : null}
         </>
+      ) : route.path === "general" ? (
+        <GeneralSection />
       ) : route.path === "appearance" ? (
         <span data-testid="settings-section-body">
           <ThemeToggle />

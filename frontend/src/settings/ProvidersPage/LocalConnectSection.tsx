@@ -8,7 +8,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { ReactElement } from "react";
-import { getUiToken } from "../../api/errors";
+import { ApiError, getUiToken } from "../../api/errors";
 import { listConnectedProviders, probeLocalModels } from "./connectApi";
 import { getProviderCatalog } from "./catalog";
 import { ConnectDialog } from "./ConnectDialog";
@@ -16,6 +16,10 @@ import { DisconnectDialog } from "./DisconnectDialog";
 import { createMemorySecretStore, secretIdForProvider } from "./secretStore";
 import type { SecretStorePort } from "./secretStore";
 import type { ProviderPreset } from "./types";
+import { listProviderModels } from "./modelsApi";
+import type { ProviderModelRow } from "./modelsApi";
+import { saveRolePool } from "./poolsApi";
+import { choicesToPoolOptions } from "./RolePoolPicker";
 import { t } from "../../locale/index";
 
 export function LocalConnectSection(): ReactElement {
@@ -33,6 +37,15 @@ export function LocalConnectSection(): ReactElement {
   // Probe outcome per preset id: undefined while pending, null when the
   // local server does not answer, a model count otherwise.
   const [probes, setProbes] = useState<Record<string, number | null | undefined>>({});
+  // Served real model rows per connected preset (GET
+  // /api/v1/providers/{id}/models): read-only names from the runtime,
+  // nothing is pulled or deleted from this card.
+  const [modelsByPreset, setModelsByPreset] = useState<
+    Record<string, ProviderModelRow[]>
+  >({});
+  const [useModelId, setUseModelId] = useState<Record<string, string>>({});
+  const [useMessage, setUseMessage] = useState<Record<string, string>>({});
+  const [useSaving, setUseSaving] = useState<Record<string, boolean>>({});
   const [connectId, setConnectId] = useState<string | null>(null);
   const [disconnectId, setDisconnectId] = useState<string | null>(null);
 
@@ -64,6 +77,94 @@ export function LocalConnectSection(): ReactElement {
       cancelled = true;
     };
   }, [presets]);
+
+  // Served real model names for every connected preset (the local
+  // provider model routes answer them; an empty runtime answers empty).
+  useEffect(() => {
+    let cancelled = false;
+    if (connectedIds.length === 0) {
+      return undefined;
+    }
+    void Promise.all(
+      connectedIds.map(async (id) => ({
+        id,
+        rows: (await listProviderModels(id, [])).rows,
+      })),
+    ).then((entries) => {
+      if (cancelled) {
+        return;
+      }
+      setModelsByPreset((prev) => {
+        const next = { ...prev };
+        for (const entry of entries) {
+          next[entry.id] = entry.rows;
+        }
+        return next;
+      });
+      setUseModelId((prev) => {
+        const next = { ...prev };
+        for (const entry of entries) {
+          if (next[entry.id] === undefined) {
+            const first = entry.rows[0];
+            next[entry.id] = first === undefined ? "" : first.id;
+          }
+        }
+        return next;
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [connectedIds]);
+
+  // R2: pin the chosen real model on the worker through the normal
+  // role save, so routing, verification and audit stay the same as
+  // for a cloud model. A status line confirms the save.
+  async function handleUseForAgents(preset: ProviderPreset): Promise<void> {
+    const modelId = useModelId[preset.id] ?? "";
+    if (modelId === "" || useSaving[preset.id] === true) {
+      return;
+    }
+    setUseSaving((prev) => ({ ...prev, [preset.id]: true }));
+    try {
+      const picked = (modelsByPreset[preset.id] ?? []).find(
+        (row) => row.id === modelId,
+      );
+      const options = choicesToPoolOptions([
+        {
+          providerId: preset.id,
+          modelId,
+          label: picked?.label ?? modelId,
+        },
+      ]);
+      await saveRolePool("local", "worker", {
+        mode: "PINNED",
+        pinnedKey: options[0]?.key ?? "",
+        poolKeys: [],
+        strategy: "AUTO",
+      }, options);
+      setUseMessage((prev) => ({
+        ...prev,
+        [preset.id]: t("settings.localAi.workerPinned", {
+          model: picked?.label ?? modelId,
+        }),
+      }));
+    } catch (err) {
+      const reason =
+        err instanceof ApiError && typeof err.details?.message === "string" &&
+          err.details.message.trim() !== ""
+          ? err.details.message.trim()
+          : err instanceof Error && err.message.trim() !== ""
+            ? err.message.trim()
+            : t("errors.generic");
+      setUseMessage((prev) => ({
+        ...prev,
+        [preset.id]: t("settings.localAi.useFailed", { reason }),
+      }));
+    } finally {
+      setUseSaving((prev) => ({ ...prev, [preset.id]: false }));
+    }
+  }
 
   function handleConnected(presetId: string): void {
     // The dialog stays open and moves to step 2 itself (same as the
@@ -114,9 +215,66 @@ export function LocalConnectSection(): ReactElement {
             </p>
             {connected ? (
               <>
+                {/* R2: status is connected, endpoint, models. */}
                 <p role="status" data-variant="quiet">
-                  {t("providers.connect.connected", { label: preset.label })}
+                  {t("settings.localAi.connectedModels", {
+                    label: preset.label,
+                    count: String((modelsByPreset[preset.id] ?? []).length),
+                  })}
                 </p>
+                {(modelsByPreset[preset.id] ?? []).length > 0 ? (
+                  <label>
+                    {t("settings.localAi.modelsLabel")}
+                    <select
+                      aria-label={t("settings.localAi.modelsLabel")}
+                      data-testid={`local-models-${preset.id}`}
+                      value={useModelId[preset.id] ?? ""}
+                      onChange={(event) =>
+                        setUseModelId((prev) => ({
+                          ...prev,
+                          [preset.id]: event.target.value,
+                        }))
+                      }
+                    >
+                      {(modelsByPreset[preset.id] ?? []).map((row) => (
+                        <option key={row.id} value={row.id}>
+                          {row.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+                {(() => {
+                  const picked = (modelsByPreset[preset.id] ?? []).find(
+                    (row) => row.id === (useModelId[preset.id] ?? ""),
+                  );
+                  return picked !== undefined && picked.kbKnown === false ? (
+                    <p data-variant="quiet" role="note">
+                      {t("settings.localAi.noCapability", {
+                        model: picked.label,
+                      })}
+                    </p>
+                  ) : null;
+                })()}
+                <button
+                  type="button"
+                  data-testid={`local-use-${preset.id}`}
+                  disabled={
+                    (modelsByPreset[preset.id] ?? []).length === 0 ||
+                    useSaving[preset.id] === true
+                  }
+                  onClick={() => {
+                    void handleUseForAgents(preset);
+                  }}
+                >
+                  {t("settings.localAi.useForAgents")}
+                </button>
+                {useMessage[preset.id] !== undefined &&
+                useMessage[preset.id] !== "" ? (
+                  <p role="status" data-variant="quiet">
+                    {useMessage[preset.id]}
+                  </p>
+                ) : null}
                 <button
                   type="button"
                   aria-label={t("providers.page.disconnectCta", {
