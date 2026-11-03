@@ -446,6 +446,29 @@ def _reconcile_running_to_interrupted(app: Any) -> dict[str, Any]:
     except Exception:
         pass
     try:
+        # FXANSWER: chat turns still running are crash/restart leftovers
+        # too: mark them interrupted so only those rows show the
+        # app-closed banner (never a live running row).
+        from agent_si.backend import chat_history as _chathist
+
+        try:
+            marked = _chathist.mark_interrupted_at_restart(app)
+        except Exception:
+            marked = {}
+        try:
+            result["turns"] = int((marked or {}).get("turns", 0))
+        except Exception:
+            result["turns"] = 0
+        try:
+            for project in (marked or {}).get("projects", []) or []:
+                entry = touched.setdefault(str(project), {
+                    "tasks": [], "runs": []})
+                entry.setdefault("turns", []).append("history")
+        except Exception:
+            pass
+    except Exception:
+        pass
+    try:
         from agent_si.watcher import journal as _journal
 
         for project, entry in touched.items():

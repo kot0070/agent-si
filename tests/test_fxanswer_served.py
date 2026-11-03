@@ -171,6 +171,34 @@ def test_fxanswer_solo_never_done_to_cap_not_done(tmp_path):
         record.get("summary"))
 
 
+# -- reconcile: leftover running chat turns become interrupted ------------
+
+def test_fxanswer_reconcile_marks_running_turns_interrupted(tmp_path):
+    project = "fxans-reconcile"
+    folder = _project_dir(tmp_path, project)
+    factory = _FakeFactory({
+        "director": [json.dumps({"answer": "pear"})],
+        "manager": [json.dumps({"order": []})],
+        "worker": [json.dumps({"actions": [], "done": True})],
+        "auditor": [_audit_pass],
+    })
+    app = _served_app(tmp_path, project, factory)
+    from agent_si.backend import app as _app_mod
+    from agent_si.backend import chat_history as _chathist
+    _chathist.record_turn(
+        app, project, "do it", "partial", status="running",
+        run_id="run-leftover")
+    page = _chathist.history_page(app, project)
+    assert [turn["status"] for turn in page["turns"]] == ["running"]
+    result = _app_mod._reconcile_running_to_interrupted(app)
+    assert result.get("turns", 0) >= 1, result
+    page = _chathist.history_page(app, project)
+    assert [turn["status"] for turn in page["turns"]] == ["interrupted"]
+    assert page["turns"][0]["run_end_reason"] != "", page["turns"][0]
+    assert "restart reconcile" in page["turns"][0]["run_end_reason"], (
+        page["turns"][0])
+
+
 # -- team: answer without a question mark is a plain answer ------------------
 
 def test_fxanswer_team_answer_no_question_mark(tmp_path):
