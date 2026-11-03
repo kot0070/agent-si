@@ -5,7 +5,8 @@
 // button, and Cancel.
 
 import { useEffect, useRef, useState } from "react";
-import { disconnectProvider, isNetworkFailure } from "./connectApi";
+import { disconnectLocal, disconnectProvider, isNetworkFailure } from "./connectApi";
+import { PROVIDER_CATALOG, getPreset } from "./catalog";
 import { ApiError } from "../../api/errors";
 import { t } from "../../locale/index";
 import { APP_NAMESPACE_PREFIX } from "./types";
@@ -121,7 +122,16 @@ export function DisconnectDialog({
         return;
       }
       try {
-        await disconnectProvider(provider_id);
+        // Local presets attach a runtime instead of registering a provider
+        // row, so the registry disconnect 404s for them (TRIAL3 20:20:32):
+        // they detach through the local route, which flips the same card.
+        // The preset kind is locale-independent, so the frozen import-time
+        // catalog answers it without rendering anything.
+        if (getPreset(PROVIDER_CATALOG, provider_id)?.kind === "local") {
+          await disconnectLocal();
+        } else {
+          await disconnectProvider(provider_id);
+        }
       } catch (err: unknown) {
         if (!isNetworkFailure(err)) {
           setError(disconnectFailure(err));
