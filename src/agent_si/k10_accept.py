@@ -19,6 +19,8 @@ import shutil
 import socket
 import subprocess
 
+from agent_si.backend.proc_tree import quiet_flags
+
 #: Third-party direct dependencies pinned by this checkout (name plus
 #: pinned version taken from pyproject.toml / frontend/package.json;
 #: each package's own installed metadata carries its licence text).
@@ -68,6 +70,7 @@ def _probe_docker() -> dict:
             encoding="utf-8",
             errors="replace",
             timeout=_DOCKER_TIMEOUT_S,
+            creationflags=quiet_flags(),
         )
     except (OSError, subprocess.TimeoutExpired) as _exc:
         return {
@@ -109,6 +112,7 @@ def _probe_powershell() -> dict:
             encoding="utf-8",
             errors="replace",
             timeout=_POWERSHELL_TIMEOUT_S,
+            creationflags=quiet_flags(),
         )
     except (OSError, subprocess.TimeoutExpired) as _exc:
         return {
