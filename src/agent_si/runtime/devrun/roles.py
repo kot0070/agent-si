@@ -118,6 +118,53 @@ _CALL_PROVIDER_RETRY = "PROVIDER_RETRY"
 _CALL_FORMAT_RETRY = "FORMAT_RETRY"
 _CALL_NON_RETRYABLE = "NON_RETRYABLE"
 
+#: Reasoning effort per role for muse models (FXRUNSPEED S1, measured
+#: in the eval report): director/auditor/manager/solo run low, workers
+#: run max. The gateway transport sends the level only for muse-spark
+#: wire models; every other provider never gets the field.
+REASONING_EFFORT_BY_ROLE = {
+    "director": "low",
+    "manager": "low",
+    "worker": "max",
+    "auditor": "low",
+}
+
+
+def reasoning_level(role: Any, part: Any, model: Any) -> str | None:
+    """Reasoning effort for one call, or None for the old call shape.
+
+    Solo (role or part "solo", the engine solo turn runs as worker)
+    always runs low; any other role uses the table (unknown roles
+    default to low). Non-muse models get None: no params travel, so
+    one-argument fakes and other providers keep the old call shape.
+    """
+    try:
+        wire = str(model or "")
+    except Exception:
+        wire = ""
+    if "/" in wire:
+        wire = wire.rsplit("/", 1)[-1]
+    if not wire.startswith("muse-spark"):
+        return None
+    try:
+        role_name = str(role or "")
+    except Exception:
+        role_name = ""
+    try:
+        part_id = part.get("part_id") if isinstance(part, dict) else part
+        part_name = str(part_id or "")
+    except Exception:
+        part_name = ""
+    if role_name == "solo" or part_name == "solo":
+        return "low"
+    try:
+        level = REASONING_EFFORT_BY_ROLE.get(role_name, "low")
+    except Exception:
+        level = "low"
+    if level not in ("low", "medium", "high", "max"):
+        return "low"
+    return level
+
 #: Max wrapper tries per reason (first try + repeats).
 _CALL_TRIES = {
     _CALL_TIMEOUT: 2,  # one silent repeat of a timed-out call
@@ -312,6 +359,7 @@ def reply_language_line() -> str:
 
 
 def invoke_timed(adapter: Any, messages: list, *,
+                 params: Any = None,
                  timeout_s: Any = None,
                  first_notice_s: Any = None,
                  notice_every_s: Any = None,
@@ -325,6 +373,8 @@ def invoke_timed(adapter: Any, messages: list, *,
     waiting notice fires after first_notice_s seconds and then every
     notice_every_s seconds. A stop raises ModelStopped; an expired
     bound raises ModelTimeout; an adapter failure re-raises unchanged.
+    Per-run params travel only when set (two-argument invoke); a None
+    params keeps the old one-argument call so old fakes keep working.
     """
     limit = _clamp_timeout(timeout_s)
     try:
@@ -345,7 +395,10 @@ def invoke_timed(adapter: Any, messages: list, *,
 
     def _target() -> None:
         try:
-            box["response"] = adapter.invoke(messages)
+            if params is not None:
+                box["response"] = adapter.invoke(messages, params)
+            else:
+                box["response"] = adapter.invoke(messages)
         except BaseException as exc:  # noqa: BLE001 -- re-raised below
             box["error"] = exc
 
@@ -1096,12 +1149,19 @@ def invoke_owned(
         _CALL_TIMEOUT: int(_CALL_TRIES[_CALL_TIMEOUT]),
         _CALL_FORMAT_RETRY: int(_CALL_TRIES[_CALL_FORMAT_RETRY]),
     }
+    # FXRUNSPEED S1: one reasoning level per role for muse models.
+    # None keeps the old one-argument call (fakes, other providers).
+    level = reasoning_level(
+        resolution.get("role") if isinstance(resolution, dict) else None,
+        part, model)
+    params = {"reasoning_effort": level} if level is not None else None
     outage_failures: list[BaseException] = []
     response: Any = None
     while True:
         try:
             response = invoke_timed(
-                adapter, messages, timeout_s=timeout_s,
+                adapter, messages, params=params,
+                timeout_s=timeout_s,
                 first_notice_s=first_notice_s,
                 notice_every_s=notice_every_s,
                 tick_s=tick_s, stop_seen=stop_seen,
@@ -1157,7 +1217,8 @@ def invoke_owned(
             row = _records.ledger_add(
                 record, role=resolution["role"],
                 provider=provider, model=model,
-                part=part, attempt=attempt, usage=usage, cost=cost)
+                part=part, attempt=attempt, usage=usage, cost=cost,
+                reasoning_effort=level)
         except Exception:
             pass
         _record_usage(app, record, project_id, run_id,

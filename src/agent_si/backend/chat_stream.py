@@ -1538,6 +1538,17 @@ def _gateway_transport(base_url: str, credential_store: Any,
         if isinstance(max_tokens, int) and not isinstance(max_tokens, bool):
             if max_tokens > 0:
                 body_out["max_tokens"] = max_tokens
+        # FXRUNSPEED S1: per-role reasoning effort, muse wire models
+        # only. Any other provider never gets the field; nothing else
+        # is added here (no max_tokens invented).
+        try:
+            _params = request.get("params") or {}
+            _effort = _params.get("reasoning_effort")
+        except Exception:
+            _effort = None
+        if (isinstance(_effort, str) and _effort
+                and wire_model.startswith("muse-spark")):
+            body_out["reasoning_effort"] = _effort
         payload = _json.dumps(body_out).encode("utf-8")
         headers = {"Content-Type": "application/json"}
         if value:

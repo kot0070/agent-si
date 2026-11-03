@@ -140,13 +140,17 @@ afterEach(() => {
   window.sessionStorage.clear();
 });
 
-describe("fxviewsv7 quiet wrapping tab row", () => {
-  it("wraps tabs to more lines with the selected tab marked in ink", async () => {
+describe("fxviewsv7 one-row tab strip", () => {
+  it("holds tabs in one scrolled row with the selected tab marked in ink", async () => {
     renderAppAt("/projects/p9/overview");
     const nav = await screen.findByRole("navigation", {
       name: "Project sections",
     });
     expect(nav.classList.contains("fxpv-tabs")).toBe(true);
+    // FXLOOK D1 supersedes the wrap: owner-found 16 tabs in 3 rows, so
+    // the row is one nowrap lane with a scroll holder (same readFileSync
+    // precedent as before; the DOM half below proves every tab lives in
+    // that row with the ink selected state intact).
     // U1: quiet text tabs wrap to more lines — no boxed scroll row, no
     // thick scrollbar, no solid repaint. (jsdom applies no stylesheet
     // here — SHEETS 0 probed — so the rule text itself is the guard,
@@ -156,9 +160,10 @@ describe("fxviewsv7 quiet wrapping tab row", () => {
     // Tests run from frontend/, so this is src/projects/projectview.css.
     const tabsCss = readFileSync("src/projects/projectview.css", "utf8");
     const tabsBlock = /\.fxpv-tabs\s*\{([^}]*)\}/.exec(tabsCss)?.[1] ?? "";
-    expect(tabsBlock).toMatch(/flex-wrap\s*:\s*wrap/);
-    expect(tabsBlock).toMatch(/overflow-x\s*:\s*visible/);
-    expect(tabsBlock).not.toMatch(/flex-wrap\s*:\s*nowrap/);
+    expect(tabsBlock).toMatch(/flex-wrap\s*:\s*nowrap/);
+    const laneBlock =
+      /\.fxpv-tabs-scroll\s*\{([^}]*)\}/.exec(tabsCss)?.[1] ?? "";
+    expect(laneBlock).toMatch(/overflow-x\s*:\s*auto/);
     // Every tab (chat + all project views) lives in that row.
     expect(nav.querySelector('[data-testid="project-chat-tab"]')).not.toBeNull();
     for (const view of PROJECT_VIEWS) {

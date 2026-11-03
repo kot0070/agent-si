@@ -3,12 +3,60 @@
    hover/selected). Selected is bold + underline in ink, readable in
    both themes. Every string stays in the locale tables. */
 
-/* U1: the tab row wraps; hover underlines without repainting the
-   button (base button:hover would paint solid accent under ink text). */
+/* FXLOOK D1: the tab row is ONE row, never wrapped: nowrap plus a
+    horizontal scroll lane; tabs never shrink and labels never wrap.
+    `‹` `›` arrows (rendered only while overflow exists) sit outside
+    the lane; a soft fade marks the clipped edge. */
+.fxpv-tabs-wrap {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 0.25rem;
+  position: relative;
+}
+
+.fxpv-tabs-scroll {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.fxpv-tabs-wrap.fxpv-clip-left .fxpv-tabs-scroll {
+  mask-image: linear-gradient(to right, transparent, black 24px);
+}
+
+.fxpv-tabs-wrap.fxpv-clip-right .fxpv-tabs-scroll {
+  mask-image: linear-gradient(to left, transparent, black 24px);
+}
+
+.fxpv-tabs-wrap.fxpv-clip-left.fxpv-clip-right .fxpv-tabs-scroll {
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    black 24px,
+    black calc(100% - 24px),
+    transparent
+  );
+}
+
+.fxpv-tabs-arrow {
+  flex: 0 0 auto;
+  align-self: center;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--fx-card-border, var(--agent-si-card-border));
+  border-radius: 0.375rem;
+  background-color: var(--fx-card-bg, transparent);
+  color: var(--fx-ink, var(--agent-si-ink));
+  cursor: pointer;
+  line-height: 1;
+}
+
 .fxpv-tabs {
   display: flex;
   flex-direction: row;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   overflow-x: visible;
   gap: 0.25rem 0.75rem;
   padding: 0.25rem 0;
@@ -22,7 +70,7 @@
   background-color: transparent;
   color: var(--fx-ink, var(--agent-si-ink));
   cursor: pointer;
-  white-space: normal;
+  white-space: nowrap;
 }
 
 .fxpv-tabs .fxpv-tab:hover:not(:disabled) {

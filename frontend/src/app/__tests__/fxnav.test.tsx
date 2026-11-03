@@ -4,7 +4,13 @@
 // the Settings Project page, one purpose sentence per project tab.
 // Real App + real pages; the ONLY fake is the fetch boundary below.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { HttpApiClient } from "../../api/client";
 import { ApiClientProvider } from "../../app/ApiClientProvider";
@@ -187,9 +193,52 @@ describe("FXNAV one purpose sentence per project tab", () => {
     }
   });
 
-  it("shows the chat purpose line on the project chat tab", async () => {
-    renderAppAt("/projects/p-9/chat");
-    const purpose = await screen.findByTestId("tab-purpose");
-    expect(purpose.textContent).toBe(en.projectView.purpose.chat);
+  it("chat route carries no strip: head line opens Overview (FXLOOK D8)", async () => {
+    // FXLOOK D8 supersedes the chat purpose line: the chat route is a
+    // separate surface, so it shows the project head, never tab-purpose.
+    vi.stubGlobal(
+      "fetch",
+      async (input: unknown) => {
+        const url = String(input);
+        if (url === "/api/v1/projects") {
+          return json({
+            projects: [
+              {
+                project_id: "p-9",
+                name: "n-9",
+                folder_ref: "n-9",
+                created_at: "2026-01-01T00:00:00.000Z",
+              },
+            ],
+          });
+        }
+        if (url === "/api/v1/projects/p-9") {
+          return json({
+            project: {
+              project_id: "p-9",
+              name: "n-9",
+              folder_ref: "n-9",
+              created_at: "2026-01-01T00:00:00.000Z",
+            },
+          });
+        }
+        if (url === "/api/v1/agents/live") {
+          return json({ agents: [] });
+        }
+        return json({ code: "CONTEXT_MISSING" }, 404);
+      },
+    );
+    const router = renderAppAt("/projects/p-9/chat");
+    const head = await screen.findByTestId("chat-route-head");
+    const named = await within(head).findByText("n-9");
+    expect(named.getAttribute("data-testid")).toBe("chat-route-project");
+    expect(
+      screen.getByTestId("project-details-open").textContent,
+    ).toBe(en.projects.details.open);
+    expect(screen.queryByTestId("tab-purpose")).toBeNull();
+    expect(screen.queryByTestId("project-tabs")).toBeNull();
+    fireEvent.click(screen.getByTestId("project-details-open"));
+    expect(await screen.findByTestId("project-tabs")).toBeTruthy();
+    expect(router.state.location.pathname).toBe("/projects/p-9/overview");
   });
 });

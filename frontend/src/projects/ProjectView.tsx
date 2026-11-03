@@ -54,7 +54,6 @@ import { RunId } from "./RunId";
 import "./projectview.css";
 import {
   PROJECT_VIEWS,
-  buildDerivedSplit,
   computeAgeDays,
   contextUsage,
   exportProjectReport,
@@ -67,6 +66,7 @@ import {
 } from "./projectsApi";
 import type { ProjectViewName } from "./projectsApi";
 import { RunHistory } from "./RunHistory";
+import { ProjectTabsNav } from "./ProjectTabsNav";
 import { TestsTab } from "./TestsTab";
 import { ProjectLimitsSection } from "../settings/projectLimits";
 import { HealthView } from "./observe/HealthView";
@@ -1819,8 +1819,10 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
               ) : (
                 <div data-testid="report-task-counts">
                   <div className="fxpv-fact">
+                    {/* FXLOOK D5: the header always carries the total, never
+                        a blank "Tasks:" row. */}
                     <span>{t("tasks.list.title")}:</span>
-                    {tasks.length === 0 ? <span>0</span> : null}
+                    <span>{formatNumber(tasks.length, locale)}</span>
                   </div>
                   {statusCounts(tasks).map(({ status, count }) => (
                     <div
@@ -1922,10 +1924,9 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
                             ? formatNumber(runsWall, locale)
                             : null,
                       ],
-                      [
-                        "projectView.reports.spent",
-                        `${formatNumber(budget.spent, locale)} ${budget.currency}`,
-                      ],
+                      // FXLOOK D5: no duplicate Money spent under Calculated
+                      // value (the budget block above owns it); reserved and
+                      // remaining stay.
                       [
                         "projectView.reports.reserved",
                         `${formatNumber(budget.reserved, locale)} ${budget.currency}`,
@@ -1947,32 +1948,9 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
                 </>
               )}
             </div>
-            <div data-testid="project-report-derived-split">
-              {tasksError !== null ? (
-                panelError(tasksError)
-              ) : ledgerError !== null ? (
-                panelError(ledgerError)
-              ) : budgetError !== null ? (
-                panelError(budgetError)
-              ) : ledger === null || budget === null ? (
-                <LoadingState loadingKey="ui.loading.more" />
-              ) : buildDerivedSplit({ ledger, budget }).length === 0 ? null : (
-                buildDerivedSplit({ ledger, budget }).map((allocation) => (
-                  <div
-                    key={allocation.packageId}
-                    data-testid={`derived-split-${allocation.packageId}`}
-                    className="fxpv-row"
-                  >
-                    <span>{t(allocation.labelKey)}</span>
-                    <span>{humanRunRef(allocation.packageId).text}</span>
-                    <span>
-                      {formatNumber(allocation.derivedCost, locale)}{" "}
-                      {allocation.currency}
-                    </span>
-                  </div>
-                ))
-              )}
-            </div>
+            {/* FXLOOK D5: the engine allocation rows no longer render under
+                Calculated value (buildDerivedSplit stays exported for the
+                contract tests, but the view stops rendering it). */}
             <div data-testid="project-report-files" className="fxpv-fact">
               <span>{t("projectView.reports.changedFiles")}:</span>
               {liveError !== null ? (
@@ -2041,52 +2019,14 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
 
   return (
     <div>
-      <nav aria-label={t("projectView.tabsLabel")} className="fxpv-tabs">
-        {/* FXCHATHIST Part 2 (H3): Chat is the first project tab and
-            opens that project's chat with its history. The testid keeps
-            the project-menu-* prefix free so the frozen 15-tab count in
-            app/__tests__/App.test.tsx stays exact. */}
-        <button
-          type="button"
-          data-testid="project-chat-tab"
-          className="fxpv-tab"
-          aria-selected="false"
-          onClick={() => {
-            props.onSelect?.("chat" as ProjectViewName);
-          }}
-          onKeyDown={(event) => {
-            // W6: keyboard tabs navigate like clicks (App onSelect).
-            if (event.key === "Enter") {
-              props.onSelect?.("chat" as ProjectViewName);
-            }
-          }}
-        >
-          {t("shell.sidebar.chat")}
-        </button>
-        {PROJECT_VIEWS.map((name) => (
-          <button
-            key={name}
-            type="button"
-            data-testid={projectMenuTestId(name)}
-            aria-current={props.view === name ? "true" : undefined}
-            aria-selected={props.view === name ? "true" : "false"}
-            className={
-              props.view === name ? "fxpv-tab fxpv-tab-selected" : "fxpv-tab"
-            }
-            onClick={() => {
-              props.onSelect?.(name);
-            }}
-            onKeyDown={(event) => {
-              // W6: keyboard tabs navigate like clicks (App onSelect).
-              if (event.key === "Enter") {
-                props.onSelect?.(name);
-              }
-            }}
-          >
-            {t(projectViewTitleKey(name))}
-          </button>
-        ))}
-      </nav>
+      {/* FXLOOK D1+D7: the one shared single-row tab strip (chat first,
+          same look for every tab, arrows on overflow). */}
+      <ProjectTabsNav
+        selected={props.view}
+        onSelect={(name) => {
+          props.onSelect?.(name as ProjectViewName);
+        }}
+      />
       <p data-testid="tab-purpose">{t(VIEW_PURPOSE_KEY[props.view])}</p>
       <section
         data-testid={`kit-card-project-${props.view}`}

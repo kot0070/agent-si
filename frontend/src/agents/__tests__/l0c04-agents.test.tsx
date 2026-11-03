@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { ApiClientProvider } from "../../app/ApiClientProvider";
 import { FakeApiClient } from "../../api/__tests__/fakeApiClient";
 import { resetLocaleForTests, setLocale, t } from "../../locale/index";
@@ -27,9 +28,11 @@ describe("L0C-04 inspector shows the project name, never the raw id", () => {
       ],
     });
     render(
-      <ApiClientProvider client={client}>
-        <AgentsLive projectId="proj-raw-123" />
-      </ApiClientProvider>,
+      <MemoryRouter initialEntries={["/agents/live"]}>
+        <ApiClientProvider client={client}>
+          <AgentsLive projectId="proj-raw-123" />
+        </ApiClientProvider>
+      </MemoryRouter>,
     );
     const label = await screen.findByTestId("agents-live-project");
     expect(label.textContent).toBe("Alpha Project");
@@ -44,9 +47,11 @@ describe("L0C-04 inspector shows the project name, never the raw id", () => {
       ],
     });
     render(
-      <ApiClientProvider client={client}>
-        <AgentsLive projectId="missing-raw-999" />
-      </ApiClientProvider>,
+      <MemoryRouter initialEntries={["/agents/live"]}>
+        <ApiClientProvider client={client}>
+          <AgentsLive projectId="missing-raw-999" />
+        </ApiClientProvider>
+      </MemoryRouter>,
     );
     const label = await screen.findByTestId("agents-live-project");
     expect(label.textContent).toBe(t("shell.topbar.project"));

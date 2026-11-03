@@ -365,10 +365,101 @@ def register_read_routes(app: Any) -> Any:
                 status_code=404,
                 detail=f"no stage run recorded for project {project_id!r}",
             )
-        return {
+        # FXQACAT (additive): serve the served start time when the stage
+        # recorded one; older entries read back without it, never invented.
+        body = {
             "project_id": project_id,
             "plan_id": found["plan_id"],
             "run_id": found["run_id"],
+        }
+        started_at = found.get("started_at")
+        if isinstance(started_at, str) and started_at:
+            body["started_at"] = started_at
+        return body
+
+    # FXQACAT (additions-only): Settings Test-catalog reads over the real
+    # lane modules. No doubles, no copies: every handler calls its owning
+    # entry directly; absent data reads back empty, never invented.
+    @app.get("/api/v1/teststage/catalog/summary")
+    def fxqacat_catalog_summary() -> dict:
+        import hashlib as _fxqacat_hashlib
+
+        from agent_si.qa_catalog import catalog_v2 as _fxqacat_c2
+        from agent_si.test_runners import test_bases as _fxqacat_bases
+
+        split = _fxqacat_c2.split_summary()
+        with open(_fxqacat_c2._catalog_path(), "rb") as handle:
+            digest = _fxqacat_hashlib.sha256(handle.read()).hexdigest()
+        return {
+            "catalog_ref": "catalog-v2",
+            "version": _fxqacat_c2.CATALOG_VERSION,
+            "version_sha_short": digest[:8],
+            "bases": len(_fxqacat_bases.list_bases()),
+            "tests_total": split["total"],
+            "kinds": {
+                "CODE": split["code"],
+                "AI": split["ai"],
+                "HUMAN": split["human"],
+            },
+        }
+
+    @app.get("/api/v1/teststage/catalog/tests")
+    def fxqacat_catalog_tests() -> dict:
+        from agent_si.qa_catalog import catalog_v2 as _fxqacat_c2
+
+        rows = _fxqacat_c2._DOC["tests"]
+        return {
+            "catalog_ref": "catalog-v2",
+            "version": _fxqacat_c2.CATALOG_VERSION,
+            "total": len(rows),
+            "tests": [
+                {
+                    "id": row["id"],
+                    "group": row["group"],
+                    "intent": row["intent"],
+                    "kind": row["kind"],
+                    "priority": row["priority"],
+                    "runner": row["runner"],
+                }
+                for row in rows
+            ],
+        }
+
+    # NOTE: GET /api/v1/teststage/catalog/versions stays with the k03wire
+    # test_runners lane (recorded stage versions); the frozen-catalog
+    # history below lives under /history so the two never collide.
+    @app.get("/api/v1/teststage/catalog/history")
+    def fxqacat_catalog_versions() -> dict:
+        from agent_si.qa_catalog import catalog_versions as _fxqacat_ver
+
+        ref = _fxqacat_ver._SEED_REF
+        active = _fxqacat_ver.current_version(ref)
+        log = _fxqacat_ver.get_changelog(ref)
+        seen = sorted({entry.version for entry in log} | {active.version})
+        return {
+            "catalog_ref": ref,
+            "active": {
+                "version": active.version,
+                "sha_short": active.catalog_hash[:8],
+                "created_at": active.created_at,
+            },
+            "versions": [
+                {
+                    "version": number,
+                    "sha_short": _fxqacat_ver._catalog_hash(ref, number)[:8],
+                    "active": number == active.version,
+                }
+                for number in seen
+            ],
+            "changelog": [
+                {
+                    "version": entry.version,
+                    "change": entry.change,
+                    "changed_at": entry.changed_at,
+                    "changed_by": entry.changed_by,
+                }
+                for entry in log
+            ],
         }
 
     @app.get("/api/v1/teststage/result-output")

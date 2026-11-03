@@ -85,7 +85,8 @@ def extract_json_object(text: Any) -> Any:
 
     Real replies arrive as plain JSON, ```json fences, or a sentence
     then JSON. Empty or reasoning-only text raises "empty reply";
-    text with no object raises "no JSON object in reply: ...".
+    text with no object raises "no JSON object in reply" (no excerpt:
+    the raw text is model content and never travels in errors).
     """
     try:
         src = (text or "").strip()
@@ -95,7 +96,9 @@ def extract_json_object(text: Any) -> Any:
         raise ValueError("empty reply")
     start = src.find("{")
     if start < 0:
-        raise ValueError("no JSON object in reply: %r" % (src[:120],))
+        # FXRUNSPEED S2: no excerpt (model text never travels in errors;
+        # the journal re-ask line stays reason-only).
+        raise ValueError("no JSON object in reply")
     try:
         obj, _end = json.JSONDecoder().raw_decode(src[start:])
     except Exception as exc:
@@ -179,6 +182,60 @@ def _clean_managers(raw: Any, part_ids: set[str]) -> list[dict[str, Any]]:
     return out
 
 
+def _syntax_repair(text: Any) -> str:
+    """One bounded syntax-repair pass for a director reply.
+
+    Strips code-fence lines, drops trailing commas before } or ],
+    and appends closers for still-open trailing { or [. String-aware
+    (braces inside quoted strings never count). Never invents parts
+    or fields: the caller re-runs the same extract + validation, and
+    a repair that still fails keeps the original error (re-ask).
+    """
+    try:
+        src = str(text or "")
+    except Exception:
+        return ""
+    try:
+        lines = src.splitlines()
+    except Exception:
+        lines = []
+    if any(line.strip().startswith("```") for line in lines):
+        src = "\n".join(
+            line for line in lines
+            if not line.strip().startswith("```"))
+    try:
+        src = re.sub(r",(\s*[}\]])", r"\1", src)
+    except Exception:
+        pass
+    stack: list[str] = []
+    in_str = False
+    quote = ""
+    escaped = False
+    for ch in src:
+        if in_str:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == quote:
+                in_str = False
+            continue
+        if ch == '"' or ch == "'":
+            in_str = True
+            quote = ch
+        elif ch == "{" or ch == "[":
+            stack.append(ch)
+        elif ch == "}":
+            if stack and stack[-1] == "{":
+                stack.pop()
+        elif ch == "]":
+            if stack and stack[-1] == "[":
+                stack.pop()
+    for opener in reversed(stack):
+        src += "}" if opener == "{" else "]"
+    return src
+
+
 def parse_director_reply(text: str) -> dict[str, Any]:
     """Parse one Director reply into {"answer"} or {"parts"}.
 
@@ -188,8 +245,17 @@ def parse_director_reply(text: str) -> dict[str, Any]:
     """
     try:
         data = extract_json_object(text)
-    except ValueError as exc:
-        raise PlanError("director reply is not JSON: %s" % (exc,)) from None
+    except ValueError as first_exc:
+        # FXRUNSPEED S2: one bounded syntax repair before the re-ask
+        # (fences, trailing commas, unclosed trailers). The repaired
+        # text goes through the same extract + validation below; a
+        # repair that still fails keeps the ORIGINAL error so the
+        # re-ask reason is unchanged.
+        try:
+            data = extract_json_object(_syntax_repair(text))
+        except ValueError:
+            raise PlanError(
+                "director reply is not JSON: %s" % (first_exc,)) from None
     if not isinstance(data, dict):
         raise PlanError("director reply must be a JSON object")
     if "parts" in data and data["parts"] is not None:
