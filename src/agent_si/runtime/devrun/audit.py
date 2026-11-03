@@ -235,6 +235,7 @@ def auditor_messages(
     prior_install_runs: Any = (),
     part_diff: str = "",
     part_files: Any = None,
+    folder: str = "",
 ) -> list[dict[str, str]]:
     """The auditor's NEW message list: goal, diff, checks with output.
 
@@ -245,6 +246,8 @@ def auditor_messages(
     second section (the rerun must verify, not reinstall).
     Declared post-images ride their own section (8 KB per file,
     32 KB total) so unchanged-file breaks stay visible.
+    ``folder`` names the project folder (FXWHERE location check);
+    empty keeps the messages identical to the pre-FXWHERE shape.
     """
     from agent_si.runtime.devrun import records as _records
 
@@ -277,6 +280,18 @@ def auditor_messages(
         lines.append("Installers already run for this project "
                      "(do not reinstall, verify instead):")
         lines.extend(prior_lines)
+    if folder:
+        # FXWHERE location check: the goal is the user's own words; the
+        # diffs above are relative to the project folder. A goal naming
+        # a place outside it still lands inside (the jail refuses
+        # anything else): PASS only then, and name the inside path.
+        lines.append("Project folder: %s." % (folder,))
+        lines.append(
+            "Location check: the goal above is the user's own words. "
+            "The diffs above are relative to that folder. If the goal "
+            "names a place outside it, PASS only when the deliverable "
+            "landed inside the project folder anyway (the jail refuses "
+            "anything else); name the inside path in a reason.")
     lines.append(
         'Return ONLY JSON: {"result": "PASS"|"FAIL", '
         '"reasons": ["..."]}. Judge the real files and real outputs '
@@ -317,6 +332,7 @@ def judge(
     artifact_refs: list[str],
     part_diff: str = "",
     part_files: Any = None,
+    folder: str = "",
     lock: Any = None,
     timeout_s: Any = None,
     stop_seen: Any = None,
@@ -336,7 +352,7 @@ def judge(
     prior = _install_records.prior_snapshot(record)
     messages = auditor_messages(goal, files_diff, checks, evidence,
                                 prior, part_diff=part_diff,
-                                part_files=part_files)
+                                part_files=part_files, folder=folder)
     # FXPARALLEL BEGIN charge-lock: auditor charges under the run lock.
     response, over, _row = _roles.invoke_owned(
         app, adapter, resolution, messages, record=record,
