@@ -261,19 +261,19 @@ describe("fxpoint1 R4 first chat screen label", () => {
 });
 
 describe("fxpoint1 R5 top bar brand plus pairing gap", () => {
-  it("leads with the Agent SI brand and keeps the pairing spans apart", async () => {
+  it("leads with the Agent SI brand and keeps the pairing badge", async () => {
     seedProject();
     renderApp("/");
     const topbar = await screen.findByTestId("topbar");
     const brand = await screen.findByTestId("topbar-brand");
     expect(brand.textContent).toContain("Agent SI");
     expect(topbar.firstElementChild).toBe(brand);
+    // FXFACTS F15: the watcher word lives in the rail card only, so the
+    // strip keeps the placement badge and no label span.
     const strip = screen.getByTestId("pairing-strip");
-    const label = screen.getByTestId("pairing-label");
-    const badge = screen.getByTestId("pairing-badge");
-    expect(strip.firstElementChild).toBe(label);
-    expect(label.nextElementSibling).toBe(badge);
-    expect(strip.textContent).toContain(`${en.shell.topbar.watcher} `);
+    expect(screen.queryByTestId("pairing-label")).toBeNull();
+    expect(screen.getByTestId("pairing-badge")).toBeTruthy();
+    expect(strip.firstElementChild).toBe(screen.getByTestId("pairing-badge"));
   });
 });
 

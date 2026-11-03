@@ -342,6 +342,13 @@ aside[data-testid="inspector"] dl dd {
     display: block;
   }
 }
+/* FXFACTS F12/F15: the quiet stop status fades on its own. */
+.fx-fade-note {
+  opacity: 0.8;
+  font-size: 12px;
+  transition: opacity 0.6s ease-out;
+}
+
 /* FXDESIGN1 S2: top-bar rhythm — brand, watcher pairing label and badge. */
 .fx-topbar > [data-testid="topbar-brand"] {
   margin-right: 4px;

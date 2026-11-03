@@ -4,9 +4,10 @@
 // the fix, GREEN after. S1 shell fills the viewport (min-height rule plus
 // token scrollbar rules, regions present); S2 chat list fills the centre
 // column with the composer in flow last (in-flow, after messages, never
-// sticky/fixed/absolute/overlapping); S3 exactly one
-// visible Watcher string while topbar-watcher still navigates to /watcher;
-// S4 one primary per form (folder-choose quiet) with the kit chevron intact;
+// sticky/fixed/absolute/overlapping); S3 no Watcher word in the top bar
+// (the rail Watcher card holds it, F15) while the card still navigates
+// to /watcher; S4 one primary per form (folder-choose quiet) with the kit
+// chevron intact;
 // S5 the active rail entry exposes aria-current; S6 served UNKNOWN evidence
 // renders the locale label, never the bare enum; S7 every option control in
 // the owned regions is associated with its label.
@@ -192,17 +193,16 @@ describe("fxdesign3 S2 chat fills the centre column", () => {
 });
 
 describe("fxdesign3 S3 single Watcher entry", () => {
-  it("shows one Watcher string while the watcher link still navigates", async () => {
+  it("shows no Watcher string in the top bar; the rail card navigates", async () => {
     renderAppAt("/");
     const topbar = await screen.findByTestId("topbar");
+    // FXFACTS F15: the watcher word lives in the rail Watcher card only.
     const hits = (topbar.textContent ?? "").match(/Watcher/g) ?? [];
-    expect(hits.length).toBe(1);
-    const label = screen.getByTestId("pairing-label");
-    const link = screen.getByTestId("topbar-watcher");
-    expect(label.textContent).toBe(t("shell.topbar.watcher"));
-    expect(label.contains(link)).toBe(true);
-    expect(link.getAttribute("href")).toBe("/watcher");
-    fireEvent.click(link);
+    expect(hits).toEqual([]);
+    expect(screen.queryByTestId("topbar-watcher")).toBeNull();
+    expect(screen.queryByTestId("pairing-label")).toBeNull();
+    fireEvent.click(await screen.findByTestId("rail-toggle-watcher"));
+    fireEvent.click(await screen.findByTestId("watcher-open"));
     expect(await screen.findByTestId("watcher-tab")).toBeTruthy();
   });
 });
