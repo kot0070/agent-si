@@ -14,7 +14,10 @@ import { ProvidersPage } from "./ProvidersPage";
 
 const FX_TOKEN = "fxrefused-token-01";
 const REFUSED = "The provider refused this key. Paste the full key again.";
-const UNREACHABLE = "Could not reach the provider.";
+// S3: slow/unreachable keeps the key; the page names Connect again,
+// never the re-paste hint.
+const UNREACHABLE =
+  "The provider is slow or unreachable. Your key is saved. Press Connect again.";
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
