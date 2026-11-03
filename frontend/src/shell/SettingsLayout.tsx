@@ -10,6 +10,9 @@ export interface SettingsLayoutProps {
   needItNowKey: string;
   children: ReactNode;
   advanced?: ReactNode;
+  // FXNAV P16-needitnow: optional kit probe id on the section (the
+  // Settings Project page carries kit-card-needitnow-project).
+  sectionTestId?: string;
 }
 
 // W10: the Why chip navigates to the routing-decisions view (project
@@ -45,7 +48,7 @@ function WhyChipWithRouter(): ReactElement {
 export function SettingsLayout(props: SettingsLayoutProps): ReactElement {
   const inRouter = useInRouterContext();
   return (
-    <section>
+    <section data-testid={props.sectionTestId}>
       <h2>{t(props.titleKey)}</h2>
       <p data-testid="settings-purpose">{t(props.purposeKey)}</p>
       <p data-testid="settings-need-it-now">{t(props.needItNowKey)}</p>
