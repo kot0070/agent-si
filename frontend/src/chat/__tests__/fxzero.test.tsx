@@ -51,4 +51,29 @@ describe('fxzero R1 zero-part runs never say Done', () => {
     expect(summary.parts).toBe(1);
     expect(summary.done).toBe(true);
   });
+
+  it("a success count line without Part rows still counts", () => {
+    const summary = summarizeEngineTurn(
+      "Director: plan of 2 parts\nTotal: 10 input\nrun success: all 2 parts PASS",
+      "ok",
+    );
+    expect(summary.parts).toBe(2);
+    expect(summary.done).toBe(true);
+    expect(engineVerdictLine(summary)).toContain("Done");
+  });
+
+  it("an announced plan without verdicts reads failed with its count", () => {
+    const summary = summarizeEngineTurn("Director: plan of 2 parts", "ok");
+    expect(summary.parts).toBe(2);
+    expect(summary.done).toBe(false);
+    expect(engineVerdictLine(summary)).toContain("Failed");
+  });
+
+  it("team-off solo success keeps Done", () => {
+    const summary = summarizeEngineTurn(
+      "Team off: one worker, no audit\nDone, not audited.",
+      "ok",
+    );
+    expect(summary.done).toBe(true);
+  });
 });

@@ -682,17 +682,43 @@ export function summarizeEngineTurn(
       passed += 1;
     }
   }
-  // FXZERO R1: a run with zero parts never says Done. With no parts
-  // there is no success to claim, whatever the terminal state says.
-  const empty = parts === 0;
+  // FXZERO R1: a run with zero "Part ...: PASS/FAIL" rows is hollow
+  // unless the run's own lines evidence work: its success count line
+  // ("run success: all N parts PASS"), its announced plan
+  // ("Director: plan of N parts"), or the team-off solo marker
+  // ("Done, not audited."). A hollow run never says Done.
+  const soloDone = /Done, not audited\./.test(text);
+  let wholeParts = parts;
+  let wholePassed = passed;
+  if (wholeParts === 0 && !soloDone) {
+    const runOk = /run success:\s*all (\d+)\s+parts?\s+PASS/i.exec(text);
+    if (runOk?.[1] !== undefined) {
+      wholeParts = Number.parseInt(runOk[1], 10);
+      wholePassed = wholeParts;
+    } else {
+      const plans = [...text.matchAll(
+        /Director:\s*plan of (\d+)\s+parts?/gi)];
+      const lastPlan = plans.length === 0
+        ? 0
+        : Number.parseInt(
+            plans[plans.length - 1]?.[1] ?? "0",
+            10,
+          );
+      if (Number.isFinite(lastPlan) && lastPlan > 0) {
+        wholeParts = lastPlan;
+      }
+    }
+  }
+  const hollow =
+    wholeParts === 0 && files.length === 0 && !soloDone;
   const failed =
     status !== "ok" ||
-    empty ||
-    (parts > 0 ? passed < parts : /run fail/i.test(text));
+    hollow ||
+    (wholeParts > 0 ? wholePassed < wholeParts : /run fail/i.test(text));
   return {
     done: !failed,
-    parts,
-    passed,
+    parts: wholeParts,
+    passed: wholePassed,
     files,
     lines,
     planChanged: planChangedLine(text),
@@ -1360,12 +1386,22 @@ function startChatRun(
         // FXZERO R1: an engine turn that built zero parts is not
         // success, even on a clean stream end. A phrased question
         // keeps its answer status; a statement-like prompt fails.
+        // summarizeEngineTurn already credits evidenced work (success
+        // count, announced plan, solo marker): only a hollow summary
+        // (not done, zero parts) flips the terminal status. Replays
+        // (skipUserAppend) never flip: a replay slice is not the whole
+        // run text, so zero parts in the slice prove nothing.
         const engineText = ranEngine || looksLikeEngineLog(answer);
+        const terminalSummary = engineText
+          ? summarizeEngineTurn(answer, "ok")
+          : null;
         const questionPrompt = text.trimEnd().endsWith("?");
         const emptyPlan =
-          engineText &&
+          opts?.skipUserAppend !== true &&
+          terminalSummary !== null &&
           !questionPrompt &&
-          summarizeEngineTurn(answer, "ok").parts === 0;
+          terminalSummary.parts === 0 &&
+          !terminalSummary.done;
         const terminalStatus = emptyPlan ? "failed" : "ok";
         if (emptyPlan) {
           setChatHealth(key, "degraded");
