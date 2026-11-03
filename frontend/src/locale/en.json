@@ -45,7 +45,10 @@
       "noneEnabled": "None enabled — open Manage models to choose.",
       "manageModels": "Manage models",
       "manageModelsCta": "Manage {label} models",
-      "enabledCount": "{count} enabled"
+      "enabledCount": "{count} enabled",
+      "connectedModel": "{label} connected · {model}",
+      "showAllModels": "Show all {count}",
+      "showFewerModels": "Show fewer"
     },
     "role": {
       "director": "Director",

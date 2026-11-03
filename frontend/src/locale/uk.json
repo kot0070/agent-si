@@ -45,7 +45,10 @@
       "noneEnabled": "Нічого не ввімкнено — відкрийте «Керування моделями», щоб обрати.",
       "manageModels": "Керувати моделями",
       "manageModelsCta": "Керувати моделями {label}",
-      "enabledCount": "{count} увімкнено"
+      "enabledCount": "{count} увімкнено",
+      "connectedModel": "{label} підключено · {model}",
+      "showAllModels": "Показати всі ({count})",
+      "showFewerModels": "Показати менше"
     },
     "role": {
       "director": "Директор",

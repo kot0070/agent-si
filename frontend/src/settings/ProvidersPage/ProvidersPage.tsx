@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getUiToken } from "../../api/errors";
 import { deleteLeftoverKey, listConnectedProviders, listLeftoverKeys } from "./connectApi";
-import { listServedModels, mergeModelList, modelPriceText } from "./modelsApi";
+import { listProviderModels, listServedModels, mergeModelList, modelPriceText } from "./modelsApi";
 import type { ServedModelRow } from "./modelsApi";
 import { getProviderCatalog } from "./catalog";
 import { ChatModelSelector } from "./ChatModelSelector";
@@ -74,6 +74,9 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
   // Last provider connected through the dialog: its card carries the quiet
   // "Connected {label}." line next to Disconnect.
   const [lastConnectedId, setLastConnectedId] = useState<string | null>(null);
+  // FXLOOK D4: per-card "not known" fold: model rows with no price stay
+  // hidden behind Show all until opened.
+  const [showAllModels, setShowAllModels] = useState<Record<string, boolean>>({});
   // Served model listings per preset (GET /api/v1/providers/{id}/models):
   // the provider's own rows the routes know, merged over the KB catalog.
   const [servedModels, setServedModels] = useState<Record<string, ServedModelRow[]>>({});
@@ -118,6 +121,9 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
 
   // Cards state on open: a background GET marks the providers the routes
   // already know as connected, then their served model listings merge in.
+  // FXLOOK D4: the served `enabled` array (the routing truth) is adopted
+  // into the card ticks, so a connected provider with served-enabled
+  // models never reads "None enabled" while runs work.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -126,16 +132,6 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
         return;
       }
       const known = new Set(ids);
-      setStates((prev) => {
-        const next: Record<string, ProviderState> = { ...prev };
-        for (const id of Object.keys(next)) {
-          if (known.has(id)) {
-            const current = next[id] as ProviderState;
-            next[id] = { ...current, connected: true };
-          }
-        }
-        return next;
-      });
       const entries = await Promise.all(
         ids.map(async (id) => ({ id, rows: await listServedModels(id) })),
       );
@@ -149,11 +145,46 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
         }
         return next;
       });
+      // Routing-truth ticks per connected preset (never throws; a silent
+      // route keeps the local ticks).
+      const truth = await Promise.all(
+        ids.map(async (id) => {
+          const preset = catalog.find((entry) => entry.id === id);
+          if (preset === undefined) {
+            return { id, enabled: [] as string[] };
+          }
+          const outcome = await listProviderModels(
+            id,
+            preset.models.map((model) => ({ id: model.id, label: model.label })),
+          );
+          return { id, enabled: outcome?.servedEnabled ?? [] };
+        }),
+      );
+      if (cancelled) {
+        return;
+      }
+      setStates((prev) => {
+        const next: Record<string, ProviderState> = { ...prev };
+        for (const id of Object.keys(next)) {
+          if (known.has(id)) {
+            const current = next[id] as ProviderState;
+            const served = truth.find((entry) => entry.id === id)?.enabled ?? [];
+            const enabled = [...current.enabledModels];
+            for (const modelId of served) {
+              if (!enabled.includes(modelId)) {
+                enabled.push(modelId);
+              }
+            }
+            next[id] = { ...current, connected: true, enabledModels: enabled };
+          }
+        }
+        return next;
+      });
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [catalog]);
 
   // Display models per preset: the served provider listing (the rows the
   // routes know for this provider) first, then the KB-derived catalog
@@ -389,9 +420,22 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
                         {t("providers.page.manageModels")}
                       </button>
                       <p data-testid={`provider-enabled-${preset.id}`} data-variant="quiet">
-                        {state.enabledModels.length === 0
-                          ? t("providers.page.noneEnabled")
-                          : t("providers.page.enabledCount", { count: String(state.enabledModels.length) })}
+                        {(() => {
+                          // FXLOOK D4: a connected card names the connection
+                          // and the model in one line, never "None enabled"
+                          // while the routes know the provider. The model is
+                          // the first ticked one, else the first listed row
+                          // (served order, then catalog).
+                          const listed = displayModels[preset.id] ?? [];
+                          const effective =
+                            state.enabledModels[0] ?? listed[0]?.id;
+                          return effective === undefined
+                            ? t("providers.page.noneEnabled")
+                            : t("providers.page.connectedModel", {
+                                label: preset.label,
+                                model: effective,
+                              });
+                        })()}
                       </p>
                       {lastConnectedId === preset.id ? (
                         <p role="status" data-variant="quiet">
@@ -422,8 +466,16 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
                     {preset.keyHint}
                   </p>
                   <ul>
-                    {(displayModels[preset.id] ?? []).map((model) => (
-                      <li key={model.id} data-testid="model-row">
+                    {(displayModels[preset.id] ?? []).map((model) => {
+                      // FXLOOK D4: rows with no price ("not known") fold
+                      // behind Show all; ticked rows always stay visible.
+                      const folded =
+                        modelPriceText(model.kb) ===
+                          t("providers.connect.priceUnknown") &&
+                        !state.enabledModels.includes(model.id);
+                      const open = showAllModels[preset.id] === true;
+                      return (
+                      <li key={model.id} data-testid="model-row" hidden={folded && !open}>
                         {model.label === model.id ? null : (
                           <>
                             <span>{model.label}</span>{" "}
@@ -448,8 +500,41 @@ export function ProvidersPage({ project_id = "local" }: ProvidersPageProps) {
                           onChange={() => toggleModel(preset.id, model.id)}
                         />
                       </li>
-                    ))}
+                      );
+                    })}
                   </ul>
+                  {(() => {
+                    const foldedCount = (displayModels[preset.id] ?? []).filter(
+                      (model) =>
+                        modelPriceText(model.kb) ===
+                          t("providers.connect.priceUnknown") &&
+                        !state.enabledModels.includes(model.id),
+                    ).length;
+                    if (foldedCount === 0) {
+                      return null;
+                    }
+                    const open = showAllModels[preset.id] === true;
+                    return (
+                      <button
+                        type="button"
+                        data-testid={`provider-models-toggle-${preset.id}`}
+                        className="fx-btn-quiet"
+                        aria-expanded={open}
+                        onClick={() => {
+                          setShowAllModels((prev) => ({
+                            ...prev,
+                            [preset.id]: !open,
+                          }));
+                        }}
+                      >
+                        {open
+                          ? t("providers.page.showFewerModels")
+                          : t("providers.page.showAllModels", {
+                              count: String(foldedCount),
+                            })}
+                      </button>
+                    );
+                  })()}
                 </article>
               );
             })}

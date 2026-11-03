@@ -127,7 +127,10 @@ describe("FXPROV2 step 2 opens in the same dialog", () => {
     expect(checked[0].getAttribute("aria-label")).toBe("openai/gpt-4o-mini");
     fireEvent.click(within(dialog).getByText("Done"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(screen.getByText("1 enabled")).toBeTruthy();
+    // FXLOOK D4: the connected card names connection + model, not a count.
+    expect(
+      screen.getByText("OpenAI connected · openai/gpt-4o-mini"),
+    ).toBeTruthy();
   });
 
   it("X closes even during a pending save and the key is gone", async () => {
@@ -151,7 +154,10 @@ describe("FXPROV2 step 2 opens in the same dialog", () => {
     fireEvent.keyDown(document, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     // Only the fresh-connect default survived; the extra tick was dropped.
-    expect(screen.getByText("1 enabled")).toBeTruthy();
+    // FXLOOK D4: the connected card names connection + model, not a count.
+    expect(
+      screen.getByText("OpenAI connected · openai/gpt-4o-mini"),
+    ).toBeTruthy();
   });
 });
 
@@ -223,7 +229,10 @@ describe("FXPROV2 list source and fallback", () => {
     expect(full.checked).toBe(true);
     fireEvent.click(within(dialog).getByText("Done"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(screen.getByText("1 enabled")).toBeTruthy();
+    // FXLOOK D4: the served tick truth names the model on the card.
+    expect(
+      screen.getByText("OpenAI connected · openai/gpt-4o"),
+    ).toBeTruthy();
   });
 });
 
@@ -265,7 +274,11 @@ describe("FXPROV2 cards after Done", () => {
     render(<ProvidersPage project_id="local" />);
     expect(await screen.findByLabelText("Disconnect OpenAI")).toBeTruthy();
     expect(screen.getByLabelText("Manage OpenAI models")).toBeTruthy();
-    expect(screen.getByText("None enabled — open Manage models to choose.")).toBeTruthy();
+    // FXLOOK D4: a served-connected card names connection + model even
+    // with no local ticks (runs work, so "None enabled" would lie).
+    expect(
+      screen.getByText("OpenAI connected · openai/gpt-4o-mini"),
+    ).toBeTruthy();
     const card = screen
       .getAllByTestId("provider-card")
       .find((entry) => entry.getAttribute("data-provider-id") === "openai");
@@ -273,6 +286,9 @@ describe("FXPROV2 cards after Done", () => {
       throw new Error("openai card missing");
     }
     fireEvent.click(within(card).getByLabelText("OpenAI Standard"));
-    expect(screen.getByText("1 enabled")).toBeTruthy();
+    // FXLOOK D4: the tick names the model on the connected line.
+    expect(
+      screen.getByText("OpenAI connected · openai/gpt-4o-mini"),
+    ).toBeTruthy();
   });
 });
