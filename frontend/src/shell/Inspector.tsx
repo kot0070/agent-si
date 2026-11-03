@@ -23,9 +23,9 @@ import { dedupeLiveRows, readLiveExtras } from "../projects/viewsApi";
 import { readProjectTelemetry } from "../k07next2/k07next2Api";
 import type { ProjectTelemetry } from "../k07next2/k07next2Api";
 import { ApiError, requestResponse } from "../api/errors";
-import { formatNumber, pluralUnit, t } from "../locale/index";
+import { formatNumber, pluralUnit, t, useLocale } from "../locale/index";
 import { formatScreenTime } from "../locale/index";
-import { shortenLiveRef } from "../agents/agentsApi";
+import { resolveStatusHuman, shortenLiveRef } from "../agents/agentsApi";
 import {
   placementForRow,
   placementKey,
@@ -138,14 +138,22 @@ function readRef(value: unknown): RefText {
   return text.length > 40 ? { text, title: text } : { text };
 }
 
-// FXDESIGN8 short model name: the registry tail after the last slash or
-// colon (provider prefixes never render in the one-line row).
-function shortModelName(value: string): string {
-  const afterSlash = value.split("/");
-  const tail = afterSlash[afterSlash.length - 1] ?? value;
-  const afterColon = tail.split(":");
-  const head = afterColon[afterColon.length - 1] ?? tail;
-  return head === "" ? value : head;
+// FXLOOK D5: served human status for a live row (uk/en pair wins,
+// else the status code maps through tasks.status.*).
+function readStatusHuman(row: PartRow): unknown {
+  return (row as unknown as Record<string, unknown>).status_human;
+}
+
+// FXLOOK D5: a human name for a served agent id when no role rides the
+// row (raw ids never reach the summary line).
+function prettifyAgentId(agent: string): string {
+  const words = agent.split(/[-_]+/).filter((part) => part !== "");
+  if (words.length === 0) {
+    return agent;
+  }
+  return words
+    .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function readTaskStatus(status: string): string {
@@ -174,6 +182,7 @@ function fractionOf(value: number, total: number): number {
 
 export function Inspector(props: InspectorProps): ReactElement {
   const client = useApiClient();
+  const { locale } = useLocale();
   const projectId = props.projectId;
   // FXDESIGN8: the shared agents-live store owns the single poller;
   // the rail only subscribes.
@@ -953,17 +962,17 @@ export function Inspector(props: InspectorProps): ReactElement {
                 const scopeRef = shortenLiveRef(row.scope);
                 const deliverableRef = shortenLiveRef(row.deliverable);
                 const place = placementForRow(row);
-                // FXDESIGN8 one-liner: role, short model name, status chip,
-                // step. The rest rides under the row disclosure. Unevidenced
-                // values render nothing: real state or none, never Unknown.
+                // FXLOOK D5 one-liner: role plus live status ("Director,
+                // Running"), the status chip, step. The raw agent id and
+                // the full model id ride the tooltip + disclosure below.
+                // Unevidenced values render nothing: real state or none,
+                // never Unknown.
                 const roleRaw = readExtra(row, "role");
                 const roleKnown =
                   typeof roleRaw === "string" && roleRaw !== "";
                 const modelRaw = readExtra(row, "model");
-                const modelShort =
-                  typeof modelRaw === "string" && modelRaw !== ""
-                    ? shortModelName(modelRaw)
-                    : null;
+                // FXLOOK D5: the full model id rides the summary
+                // tooltip (title) and the details row below.
                 const stepRaw = readExtra(row, "step");
                 const stepKnown =
                   typeof stepRaw === "number" &&
@@ -979,25 +988,26 @@ export function Inspector(props: InspectorProps): ReactElement {
                       <summary
                         data-testid={`team-line-${row.agent}`}
                         className="fx-team-line"
+                        // FXLOOK D5: the summary reads human — role plus
+                        // live status, never the raw agent id or the full
+                        // model id (the full model rides the tooltip).
+                        title={
+                          typeof modelRaw === "string" && modelRaw !== ""
+                            ? modelRaw
+                            : undefined
+                        }
                       >
-                        <span className="fx-team-field">{row.agent}</span>
-                        {roleKnown ? (
-                          <span className="fx-team-field">
-                            {readRoleText(roleRaw)}
-                          </span>
-                        ) : null}
-                        {modelShort === null ? null : (
-                          <span
-                            className="fx-team-field fx-truncate"
-                            title={
-                              modelShort === String(modelRaw)
-                                ? undefined
-                                : String(modelRaw)
-                            }
-                          >
-                            {modelShort}
-                          </span>
-                        )}
+                        <span className="fx-team-field">
+                          {roleKnown
+                            ? readRoleText(roleRaw)
+                            : prettifyAgentId(row.agent)}
+                          {", "}
+                          {resolveStatusHuman(
+                            readStatusHuman(row),
+                            row.status,
+                            locale,
+                          )}
+                        </span>
                         <span
                           data-testid={`team-status-${row.agent}`}
                           className="fx-status-chip"
@@ -1030,6 +1040,12 @@ export function Inspector(props: InspectorProps): ReactElement {
                         )}
                       </summary>
                       <div className="fx-team-detail">
+                        {/* FXLOOK D5: the raw agent id lives here in the
+                            details, never in the summary line above. */}
+                        <span className="fx-team-field">
+                          {t("agents.row.agent")}{": "}
+                          <span className="fx-team-value">{row.agent}</span>
+                        </span>
                         <span className="fx-team-field">
                           {t("agents.row.scope")}{": "}
                           <span
@@ -1553,8 +1569,8 @@ export function Inspector(props: InspectorProps): ReactElement {
                   : t("watcher.tab.noChecksYet")}
               </p>
               {/* FXZERO R4 extra gate: the model names the exact served
-                  watcher model (the one that answered), never a setting
-                  label; with no answering model it reads unavailable. */}
+                  watcher model (the one that answered); with no answering
+                  model it reads plain "not used yet", never UNAVAILABLE. */}
               <p data-testid="watcher-model">
                 {t("watcher.tab.model")}:{" "}
                 {typeof watcherStatus.watcher_calls === "number" &&
@@ -1562,7 +1578,7 @@ export function Inspector(props: InspectorProps): ReactElement {
                 typeof watcherStatus.watcher_model === "string" &&
                 watcherStatus.watcher_model !== ""
                   ? watcherStatus.watcher_model
-                  : t("telemetry.unavailable")}
+                  : t("watcher.tab.notUsedYet")}
                 {" \u00b7 "}
                 {t("shell.cards.watcher.calls")}{": "}
                 {typeof watcherStatus.watcher_calls === "number"

@@ -13,8 +13,8 @@
 // @ts-ignore: node builtin types are not installed in this workspace; vitest resolves "fs" at runtime.
 import { readFileSync } from "fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
-import { createMemoryRouter, RouterProvider } from "react-router-dom";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { createMemoryRouter, MemoryRouter, RouterProvider } from "react-router-dom";
 import { HttpApiClient } from "../../api/client";
 import { ApiClientProvider } from "../../app/ApiClientProvider";
 import { FakeApiClient } from "../../api/__tests__/fakeApiClient";
@@ -248,6 +248,9 @@ describe("fxdesign5 S3 one thin top strip", () => {
 describe("fxdesign5 S4 one primary per form and card", () => {
   it("keeps a single submit with quiet secondaries on the project form", async () => {
     renderAppAt("/projects");
+    // FXLOOK D3: the stub seeds one project, so the form folds behind
+    // New project before the submit can be counted.
+    fireEvent.click(await screen.findByTestId("project-add-open"));
     const form = await screen.findByTestId("project-add-form");
     expect(form.querySelectorAll('button[type="submit"]')).toHaveLength(1);
     expect(
@@ -318,13 +321,19 @@ describe("fxdesign5 S6 served codes read as human labels with empty-only text", 
 
   it("shows exactly the locale empty text with no glued counts", async () => {
     render(
-      <ApiClientProvider client={new FakeApiClient({ liveRows: [] })}>
-        <AgentsLive projectId="p-1" />
-      </ApiClientProvider>,
+      <MemoryRouter initialEntries={["/agents/live"]}>
+        <ApiClientProvider client={new FakeApiClient({ liveRows: [] })}>
+          <AgentsLive projectId="p-1" />
+        </ApiClientProvider>
+      </MemoryRouter>,
     );
     const card = await screen.findByTestId("kit-card-agents-live");
     const empty = within(card).getByTestId("kit-empty-state");
-    expect(empty.textContent).toBe(t("agents.live.empty"));
+    // FXLOOK D5: the empty line keeps the locale sentence and points at
+    // Chat with a real link.
+    expect(empty.textContent).toContain(t("agents.live.empty"));
+    const link = within(empty).getByTestId("agents-live-open-chat");
+    expect(link.getAttribute("href")).toBe("/projects/p-1/chat");
   });
 });
 
@@ -344,6 +353,9 @@ describe("fxdesign5 S7 every option control in the owned regions is named", () =
 
   it("names the project form controls", async () => {
     renderAppAt("/projects");
+    // FXLOOK D3: the stub seeds one project, so the form folds behind
+    // New project before the controls can be named.
+    fireEvent.click(await screen.findByTestId("project-add-open"));
     await screen.findByTestId("project-add-form");
     for (const testId of ["project-add-name", "project-add-folder"]) {
       expect(named(screen.getByTestId(testId))).toBe(true);

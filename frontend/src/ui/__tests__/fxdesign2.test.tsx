@@ -154,6 +154,9 @@ function renderAppAt(route: string): void {
 describe("fxdesign2 S1 project submit label", () => {
   it("reads Create project through its own locale key, never the task composer key", async () => {
     renderAppAt("/projects");
+    // FXLOOK D3: the stub seeds one project, so the form folds behind
+    // New project before the submit label can be read.
+    fireEvent.click(await screen.findByTestId("project-add-open"));
     const submit = await screen.findByTestId("project-add-submit");
     expect(submit.textContent).toBe("Create project");
     expect(submit.textContent).not.toBe(t("tasks.creator.create"));
@@ -201,6 +204,9 @@ describe("fxdesign2 S3 context card and project form locales", () => {
     setLocale("uk");
     liveAgents = LIVE_UNKNOWN_COUNTS;
     renderAppAt("/projects");
+    // FXLOOK D3: the stub seeds one project, so the form folds behind
+    // New project before the uk labels can be read.
+    fireEvent.click(await screen.findByTestId("project-add-open"));
     const form = await screen.findByTestId("project-add-form");
     const formText = form.textContent ?? "";
     expect(formText).toContain("Назва проєкту");

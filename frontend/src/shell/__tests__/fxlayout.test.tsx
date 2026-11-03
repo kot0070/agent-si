@@ -300,7 +300,9 @@ describe("fxlayout shell over the real app", () => {
       t("shell.cards.watcher.ok"),
     );
     expect(screen.getByTestId("watcher-model").textContent).toContain(
-      t("telemetry.unavailable"),
+      // FXLOOK D5: with no answering model the rail reads plain
+      // "not used yet", never UNAVAILABLE.
+      t("watcher.tab.notUsedYet"),
     );
     const action = screen.getByTestId("watcher-action");
     expect(action.textContent).toContain(

@@ -267,7 +267,10 @@ describe("fxwalk1 screens over the real app", () => {
       ),
     ).toBeNull();
     expect(screen.getByTestId("report-task-counts").textContent).toContain("0");
-    expect(screen.queryByText("Calculated value")).toBeTruthy();
+    // FXLOOK D5: the engine allocation rows no longer render an exact
+    // "Calculated value" text node; the derived section keeps its
+    // labelled header.
+    expect(screen.queryByText("Calculated value:")).toBeTruthy();
     expect(await screen.findByTestId("report-project-name")).toBeTruthy();
   });
 
