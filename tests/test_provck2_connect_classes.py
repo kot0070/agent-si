@@ -429,3 +429,33 @@ def test_probe_timeout_keeps_key_and_row_second_connect_200(
                         lambda request, timeout=None: _FakeResp(_ok_body()))
     conn2 = _connect(client, key_ref, "m-slow")
     assert conn2.status_code == 200, conn2.text
+
+
+def test_muse_probe_sends_reasoning_low(tmp_path, monkeypatch):
+    """S1+S3: the connect probe for a muse model asks for low reasoning.
+
+    The probe request carries params (S3) and the gateway transport
+    copies reasoning_effort onto the wire body for muse-spark wire
+    models only (S1)."""
+    import json as _json
+
+    _stub_models_ok(monkeypatch, "muse-spark-probe")
+    captured: dict = {}
+
+    def _capture(request, timeout=None):
+        try:
+            captured["body"] = _json.loads(request.data.decode("utf-8"))
+        except Exception:
+            captured["body"] = {}
+        return _FakeResp(_ok_body())
+
+    monkeypatch.setattr(_urlreq, "urlopen", _capture)
+    client, _app = _make_client(tmp_path)
+    _create_project(client)
+    key_ref = _save_key(client, BAIT_NET)
+    conn = _connect(client, key_ref, "muse-spark-probe")
+    assert conn.status_code == 200, conn.text
+    assert captured.get("body", {}).get("reasoning_effort") == "low", captured
+    # The probe itself sends max_tokens 1 (pre-existing); S1 adds no
+    # other field on top.
+    assert captured.get("body", {}).get("max_tokens") == 1, captured
