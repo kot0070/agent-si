@@ -243,6 +243,9 @@ describe("fxgapt F01 tests tab on the real page", () => {
     renderAppAt("/");
     expect(await screen.findByTestId("chat-prompt")).toBeTruthy();
     await openProject();
+    // FXLOOK D8: the chat route carries no tab strip, so the Tests tab
+    // opens through Project details on the Overview data view.
+    fireEvent.click(await screen.findByTestId("project-details-open"));
     fireEvent.click(await screen.findByTestId("project-menu-tests"));
     expect(await screen.findByTestId("tests-tab")).toBeTruthy();
     expect(await screen.findByTestId("tests-counters")).toBeTruthy();

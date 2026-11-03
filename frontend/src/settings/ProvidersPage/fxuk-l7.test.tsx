@@ -4,8 +4,8 @@
  * FXUK L7: the uk models page must not render hard-coded English catalog
  * strings (keyHint, group, model labels) nor other English UI literals;
  * the en page keeps English. Uses the REAL ProvidersPage through the
- * connect flow (Manage models + enabled-count only render when connected).
- * Network is the only fake.
+ * connect flow (Manage models + connected-model line only render when
+ * connected). Network is the only fake.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -95,9 +95,10 @@ describe("fxuk-l7 models page locale", () => {
     expect(screen.queryByRole("heading", { name: "Local" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Compatible" })).toBeNull();
     // Localized content renders; product names stay.
+    // FXLOOK D4: the connected line reads "підключено · model".
     expect(text).toContain("Постачальники");
     expect(text).toContain("Керувати моделями");
-    expect(text).toContain("увімкнено");
+    expect(text).toContain("підключено");
     expect(text).toContain("невідомо");
     expect(text).toContain("Meta");
   });
@@ -109,7 +110,8 @@ describe("fxuk-l7 models page locale", () => {
     const text = container.textContent ?? "";
     expect(text).toContain("Key from your Meta dashboard.");
     expect(text).toContain("Manage models");
-    expect(text).toContain("1 enabled");
+    // FXLOOK D4: the connected line names connection + model, not a count.
+    expect(text).toContain("OpenAI connected · openai/gpt-4o-mini");
     expect(screen.getByRole("heading", { name: "Cloud" })).toBeTruthy();
   });
 });

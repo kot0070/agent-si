@@ -133,7 +133,10 @@ describe("FXPROV P1 save moves to step 2 in the same dialog", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(screen.getByLabelText("Disconnect OpenAI")).toBeTruthy();
     expect(screen.getByText("Connected OpenAI.")).toBeTruthy();
-    expect(screen.getByText("1 enabled")).toBeTruthy();
+    // FXLOOK D4: the connected card names connection + model, not a count.
+    expect(
+      screen.getByText("OpenAI connected · openai/gpt-4o-mini"),
+    ).toBeTruthy();
   });
 });
 

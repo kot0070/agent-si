@@ -138,6 +138,8 @@ describe("projects page", () => {
     );
     expect(await screen.findByTestId("project-row-p-9")).toBeTruthy();
 
+    // FXLOOK D3: one row exists, so the form folds behind New project.
+    fireEvent.click(await screen.findByTestId("project-add-open"));
     fireEvent.change(await screen.findByTestId("project-add-name"), {
       target: { value: "n-new" },
     });

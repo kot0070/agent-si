@@ -154,6 +154,9 @@ describe("U13 create opens the new project at once", () => {
     ).toBe(1);
 
     // Retry with the same name: refused in place, no second project.
+    // FXLOOK D3: the form folded behind New project once the first row
+    // exists, so the retry opens it first.
+    fireEvent.click(await screen.findByTestId("project-add-open"));
     await fillAndSubmit("alpha", "other-folder");
     expect(await screen.findByTestId("project-add-duplicate")).toBeTruthy();
     expect((await screen.findByTestId("project-add-duplicate")).textContent).toBe(

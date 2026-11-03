@@ -131,18 +131,16 @@ describe("ARCH-683 derived display split", () => {
     expect(split[0].labelKey).toBe("projects.derived.label");
   });
 
-  it("renders the derived split section on the real reports view", async () => {
+  it("no longer renders engine allocation rows under Calculated value", async () => {
+    // FXLOOK D5: the derived-split rows are dropped from the reports
+    // view (the pure builder keeps its own unit tests above).
     render(
       <ApiClientProvider client={new HttpApiClient()}>
         <ProjectView projectId="p-9" view="reports" />
       </ApiClientProvider>,
     );
-    const section = await screen.findByTestId("project-report-derived-split");
-    expect(section.textContent).toContain(t("projects.derived.label"));
-    const rowA = await within(section).findByTestId("derived-split-pkg-a");
-    expect(rowA.textContent).toContain("pkg-a");
-    expect(rowA.textContent).toContain(t("projects.derived.label"));
-    const rowB = await within(section).findByTestId("derived-split-pkg-b");
-    expect(rowB.textContent).toContain("pkg-b");
+    await screen.findByTestId("project-report-derived");
+    expect(screen.queryByTestId("project-report-derived-split")).toBeNull();
+    expect(screen.queryByTestId("derived-split-pkg-a")).toBeNull();
   });
 });

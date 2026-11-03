@@ -45,7 +45,10 @@
       "noneEnabled": "None enabled — open Manage models to choose.",
       "manageModels": "Manage models",
       "manageModelsCta": "Manage {label} models",
-      "enabledCount": "{count} enabled"
+      "enabledCount": "{count} enabled",
+      "connectedModel": "{label} connected · {model}",
+      "showAllModels": "Show all {count}",
+      "showFewerModels": "Show fewer"
     },
     "role": {
       "director": "Director",
@@ -429,7 +432,8 @@
       "looksTamper": "Looks for tampered files",
       "actionBlocked": "Blocked a problem",
       "actionEscalated": "Escalated for review",
-      "actionAllowed": "Checked, all quiet"
+      "actionAllowed": "Checked, all quiet",
+      "notUsedYet": "not used yet"
     }
   },
   "firstrun": {
@@ -500,7 +504,8 @@
     "closing": {
       "confirm": "Close anyway?",
       "stay": "Stay",
-      "leave": "Leave"
+      "leave": "Leave",
+      "runWorking": "Run still working. Leave this page?"
     },
     "cards": {
       "team": {
@@ -710,7 +715,9 @@
       "empty": "No projects yet.",
       "create": "Create project",
       "created": "Created",
-      "duplicate": "A project with this name already exists."
+      "duplicate": "A project with this name already exists.",
+      "open": "Open",
+      "newProject": "New project"
     },
     "overview": {
       "title": "Overview"
@@ -795,13 +802,21 @@
     "folder": {
       "choose": "Choose folder",
       "missing": "Project folder not found: {path}. Choose another folder in Projects."
+    },
+    "details": {
+      "open": "Project details"
+    },
+    "row": {
+      "stopTitle": "Stop: pause this project here only; the server keeps no record of it",
+      "leaveTitle": "Leave: archive this project and remove it from the list"
     }
   },
   "agents": {
     "live": {
       "title": "Live agents",
       "subtitle": "Who works on what right now, updating live.",
-      "empty": "No agents running right now."
+      "empty": "No agents running right now.",
+      "openChat": "Ask in Chat"
     },
     "badge": {
       "local": "Local",
@@ -811,7 +826,8 @@
     "row": {
       "scope": "Scope",
       "deliverable": "Result",
-      "tokens": "Tokens"
+      "tokens": "Tokens",
+      "agent": "Agent"
     }
   },
   "ui": {
@@ -971,6 +987,10 @@
     },
     "routing": {
       "autoWhy": "Auto: cheapest known price among connected providers."
+    },
+    "tabs": {
+      "scrollPrev": "Show earlier tabs",
+      "scrollNext": "Show later tabs"
     }
   }
 }

@@ -56,11 +56,6 @@ import { Inspector } from "../shell/Inspector";
 import { ClosingGuard } from "../shell/ClosingGuard";
 import { useLivePumpActive } from "../chat/index";
 import type { ProjectViewName } from "../projects/ProjectView";
-import {
-  PROJECT_VIEWS,
-  projectMenuTestId,
-  projectViewTitleKey,
-} from "../projects/projectsApi";
 import { LocaleCoverage } from "../k07next/LocaleCoverage";
 import { TelemetryThemes } from "../k07next/TelemetryThemes";
 import { BenchGatewayCheck } from "../k07next2/BenchGatewayCheck";
@@ -495,71 +490,64 @@ function LocalAiRoute(props: { projectId: string }): ReactElement {
 // FXCHATHIST Part 2: the project Chat tab. Renders the same ChatArea as
 // the root chat route, bound to the URL project; selects it into the
 // current project so the shell (TopBar, Sidebar, Inspector) follows.
-// FXC2 (P6-F9): the chat landing is a project page, so it renders the
-// same project tabs nav as ProjectView (chat first, then PROJECT_VIEWS
-// which already ends with `tests`). Without it the real App page after
-// openProject has no `project-menu-tests` and F01 cannot reach TestsTab.
+// FXLOOK D8: the chat route carries NO tab strip and NO purpose line —
+// chat and project data are separate surfaces. The top holds one line:
+// the project name plus a quiet Project-details button opening the
+// Overview data view (whose strip carries Chat first to come back).
 function ChatTabRoute(): ReactElement {
   const params = useParams();
+  const client = useApiClient();
   const current = useCurrentProject();
   const projectId = params.projectId;
   // Unconditional: hooks never run behind the project guard below.
   const onSelect = useProjectSelect(projectId ?? "");
+  const [projectName, setProjectName] = useState<string | null>(null);
   useEffect(() => {
     if (projectId !== undefined && projectId !== current.projectId) {
       current.select(projectId);
     }
   }, [projectId, current]);
+  useEffect(() => {
+    if (projectId === undefined) {
+      return;
+    }
+    let alive = true;
+    client.readProject(projectId).then(
+      (project) => {
+        if (alive) {
+          setProjectName(project.name);
+        }
+      },
+      () => undefined,
+    );
+    return () => {
+      alive = false;
+    };
+  }, [client, projectId]);
   if (projectId === undefined) {
     return <ProjectsPageView />;
   }
   return (
-    <div>
-      <nav aria-label={t("projectView.tabsLabel")} className="fxpv-tabs">
+    <div className="fx-chat-route">
+      <div data-testid="chat-route-head" className="fx-chat-head">
+        <span data-testid="chat-route-project">
+          {projectName ?? projectId}
+        </span>
         <button
           type="button"
-          data-testid="project-chat-tab"
-          className="fxpv-tab fxpv-tab-selected"
-          aria-selected="true"
+          data-testid="project-details-open"
+          className="fx-btn-quiet"
           onClick={() => {
-            onSelect("chat" as ProjectViewName);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              onSelect("chat" as ProjectViewName);
-            }
+            onSelect("overview");
           }}
         >
-          {t("shell.sidebar.chat")}
+          {t("projects.details.open")}
         </button>
-        {PROJECT_VIEWS.map((name) => (
-          <button
-            key={name}
-            type="button"
-            data-testid={projectMenuTestId(name)}
-            aria-selected="false"
-            className="fxpv-tab"
-            onClick={() => {
-              onSelect(name);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                onSelect(name);
-              }
-            }}
-          >
-            {t(projectViewTitleKey(name))}
-          </button>
-        ))}
-      </nav>
-      {/* FXNAV P16-purpose: the chat tab is the 16th project tab; its
-          panel opens with the same one-sentence purpose line. */}
-      <p data-testid="tab-purpose">{t("projectView.purpose.chat")}</p>
+      </div>
       <ChatAreaView projectId={projectId} />
     </div>
   );
 }
-
 function ProjectSubview(props: { view: ProjectViewName }): ReactElement {
   const params = useParams();
   const [search] = useSearchParams();
@@ -778,7 +766,9 @@ function AppShellInner(): ReactElement {
           keyboard tabbing reads the working area before the rails. The
           grid areas keep the visuals unchanged. */}
       <main data-testid="app-main">
-        <ClosingGuard armed={livePump} confirmKey="shell.closing.confirm">
+        {/* FXLOOK D5: the guard names the live run, never a bare
+            "Close anyway?". */}
+        <ClosingGuard armed={livePump} confirmKey="shell.closing.runWorking">
           <Suspense
             fallback={<LoadingState loadingKey="ui.loading.more" />}
           >
