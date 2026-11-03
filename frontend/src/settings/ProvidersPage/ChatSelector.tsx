@@ -3,7 +3,6 @@
 
 import type { ProviderPreset, ProviderState } from "./types";
 import { t } from "../../locale/index";
-import { withConnectedSeed } from "./ChatSelector";
 import { canonical as canonicalChoiceId, chatCapable, choiceLabel, isListableModelId } from "./roleChoices";
 
 export type ChatChoice = {
