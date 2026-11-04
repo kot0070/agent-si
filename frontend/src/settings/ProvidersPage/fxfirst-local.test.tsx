@@ -148,9 +148,7 @@ describe("fxfirst local preset check plus save with empty key", () => {
     });
     renderDialog("ollama");
     const dialog = await screen.findByRole("dialog");
-    fireEvent.change(within(dialog).getByLabelText(en.providers.connect.apiKey), {
-      target: { value: "fx-fake-key" },
-    });
+    expect(within(dialog).queryByLabelText(en.providers.connect.apiKey)).toBeNull();
     expect(within(dialog).queryByTestId("connect-check-first")).toBeNull();
   });
 

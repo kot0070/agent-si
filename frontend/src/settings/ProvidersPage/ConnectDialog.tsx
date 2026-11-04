@@ -510,6 +510,8 @@ export function ConnectDialog({
       </p>
       {step === 1 ? (
       <>
+      {isLocal ? null : (
+      <>
       <label>
         {t("providers.connect.apiKey")}
         <input
@@ -523,6 +525,8 @@ export function ConnectDialog({
       </label>
       <p>{t("providers.connect.keyFormat", { hint: preset.keyHint })}</p>
       <p data-variant="quiet">{t("providers.connect.storeNote")}</p>
+      </>
+      )}
       {showHintWarning ? <p>{t("providers.connect.hintMismatch")}</p> : null}
       {result !== null ? <p role="status">{result.text}</p> : null}
       {/* U7: Cancel + Save share one spaced action row. */}

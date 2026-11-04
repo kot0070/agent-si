@@ -142,6 +142,26 @@ describe("fxlocal connect section on the real settings route", () => {
     ).toBeTruthy();
   });
 
+  it("the local dialog shows no API key field, Check and Save stay", async () => {
+    installDownServers();
+    renderRealLocalRoute();
+    const ollama = await screen.findByTestId("local-preset-ollama");
+    fireEvent.click(
+      within(ollama).getByRole("button", {
+        name: en.providers.page.connectCta.replace("{label}", "Ollama"),
+      }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).queryByLabelText(en.providers.connect.apiKey)).toBeNull();
+    expect(dialog.querySelector("input")).toBeNull();
+    expect(
+      within(dialog).getByRole("button", { name: en.providers.connect.check }),
+    ).toBeTruthy();
+    expect(
+      within(dialog).getByRole("button", { name: en.providers.connect.save }),
+    ).toBeTruthy();
+  });
+
   it("served connected state flips the button to Disconnect", async () => {
     installFetch({
       "/api/v1/providers": () => body({ providers: [] }),

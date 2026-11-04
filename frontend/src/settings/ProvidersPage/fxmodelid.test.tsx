@@ -158,9 +158,6 @@ describe("fxmodelid catalog carries real ids, connect sends them", () => {
     render(<ProvidersPage project_id="local" />);
     fireEvent.click(screen.getByLabelText("Connect Ollama"));
     const dialog = screen.getByRole("dialog");
-    fireEvent.change(within(dialog).getByLabelText("API key"), {
-      target: { value: "local-dev-key" },
-    });
     fireEvent.click(within(dialog).getByText("Save"));
     expect(await within(dialog).findByText("Connected Ollama.")).toBeTruthy();
     fireEvent.click(within(dialog).getByText("Done"));
