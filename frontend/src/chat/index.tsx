@@ -1008,8 +1008,10 @@ export function EngineTurnView(props: {
   // FXANSWER item 4: a stopped run says Stopped, never Failed, never a
   // parts verdict. The Details disclosure below stays as it is.
   const stoppedLine = pt("chat.run.stopped", "Stopped.");
+  // FXDENYLINE: a stopped run that was denied keeps the real reason
+  // (what was refused), not the bare Stopped line.
   const verdict =
-    props.status === "stopped"
+    props.status === "stopped" && summary.denied === null
       ? stoppedLine
       : engineVerdictLine(summary, costNote);
   // R05: the disclosure collapses only recognised engine logs. Plain
