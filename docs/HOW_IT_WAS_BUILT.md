@@ -97,7 +97,7 @@ notes to all lanes.
   golden-subset gate per landing, single int writer).
 - "Green" merges broke the tree -> integration gate: fast + full gates
   (prove-they-ran: exact command, counts, negative controls, red allowlist).
-- An agent's cleanup wiped most of the tree -> shell guard refuses
+- An agent's cleanup deleted files far outside its scratch -> shell guard refuses
   recursive deletes and drive-root globs in command text. It cannot see
   inside a script file run by name, so the real cover is 15-minute
   off-drive backups, a no-delete rule for every agent and a mass-delete
@@ -245,9 +245,9 @@ come from the sources above.
   pass acceptance across the build was 43.7 %.
 - Tested does not mean wired. Several pieces passed their tests while nothing
   called them.
-- No sense of blast radius. An agent cleaning its own scratch wiped most of the
-  tree with a delete built from character codes. A filter on command text cannot
-  read that. Off-drive backups saved the build, not the filter.
+- No sense of blast radius. An agent cleaning its own scratch deleted files far outside it,
+  with a delete built from character codes. A filter on command text cannot
+  read that. Off-drive backups restored the work, not the filter.
 - Useful work stops growing long before the machine does: 8 runs gave about 3.3
   useful runs, 5 gave about 4.0. Measure the cap, do not guess it.
 
