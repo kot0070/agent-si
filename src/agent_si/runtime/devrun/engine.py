@@ -1057,6 +1057,28 @@ def _team_reason(mode: str) -> str:
     return "Pinned"
 
 
+_ENGINE_DIR = ".devrun"
+
+
+def _refuse_engine_dir(path: Any) -> None:
+    """The engine's own record folder is not part of the project for a worker.
+
+    A worker that lists or reads it wastes steps on agent logs (PLANB V2);
+    the folder reads as absent.
+    """
+    from agent_si.runtime.devrun import actions as _actions
+    parts = [part for part in str(path or "").replace("\\", "/").split("/")
+             if part not in ("", ".")]
+    if parts and parts[0] == _ENGINE_DIR:
+        raise _actions.ActionRefused("refused: no such path %r" % (str(path),))
+
+
+def _worker_listing(text: str) -> str:
+    """A directory listing without the engine's record folder."""
+    return "\n".join(line for line in str(text).split("\n")
+                     if line != _ENGINE_DIR)
+
+
 def _provider_model(provider: Any, model: Any) -> str:
     """"provider/model" for the chat line, without a doubled provider.
 
@@ -4504,6 +4526,7 @@ def _apply_actions(*, record: Any, row: Any, folder: str, project: str,
         name = action.get("action")
         try:
             if name == "read_file":
+                _refuse_engine_dir(action.get("path", ""))
                 out = _actions.read_file(
                     folder, str(action.get("path", "")))
                 notes.append("read_file %s: %s" % (
@@ -4513,8 +4536,9 @@ def _apply_actions(*, record: Any, row: Any, folder: str, project: str,
                         "path": str(action.get("path", "")),
                         "ok": True})
             elif name == "list_dir":
-                out = _actions.list_dir(
-                    folder, str(action.get("path", ".") or "."))
+                _refuse_engine_dir(action.get("path", "."))
+                out = _worker_listing(_actions.list_dir(
+                    folder, str(action.get("path", ".") or ".")))
                 notes.append("list_dir %s: %s" % (
                     action.get("path", "."), out[:2000]))
             elif name == "write_file":
