@@ -160,14 +160,13 @@ function readStatusHuman(row: PartRow): unknown {
   return (row as unknown as Record<string, unknown>).status_human;
 }
 
-// FXDESIGN8 short model name: the registry tail after the last slash or
-// colon (provider prefixes never render in the one-line row).
-function shortModelName(value: string): string {
+// FXDESIGN8 short model name: the registry tail after the last slash
+// (provider prefixes never render in the one-line row). A colon stays: it
+// is the tag of a local model (muse-glimmer:30b), not a provider prefix.
+export function shortModelName(value: string): string {
   const afterSlash = value.split("/");
   const tail = afterSlash[afterSlash.length - 1] ?? value;
-  const afterColon = tail.split(":");
-  const head = afterColon[afterColon.length - 1] ?? tail;
-  return head === "" ? value : head;
+  return tail === "" ? value : tail;
 }
 
 // FXLOOK D5: a human name for a served agent id when no role rides the
