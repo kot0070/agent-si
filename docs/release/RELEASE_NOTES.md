@@ -1,9 +1,8 @@
 # Release notes — Agent SI 0.1.0 (RC4 dry-run values)
 
-Prefer the installer first: `AgentSI-setup-0.1.0.exe` installs this same
-folder per user (see README "Download and verify"). This package is the
-portable second option: an unsigned portable folder build for Windows —
-unzip the folder, run AgentSI.exe inside it, never copy the exe out.
+No installer is published for this release. This package is an unsigned
+portable folder build for Windows: unzip the folder, run AgentSI.exe inside
+it, never copy the exe out (see README "Download and verify").
 
 Agent SI is a desktop app for running a small team of AI agents:
 one task becomes a plan, the plan splits into parallel work, checks
