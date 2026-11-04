@@ -5,11 +5,11 @@ Each entry is a message the app actually shows. Follow the fix next to it.
 ## Running from source
 
 - `ModuleNotFoundError: No module named 'uvicorn'`. `src/agent_si/sidecar.py` imports `uvicorn` when it
-  starts, and `pyproject.toml` does not list it. Install it into the same environment:
-  `.\.venv\Scripts\python.exe -m pip install uvicorn`.
+  starts, and `pyproject.toml` lists it as a dependency, so the environment was not installed from this
+  checkout. Install the project into it: `.\.venv\Scripts\python.exe -m pip install -e .`.
 - `Agent SI web UI is not staged: the web tree holds no index.html`. The sidecar serves
-  `frontend/dist`, which the web build writes. Run `npm --prefix frontend install`, then
-  `npm --prefix frontend run build`, and start the app again.
+  `frontend/dist`, which the web build writes. Run `npm.cmd --prefix frontend install`, then
+  `npm.cmd --prefix frontend run build`, and start the app again.
 - The app answers on a loopback address but the window does not open: the WebView2 runtime is missing or
   the window could not start. The app opens the same address in your default browser and keeps serving;
   install WebView2 from the link in the notice to get the native window back.

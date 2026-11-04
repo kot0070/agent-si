@@ -18,15 +18,18 @@ In PowerShell, in the checkout root:
 ```powershell
 py -3.13 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e .
-npm --prefix frontend install
-npm --prefix frontend run build
+npm.cmd --prefix frontend install
+npm.cmd --prefix frontend run build
 $env:AGENT_SI_DATA_DIR = "$PWD\data"
 .\.venv\Scripts\python.exe -m agent_si.sidecar
 ```
 
 Each step is checked against this repo:
 
-- `npm --prefix frontend run build` is the `build` script of `frontend/package.json`; it writes the web
+- `npm.cmd` instead of `npm`: in Windows PowerShell with the default execution policy, `npm` resolves to
+  `npm.ps1`, which the policy refuses ("running scripts is disabled on this system"); `npm.cmd` is the same
+  npm and runs. (In `cmd.exe` plain `npm` works too.)
+- `npm.cmd --prefix frontend run build` is the `build` script of `frontend/package.json`; it writes the web
   UI to `frontend/dist`, which the sidecar serves. Without that build the window answers
   "Agent SI web UI is not staged: the web tree holds no index.html".
 - `uvicorn` is a declared dependency in `pyproject.toml` (`src/agent_si/sidecar.py` imports it when it starts), so
@@ -44,8 +47,8 @@ the guided first run at `/firstrun`.
 Optional checks, also from this repo:
 
 ```powershell
-npm --prefix frontend run check
-npm --prefix frontend test
+npm.cmd --prefix frontend run check
+npm.cmd --prefix frontend test
 ```
 
 The backend suite runs with pytest (settings in `pytest.ini`, including the 120 s per-test timeout).
