@@ -199,6 +199,8 @@ notes to all lanes.
 | Defect ledger | 573 (49 fixed-in-ship, 18 on-lane, 225 in-work, 4 dropped, 277 no-owner) | ledger file + recompute script |
 | Coverage | 443 rows: 5 UI-live, 438 pre-check, 0 not-started | checklist script on a copy |
 
+Scope of the run and cost totals (545 runs, $19.4343): recorded main runs only, one script total. The paid spend in FORM_ANSWERS.md is a different scope.
+
 **Sources:** run report script, token cost script, run timeline (table and
 CSV), final evidence record, train state and log, defect ledger, gate
 records, golden rerun, baseline and allowed-reds lists.
@@ -226,6 +228,7 @@ come from the sources above.
 
 - Price and hands. 545 Muse runs cost $19.43 in recorded main-run usage. No
   supervisor of mine could have kept that many parallel lanes moving by itself.
+  Scope note: the 545 runs and the $19.43 are a script total over recorded main runs only; the $291.17 paid spend in FORM_ANSWERS.md is from my Meta Model API dashboard and is a different scope.
 - Exact tasks. Given file:line, exact names, a failing test first and a quoted
   tail, Muse agents usually came back right. Given a vague brief they drifted.
   By my estimate about half of the defects I traced started in the brief, so

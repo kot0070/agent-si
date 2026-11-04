@@ -80,8 +80,8 @@ Limits (Optimization, Project), App (General, Appearance, Diagnostics), Measure 
   (`http://localhost:1234/v1`). Connect opens the same two-step dialog as the provider page: local rows
   need no key ("Local server: usually no key is needed."), and a stopped server reads "Local server is
   not running. Start Ollama first, then Check again." A connected row reads "Connected Ollama, N models.",
-  lists the local models, and offers Use for agents, which pins the worker role to the chosen model and
-  confirms "Worker model set to {model}." Below the rows, a read-only panel repeats the stored benchmark
+  lists the local models, and offers Use for agents, which pins the Director, Manager, Worker and Auditor roles to the chosen model and
+  confirms "Director, Manager, Worker and Auditor set to {model}." Below the rows, a read-only panel repeats the stored benchmark
   path, the models with their evidence, and the decision record.
 - Models and Routing: provider list, search, setup wizard, role pools, chat-model picker, leftover-key
   finder. Connecting is two-step — paste the key, press Check, then Save: only a checked key saves, a

@@ -13,9 +13,7 @@ Each entry is a message the app actually shows. Follow the fix next to it.
 - The app answers on a loopback address but the window does not open: the WebView2 runtime is missing or
   the window could not start. The app opens the same address in your default browser and keeps serving;
   install WebView2 from the link in the notice to get the native window back.
-- `agent-si` prints nothing and exits: that console script points at the app factory
-  `agent_si.backend.app:create_app`, not at the window. Start the app with
-  `python -m agent_si.sidecar`.
+- `agent-si` runs the entry point `agent_si.sidecar:main` (pyproject.toml:17), the same as `python -m agent_si.sidecar`. If it exits at once, run `python -m agent_si.sidecar` and read the message it prints.
 
 ## Providers and keys
 
@@ -68,8 +66,8 @@ Each entry is a message the app actually shows. Follow the fix next to it.
 - The model is not in the Local models list after `ollama pull muse-glimmer:30b`: the list is read from
   the running server. Start Ollama first, then reopen Settings -> Local LLM (or press Check) so the list
   is fetched again.
-- `Worker model not set: {reason}.` Use for agents could not pin the model on the worker role. Read the
-  reason, reopen Settings -> Local LLM and press Use for agents again.
+- `Agent models not set: {reason}.` Use for agents could not pin the models. Read the reason, reopen
+  Settings -> Local LLM and press Use for agents again.
 - `No capability data for {model}; it can still be used.` Not an error: the shipped knowledge base has no
   row for that local model. Routing falls back to the default fit.
 - A 30B model needs about 18 GB of free disk. On 8 GB of video memory it runs split with the CPU and is
@@ -77,7 +75,7 @@ Each entry is a message the app actually shows. Follow the fix next to it.
 
 ## Watcher and automations
 
-- A watcher rule card reads Evaluate off: turn the card on to evaluate. `No backend rule for this card;
+- A watcher rule card shows the note `Turn the card on to evaluate.` `No backend rule for this card;
   evaluation runs on the guard and tamper cards.` means that specific card has no backend yet — the guard
   and tamper cards do the work.
 - Restart once, pause and stop wait for you: tick `I approve this one check` before they act.

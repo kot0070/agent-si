@@ -5,7 +5,7 @@
 Agent SI is a desktop app that takes one task in plain words and returns a checked result with evidence.
 You describe the goal; the app plans the work with a team of model agents, runs the checks, and a fresh auditor gives the verdict.
 Every run, decision and audit record stays with the project in a local data folder.
-After the first start you connect a model in Settings -> Models. The proof of how it was built is in `docs/EVIDENCE.md`. It ships under the MIT licence, see `LICENSE`.
+After the first start you connect a model in Settings -> Models. The proof of how it was built is in `docs/HOW_IT_WAS_BUILT.md`; the screenshots with captions are in `docs/EVIDENCE.md`. It ships under the MIT licence, see `LICENSE`.
 
 ## Quick start (Windows, from source)
 
@@ -90,12 +90,12 @@ The app does the work with a model you connect. There are two real options; eith
    the four roles back and lists each one on the model. Routing, checks and audit work exactly as with a
    cloud model. The Watcher is a fifth role: pin it in the role editor too (Settings -> Roles) if you want
    the Watcher on Glimmer; unpinned, it stays on its rules only.
-5. Real need: about 18 GB of free disk for the 30B model. On 8 GB of video memory it runs split with
+5. Disk need: about 18 GB of free space for the 30B model. On 8 GB of video memory it runs split with
    the CPU and is slow (measured on an RTX 3070 8 GB + 32 GB RAM: about 2.6 tokens per second). The
-   small Node task "node-add" took 24 min with Team On (Director, Worker, Auditor) and 18 min with Team
+   small Node task "node-add", measured on my PC, took 24 min with Team On (Director, Worker, Auditor) and 18 min with Team
    Off on that PC; a smaller local model or the hosted key is the fast path. Local model calls wait up to
    60 minutes each; slow is not stuck.
-   Last test of this build: the node-add task ran 2 times in a row (Team On, muse-glimmer:30b, fresh data each
+   Last test of this build, measured on my PC: the node-add task ran 2 times in a row (Team On, muse-glimmer:30b, fresh data each
    time, same PC): 2 of 2 passed, in 11.2 and 8.6 minutes.
 
 ### Which Meta model runs each role
@@ -106,7 +106,7 @@ The app does the work with a model you connect. There are two real options; eith
 | Manager | `meta/muse-spark-1.3-contributor`, hosted by Meta | `muse-glimmer:30b`, on this PC |
 | Worker | `meta/muse-spark-1.3-contributor`, hosted by Meta | `muse-glimmer:30b`, on this PC |
 | Auditor | `meta/muse-spark-1.3-contributor`, hosted by Meta | `muse-glimmer:30b`, on this PC |
-| Watcher | Rules only by default; pinned on the Watcher role, a hosted model answers only when the project's Watcher cloud fallback is on (`watcher/rules.py`) | `muse-glimmer:30b`, on this PC, when the Watcher role is pinned to it (Settings -> Roles); the Watcher card then shows the model name, its model calls and tokens |
+| Watcher | Rules only by default; pinned on the Watcher role, a hosted Meta model (Muse Spark) answers only when the project's Watcher cloud fallback is on (`src/agent_si/watcher/rules.py`) | `muse-glimmer:30b`, on this PC, when the Watcher role is pinned to it (Settings -> Roles); the Watcher card then shows the model name, its model calls and tokens |
 
 This demo calls only Meta models at runtime: Muse Spark through the Meta Model API and Muse Glimmer through
 local Ollama. Adapters for other providers exist in the code as an option; this demo does not call them.
@@ -198,7 +198,7 @@ Go to Settings -> Models, or use the Setup wizard on the first-run screen.
 
 Search filters the list by provider or model name. Model checkboxes are enabled only when the provider is connected. An optional setup wizard, role pools, and a chat-model picker are on the same page.
 
-The connect dialog shows the expected key format, and a key that does not fit shows "This key does not match the expected format." before you save (a warning only). Connecting itself is two steps: paste the key, press Check, then Save. Check tries the key against the live provider without storing anything: a good key answers "Key checked. Save to connect." and enables Save (local providers check at once, with no network). A wrong key answers "The provider refused this key. Paste the full key again." and nothing is stored — a failed replace keeps the old working key; an unreachable provider answers "The provider is slow or unreachable. Your key is saved. Press Connect again.". Save stores the checked key (the server checks once more first) and only then reports "Connected {label}."; the local reference copy is written only after the server answers.
+The connect dialog shows the expected key format, and a key that does not fit shows "This key does not match the expected format." before you save (a warning only). Connecting itself is three steps: paste the key, press Check, then Save. Check tries the key against the live provider without storing anything: a good key answers "Key checked. Save to connect." and enables Save (local providers check at once, with no network). A wrong key answers "The provider refused this key. Paste the full key again." and nothing is stored — a failed replace keeps the old working key; an unreachable provider answers "The provider is slow or unreachable. Your key is saved. Press Connect again.". Save stores the checked key (the server checks once more first) and only then reports "Connected {label}."; the local reference copy is written only after the server answers.
 
 Model checkboxes switch models on and off for the team: only ticked models reach Auto, the role pools, and the chat picker. A fresh connect ticks only the default model. On the project Models route a team quick-fix card can apply the routing's suggested binding (Accept) or drop it (Dismiss).
 

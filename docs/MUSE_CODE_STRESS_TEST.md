@@ -1,6 +1,6 @@
 # Muse Code under stress: what broke, what I built, what I would ask
 
-I built Agent SI with Muse Code agents, running several agent trees at the same time on one Windows machine. Peak load in my scans was 12 or more live runs at once. This page is my field report for Meta engineers and hackathon judges. Muse carried most of this load. Most of the problems came from running many agents on one desktop, not from the model itself.
+I built Agent SI with Muse Code agents, running several agent trees at the same time on one Windows machine. Peak load in my scans was 11 live runs at the agent peak (101 agents); some windows had 12 or more runs. This page is my field report for Meta engineers and hackathon judges. Muse carried most of this load. Most of the problems came from running many agents on one desktop, not from the model itself.
 
 Every number below comes from a script that counted session logs. Each one is marked as **measured** or as a **standing rule**.
 
@@ -64,11 +64,11 @@ The two lenses disagree. The scan counts `os error 32` in executed shell results
 
 **What happened.** On 27 Oct I capped Muse runs at five, for product work only. Starts are at least two minutes apart, and I re-measure every two hours. Status lines read "Muse 5/5 live" many times after that.
 
-**What it means for Muse Code users.** More concurrent runs did not give more finished work. Past a certain point, the extra runs mostly waited or failed. The cap is a standing rule, and I have not yet published a per-level count of useful runs.
+**What it means for Muse Code users.** More concurrent runs did not give more finished work. Past a certain point, the extra runs mostly waited or failed. The cap is a standing rule. Per-level useful-run figures are only partly verified: see Not included.
 
 ## 4. Cost
 
-**The number.** The experiment cost $18.07 over 505 runs and grew to $30.47 over 865 runs (read from session stores).
+**The number.** The experiment cost $18.07 over 505 runs at an earlier count and $30.47 over 865 runs at a later count (both read from session stores). The 545-run ledger in How this was built counts recorded main runs only, so the scopes differ.
 
 **A healthy lane** (queue, manager, coder, auditor, review request, check, run end) took 6.1 minutes and cost $0.031.
 
@@ -85,7 +85,7 @@ The two lenses disagree. The scan counts `os error 32` in executed shell results
 
 During one incident (09:41), OpenConsole and conhost counts rose from 43/60 to 62/91 in about five minutes. Every lane start and hook poll opened a visible console.
 
-**Fix.** Every subprocess start on Windows now uses `CREATE_NO_WINDOW`, across 15 files (count from my own return text). A regression test passes 6/6.
+**Fix.** Windows subprocess starts use `CREATE_NO_WINDOW` in 3 source files (`src/agent_si/backend/proc_tree.py`, `src/agent_si/qa_catalog/runners/host.py`, `src/agent_si/qa_catalog/runners/suite_invoke.py`). A regression test (`tests/test_fxnowin_no_console.py`) covers them.
 
 **What it means for Muse Code users.** Any agent tool that runs subprocesses on Windows can flood the desktop with windows unless it hides them.
 
@@ -115,5 +115,5 @@ The notes from Claude, the AI advisor on this build, are in [section 9 of How th
 - **Source.** A read-only copy of the Muse session store, filtered to this project, plus tool-output text found in session messages. Counts were made by script. Each claim was checked against the files on disk.
 - **Measured.** Peak agent counts (from a read-only recount of session ids and timestamps; a floor, because about 15 % of ids had no event file), lock failure shares by live-run count (scan of 155 run folders), cost totals, lane time and cost, incident timings, and event counts.
 - **Standing rules, not re-measured.** The 4 % and 30 % lock rates (rule 13), the five-run Muse cap, the two-minute start spacing, the 60-second launch retry, and the queue spacing values.
-- **Not included.** Useful-run counts per concurrency level, and the number of dead sessions seen in the app. I could not verify either one from files.
+- **Not included.** The 5-run useful-run figure (about 4.0) quoted in section 9 of How this was built, and the number of dead sessions seen in the app. I could not verify either one from files. The 8-run figure (about 3.3) was found in session texts.
 - **Note.** The rule rates and the scan do not match, because they count different things (section 2).
