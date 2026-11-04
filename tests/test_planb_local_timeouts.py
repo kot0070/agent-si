@@ -110,3 +110,19 @@ def test_muse_glimmer_gets_thinking_off_and_8k_window(monkeypatch):
 def test_other_local_models_get_no_think_field(monkeypatch):
     body = _sent_body(monkeypatch, "ollama/qwen3:8b")
     assert "think" not in body and "options" not in body
+
+
+def test_ollama_native_token_counters_become_usage(monkeypatch):
+    def fake_urlopen(request, timeout=None):
+        body = {"message": {"role": "assistant", "content": "ok"},
+                "prompt_eval_count": 885, "eval_count": 120}
+        return _Reply(json.dumps(body).encode("utf-8"))
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    transport = chat_stream._gateway_transport(
+        "http://localhost:11434", None, {"secret_id": "", "provider_id": "ollama"})
+    out = transport({"model": "ollama/muse-glimmer:30b",
+                     "messages": [{"role": "user", "content": "hi"}],
+                     "chat_path": "/api/chat"})
+    assert out["usage"]["input_tokens"] == 885
+    assert out["usage"]["output_tokens"] == 120

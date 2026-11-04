@@ -1612,6 +1612,15 @@ def _gateway_transport(base_url: str, credential_store: Any,
             elif isinstance(body.get("response"), str) and body.get("response"):
                 content = str(body.get("response"))
         usage = body.get("usage", {}) if isinstance(body, dict) else {}
+        if not usage and isinstance(body, dict):
+            # Ollama-native counters (prompt_eval_count / eval_count).
+            native_usage = {}
+            for src_key, dst_key in (("prompt_eval_count", "input_tokens"),
+                                     ("eval_count", "output_tokens")):
+                val = body.get(src_key)
+                if isinstance(val, int) and not isinstance(val, bool):
+                    native_usage[dst_key] = val
+            usage = native_usage
         return {
             "output_text": content,
             "finish": finish,
