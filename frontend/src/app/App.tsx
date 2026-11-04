@@ -585,41 +585,85 @@ function ProjectSubview(props: { view: ProjectViewName }): ReactElement {
   );
 }
 
+// D7: the grouped section nav beside the content (settings-nav). It wraps
+// the existing link strip (settings-tabs, same ten links plus Diagnostics),
+// names each settings group, and adds a select for narrow windows. The
+// active link carries aria-current="page" through NavLink.
 function SettingsTabs(): ReactElement {
+  const navigate = useNavigate();
+  const params = useParams();
+  const active = params.section ?? "";
+  const sectionOptions = [
+    ...SETTINGS_ROUTES.map((route) => ({
+      path: route.path,
+      title: t(route.titleKey),
+    })),
+    { path: "diagnostics", title: t("diagnostics.title") },
+    { path: "automations", title: t("settings.automations.title") },
+  ];
   return (
-    <nav data-testid="settings-tabs">
-      {SETTINGS_ROUTES.map((route) => (
+    <nav data-testid="settings-nav" aria-label={t("settings.index.title")}>
+      <div>
+        {SETTINGS_GROUPS.map((group) => (
+          <span
+            key={group.id}
+            data-testid={`settings-nav-group-${group.id}`}
+          >
+            {t(group.titleKey)}{" "}
+          </span>
+        ))}
+      </div>
+      <select
+        data-testid="settings-nav-select"
+        aria-label={t("settings.index.title")}
+        value={active}
+        onChange={(event) => {
+          navigate(`/settings/${event.target.value}`);
+        }}
+      >
+        {sectionOptions.map((option) => (
+          <option key={option.path} value={option.path}>
+            {option.title}
+          </option>
+        ))}
+      </select>
+      <div data-testid="settings-tabs">
+        {SETTINGS_ROUTES.map((route) => (
+          <NavLink
+            key={route.path}
+            to={`/settings/${route.path}`}
+            data-testid={`settings-link-${route.path}`}
+            end
+            className={({ isActive }) =>
+              isActive ? "fx-tab-active" : undefined}
+          >
+            {t(route.titleKey)}
+          </NavLink>
+        ))}
         <NavLink
-          key={route.path}
-          to={`/settings/${route.path}`}
-          data-testid={`settings-link-${route.path}`}
-          end
-          className={({ isActive }) => (isActive ? "fx-tab-active" : undefined)}
+          key="diagnostics"
+          to="/settings/diagnostics"
+          data-testid="settings-link-diagnostics"
+          className={({ isActive }) =>
+            isActive ? "fx-tab-active" : undefined}
         >
-          {t(route.titleKey)}
+          {t("diagnostics.title")}
         </NavLink>
-      ))}
-      <NavLink
-        key="diagnostics"
-        to="/settings/diagnostics"
-        data-testid="settings-link-diagnostics"
-        className={({ isActive }) => (isActive ? "fx-tab-active" : undefined)}
-      >
-        {t("diagnostics.title")}
-      </NavLink>
-      {/* FXAUTO: the Watcher and automations group is a row, not a tab,
-          so the ten tab links counted by App.test stay exactly ten. */}
-      <span data-testid="settings-group-watcher-automations">
-        {t("settings.group.watcherAutomations")}
-      </span>
-      <NavLink
-        key="automations"
-        to="/settings/automations"
-        data-testid="settings-row-automations"
-        className={({ isActive }) => (isActive ? "fx-tab-active" : undefined)}
-      >
-        {t("settings.automations.title")}
-      </NavLink>
+        {/* FXAUTO: the Watcher and automations group is a row, not a tab,
+            so the ten tab links counted by App.test stay exactly ten. */}
+        <span data-testid="settings-group-watcher-automations">
+          {t("settings.group.watcherAutomations")}
+        </span>
+        <NavLink
+          key="automations"
+          to="/settings/automations"
+          data-testid="settings-row-automations"
+          className={({ isActive }) =>
+            isActive ? "fx-tab-active" : undefined}
+        >
+          {t("settings.automations.title")}
+        </NavLink>
+      </div>
     </nav>
   );
 }
