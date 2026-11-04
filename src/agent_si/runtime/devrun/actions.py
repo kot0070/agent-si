@@ -137,6 +137,28 @@ def _secret_class(name: str) -> str:
     return ""
 
 
+def _relative_inside(folder: str, raw: str) -> str | None:
+    """Forward-slash relative form of an absolute path inside folder.
+
+    None when the path is not absolute-inside the folder (``~``, another
+    drive, a sibling, the folder itself, any ``..`` hop). Never raises.
+    """
+    try:
+        if raw.startswith("~") or not os.path.isabs(raw):
+            return None
+        if ".." in raw.replace("\\", "/").split("/"):
+            return None
+        base = os.path.normcase(os.path.realpath(str(folder)))
+        target = os.path.normcase(os.path.realpath(raw))
+        if target != base and not target.startswith(base + os.sep):
+            return None
+        return os.path.relpath(
+            os.path.realpath(raw),
+            os.path.realpath(str(folder))).replace("\\", "/")
+    except Exception:
+        return None
+
+
 def jail_abs(folder: str, raw: str) -> str:
     """Absolute path for one relative action path, jail-checked.
 
@@ -148,7 +170,15 @@ def jail_abs(folder: str, raw: str) -> str:
         raise ActionRefused("refused: path must be a non-empty string")
     text = raw.strip().replace("\\", "/")
     if os.path.isabs(raw) or os.path.isabs(text) or text.startswith("~"):
-        raise ActionRefused("refused: absolute paths never leave the jail")
+        # The brief names the project folder as an absolute path, so a
+        # small model echoes it back. An absolute path that already lies
+        # inside the project folder is the same file as its relative form
+        # and is read as that; every other absolute path stays refused.
+        inside = _relative_inside(folder, raw.strip())
+        if inside is None:
+            raise ActionRefused(
+                "refused: absolute paths never leave the jail")
+        text = inside
     base = os.path.abspath(str(folder))
     candidate = os.path.abspath(os.path.join(base, *text.split("/")))
     try:
