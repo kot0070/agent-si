@@ -1057,6 +1057,15 @@ def _team_reason(mode: str) -> str:
     return "Pinned"
 
 
+def _provider_model(provider: Any, model: Any) -> str:
+    """"provider/model" for the chat line, without a doubled provider.
+
+    A local model id already carries its provider ("ollama/muse-...").
+    """
+    prov, name = str(provider), str(model)
+    return name if name.startswith(prov + "/") else "%s/%s" % (prov, name)
+
+
 def _team_lines(team: list) -> list[str]:
     """Short chat team lines: one line when all roles share provider,
     model and mode (FXRC1FIX P2: the raw why JSON flooded chat); one
@@ -1066,10 +1075,12 @@ def _team_lines(team: list) -> list[str]:
     modes = {str(res.get("mode")) for _, res in team}
     if len(pairs) == 1 and len(modes) == 1:
         provider, model = next(iter(pairs))
-        return ["Team: director, manager, worker, auditor on %s/%s (%s)"
-                % (provider, model, _team_reason(next(iter(modes))))]
-    return ["Role %s: %s/%s (%s)"
-            % (role_name, res.get("provider"), res.get("model"),
+        return ["Team: director, manager, worker, auditor on %s (%s)"
+                % (_provider_model(provider, model),
+                   _team_reason(next(iter(modes))))]
+    return ["Role %s: %s (%s)"
+            % (role_name,
+               _provider_model(res.get("provider"), res.get("model")),
                _team_reason(str(res.get("mode"))))
             for role_name, res in team]
 
