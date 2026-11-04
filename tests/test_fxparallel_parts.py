@@ -1004,9 +1004,9 @@ _T9_BASELINE = [
                "mock/mock-canned (Pinned)\n"),
     ("delta", "Director: plan of 2 parts\n"),
     ("delta", "Part p1: Write test_p1.py with one passing test "
-               "[files: test_p1.py]\n"),
+               "(planned: test_p1.py)\n"),
     ("delta", "Part p2: Write test_p2.py with one passing test "
-               "[files: test_p2.py]\n"),
+               "(planned: test_p2.py)\n"),
     ("delta", "Part p1: attempt 1\n"),
     ("delta", "Check p1 $ python -m pytest test_p1.py -q -p "
                "no:cacheprovider -> exit 0\n"),
