@@ -116,6 +116,25 @@ describe("PLANB W1 use for agents", () => {
     expect(list.textContent).not.toContain("Watcher");
   });
 
+  it("pins the roles of the selected project, not only the shared defaults", async () => {
+    const { calls } = stubNetwork();
+    render(<LocalConnectSection projectId="p-node-add" />);
+    const card = await screen.findByTestId("local-preset-ollama");
+    await within(card).findByTestId("local-models-ollama");
+    fireEvent.click(within(card).getByTestId("local-use-ollama"));
+    await within(card).findByTestId("local-roles-ollama");
+    const puts = calls
+      .filter((call) => call.url === "/api/v1/roles/pools" && call.init.method === "PUT")
+      .map((call) => JSON.parse(call.init.body as string));
+    expect(puts).toHaveLength(4);
+    for (const body of puts) {
+      expect(body.project_id).toBe("p-node-add");
+    }
+    expect(
+      calls.some((call) => call.url === "/api/v1/roles/pools?project_id=p-node-add"),
+    ).toBe(true);
+  });
+
   it("uk labels", async () => {
     setLocale("uk");
     stubNetwork();

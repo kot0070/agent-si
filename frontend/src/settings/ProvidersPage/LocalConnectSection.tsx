@@ -23,7 +23,17 @@ import type { RolePoolReadRow } from "./poolsApi";
 import { choicesToPoolOptions } from "./RolePoolPicker";
 import { t } from "../../locale/index";
 
-export function LocalConnectSection(): ReactElement {
+export interface LocalConnectSectionProps {
+  // The project whose roles "Use for agents" pins; Settings with no
+  // project selected pins the shared "local" defaults.
+  projectId?: string;
+}
+
+export function LocalConnectSection(
+  props: LocalConnectSectionProps = {},
+): ReactElement {
+  const roleProject =
+    props.projectId !== undefined && props.projectId !== "" ? props.projectId : "local";
   // Locale-current catalog like the Providers page; local rows only.
   const presets = useMemo(
     () => getProviderCatalog().filter((preset) => preset.kind === "local"),
@@ -142,7 +152,7 @@ export function LocalConnectSection(): ReactElement {
         },
       ]);
       for (const role of AGENT_ROLES) {
-        await saveRolePool("local", role, {
+        await saveRolePool(roleProject, role, {
           mode: "PINNED",
           pinnedKey: options[0]?.key ?? "",
           poolKeys: [],
@@ -151,7 +161,7 @@ export function LocalConnectSection(): ReactElement {
       }
       let rows: RolePoolReadRow[] = [];
       try {
-        rows = await readRolePools("local");
+        rows = await readRolePools(roleProject);
       } catch {
         rows = [];
       }

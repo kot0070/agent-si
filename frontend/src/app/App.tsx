@@ -1005,7 +1005,7 @@ function SettingsSectionRoute(): ReactElement {
         </span>
       ) : route.path === "localAI" ? (
         <>
-          <LocalConnectSection />
+          <LocalConnectSection projectId={projectId ?? "local"} />
           <LocalAiStoredPanel />
         </>
       ) : route.path === "localbench" ? (
