@@ -4454,7 +4454,11 @@ def _worker_prompt(spec: dict, message: str, attempt: int,
             "Return ONLY {\"actions\": [...], \"done\": bool}: done "
             "true only when the part is complete. Run the project's own "
             "test command when it exists (package.json scripts, the "
-            "listed test files); never invent wrapper scripts." % (
+            "listed test files); never invent wrapper scripts. A file "
+            "you may not write belongs to another part: if the test "
+            "command fails only because such a file is missing, that is "
+            "expected, never try to create it, and reply done true as "
+            "soon as your own files are written." % (
                 spec["part_id"], attempt, spec["goal"],
                 message or "(no task text)",
                 ", ".join(spec["files"]),))
