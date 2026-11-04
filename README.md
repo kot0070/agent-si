@@ -245,4 +245,21 @@ Agent SI ships under the MIT licence. Copyright (c) 2026 Ivan Soprun. See `LICEN
 
 ## How this was built
 
-The stress points found while building Agent SI are recorded in a field report (owner-observed: over 100 agents at once; measured in the records: 1060 sessions, 545 recorded runs, peak 16 concurrent sessions). See [docs/MUSE_STRESS_STORY.md](docs/MUSE_STRESS_STORY.md). The per-role reasoning level was picked by a small measured eval, not by guessing: see [docs/MODEL_EVAL.md](docs/MODEL_EVAL.md).
+Owner-observed: over 100 agents at once. In the surviving records (id-clock recount): 101 Muse live at 10-26 19:49 (104 combined), 66 active at 10-26 23:37; working-min averages 33.83 live / 10.73 active. Field report: [docs/MUSE_STRESS_STORY.md](docs/MUSE_STRESS_STORY.md).
+
+One person set the goal and the rules; Claude Code steered, with Muse through
+the API in support: they wrote tasks and accepted work; Muse Code directors split them across parallel lanes that
+merged serially through a gated landing loop. Every change needed a fresh auditor, a real run with quoted output,
+and a row-by-row reality check before it shipped. Custom tooling enforced
+it: a merge train, prove-they-ran gates, a destructive-command guard, live
+UI/exe drives, and a defect ledger.
+
+- Full story: [docs/HOW_IT_WAS_BUILT.md](docs/HOW_IT_WAS_BUILT.md)
+- Stress page (what broke, what we built): [docs/MUSE_CODE_STRESS_TEST.md](docs/MUSE_CODE_STRESS_TEST.md)
+- Screenshots with captions: [docs/EVIDENCE.md](docs/EVIDENCE.md)
+
+The per-role reasoning level was picked by a small measured eval, not by guessing: see [docs/MODEL_EVAL.md](docs/MODEL_EVAL.md).
+
+## Development notes
+
+- Muse Code stress test: what broke at high concurrency, the fixes, and what we would ask the Muse Code team: [docs/MUSE_CODE_STRESS_TEST.md](docs/MUSE_CODE_STRESS_TEST.md).
