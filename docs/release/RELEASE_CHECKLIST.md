@@ -16,7 +16,7 @@ any release work. A mismatch blocks the run at once.
 
 | S01 | preflight sync | command: fetch origin, then confirm HEAD equals origin/int | expected: HEAD matches origin/int with empty status output (write-time base int a8b5a57) | verdict: lane preflight record |
 | S02 | preflight tree | command: status check for uncommitted changes | expected: no uncommitted changes; the checklist is the only new file | verdict: lane preflight record |
-| S03 | preflight seams | command: read-only presence check of tools/start.py and SUBMISSION/K12/demo-script.md plus absence check of the build-time packaging manifest folder | expected: seams present unedited; manifest folder absent at run time BLOCKS sign-off | verdict: lane STEP-0 seam check |
+| S03 | preflight seams | command: read-only presence check of tools/start.py and the old demo script draft (removed from the repo later, see git history) plus absence check of the build-time packaging manifest folder | expected: seams present unedited; manifest folder absent at run time BLOCKS sign-off | verdict: lane STEP-0 seam check |
 
 ## 2 - Unsigned build line
 
@@ -71,7 +71,7 @@ Non-LIVE rows below name their PENDING-REDRIVE gate explicitly.
 The release demo follows the merged script exactly: one 3-minute cut over all
 14 functions, opening with F04 and closing with F14.
 
-| S27 | scene script | record: merged demo script SUBMISSION/K12/demo-script.md at int merge 6c01765 | expected: 14-function 3-minute shape with click labels present | verdict: lane scene-shape brief |
+| S27 | scene script | record: merged demo script draft (removed from the repo later, see git history) at int merge 6c01765 | expected: 14-function 3-minute shape with click labels present | verdict: lane scene-shape brief |
 | S28 | scene run | record: performed demo cut timed at 174 seconds or less | expected: on-screen state and voice-over per script row | verdict: K12DEMO3 script |
 
 ## 7 - Clean-profile double proof

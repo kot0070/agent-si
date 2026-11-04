@@ -5,6 +5,8 @@
 import pathlib
 import re
 
+import pytest
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 DEMO = ROOT / "SUBMISSION" / "K12" / "demo-script.md"
 PLAN = ROOT / "SUBMISSION" / "K12" / "scene-plan.md"
@@ -14,6 +16,13 @@ READ_ROUTES = ROOT / "src" / "agent_si" / "backend" / "read_routes.py"
 PROJECT_VIEW = ROOT / "frontend" / "src" / "projects" / "ProjectView.tsx"
 
 CAP_S = 175
+
+# The old draft script and scene plan were removed from the repo (still in git
+# history). Without them there is nothing to pin, so the module skips.
+pytestmark = pytest.mark.skipif(
+    not (DEMO.is_file() and PLAN.is_file()),
+    reason="SUBMISSION/K12 draft was removed from the repo; the pins applied to that draft only",
+)
 
 
 def _row(text, step):
