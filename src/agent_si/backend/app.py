@@ -9,6 +9,7 @@ AI-generated. Product code uses only parts.py + ledger.py.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import os
 import secrets
@@ -695,6 +696,13 @@ def create_app(settings: Any = None,
                 status_code=400,
                 detail=_k02r4_chat.http_error_detail(
                     _k02r4_chat.CHAT_BAD_REQUEST, str(err))) from None
+        # PLANB X5: the x-run-id header carries the client run id so the
+        # server turn and the client write are one history row.
+        _x5_run = _k02r4_chat.clean_client_run_id(
+            request.headers.get("x-run-id"))
+        if _x5_run:
+            chat_request = dataclasses.replace(
+                chat_request, client_run_id=_x5_run)
         # FXCHATTASK (R04 + R-nodata-fallback): the first accepted chat
         # message for a project with no task yet stores one task row
         # through the shared console write path; later messages add

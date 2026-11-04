@@ -274,6 +274,8 @@ export class HttpApiClient implements ApiClient {
             method: "POST",
             kind: "chat",
             body: { project: request.project_id, message: request.prompt_ref },
+            // PLANB X5: the client run id names the stored turn on both sides.
+            headers: { "x-run-id": request.stream_id },
             actor,
             ...(opts?.signal === undefined ? {} : { signal: opts.signal }),
           },

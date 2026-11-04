@@ -143,6 +143,16 @@ def http_error_detail(code: str, message: str) -> dict[str, str]:
     return {"code": str(code), "message": str(message)}
 
 
+_CLIENT_RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$")
+
+
+def clean_client_run_id(value: Any) -> str:
+    """A client run id is a short plain token, else it is ignored."""
+    if isinstance(value, str) and _CLIENT_RUN_ID_RE.match(value.strip()):
+        return value.strip()
+    return ""
+
+
 @dataclass(frozen=True)
 class ChatStreamRequest:
     """One chat stream ask: refs only, validation only, never executes."""
@@ -159,6 +169,9 @@ class ChatStreamRequest:
     # FXDEVRUN entry: the project folder for the autonomous dev
     # engine. Empty keeps today's path; set drives run_dev_task.
     folder: str = ""
+    # PLANB X5: the client run id of this send (x-run-id header, set by the
+    # route; names the history row).
+    client_run_id: str = ""
 
     @classmethod
     def from_body(cls, body: Any, actor: str) -> ChatStreamRequest:
@@ -849,6 +862,9 @@ class ManagerSdkBridge:
         project = str(getattr(request, "project", "") or "")
         task = str(getattr(request, "task", "") or "")
         message = str(getattr(request, "message", "") or "")
+        # PLANB X5: the client run id names the history row, so the
+        # server turn and the client write upsert one row per run.
+        hist_run = str(getattr(request, "client_run_id", "") or "") or run_id
         texts: list[str] = []
         closed = False
         # FXOPEN O4: chat-facing run text carries file names plus
@@ -874,12 +890,12 @@ class ManagerSdkBridge:
             final = "\n".join(text for text in texts if text)
             _record_server_turn(
                 app, project, message, final, history_status,
-                run_id=run_id, error_code=error_code)
+                run_id=hist_run, error_code=error_code)
             _mirror_run_tasks(app, project, task, message, task_status)
 
         yield sse_bytes(self._start_event(stream_id, run_id, request))
         _record_server_turn(app, project, message, "", "running",
-                            run_id=run_id)
+                            run_id=hist_run)
         _mirror_run_tasks(app, project, task, message, "running")
         if state["cancelled"]:
             yield sse_bytes({"type": "cancelled", "stream_id": stream_id})
@@ -953,7 +969,7 @@ class ManagerSdkBridge:
                         _record_server_turn(
                             app, project, message, final,
                             history_status, run_id=str(
-                                payload.get("run_id") or run_id),
+                                hist_run),
                             error_code=str(payload.get("code") or ""))
                         _mirror_run_tasks(
                             app, project, task, message, task_status)
@@ -1004,16 +1020,19 @@ class ManagerSdkBridge:
         project = str(getattr(request, "project", "") or "")
         task = str(getattr(request, "task", "") or "")
         message = str(getattr(request, "message", "") or "")
+        # PLANB X5: the client run id names the history row, so the
+        # server turn and the client write upsert one row per run.
+        hist_run = str(getattr(request, "client_run_id", "") or "") or run_id
         yield sse_bytes(self._start_event(stream_id, run_id, request))
         _record_server_turn(app, project, message, "", "running",
-                            run_id=run_id)
+                            run_id=hist_run)
         _mirror_run_tasks(app, project, task, message, "running")
         if state["cancelled"] or provider is None:
             if not state["cancelled"]:
                 self._finish(stream_id)
             yield sse_bytes({"type": "cancelled", "stream_id": stream_id})
             _record_server_turn(
-                app, project, message, "", "stopped", run_id=run_id,
+                app, project, message, "", "stopped", run_id=hist_run,
                 error_code="STOPPED")
             _mirror_run_tasks(app, project, task, message, "stopped")
             return
@@ -1124,14 +1143,14 @@ class ManagerSdkBridge:
                 "text": reason,
             })
             _record_server_turn(
-                app, project, message, reason, "failed", run_id=run_id)
+                app, project, message, reason, "failed", run_id=hist_run)
             _mirror_run_tasks(app, project, task, message, "failed")
             return
         except Exception as err:
             self._finish(stream_id)
             yield sse_bytes(_chat_error_event(stream_id, err))
             _record_server_turn(
-                app, project, message, "", "failed", run_id=run_id,
+                app, project, message, "", "failed", run_id=hist_run,
                 error_code=str(
                     getattr(err, "code", None) or type(err).__name__))
             _mirror_run_tasks(app, project, task, message, "failed")
@@ -1141,7 +1160,7 @@ class ManagerSdkBridge:
             yield sse_bytes({"type": "cancelled", "stream_id": stream_id})
             _record_server_turn(
                 app, project, message,
-                str(captured.get("text", "")), "stopped", run_id=run_id,
+                str(captured.get("text", "")), "stopped", run_id=hist_run,
                 error_code="STOPPED")
             _mirror_run_tasks(app, project, task, message, "stopped")
             return
@@ -1163,7 +1182,7 @@ class ManagerSdkBridge:
             yield sse_bytes(approval_event)
             _record_server_turn(
                 app, project, message, str(result.reason or ""), "ok",
-                run_id=run_id)
+                run_id=hist_run)
             _mirror_run_tasks(app, project, task, message, "held")
             return
         yield sse_bytes({
@@ -1177,7 +1196,7 @@ class ManagerSdkBridge:
             yield sse_bytes({"type": "cancelled", "stream_id": stream_id})
             _record_server_turn(
                 app, project, message,
-                str(captured.get("text", "")), "stopped", run_id=run_id,
+                str(captured.get("text", "")), "stopped", run_id=hist_run,
                 error_code="STOPPED")
             _mirror_run_tasks(app, project, task, message, "stopped")
             return
@@ -1194,7 +1213,7 @@ class ManagerSdkBridge:
         })
         _record_server_turn(
             app, project, message, str(captured.get("text", "")), "ok",
-            run_id=run_id)
+            run_id=hist_run)
         _mirror_run_tasks(app, project, task, message, "done")
 
 

@@ -308,6 +308,8 @@ export interface RequestOptions {
   // FXANSWER S2: an abort signal for streams (the chat cancel aborts the
   // local reader at once; the signal only rides fetch, never the wire).
   signal?: AbortSignal;
+  // PLANB X5: extra request headers (the chat run id); never the token.
+  headers?: Record<string, string>;
 }
 
 const UI_TOKEN_HEADER = "x-ui-session-token";
@@ -329,6 +331,13 @@ export async function requestResponse(
       headers[UI_TOKEN_HEADER] = token;
     }
     headers[ACTOR_HEADER] = options.actor ?? DEFAULT_ACTOR;
+  }
+  if (options.headers !== undefined) {
+    for (const [name, value] of Object.entries(options.headers)) {
+      if (name.toLowerCase() !== UI_TOKEN_HEADER && name.toLowerCase() !== ACTOR_HEADER) {
+        headers[name] = value;
+      }
+    }
   }
   let response: Response;
   try {

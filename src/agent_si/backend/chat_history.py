@@ -329,7 +329,9 @@ def record_turn(app: Any, project_id: str, user_text: str,
                     turn["time"] = _utcnow()
                     turn["status"] = status
                     turn["error_code"] = code
-                    turn["executed"] = ran
+                    # PLANB X5: the server and client writes share one row;
+                    # the executed mark is never cleared by the other write.
+                    turn["executed"] = ran or turn.get("executed") is True
                     stored = dict(turn)
                     break
         if stored is None:

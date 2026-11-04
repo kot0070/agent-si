@@ -1401,7 +1401,8 @@ async function recordTurnBestEffort(
       body: {
         project_id: projectId,
         user_text: userText,
-        assistant_text: assistantText,
+        // PLANB X1: live waiting lines are never stored history.
+        assistant_text: assistantText.replace(/^Waiting for the model: [^\n]*\n?/gm, ""),
         status: extra?.status ?? "ok",
         run_id: extra?.run_id ?? "",
         error_code: extra?.error_code ?? "",
