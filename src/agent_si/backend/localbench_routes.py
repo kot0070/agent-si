@@ -241,6 +241,13 @@ def register_localbench_routes(app: Any) -> Any:
         rows = results_route(run_id) if run_id else []
         return JSONResponse(status_code=200, content=[asdict(row) for row in rows])
 
+    @router.get("/api/v1/local/bench/runs/status")
+    def _get_run_status(run_id: str = "") -> JSONResponse:
+        try:
+            return JSONResponse(status_code=200, content=_runner.run_state(run_id))
+        except KeyError as exc:
+            return _refusal(404, str(exc))
+
     @router.get("/api/v1/local/bench/history")
     def _get_history() -> JSONResponse:
         return JSONResponse(status_code=200, content=history_route())
@@ -302,6 +309,21 @@ def _body_chat_endpoint(body: Any) -> str | None:
     return raw.strip() or None
 
 
+def _attached_runtime_endpoint() -> str | None:
+    """Z4: the Ollama the user connected in Settings, on its generate path."""
+    from urllib.parse import urlparse
+
+    from agent_si.backend import local_connect as _local_connect
+
+    ref = getattr(_local_connect, "_ATTACHED_RUNTIME", None)
+    if not isinstance(ref, str) or not ref.strip():
+        return None
+    parts = urlparse(ref.strip() if "://" in ref else f"http://{ref.strip()}")
+    if not parts.netloc:
+        return None
+    return f"{parts.scheme or 'http'}://{parts.netloc}{_runner._OLLAMA_GENERATE_PATH}"
+
+
 def runs_route(
     model_id: str,
     level: BenchLevel,
@@ -326,6 +348,8 @@ def runs_route(
         endpoint: str | None = chat_endpoint.strip()
     else:
         endpoint = _LAST_CHECK_ENDPOINT
+    if not endpoint and _runner.bench_chat_endpoint() is None:
+        endpoint = _attached_runtime_endpoint()
     outcome = _runner.start_run(
         model_id, _coerce_level(level), True, chat_endpoint=endpoint
     )

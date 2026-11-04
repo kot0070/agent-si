@@ -101,6 +101,7 @@ export interface LocalBenchResultRow {
   kind: ResultKind;
   model_id: string;
   hardware: LocalBenchHardwareProfile;
+  score?: number | null;
 }
 
 // 111-UI per-change decision record shown in the tab: one entry per
@@ -126,6 +127,7 @@ export const LOCALBENCH_ENDPOINTS = {
   resume: "/api/v1/local/bench/runs/resume",
   stop: "/api/v1/local/bench/runs/stop",
   results: "/api/v1/local/bench/results",
+  status: "/api/v1/local/bench/runs/status",
 } as const;
 
 export type LocalBenchEndpointKey = keyof typeof LOCALBENCH_ENDPOINTS;
@@ -180,8 +182,23 @@ export const BenchEstimateWireSchema = z.object({
 
 export type BenchEstimateWire = z.infer<typeof BenchEstimateWireSchema>;
 
-// Wire: runs_route returns the run id string (localbench_routes.py).
-export const BenchRunIdSchema = z.string().min(1);
+// Wire: runs_route answers {"run_id": ...} (localbench_routes.py _post_runs);
+// a bare id string is still read.
+export const BenchRunIdSchema = z.union([
+  z.string().min(1),
+  z.object({ run_id: z.string().min(1) }).transform((body) => body.run_id),
+]);
+
+// Wire: GET runs/status (localbench_routes.py _get_run_status).
+export const BenchRunStatusSchema = z.object({
+  run_id: z.string().min(1),
+  state: z.enum(["running", "completed", "aborted", "stopped"]),
+  reason: z.string(),
+  done_cases: z.number().min(0),
+  total_cases: z.number().min(0),
+});
+
+export type BenchRunStatus = z.infer<typeof BenchRunStatusSchema>;
 
 // Wire: results_route returns BenchResultRow list (bench_protocol.py).
 export const LocalBenchResultRowSchema: z.ZodType<LocalBenchResultRow> =
@@ -190,6 +207,7 @@ export const LocalBenchResultRowSchema: z.ZodType<LocalBenchResultRow> =
     kind: ResultKindSchema,
     model_id: z.string().min(1),
     hardware: LocalBenchHardwareSchema,
+    score: z.number().nullable().optional(),
   });
 
 export const LocalBenchResultRowsSchema = z.array(LocalBenchResultRowSchema);

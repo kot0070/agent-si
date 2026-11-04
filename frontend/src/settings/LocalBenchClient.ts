@@ -8,6 +8,7 @@ import { z } from "zod";
 import {
   BenchEstimateWireSchema,
   BenchRunIdSchema,
+  BenchRunStatusSchema,
   LOCALBENCH_ENDPOINTS,
   LocalBenchResultRowsSchema,
   LocalBenchScanIdsSchema,
@@ -18,6 +19,7 @@ import {
   toWireRunBody,
 } from "./LocalBenchTypes";
 import type {
+  BenchRunStatus,
   BenchmarkLevel,
   LocalBenchEstimate,
   LocalBenchModel,
@@ -48,6 +50,9 @@ export interface LocalBenchClient {
   resumeRun(runId: string): Promise<void>;
   stopRun(runId: string): Promise<void>;
   readResults(runId: string): Promise<LocalBenchResultRow[]>;
+  /** Z4: where the run stands (running / completed / aborted + reason).
+  Optional: clients without it keep the rows-appear polling. */
+  readRunStatus?(runId: string): Promise<BenchRunStatus>;
 }
 
 export async function scanLocalBenchModels(
@@ -133,6 +138,16 @@ export async function readLocalBenchResults(
   );
 }
 
+export async function readLocalBenchRunStatus(
+  runId: string,
+): Promise<BenchRunStatus> {
+  return requestJson(
+    `${LOCALBENCH_ENDPOINTS.status}?run_id=${encodeURIComponent(runId)}`,
+    { method: "GET", kind: "read" },
+    BenchRunStatusSchema,
+  );
+}
+
 // R5: scan one attached local runtime's real model names (no
 // folder). Reads the provider model route the R2 lane serves for the
 // preset (GET /api/v1/providers/{id}/models); the rows are the
@@ -193,5 +208,9 @@ export class HttpLocalBenchClient implements LocalBenchClient {
 
   readResults(runId: string): Promise<LocalBenchResultRow[]> {
     return readLocalBenchResults(runId);
+  }
+
+  readRunStatus(runId: string): Promise<BenchRunStatus> {
+    return readLocalBenchRunStatus(runId);
   }
 }

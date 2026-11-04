@@ -158,6 +158,8 @@ _ACTIVE_RUN_ID: str | None = None
 _RUNS: dict[str, RunHandle] = {}
 _PROGRESS: dict[str, RunProgress] = {}
 _RUN_ROWS: dict[str, list[BenchResultRow]] = {}
+#: How an executor run ended: run id -> (state, reason); absent while it runs.
+_RUN_OUTCOME: dict[str, tuple[str, str]] = {}
 #: Per-run hardware snapshots (R-371): profile carried by each served run.
 _RUN_HARDWARE: dict[str, HardwareProfile] = {}
 #: Per-run admission verdicts (R-371): recorded when the caller binds refs.
@@ -629,6 +631,29 @@ def stop_run(run_id: str) -> None:
 def run_progress(run_id: str) -> RunProgress:
     """Visible progress for a known run; KeyError on unknown run ids."""
     return _require_progress(run_id)
+
+
+def run_state(run_id: str) -> dict:
+    """Where a run stands: running / completed / aborted / stopped + reason.
+
+    KeyError on unknown run ids. The reason is the executor's own real
+    text (empty unless the run ended without a full result).
+    """
+    progress = _require_progress(run_id)
+    outcome = _RUN_OUTCOME.get(run_id)
+    if outcome is not None:
+        state, reason = outcome
+    elif progress.stopped:
+        state, reason = "stopped", ""
+    else:
+        state, reason = "running", ""
+    return {
+        "run_id": run_id,
+        "state": state,
+        "reason": reason,
+        "done_cases": len(_RUN_ROWS.get(run_id, [])),
+        "total_cases": progress.total_cases,
+    }
 
 
 def run_result_rows(run_id: str) -> list[BenchResultRow]:
@@ -1615,6 +1640,11 @@ BENCH_CHAT_ENDPOINT_ENV = "AGENT_SI_BENCH_CHAT_ENDPOINT"
 #: a hung runtime never hangs the executor past stop.
 _BENCH_CHAT_TIMEOUT_S = 5.0
 
+#: Z4: a connected Ollama is called on its native generate path with a
+#: long per-case timeout (a cold 30b model loads for minutes).
+_OLLAMA_GENERATE_PATH = "/api/generate"
+_BENCH_OLLAMA_TIMEOUT_S = 600.0
+
 #: Pause-wait granularity: a stop arriving during a pause aborts fast.
 _BENCH_EXECUTOR_PAUSE_POLL_S = 0.05
 
@@ -1706,9 +1736,18 @@ def _loopback_chat(model_id: str, prompt: str, endpoint: str) -> dict:
             f"({BENCH_CHAT_ENDPOINT_ENV} is unset); state unchanged"
         )
     host, port, path = _guard_loopback_chat_endpoint(endpoint.strip())
-    body = json.dumps({"model": model_id, "prompt": prompt}).encode("utf-8")
+    payload: dict = {"model": model_id, "prompt": prompt}
+    timeout_s = _BENCH_CHAT_TIMEOUT_S
+    if path == _OLLAMA_GENERATE_PATH:
+        # Z4: a connected Ollama answers one JSON object only with stream
+        # false, wants the bare model name, and a 30b model needs minutes.
+        payload["stream"] = False
+        if model_id.startswith("ollama/"):
+            payload["model"] = model_id[len("ollama/"):]
+        timeout_s = _BENCH_OLLAMA_TIMEOUT_S
+    body = json.dumps(payload).encode("utf-8")
     try:
-        conn = http.client.HTTPConnection(host, port, timeout=_BENCH_CHAT_TIMEOUT_S)
+        conn = http.client.HTTPConnection(host, port, timeout=timeout_s)
         try:
             conn.request(
                 "POST",
@@ -1822,13 +1861,16 @@ def _executor_wait_while_paused(progress: RunProgress) -> bool:
     return not progress.stopped
 
 
-def _executor_settle(run_id: str, completed: bool) -> None:
+def _executor_settle(run_id: str, completed: bool, reason: str = "") -> None:
     """Settle a background run: stopped plus the serial slot freed.
 
     Same settlement as stop_run (stopped, slot freed when active) so a
-    finished or aborted executor never leaks the machine.
+    finished or aborted executor never leaks the machine. The outcome
+    and the real reason stay readable through run_state.
     """
     global _ACTIVE_RUN_ID
+    _RUN_OUTCOME[run_id] = (
+        "completed" if completed else "aborted", str(reason or ""))
     try:
         progress = _require_progress(run_id)
     except KeyError:
@@ -1898,6 +1940,10 @@ def _execute_run(
     except KeyError:
         return
     if not chat_endpoint:
+        _RUN_OUTCOME[run_id] = (
+            "aborted",
+            "no local runtime connected: connect Ollama in Settings > "
+            "Models, then run the benchmark again")
         return
     chat_fn = _EndpointChat(chat_endpoint).chat
     hardware = _RUN_HARDWARE.get(run_id) or detect_hardware()
@@ -1915,8 +1961,10 @@ def _execute_run(
             return
         try:
             reply = chat_fn(model_id, spec.prompt)
-        except Exception:
-            _executor_settle(run_id, completed=False)
+        except Exception as exc:
+            _executor_settle(
+                run_id, completed=False,
+                reason="%s (case %s)" % (exc, case.case_id))
             return
         try:
             reply_text = _bench_reply_text(reply)

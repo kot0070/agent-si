@@ -242,7 +242,7 @@ type RunState =
       accepted: LocalBenchRunAccepted;
       rows: Array<LocalBenchResultRow>;
     }
-  | { status: "error" };
+  | { status: "error"; reason?: string };
 
 function hardwareSummary(hardware: LocalBenchHardwareProfile): string {
   const ram = `${hardware.ram_mb} MB`;
@@ -251,6 +251,10 @@ function hardwareSummary(hardware: LocalBenchHardwareProfile): string {
   }
   return `${hardware.gpu_vendor} ${hardware.gpu_model} · ${ram}`;
 }
+
+// Z4: poll the run status every 2 s for up to 60 minutes.
+const STATUS_POLL_MS = 2000;
+const STATUS_POLLS = 1800;
 
 /** Folder picker route shared with the projects page (native sidecar
  * dialog, 409 when no native dialog exists). */
@@ -422,18 +426,49 @@ export function LocalBenchTab(props: LocalBenchTabProps): ReactElement {
       const estimate = await client.readEstimate(modelId, level);
       const runId = await client.startRun({ model_id: modelId, level });
       let rows: Array<LocalBenchResultRow> = [];
-      for (let attempt = 0; attempt < 60; attempt += 1) {
+      // Z4: with a status route the run is awaited to its real end (a
+      // model needs minutes); without one the first rows end the wait.
+      const watchStatus = client.readRunStatus !== undefined;
+      const maxPolls = watchStatus ? STATUS_POLLS : 60;
+      const pollMs = watchStatus ? STATUS_POLL_MS : 1000;
+      for (let attempt = 0; attempt < maxPolls; attempt += 1) {
         if (!runAlive.current) {
           return;
         }
-        rows = (await client.readResults(runId)).filter(
-          (row) => row.model_id === modelId,
-        );
-        if (rows.length > 0) {
-          break;
+        if (client.readRunStatus !== undefined) {
+          const status = await client.readRunStatus(runId);
+          if (status.state === "aborted" || status.state === "stopped") {
+            if (!runAlive.current) {
+              return;
+            }
+            const reason =
+              status.reason !== ""
+                ? status.reason
+                : "The run was stopped before it finished.";
+            setRun({ status: "error", reason });
+            try {
+              await client.stopRun(runId);
+            } catch {
+              // best effort: the run is already over, the slot only frees
+            }
+            return;
+          }
+          if (status.state === "completed") {
+            rows = (await client.readResults(runId)).filter(
+              (row) => row.model_id === modelId,
+            );
+            break;
+          }
+        } else {
+          rows = (await client.readResults(runId)).filter(
+            (row) => row.model_id === modelId,
+          );
+          if (rows.length > 0) {
+            break;
+          }
         }
         await new Promise((resolve) => {
-          setTimeout(resolve, 1000);
+          setTimeout(resolve, pollMs);
         });
       }
       if (!runAlive.current) {
@@ -630,7 +665,11 @@ export function LocalBenchTab(props: LocalBenchTabProps): ReactElement {
             {runDisabledReason}
           </p>
         ) : null}
-        {run.status === "error" ? <p>{t("errors.generic")}</p> : null}
+        {run.status === "error" ? (
+          <p data-testid="localbench-run-error">
+            {run.reason ?? t("errors.generic")}
+          </p>
+        ) : null}
       </div>
       {finished === null ? null : (
         <div data-testid="localbench-outcome">
@@ -663,6 +702,9 @@ export function LocalBenchTab(props: LocalBenchTabProps): ReactElement {
                     {t("settings.localbench.colEvidence")}:{" "}
                     {t(EVIDENCE_LOCALE_KEYS[kindToTier(row.kind)])}
                   </span>
+                  {typeof row.score === "number" ? (
+                    <span>{Math.round(row.score * 100)}%</span>
+                  ) : null}
                   <span>{hardwareSummary(row.hardware)}</span>
                 </li>
               ))}
