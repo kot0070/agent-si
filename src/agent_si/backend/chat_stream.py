@@ -1862,6 +1862,41 @@ def _adapter_matches(adapter: Any, provider_id: str, model: str) -> bool:
     return have == wanted
 
 
+def _bind_attached_local_adapter(
+        app: Any, project_id: str | None) -> Any:
+    """Bind a chat adapter off the attached local runtime (Ollama).
+
+    The Local LLM connect only attaches a runtime; no cloud provider is
+    registered, so a project whose worker role is pinned to a local model
+    would end in NO_PROVIDER_BOUND. The worker pin of the project picks
+    the model; the adapter is the same one the role engine builds for a
+    local role. None when nothing local is pinned. Never raises.
+    """
+    if not project_id:
+        return None
+    try:
+        from agent_si.runtime.devrun import roles as _roles
+
+        resolution = _roles.resolve_role(app, project_id, "worker")
+        provider = str(resolution.get("provider", ""))
+        if provider not in _roles._LOCAL_LEG_IDS:
+            return None
+        if _roles._attached_local_base_url(provider) is None:
+            return None
+        adapter = _roles.build_adapter(app, resolution)
+    except Exception:
+        return None
+    app.state.chat_provider_adapter = adapter
+    try:
+        _record_chat_decision(
+            app.state, provider, str(resolution.get("model", "")),
+            "attached local runtime %s for project %s" % (
+                provider, project_id))
+    except Exception:
+        pass
+    return adapter
+
+
 def bind_routed_provider_adapter(app: Any,
                                  project_id: str | None = None) -> Any | None:
     """Bind the routed provider adapter at app start (M-WIRE L0B-12).
@@ -1893,7 +1928,7 @@ def bind_routed_provider_adapter(app: Any,
     evidenced = [view for view in (views or [])
                  if getattr(view, "evidenced", False)]
     if not evidenced:
-        return None
+        return _bind_attached_local_adapter(app, project_id)
     routed_ids: set = set()
     for source in ("agent_si.routing.interface",
                    "agent_si.providers.registry.facades"):
