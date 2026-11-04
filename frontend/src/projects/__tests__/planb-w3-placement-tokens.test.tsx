@@ -103,6 +103,29 @@ describe("PLANB W3 placement rows", () => {
     expect(row.textContent).toContain("free: a local model costs nothing");
   });
 
+  it("two rows of one role + model: the count sits on the first row only", async () => {
+    stubTelemetry();
+    const second = liveRow({
+      agent: "worker-p2",
+      placement: "CLOUD",
+      role: "worker",
+      model: "muse-spark",
+      cost: "UNKNOWN",
+    });
+    render(
+      <ApiClientProvider client={client([CLOUD_ROW, second])}>
+        <ProjectView projectId="p-9" view="cloud-ai" />
+      </ApiClientProvider>,
+    );
+    const first = await screen.findByTestId("place-row-worker-p1");
+    await vi.waitFor(() => {
+      expect(first.textContent).toContain("466");
+    });
+    const next = await screen.findByTestId("place-row-worker-p2");
+    expect(next.textContent).not.toContain("466");
+    expect(next.textContent).toContain("\u2014");
+  });
+
   it("cloud tab: tokens joined, price word readable", async () => {
     stubTelemetry();
     render(

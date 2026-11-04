@@ -127,7 +127,7 @@ function AgentPlacementRow(props: {
   agent: string;
   role?: string;
   model?: string;
-  tokensTotal: number | null;
+  tokensTotal: number | "shared" | null;
   costText: string | null;
   local?: boolean;
   attempts: number;
@@ -157,7 +157,9 @@ function AgentPlacementRow(props: {
         {": "}
         {props.tokensTotal === null
           ? t("shell.common.unknown")
-          : formatNumber(props.tokensTotal, locale)}
+          : props.tokensTotal === "shared"
+            ? "\u2014"
+            : formatNumber(props.tokensTotal, locale)}
       </span>
       <span className="fxpv-place-cell">
         <span className="fxpv-place-label">{t("projectView.live.cost")}</span>
@@ -1412,11 +1414,15 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
         // PLANB W3: a row with no live token cell takes the served ledger
         // count of the same role + model (the Tokens tab numbers).
         const ledgerTokens = buildTokenRows(live, telemetry);
+        // PLANB V2g: the ledger count is per role + model, so only the first
+        // row of that pair carries it; later rows (worker-p1, worker-p2)
+        // show a dash, and the column never adds up past the Tokens tab.
+        const claimedTokens = new Set<string>();
         const rowTokens = (row: {
           role?: string;
           model?: string;
           tokensTotal: number | null;
-        }): number | null => {
+        }): number | "shared" | null => {
           if (row.tokensTotal !== null) {
             return row.tokensTotal;
           }
@@ -1426,7 +1432,15 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
               (item.model ?? "") === (row.model ?? "") &&
               item.tokens !== null,
           );
-          return fact === undefined ? null : fact.tokens;
+          if (fact === undefined) {
+            return null;
+          }
+          const key = `${row.role ?? ""}|${row.model ?? ""}`;
+          if (claimedTokens.has(key)) {
+            return "shared";
+          }
+          claimedTokens.add(key);
+          return fact.tokens;
         };
         return (
           <div>
