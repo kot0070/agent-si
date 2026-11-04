@@ -2168,9 +2168,18 @@ export function ChatArea(props: ChatAreaProps): ReactElement {
 
   useEffect(() => {
     let alive = true;
-    void readBoundModels(props.projectId).then((models) => {
+    void readBoundModels(props.projectId).then(async (models) => {
+      let known = models;
+      if (models !== null && models.length === 0) {
+        // A connected local runtime (Ollama, LM Studio) is a bound model
+        // even though the cloud list is empty: no "No model bound" hint.
+        const ids = await listConnectedProviders();
+        if (ids.some((id) => id === "ollama" || id === "lm-studio")) {
+          known = [{ local: true }];
+        }
+      }
       if (alive) {
-        setBoundModels(models);
+        setBoundModels(known);
       }
     });
     return () => {

@@ -313,6 +313,27 @@ describe("fxwalk1 screens over the real app", () => {
     });
   });
 
+  it("W11b: a connected local runtime counts as a bound model (no hint)", async () => {
+    on("GET", "/api/v1/chat/models?project_id=p1", () =>
+      jsonBody({ project_id: "p1", models: [] }),
+    );
+    on("GET", "/api/v1/local/models", () =>
+      jsonBody([
+        { model: "http://localhost:11434", evidence_tier: "PROXY", status: "READY" },
+      ]),
+    );
+    renderAppAt("/");
+    expect(await screen.findByTestId("chat-prompt")).toBeTruthy();
+    await waitFor(() => {
+      expect(
+        calls.some((call) => call.url === "/api/v1/local/models"),
+      ).toBe(true);
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId("chat-no-model-hint")).toBeNull();
+    });
+  });
+
   it("W12: connected providers seed the chat model select", async () => {
     on("GET", "/api/v1/providers", () =>
       jsonBody({
