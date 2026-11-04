@@ -1564,7 +1564,11 @@ def _gateway_transport(base_url: str, credential_store: Any,
             # "internal"-looking timeout error while the model call was
             # still inside its bound. Slow-but-healthy calls now run to
             # the same bound; dead connections still fail fast.
-            with _urlrequest.urlopen(http_request, timeout=300) as response:
+            # A loopback model (Ollama, CPU+GPU split) answers a long
+            # reply at a few tokens per second: its read bound is 2 h.
+            read_timeout = 7200 if loopback else 300
+            with _urlrequest.urlopen(
+                    http_request, timeout=read_timeout) as response:
                 try:
                     raw = response.read().decode("utf-8")
                 except (ValueError, _httpclient.HTTPException):

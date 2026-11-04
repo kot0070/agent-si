@@ -268,8 +268,12 @@ def _is_outage_error(exc: BaseException) -> bool:
 #: Default per-call model timeout in seconds (bounded by the max).
 _CALL_TIMEOUT_S = 300.0
 
-#: Upper bound for any per-call model timeout in seconds.
-_CALL_TIMEOUT_MAX = 900.0
+#: Upper bound for any per-call model timeout in seconds (a local model on
+#: CPU+GPU split runs at a few tokens per second: calls take many minutes).
+_CALL_TIMEOUT_MAX = 7200.0
+
+#: Default per-call timeout for a role bound to a local runtime: 60 min.
+_LOCAL_CALL_TIMEOUT_S = 3600.0
 
 #: Quiet waiting notice: first after this many seconds, then every this
 #: many seconds while one call is still running.
@@ -1123,6 +1127,8 @@ def invoke_owned(
     """
     provider = str(resolution["provider"])
     model = str(resolution["model"])
+    if timeout_s is None and provider in _LOCAL_LEG_IDS:
+        timeout_s = _LOCAL_CALL_TIMEOUT_S
     blocked = _cap_block(app, project_id, provider)
     if blocked is not None:
         raise _BudgetOut(blocked)
