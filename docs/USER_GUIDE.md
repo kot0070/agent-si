@@ -13,6 +13,9 @@ The home screen. A message list, a composer box, and a send control.
   dots, and a stop control. Without a connected provider the status reads Blocked and sending asks you
   to connect first.
 - If no model is bound yet, a hint with a link to Settings -> Models appears.
+- The composer has a Team on/off switch. On sends the task through the team of roles; off gives it to one agent.
+- When a run wants to execute an install command, an Install permission card asks first: Allow once, For this
+  project, or Deny. If you deny, the run stops and nothing is installed.
 
 ## Agents live (`/agents/live`)
 
@@ -63,6 +66,8 @@ Tabs: chat, overview, tasks, runs, time, AI usage, tokens, cost, local LLM, clou
 decisions, audits, errors, reports, tests.
 
 - Tasks hosts the task composer.
+- Overview also holds the project limits, the local-tests switch, and the controls to attach or detach a
+  knowledge base.
 - Tests shows the latest run: served counters and one row per test (code tests, AI checks and human
   verdicts). It never changes settings (the local-tests on/off switch lives on the overview tab).
 - Local LLM shows the work running on this machine, one row per agent, from served records.
@@ -132,8 +137,8 @@ three short notes: runs, code tests, local tests.
 
 ## Top bar and side bar
 
-- Top bar: product name, project switcher, Watcher link, Stop all (two-step, answers to Escape, reads No
-  runs active when idle), language selector, panel control.
+- Top bar: product name, project switcher, Watcher link, Stop all (one click, no confirmation dialog; reads
+  No runs active when idle), language selector, panel control.
 - Side bar: four entries only — New task, Projects, Reports, Settings — each with a short purpose hint.
   Project buttons open that project chat and show a quiet unread dot; Reports points at the selected
   project's reports and says Select a project to see its reports when none is selected.

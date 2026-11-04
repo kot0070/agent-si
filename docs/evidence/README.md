@@ -11,7 +11,7 @@ Copies of the real proof files from the build, with local paths, machine names a
 | [release-hashes.md](release-hashes.md) | Sizes and SHA-256 hashes of the installer and the portable zip, the commit they were built from, the smoke checks, and the zip content scan. |
 | [final-gate-summary.md](final-gate-summary.md) | The full gate on the integration build: backend tests (370 files), type check, frontend tests (1,343 passed), web build. It also shows two flagged lines: the stub scan reported 2 rows, and one function is listed as having no code-level test. Kept as written, and [explained below](#reading-the-two-flagged-lines). |
 
-How to read them: each file was written during the build, not after it. Where a test could not be run, the file says so.
+How to read them: each file was written during the build, not after it. Where a test could not be run, the file says so. The defect table in `video-run-timing.md` is a snapshot from filming: DEFECT-23, 24, 25, 27, 32, 33 and 34 are marked OPEN there and were fixed after it. The current state is in [Known issues](../KNOWN_ISSUES.md).
 
 ## Reading the two flagged lines
 

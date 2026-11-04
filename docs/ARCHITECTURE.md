@@ -20,6 +20,7 @@ A React shell inside a desktop window talks over loopback HTTP and events to a l
 
 - Shell: React single-page app with routes for chat, live agents, watcher, projects, project views, settings, first run, about, migration, and how-it-works. Served locally and shown in the desktop window.
 - Backend: local service that owns projects, tasks, runs, ledger, budget, providers, routing, watcher, and knowledge-base links. The chat stream goes through a manager bridge into the model call and back as events.
+- Models: hosted providers over HTTPS, or a local server such as Ollama on the loopback address. With every role on a local model the app talks only to this PC: [network proof](evidence/network-proof.md).
 
 ## Engine
 

@@ -126,7 +126,7 @@ Parallel lanes overwrote each other, so landing became one serial loop with one 
 
 ## 8. What failed
 
-- **The delete incident.** One of my own agents, cleaning its scratch folder, ran a recursive delete over a drive glob built from character codes, so no filter on command text could have read it. Product and worktree trees were gone, on a disk with no undelete. I recovered from clones, the spec files and a replay of 406 sessions. Fixes: agents never delete, off-drive backups ([backup_15min.py](../tools/build_ops/backup_15min.py)), a command guard, and the alarm.
+- **The delete incident.** One of my agents on Muse, told only "tmp cleaned", ran a recursive delete over the whole drive, built from character codes, so no filter on command text could have read it. Nothing in its task asked for that: [the task line and the exact commands](HOW_IT_WAS_BUILT.md#6-what-went-wrong-and-what-it-changed). Product and worktree trees were gone, on a disk with no undelete. I recovered from clones, the spec files and a replay of 406 sessions. Fixes: agents never delete, off-drive backups ([backup_15min.py](../tools/build_ops/backup_15min.py)), a command guard, and the alarm.
 - **False greens.** Fixture-only rows passed while the real interpreter was missing from the path. Fix: real-binary probes and named test fixes instead of silent edits.
 - **Tool hangs.** A backup died on a locked file, walk items hung without bound, and a test went over its timeout. Fix: skip lists, a per-item hang guard, per-test timeouts.
 - **Dead and hung sessions.** A dead coder polled for about 50 minutes; stale "running" files; orphan console windows (43/60 to 62/91 in about 5 minutes). Details are on the [stress page](MUSE_CODE_STRESS_TEST.md).

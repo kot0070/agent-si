@@ -89,6 +89,8 @@ During one incident (09:41), OpenConsole and conhost counts rose from 43/60 to 6
 
 **What it means for Muse Code users.** Any agent tool that runs subprocesses on Windows can flood the desktop with windows unless it hides them.
 
+**One more failure, not about load: a delete over the whole drive.** On November 2 a coding agent on Muse Spark 1.3 Contributor, told only "tmp cleaned", ran a delete over the whole drive, written in character codes. Nothing in its task asked for that. The task line, the exact commands and what was lost: [How this was built, section 6](HOW_IT_WAS_BUILT.md#6-what-went-wrong-and-what-it-changed).
+
 ## 7. What I built, and what changed
 
 - **Run cap and queue.** Built a scheduler with a cap, start spacing, a PID guard, a dead-letter queue, one owner per work tree, and a reserve of ready briefs. Changed: freed slots refill at once. Before the reserve existed, 658 of 1860 slot-minutes were idle.

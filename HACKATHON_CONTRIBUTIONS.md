@@ -9,6 +9,8 @@ Only Meta models run in the demo. Two setups, one after the other:
 - **Until November 2, 2026: Muse Spark 1.3 Contributor** (`meta/muse-spark-1.3-contributor`) through the Meta Model API. Every role of the team ran on it.
 - **After that: Muse Glimmer** (`muse-glimmer:30b`) on the same PC, through Ollama. On November 2 the Meta Model API billing was blocked, so the final demo runs locally.
 
+That is what the app calls when it runs. Building it is a separate matter: Claude Code steered the build throughout, and after November 2 Claude and free OpenCode models did the remaining coding: [the last two days](docs/HOW_IT_WAS_BUILT.md#10-the-last-two-days-november-3-and-4).
+
 What each role does, and which Meta model it used:
 
 | Role | What it does | Muse Spark (Meta Model API) | Muse Glimmer (local) |

@@ -28,6 +28,41 @@ Release page and hashes: https://github.com/kot0070/agent-si/releases/tag/v0.1.0
 
 More captions and photos: [docs/EVIDENCE.md](docs/EVIDENCE.md).
 
+### What it does
+
+The demo video shows 14 main functions, and the app does more. These are the 14, with the F numbers used in the test and evidence files:
+
+| | Function |
+|---|---|
+| F01 | Code tests: a test catalog runs local code first, then AI checks, then a human verdict, with one switch per project. |
+| F02 | Fixed team: every role is pinned to a model you choose, and the model of each level is recorded. |
+| F03 | Auto team: picks the cheapest connected model that fits and records why. |
+| F04 | Autonomous development: one task becomes a plan, parallel Managers, real checks and an audit. |
+| F05 | Team control panel: role, model, step, file, cost and tokens for each agent. |
+| F06 | Watcher: independent from the team, runs on scripts and calls a local or cloud model on an abnormal event. |
+| F07 | Emergency Stop: one click stops everything, tested on an endless command. |
+| F08 | Provider catalog: connect a provider with the key only. |
+| F09 | Model knowledge base, with an Update action. |
+| F10 | Local AI benchmark: measures local models on your own PC. |
+| F11 | Knowledge bases: attach one to a project, or detach it. |
+| F12 | Budget and per-provider caps. |
+| F13 | Install permission: the app asks once before a command installs something. |
+| F14 | Clean install: a fresh profile starts clean. |
+
+Also in the app (every screen is described in the [user guide](docs/USER_GUIDE.md)):
+
+- **Chat and projects:** chat as the home screen with Team on or off; projects with a folder, pause, resume and archive.
+- **Project pages:** tasks, runs, time, AI usage, tokens, cost, local LLM, cloud AI, models, routing decisions, audits, errors, reports and tests.
+- **Automations:** rules on a schedule, a number or an event, with templates, a preview and two stop switches.
+- **Watcher controls:** Hang, Guard and Tamper rule cards, presets, alerts, timers, an integrity check, a list of apps and services, and on or off per project.
+- **Routing:** role pools, role profiles, a setup wizard, a chat-model picker, and weights for cost, speed, quality and risk.
+- **Local servers:** Ollama, LM Studio or any OpenAI-compatible server; Use for agents pins the team roles to one local model.
+- **Model knowledge updates:** from the shipped copy, the official docs or a file, with old and new values side by side and Apply or Reject.
+- **Test catalog screen:** versions, filters, changelog, and import or attach a base.
+- **Everyday:** a guided first run, English and Ukrainian, dark and light themes, diagnostics, migration of older data, and live cards for team, context, results, background work and watcher.
+
+The full list from the original build plan, 437 requirement rows: [docs/REQUIREMENTS_LIST.md](docs/REQUIREMENTS_LIST.md). What is still open: [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md).
+
 ### What makes it different
 
 - **A fresh auditor gives the verdict, not the agent that wrote the code.** In the demo run the app ran the checks itself (all exit 0) and the auditor said PASS: [docs/evidence/video-run-timing.md](docs/evidence/video-run-timing.md).
@@ -117,6 +152,8 @@ pytest is not among the runtime dependencies in `pyproject.toml`, so install it 
 .\.venv\Scripts\python.exe -m pip install pytest pytest-timeout
 .\.venv\Scripts\python.exe -m pytest
 ```
+
+This also runs older test files in subfolders of `tests/`, and 11 of those tests currently fail: see [Known issues](docs/KNOWN_ISSUES.md).
 
 ## Two ways to run a model
 
@@ -288,7 +325,7 @@ Provider keys are stored only in the Windows Credential Manager under the app na
 3. Watch progress in the chat, the team panel, and the Tests tab.
 4. The result appears in the chat with its checks and the audit verdict. Reports and the evidence index stay with the project.
 
-Stop: the top bar has Stop all. Stopping is a two-step control and also answers to the Escape key. It stops the active runs at once and keeps partial outputs and records.
+Stop: the top bar has Stop all. One click, with no confirmation dialog, stops the active runs at once and keeps partial outputs and records.
 
 ## Known limits
 
@@ -314,6 +351,8 @@ and a row-by-row reality check before it shipped. Custom tooling enforced
 it: a merge train, prove-they-ran gates, a destructive-command guard, live
 UI/exe drives, and a defect ledger.
 
+After the Meta Model API billing was blocked on November 2, Claude workers through OpenCode did the last two days of coding, tests and docs. The app itself still calls only Meta models in the demo: every role runs on Muse Glimmer. Details: [the last two days](docs/HOW_IT_WAS_BUILT.md#10-the-last-two-days-november-3-and-4).
+
 - Full story: [docs/HOW_IT_WAS_BUILT.md](docs/HOW_IT_WAS_BUILT.md)
 - Stress page (what broke, what we built): [docs/MUSE_CODE_STRESS_TEST.md](docs/MUSE_CODE_STRESS_TEST.md)
 - Screenshots with captions: [docs/EVIDENCE.md](docs/EVIDENCE.md)
@@ -330,5 +369,6 @@ Current open issues: [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md).
 - Evidence files (timing, network proof, clean install, release hashes, gate summary): [docs/evidence/README.md](docs/evidence/README.md).
 - Screenshots and photos with captions: [docs/EVIDENCE.md](docs/EVIDENCE.md).
 - How the project uses Meta's models: [HACKATHON_CONTRIBUTIONS.md](HACKATHON_CONTRIBUTIONS.md).
+- The full requirement list from the original build plan: [docs/REQUIREMENTS_LIST.md](docs/REQUIREMENTS_LIST.md).
 - Earlier field report on the stress test: [docs/MUSE_STRESS_STORY.md](docs/MUSE_STRESS_STORY.md).
 - Known issues: [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md).
