@@ -507,7 +507,6 @@ function Invoke-PortableAssembly {
             ('  $exe = Get-FileHash -LiteralPath "{0}" -Algorithm SHA256' -f $ExeName),
             ('  expected AgentSI.exe sha256: {0}' -f $appExeHash),
             ('  MANIFEST/HASH sha256:        {0}' -f $hashDoc.sha256),
-            '[STRING_PLACEHOLDER_1]',
             '',
             'Start: unzip to a writable folder, open the AgentSI folder inside it,',
             'and run AgentSI.exe there (double-click it, or Start-AgentSI.cmd).',
