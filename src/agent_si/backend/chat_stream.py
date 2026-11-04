@@ -29,7 +29,9 @@ from __future__ import annotations
 import importlib
 import json
 import os
+import queue
 import re
+import threading
 import uuid
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
@@ -903,7 +905,7 @@ class ManagerSdkBridge:
         terminal_emitted = False
         forwarded = 0
         try:
-            for event in run_events:
+            for event in events_with_waiting(run_events, state):
                 if state["cancelled"]:
                     yield sse_bytes(
                         {"type": "cancelled", "stream_id": stream_id})
@@ -913,17 +915,19 @@ class ManagerSdkBridge:
                     stream_id, run_id, event)
                 if payload.get("type") == "start":
                     continue
+                is_waiting = payload.pop("waiting", False) is True
                 if display_folder and isinstance(
                         payload.get("text"), str):
                     payload["text"] = _chat_display_text(
                         payload["text"], display_folder)
                 if (kb_note and payload.get("type") == "delta"
+                        and not is_waiting
                         and isinstance(payload.get("text"), str)
                         and not state.get("kb_cited")):
                     payload["text"] = payload["text"] + kb_note
                     state["kb_cited"] = True
                 text = payload.get("text")
-                if isinstance(text, str) and text:
+                if isinstance(text, str) and text and not is_waiting:
                     texts.append(text)
                 yield sse_bytes(payload)
                 forwarded += 1
@@ -1240,6 +1244,70 @@ def _chat_display_text(text: str, folder: str) -> str:
         return name or token
 
     return _DRIVE_PATH_RE.sub(_basename, out)
+
+
+def events_with_waiting(
+    run_events: Any, state: dict[str, Any], poll_s: float = 1.0
+) -> Iterator[Any]:
+    """Yield the engine's events plus a live waiting line per model call.
+
+    The engine blocks inside a model call and cannot yield; it publishes
+    its roles.invoke_timed on_waiting lines into ``state["waiting"]``.
+    The engine runs in its own thread here, the stream loop polls, and
+    every refreshed line goes out as one delta marked ``waiting``.
+    Closing this generator closes the engine at its next event.
+    """
+    box: "queue.Queue[tuple[str, Any]]" = queue.Queue()
+    closing = threading.Event()
+
+    def _produce() -> None:
+        try:
+            for event in run_events:
+                box.put(("event", event))
+                if closing.is_set():
+                    break
+            box.put(("end", None))
+        except BaseException as err:  # noqa: BLE001 -- re-raised below
+            box.put(("error", err))
+        finally:
+            close = getattr(run_events, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    pass
+
+    producer = threading.Thread(
+        target=_produce, daemon=True, name="chat-run-events")
+    producer.start()
+    sent: dict[str, float] = {}
+    try:
+        while True:
+            try:
+                kind, value = box.get(timeout=max(0.05, float(poll_s)))
+            except queue.Empty:
+                waiting = state.get("waiting") if isinstance(
+                    state, dict) else None
+                if isinstance(waiting, dict):
+                    for key, entry in list(waiting.items()):
+                        try:
+                            stamp = float(entry["stamp"])
+                            line = str(entry["line"])
+                        except Exception:
+                            continue
+                        if sent.get(key) != stamp:
+                            sent[key] = stamp
+                            yield {"type": "delta", "text": line + "\n",
+                                   "waiting": True}
+                continue
+            if kind == "event":
+                yield value
+            elif kind == "error":
+                raise value
+            else:
+                return
+    finally:
+        closing.set()
 
 
 def _manager_event_payload(

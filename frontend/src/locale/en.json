@@ -731,9 +731,9 @@
       "noCapability": "No capability data for {model}; it can still be used.",
       "purpose": "Run models on this PC.",
       "title": "Local LLM",
-      "useFailed": "Worker model not set: {reason}.",
+      "useFailed": "Agent models not set: {reason}.",
       "useForAgents": "Use for agents",
-      "workerPinned": "Worker model set to {model}."
+      "workerPinned": "Director, Manager, Worker and Auditor set to {model}."
     },
     "localbench": {
       "colDuration": "Duration",

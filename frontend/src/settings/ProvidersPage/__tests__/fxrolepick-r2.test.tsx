@@ -102,12 +102,19 @@ describe("R2 local card", () => {
     expect(card.textContent).not.toContain("ollama/model-");
     fireEvent.change(select, { target: { value: "ollama/llama3.2" } });
     fireEvent.click(within(card).getByTestId("local-use-ollama"));
-    expect(await within(card).findByText("Worker model set to llama3.2.")).toBeTruthy();
+    expect(
+      await within(card).findByText(
+        "Director, Manager, Worker and Auditor set to llama3.2.",
+      ),
+    ).toBeTruthy();
     const puts = calls.filter(
       (call) => call.url === "/api/v1/roles/pools" && call.init.method === "PUT",
     );
-    expect(puts).toHaveLength(1);
-    expect(JSON.parse(puts[0].init.body as string)).toMatchObject({
+    expect(puts).toHaveLength(4);
+    const workerPut = puts.find(
+      (call) => JSON.parse(call.init.body as string).role === "worker",
+    );
+    expect(JSON.parse(workerPut?.init.body as string)).toMatchObject({
       project_id: "local",
       role: "worker",
       mode: "PINNED",

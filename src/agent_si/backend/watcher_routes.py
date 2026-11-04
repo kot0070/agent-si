@@ -25,6 +25,7 @@ from enum import Enum
 from typing import Any, Callable, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 
 from agent_si.assurance import audit_records as _audit_home
 from agent_si.automation import runner as _auto_runner_home
@@ -515,8 +516,16 @@ async def route_post_evaluate(id: str, request: Request) -> Any:
     """POST /api/v1/watcher/rules/{id}/evaluate -> evaluate_rule (token)."""
     data = await _body(request)
     token = _guard_post(request, data)
-    return _call(
-        "evaluate_rule", str(data.get("project_id", "")), id,
+    try:
+        from agent_si.backend import watcher_model as _watcher_model
+
+        _watcher_model.bind(request.app, str(data.get("project_id", "")))
+    except Exception:
+        pass
+    # A bound watcher model makes a real (slow, local) call: keep it off
+    # the event loop so the app stays responsive while it runs.
+    return await run_in_threadpool(
+        _call, "evaluate_rule", str(data.get("project_id", "")), id,
         session_token=token,
     )
 

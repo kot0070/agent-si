@@ -277,8 +277,8 @@ _LOCAL_CALL_TIMEOUT_S = 3600.0
 
 #: Quiet waiting notice: first after this many seconds, then every this
 #: many seconds while one call is still running.
-_WAIT_FIRST_S = 20.0
-_WAIT_EVERY_S = 30.0
+_WAIT_FIRST_S = 10.0
+_WAIT_EVERY_S = 15.0
 
 
 def _clamp_timeout(value: Any) -> float:
@@ -346,10 +346,35 @@ def _signal_outage_once(app: Any, record: Any, project_id: str,
         pass
 
 
-def waiting_line(role: str, elapsed_s: float) -> str:
+def waiting_line(role: str, elapsed_s: float, model: str = "") -> str:
     """One quiet chat status line for a still-running model call."""
+    if model:
+        return "Waiting for the model: %s on %s, %d s" % (
+            str(role), str(model), int(max(0, elapsed_s)))
     return "Waiting for the model: %s, %d s" % (
         str(role), int(max(0, elapsed_s)))
+
+
+def note_waiting(state: Any, key: str, role: str, model: str,
+                 elapsed_s: float) -> None:
+    """Publish the current waiting line of one call into the stream state.
+
+    The chat stream reads ``state["waiting"]`` while the engine blocks in
+    the model call and forwards each refreshed line to the run stream.
+    """
+    if not isinstance(state, dict):
+        return
+    slot = state.setdefault("waiting", {})
+    slot[str(key)] = {"line": waiting_line(role, elapsed_s, model),
+                      "stamp": time.monotonic()}
+
+
+def clear_waiting(state: Any, key: str) -> None:
+    """Remove a finished call's waiting line from the stream state."""
+    if isinstance(state, dict):
+        slot = state.get("waiting")
+        if isinstance(slot, dict):
+            slot.pop(str(key), None)
 
 
 def reply_language_line() -> str:

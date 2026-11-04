@@ -4,7 +4,7 @@
 // (never in the URL query or the JSON body: the backend never accepts a
 // query token and refuses secret-looking body fields).
 
-import { requestVoid } from "../../api/errors";
+import { requestResponse, requestVoid } from "../../api/errors";
 import { defaultPoolResolver } from "./RolePoolPicker";
 import type { PoolOption, RolePoolValue } from "./RolePoolPicker";
 
@@ -52,6 +52,19 @@ export function buildRolePoolBody(
     return { project_id, role, mode: "pool", pool, strategy: value.strategy };
   }
   return { project_id, role, mode: "AUTO", pool: [], strategy: value.strategy };
+}
+
+export const AGENT_ROLES = ["director", "manager", "worker", "auditor"] as const;
+
+export type RolePoolReadRow = { role: string; mode: string | null; model: string | null };
+
+export async function readRolePools(project_id: string): Promise<RolePoolReadRow[]> {
+  const response = await requestResponse(
+    `/api/v1/roles/pools?project_id=${encodeURIComponent(project_id)}`,
+    { method: "GET" },
+  );
+  const data = (await response.json()) as { roles?: RolePoolReadRow[] };
+  return Array.isArray(data.roles) ? data.roles : [];
 }
 
 export async function saveRolePool(

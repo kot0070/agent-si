@@ -18,7 +18,8 @@ import type { SecretStorePort } from "./secretStore";
 import type { ProviderPreset } from "./types";
 import { listProviderModels } from "./modelsApi";
 import type { ProviderModelRow } from "./modelsApi";
-import { saveRolePool } from "./poolsApi";
+import { AGENT_ROLES, readRolePools, saveRolePool } from "./poolsApi";
+import type { RolePoolReadRow } from "./poolsApi";
 import { choicesToPoolOptions } from "./RolePoolPicker";
 import { t } from "../../locale/index";
 
@@ -46,6 +47,9 @@ export function LocalConnectSection(): ReactElement {
   const [useModelId, setUseModelId] = useState<Record<string, string>>({});
   const [useMessage, setUseMessage] = useState<Record<string, string>>({});
   const [useSaving, setUseSaving] = useState<Record<string, boolean>>({});
+  const [rolesByPreset, setRolesByPreset] = useState<
+    Record<string, { role: string; model: string }[]>
+  >({});
   const [connectId, setConnectId] = useState<string | null>(null);
   const [disconnectId, setDisconnectId] = useState<string | null>(null);
 
@@ -137,12 +141,31 @@ export function LocalConnectSection(): ReactElement {
           label: picked?.label ?? modelId,
         },
       ]);
-      await saveRolePool("local", "worker", {
-        mode: "PINNED",
-        pinnedKey: options[0]?.key ?? "",
-        poolKeys: [],
-        strategy: "AUTO",
-      }, options);
+      for (const role of AGENT_ROLES) {
+        await saveRolePool("local", role, {
+          mode: "PINNED",
+          pinnedKey: options[0]?.key ?? "",
+          poolKeys: [],
+          strategy: "AUTO",
+        }, options);
+      }
+      let rows: RolePoolReadRow[] = [];
+      try {
+        rows = await readRolePools("local");
+      } catch {
+        rows = [];
+      }
+      setRolesByPreset((prev) => ({
+        ...prev,
+        [preset.id]: AGENT_ROLES.map((role) => {
+          const row = rows.find((item) => item.role === role);
+          const model = row?.model ?? "";
+          return {
+            role,
+            model: model === "" ? (picked?.label ?? modelId) : model.replace(/^[^/]+\//, ""),
+          };
+        }),
+      }));
       setUseMessage((prev) => ({
         ...prev,
         [preset.id]: t("settings.localAi.workerPinned", {
@@ -274,6 +297,15 @@ export function LocalConnectSection(): ReactElement {
                   <p role="status" data-variant="quiet">
                     {useMessage[preset.id]}
                   </p>
+                ) : null}
+                {rolesByPreset[preset.id] !== undefined ? (
+                  <ul data-testid={`local-roles-${preset.id}`}>
+                    {rolesByPreset[preset.id].map((item) => (
+                      <li key={item.role}>
+                        {t(`providers.role.${item.role}`)}: {item.model}
+                      </li>
+                    ))}
+                  </ul>
                 ) : null}
                 <button
                   type="button"

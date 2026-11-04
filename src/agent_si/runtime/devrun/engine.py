@@ -1501,12 +1501,18 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
               waits: list) -> Any:
         _check_stop()
 
+        wait_key = "%s/%s/%s" % (role, part, attempt)
+
         def _waiting(elapsed: float) -> None:
+            model_name = str(resolution.get("model", ""))
             with contextlib.suppress(Exception):
-                _live(str(role), str(resolution.get("model", "")),
+                _roles.note_waiting(
+                    state, wait_key, str(role), model_name, elapsed)
+            with contextlib.suppress(Exception):
+                _live(str(role), model_name,
                       part, attempt,
-                      _roles.waiting_line(str(role), elapsed), "",
-                      {}, None, list(waits or []),
+                      _roles.waiting_line(str(role), elapsed, model_name),
+                      "", {}, None, list(waits or []),
                       str(resolution.get("provider", "")))
 
         try:
@@ -1539,6 +1545,8 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
             raise _OutagePaused(str(exc)) from None
         except _roles._BudgetOut as exc:
             raise _BudgetOut(str(exc)) from None
+        finally:
+            _roles.clear_waiting(state, wait_key)
         usage = getattr(response, "usage", {}) or {}
         tokens = dict(usage) if isinstance(usage, dict) else {}
         _live(role, str(resolution["model"]), part, attempt,
@@ -1666,7 +1674,10 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                         "the run action IS the permission ask the app shows "
                         "the user. You may run checks. Return ONLY "
                         "{\"actions\": [...], \"done\": bool}: done true only "
-                        "when the task is complete. Project folder: %s. If the "
+                        "when the task is complete. Project folder: %s "
+                        "(for information: action paths stay relative to it, "
+                        "never type this absolute path or any absolute path "
+                        "in an action). If the "
                         "task names a place outside the project folder, never "
                         "claim the file went there: work inside the project "
                         "folder only, done true only when the inside work is "
@@ -3587,12 +3598,19 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
                     artifact_refs=["%s/%s" % (part_id, path)
                                    for path in spec["files"]],
                     lock=lock, stop_seen=stop_seen,
-                    on_waiting=lambda elapsed: _live(
-                        "auditor", str(auditor_spec.get("model", "")),
-                        part_id, attempt,
-                        _roles.waiting_line("auditor", elapsed), "",
-                        {}, None, ["audit:%s" % (part_id,)],
-                        str(auditor_spec.get("provider", ""))))
+                    on_waiting=lambda elapsed: (
+                        _roles.note_waiting(
+                            state, "auditor/%s/%s" % (part_id, attempt),
+                            "auditor", str(auditor_spec.get("model", "")),
+                            elapsed),
+                        _live(
+                            "auditor", str(auditor_spec.get("model", "")),
+                            part_id, attempt,
+                            _roles.waiting_line(
+                                "auditor", elapsed,
+                                str(auditor_spec.get("model", ""))), "",
+                            {}, None, ["audit:%s" % (part_id,)],
+                            str(auditor_spec.get("provider", "")))))
                 # FXPARALLEL END judge-lock.
             except _roles._BudgetOut as exc:
                 raise _BudgetOut(str(exc)) from None
@@ -4432,7 +4450,9 @@ def _worker_prompt(spec: dict, message: str, attempt: int,
         # never faked by the worker: inside writes only, and no claim
         # the file went outside (the run verdict names where it went).
         head += (
-            " Project folder: %s. If the task names a place outside "
+            " Project folder: %s (for information: action paths stay "
+            "relative to it, never type this absolute path or any "
+            "absolute path in an action). If the task names a place outside "
             "the project folder, never claim the file went there: "
             "write inside the project folder only - the run verdict "
             "names where every file went." % (folder,))
