@@ -83,3 +83,30 @@ def test_call_bound_allows_an_hour_and_local_role_defaults_to_it(monkeypatch):
             pass
     assert captured[0] >= 3600
     assert captured[1] is None
+
+
+def _sent_body(monkeypatch, model):
+    seen = {}
+
+    def fake_urlopen(request, timeout=None):
+        seen["body"] = json.loads(request.data.decode("utf-8"))
+        return _Reply(json.dumps({"message": {"role": "assistant", "content": "ok"}}).encode("utf-8"))
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    transport = chat_stream._gateway_transport(
+        "http://localhost:11434", None, {"secret_id": "", "provider_id": "ollama"})
+    transport({"model": model, "messages": [{"role": "user", "content": "hi"}],
+               "chat_path": "/api/chat"})
+    return seen["body"]
+
+
+def test_muse_glimmer_gets_thinking_off_and_8k_window(monkeypatch):
+    body = _sent_body(monkeypatch, "ollama/muse-glimmer:30b")
+    assert body["think"] is False
+    assert body["options"]["num_ctx"] == 8192
+    assert body["model"] == "muse-glimmer:30b"
+
+
+def test_other_local_models_get_no_think_field(monkeypatch):
+    body = _sent_body(monkeypatch, "ollama/qwen3:8b")
+    assert "think" not in body and "options" not in body

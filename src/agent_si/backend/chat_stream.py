@@ -1549,6 +1549,14 @@ def _gateway_transport(base_url: str, credential_store: Any,
         if (isinstance(_effort, str) and _effort
                 and wire_model.startswith("muse-spark")):
             body_out["reasoning_effort"] = _effort
+        if chat_path == "/api/chat" and wire_model.startswith(
+                "muse-glimmer"):
+            # Muse Glimmer thinks at level "high" by default and Ollama
+            # loads it with a 4096-token window: at ~2.6 tok/s one role
+            # call then spends 30+ min on thinking. The roles ask for a
+            # short JSON reply, so thinking is off and the window is 8k.
+            body_out["think"] = False
+            body_out["options"] = {"num_ctx": 8192}
         payload = _json.dumps(body_out).encode("utf-8")
         headers = {"Content-Type": "application/json"}
         if value:
