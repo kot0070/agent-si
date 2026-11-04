@@ -179,6 +179,7 @@ export class HttpApiClient implements ApiClient {
                 stream_id: effectiveId,
                 delta: wire.text,
                 done: false,
+                ...(typeof wire.live === "string" ? { live: wire.live } : {}),
               };
             }
             break;

@@ -79,6 +79,7 @@ def test_stream_heartbeat_emits_waiting_lines_while_the_engine_blocks():
     assert "director" in waits[0]["text"] and "m1" in waits[0]["text"]
     assert [w["text"].count("s") > 0 for w in waits]
     assert all(w["text"].endswith("\n") for w in waits)
+    assert {w["waiting_key"] for w in waits} == {"director"}
 
 
 def test_stream_heartbeat_reraises_engine_error_and_stops_on_close():
@@ -152,4 +153,6 @@ def test_bridge_stream_forwards_waiting_line_not_into_history():
              if "Waiting for the model: director on m1" in str(e.get("text"))]
     assert len(waits) == 1
     assert "waiting" not in waits[0] and waits[0]["type"] == "delta"
+    assert waits[0]["live"] == "director"
+    assert "waiting_key" not in waits[0]
     assert events[-1]["type"] == "done"

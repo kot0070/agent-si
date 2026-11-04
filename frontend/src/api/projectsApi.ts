@@ -173,6 +173,7 @@ export const ChatChunkSchema: z.ZodType<ChatChunk> = z.object({
   ask: z
     .object({ toolName: z.string(), argv: z.array(z.string()) })
     .optional(),
+  live: z.string().optional(),
 });
 
 export const ChatStreamEventSchema = z.object({
@@ -198,6 +199,9 @@ export const ChatStreamEventSchema = z.object({
   // value) so the UI names the missing key. Optional: older events
   // parse exactly as before.
   provider_id: z.string().optional(),
+  // PLANB X1: a live waiting line names its model call; the next line of
+  // the same key replaces it in place. Omitted on every older event.
+  live: z.string().optional(),
 });
 
 export type ChatStreamEvent = z.infer<typeof ChatStreamEventSchema>;

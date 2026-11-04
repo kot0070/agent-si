@@ -916,6 +916,9 @@ class ManagerSdkBridge:
                 if payload.get("type") == "start":
                     continue
                 is_waiting = payload.pop("waiting", False) is True
+                live_key = payload.pop("waiting_key", None)
+                if is_waiting and isinstance(live_key, str):
+                    payload["live"] = live_key
                 if display_folder and isinstance(
                         payload.get("text"), str):
                     payload["text"] = _chat_display_text(
@@ -1298,7 +1301,7 @@ def events_with_waiting(
                         if sent.get(key) != stamp:
                             sent[key] = stamp
                             yield {"type": "delta", "text": line + "\n",
-                                   "waiting": True}
+                                   "waiting": True, "waiting_key": str(key)}
                 continue
             if kind == "event":
                 yield value

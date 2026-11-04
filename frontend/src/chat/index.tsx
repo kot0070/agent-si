@@ -54,6 +54,7 @@ import type { ProjectChatState } from "./chatStore";
 import type { NewChatMessage } from "./chatStore";
 import {
   CHAT_FLOOD_WINDOW_MS,
+  applyLiveDelta,
   compactPrompt,
   extractChatTags,
   isFlooding,
@@ -1675,19 +1676,21 @@ function startChatRun(
   const streamId = runId;
   setChatRunner(key, { streamId, streaming: true });
   let runner: ChatRunner;
+  const liveLines = new Map<string, string>();
   try {
     runner = streamChat(
       client,
       { project_id: projectId, prompt_ref: text, stream_id: streamId },
       {
-        onChunkText: (delta) => {
+        onChunkText: (delta, live) => {
           const current = getChatState(key).messages.find(
             (message) => message.id === assistantId,
           );
           if (current !== undefined) {
-            patchChatMessage(key, assistantId, {
-              text: current.text + delta,
-            });
+            // PLANB X1: a live waiting line replaces its own previous
+            // line in place; any other text closes that call's line.
+            const next = applyLiveDelta(current.text, delta, live, liveLines);
+            patchChatMessage(key, assistantId, { text: next });
           }
         },
         // FXASK A8: mid-stream install ask (the run waits in place).

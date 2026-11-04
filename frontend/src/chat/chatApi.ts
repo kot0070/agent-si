@@ -13,7 +13,7 @@ import { ChatChunkSchema, ChatOpenSchema } from "../api/projectsApi";
 export { ChatChunkSchema, ChatOpenSchema };
 
 export interface ChatProgress {
-  onChunkText(text: string): void;
+  onChunkText(text: string, live?: string): void;
   isCancelled(): boolean;
   // FXASK A8: mid-stream install ask (the run waits in place).
   onAsk?(ask: { toolName: string; argv: readonly string[] }): void;
@@ -69,7 +69,7 @@ export function streamChat(
           executed = true;
         }
         if (data.delta !== "") {
-          progress.onChunkText(data.delta);
+          progress.onChunkText(data.delta, data.live);
         }
         // FXASK A8: a mid-stream install ask shows the card while the
         // same stream keeps going; the terminal done still closes it.
@@ -108,6 +108,30 @@ export function streamChat(
       return client.cancelChatStream(stream.stream_id);
     },
   };
+}
+
+// PLANB X1: one live waiting line per model call. A chunk with a live
+// key replaces that key's previous line in place (or appends the first
+// one); any other chunk ends the call, so the next call starts a new line.
+export function applyLiveDelta(
+  text: string,
+  delta: string,
+  live: string | undefined,
+  lines: Map<string, string>,
+): string {
+  if (live === undefined) {
+    lines.clear();
+    return text + delta;
+  }
+  const previous = lines.get(live);
+  lines.set(live, delta);
+  if (previous !== undefined) {
+    const at = text.lastIndexOf(previous);
+    if (at >= 0) {
+      return text.slice(0, at) + delta + text.slice(at + previous.length);
+    }
+  }
+  return text + delta;
 }
 
 export const CHAT_FLOOD_WINDOW_MS = 30000;

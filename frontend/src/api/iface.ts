@@ -154,6 +154,8 @@ export interface ChatChunk {
   // FXASK A8: a mid-stream install ask (the run waits in place): the
   // card shows while the same stream continues. Optional, same reason.
   ask?: { toolName: string; argv: readonly string[] };
+  // PLANB X1: key of a live waiting line; same key replaces in place.
+  live?: string;
 }
 
 export interface ChatStream {
