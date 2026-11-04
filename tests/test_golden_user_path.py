@@ -18,6 +18,7 @@ Real files, real processes, real findstr on Windows.
 import copy
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -351,7 +352,7 @@ def _worker_script(n_calls, messages):
                                          "argv": ["pip", "install", "-r",
                                                   "requirements.txt"]}],
                             "done": False})
-    if "long" in low:
+    if re.search(r"\blong\b", low):
         if "exit" in low or n_calls >= 1:
             return json.dumps({"actions": [], "done": True})
         return json.dumps({"actions": [{"action": "run",
@@ -371,7 +372,7 @@ def _worker_script(n_calls, messages):
         return json.dumps({"actions": [{"action": "run",
                                          "argv": ["npm", "install"]}],
                             "done": False})
-    if "hello" in low and "long" not in low and "retry" not in low:
+    if "hello" in low and not re.search(r"\blong\b", low) and "retry" not in low:
         if "write_file hello.txt" in low or "hello.txt: ok" in low \
                 or n_calls >= 1:
             return json.dumps({"actions": [], "done": True})
