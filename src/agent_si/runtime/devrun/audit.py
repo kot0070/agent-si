@@ -368,11 +368,38 @@ def judge(
     }
     try:
         parsed = _protocol.parse_auditor_reply(response.output_text or "")
+    except _protocol.AuditError as first_exc:
+        # A small model often breaks the JSON (a quote inside a reason).
+        # One re-ask with the same evidence; the second reply is parsed
+        # by the same strict parser and a second failure stays FAIL.
+        parsed = None
+        failure = first_exc
+        try:
+            again = list(messages) + [
+                {"role": "assistant",
+                 "content": str(response.output_text or "")[:4000]},
+                {"role": "user", "content": (
+                    "Your last reply was not valid JSON: %s. Return ONLY "
+                    "{\"result\": \"PASS\" or \"FAIL\", \"reasons\": "
+                    "[\"short text\"]}; no double quotes or backslashes "
+                    "inside the reason texts." % (first_exc,))},
+            ]
+            response, over2, _row2 = _roles.invoke_owned(
+                app, adapter, resolution, again, record=record,
+                project_id=project_id, run_id=run_id, part=part_id,
+                attempt=attempt, lock=lock, timeout_s=timeout_s,
+                stop_seen=stop_seen, on_waiting=on_waiting)
+            entry["over_cap"] = bool(over or over2)
+            parsed = _protocol.parse_auditor_reply(
+                response.output_text or "")
+        except _protocol.AuditError as second_exc:
+            failure = second_exc
+        if parsed is None:
+            entry["result"] = "FAIL"
+            entry["reasons"] = ["auditor output malformed: %s" % (failure,)]
+    if parsed is not None:
         entry["result"] = parsed["result"]
         entry["reasons"] = parsed["reasons"]
-    except _protocol.AuditError as exc:
-        entry["result"] = "FAIL"
-        entry["reasons"] = ["auditor output malformed: %s" % (exc,)]
     stored = coordinator.record_auditor_verdict(
         project_id=str(project_id), task_id=str(task_id),
         run_id=str(run_id), part_id=str(part_id), attempt=int(attempt),
