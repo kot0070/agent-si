@@ -13,6 +13,8 @@ After the first start you connect a model in Settings -> Models. The proof of ho
 
 Release page and hashes: https://github.com/kot0070/agent-si/releases/tag/v0.1.0 (steps to check the hash are under "Download and verify" below).
 
+**Read more:** [Muse Code stress test](docs/MUSE_CODE_STRESS_TEST.md) | [How this was built](docs/HOW_IT_WAS_BUILT.md) | [Controlling about 100 agents](docs/CONTROLLING_MANY_AGENTS.md) | [Evidence files](docs/evidence/README.md) | [User guide](docs/USER_GUIDE.md) | [All documentation](#all-documentation)
+
 ### What you need
 
 - The app: the installer or the zip (Windows 10 or 11, 64-bit; no Python needed).
@@ -70,6 +72,28 @@ The full list from the original build plan, 437 requirement rows: [docs/REQUIREM
 - **Keys and records stay on your machine.** Keys live only in the Windows Credential Manager; runs, decisions and audits stay in a local data folder: [docs/SECURITY.md](docs/SECURITY.md).
 - **It shows "not known" instead of a made-up number.** The Tokens tab prints what it knows per role and model and says so when it does not: [docs/EVIDENCE.md](docs/EVIDENCE.md).
 - **It was built with about a hundred agents, steered from one board.** The owner board shows every lane, how old its newest file is, silent agents, queue, scripts and gates on one screen: [docs/CONTROLLING_MANY_AGENTS.md](docs/CONTROLLING_MANY_AGENTS.md) and [tools/build_ops/owner_board.py](tools/build_ops/owner_board.py).
+
+### All documentation
+
+| Page | What is in it |
+|---|---|
+| [Muse Code stress test](docs/MUSE_CODE_STRESS_TEST.md) | What broke with many agents at once, the measurements, the fixes, and what I would ask the Muse Code team. |
+| [How this was built](docs/HOW_IT_WAS_BUILT.md) | The whole story: time, scale, team, custom tools, decisions, what went wrong, notes from the supervising AI, the last two days. |
+| [Controlling about 100 agents](docs/CONTROLLING_MANY_AGENTS.md) | How one person kept control: the owner board with photos, rules, limits, watchers and the merge train. |
+| [Build tools](tools/build_ops/README.md) | The real scripts from the build: owner board, merge train, gates, backup and delete alarm. |
+| [Evidence files](docs/evidence/README.md) | Proof from real runs: demo timing, network check, Team On and Off results, clean install, release hashes, gate summary. |
+| [Screenshots and photos](docs/EVIDENCE.md) | Pictures with captions, including the first passes on Muse Spark. |
+| [Requirements list](docs/REQUIREMENTS_LIST.md) | The 437 requirement rows from the original build plan. |
+| [Meta models and contributions](HACKATHON_CONTRIBUTIONS.md) | Which Meta model each role used, and what is new in this project. |
+| [Model eval](docs/MODEL_EVAL.md) | How the reasoning level for each role was measured and chosen. |
+| [User guide](docs/USER_GUIDE.md) | Every screen of the app in plain words. |
+| [Troubleshooting](docs/TROUBLESHOOTING.md) | Common problems and what to do. |
+| [Architecture](docs/ARCHITECTURE.md) | How the app is put together. |
+| [Security](docs/SECURITY.md) | Keys, local data and what the app protects. |
+| [Known issues](docs/KNOWN_ISSUES.md) | What is still open, and what was checked on the release code. |
+| [Release notes](docs/release/RELEASE_NOTES.md) | Files of this release, hashes and how to verify them. |
+| [Package reports](docs/reports/README.md) | One report per work package, K01 to K13, written during the build. |
+| [Earlier stress report](docs/MUSE_STRESS_STORY.md) | The first field report on the stress test. |
 
 ### Where things are
 
