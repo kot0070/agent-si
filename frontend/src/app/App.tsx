@@ -627,7 +627,10 @@ function SettingsTabs(): ReactElement {
           </option>
         ))}
       </select>
-      <div data-testid="settings-tabs">
+      <div
+        data-testid="settings-tabs"
+        style={{ display: "flex", flexWrap: "wrap", columnGap: 14, rowGap: 4 }}
+      >
         {SETTINGS_ROUTES.map((route) => (
           <NavLink
             key={route.path}
