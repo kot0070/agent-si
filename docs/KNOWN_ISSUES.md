@@ -23,4 +23,5 @@ The current picture on November 4, 2026. The defect ledger in [How this was buil
 | Worker protocol | The Worker replies in text JSON. Native tool calls are not used. |
 | Windows build | Unsigned: Windows SmartScreen warns on first start. |
 | Layout | Some settings pages still use the top strip. Some screens are less compact than planned. The Reports look is not finished. |
+| Local benchmark | The decision record shows the estimated duration, not the real one (900 s against 393 s in the filmed run). The result rows ran their labels together and read 0 MB of hardware on a PC with a graphics card. |
 | Local LLM page | The "no models" note can flash for a moment before the model count loads. |

@@ -32,7 +32,7 @@ More captions and photos: [docs/EVIDENCE.md](docs/EVIDENCE.md).
 
 ### What it does
 
-The demo video shows 14 main functions, and the app does more. These are the 14, with the F numbers used in the test and evidence files:
+The demo video goes through 14 main functions, some as live runs and some as their screens: [the video scene by scene](docs/evidence/final-film-scenes.md). The app does more. These are the 14, with the F numbers used in the test and evidence files:
 
 | | Function |
 |---|---|
