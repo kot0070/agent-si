@@ -124,11 +124,33 @@ connect any OpenAI-compatible server: that dialog asks for the server's Base URL
 
 ## Download and verify
 
-The release is published at https://github.com/kot0070/agent-si/releases/tag/v0.1.0.
-It publishes two files: a portable zip (`AgentSI-portable-0.1.0.zip`) and a
-`SHA256SUMS.txt` index (one `<sha256>  <filename>` line per file). No installer
-is published for this release. Download the index together with the zip, and do
-not run anything if the hash differs.
+Each release publishes an installer (`AgentSI-setup-0.1.0.exe`), a portable
+zip (`AgentSI-portable-0.1.0.zip`), and a `SHA256SUMS.txt` index (one
+`<sha256>  <filename>` line per file). Download the index together with
+whichever package you use, and do not run anything if a hash differs.
+
+### Installer (recommended)
+
+1. Download `AgentSI-setup-0.1.0.exe` and `SHA256SUMS.txt`.
+2. Check the hash in PowerShell:
+
+```powershell
+Get-FileHash -Algorithm SHA256 AgentSI-setup-0.1.0.exe
+```
+
+3. Compare the value with the `AgentSI-setup-0.1.0.exe` line in
+`SHA256SUMS.txt`.
+4. Double-click the installer and follow the wizard. It installs per user
+(no administrator rights needed), adds a Start-menu entry and a desktop
+shortcut (both named 'Agent SI', both checked by default in the wizard,
+opening AgentSI.exe in its folder), and can start the app at the end.
+Uninstalling removes both shortcuts and keeps your data
+folder unless you answer Yes to deleting it (see Remove below).
+
+The build is unsigned, so Windows SmartScreen shows "Windows protected your PC" with publisher Unknown for the installer and again on first start.
+This is expected for this release.
+Click More info, then Run anyway - only after the SHA256 value matches the published SHA256SUMS.txt.
+Do not run the app if it differs.
 
 ### Portable
 
@@ -149,10 +171,9 @@ and run AgentSI.exe inside it by double-click (or run `Start-AgentSI.cmd`
 beside it). Never copy the exe out of its folder: it needs its support
 files beside it.
 
-The build is unsigned, so Windows SmartScreen shows "Windows protected your PC" with publisher Unknown on first start.
-This is expected for this release.
-Click More info, then Run anyway - only after the SHA256 value matches the published SHA256SUMS.txt.
-Do not run the app if it differs.
+The same SmartScreen warning as above appears on first start (unsigned
+build, publisher Unknown): More info, then Run anyway - only after the
+hashes match.
 
 ## First run, step by step
 
@@ -197,7 +218,7 @@ Provider keys are stored only in the Windows Credential Manager under the app na
 
 ## Remove and closing
 
-- Remove: delete the app folder. Data lives in the `data` folder next to `AgentSI.exe` by default (`%LOCALAPPDATA%\AgentSI\data` when the app folder is not writable; the `AGENT_SI_DATA_DIR` folder path overrides both). Delete that data folder too for a full removal. Provider keys live in the Windows Credential Manager under `app:<provider>` — Disconnect removes the entry.
+- Remove: delete the app folder. Data lives in the `data` folder next to `AgentSI.exe` by default (`%LOCALAPPDATA%\AgentSI\data` when the app folder is not writable; the `AGENT_SI_DATA_DIR` folder path overrides both). Delete that data folder too for a full removal. Installed: Windows Settings -> Apps -> Agent SI -> Uninstall; the uninstaller keeps your data folder unless you answer Yes to deleting it. Provider keys live in the Windows Credential Manager under `app:<provider>` — Disconnect removes the entry.
 - Closing is safe: history and records stay on disk and reappear on the next start. Closing the window ends the backend, so an active run stops with it.
 - One copy at a time: starting the app again focuses the first window instead of starting a second copy.
 
