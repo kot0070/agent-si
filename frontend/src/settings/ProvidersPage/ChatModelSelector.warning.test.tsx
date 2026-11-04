@@ -32,14 +32,14 @@ function metaCatalog(): ProviderPreset[] {
       baseUrl: "https://api.meta.ai/v1",
       keyHint: "Key from your Meta dashboard.",
       keyStartsWith: "",
-      models: [{ id: "meta/model-1", label: "Model 1" }],
+      models: [{ id: "meta/warn-model", label: "Model 1" }],
     },
   ];
 }
 
 function metaConnected(): Record<string, ProviderState> {
   return {
-    meta: { presetId: "meta", connected: true, enabledModels: ["meta/model-1"] },
+    meta: { presetId: "meta", connected: true, enabledModels: ["meta/warn-model"] },
   };
 }
 
@@ -50,12 +50,12 @@ describe("ChatModelSelector contributor warning", () => {
         project_id="warn-1"
         catalog={metaCatalog()}
         states={metaConnected()}
-        warnings={{ "meta/model-1": CONTRIBUTOR_WARNING_EN }}
+        warnings={{ "meta/warn-model": CONTRIBUTOR_WARNING_EN }}
       />,
     );
     expect(screen.queryByTestId("model-warning")).toBeNull();
     fireEvent.change(screen.getByLabelText("Chat model"), {
-      target: { value: "meta/model-1" },
+      target: { value: "meta/warn-model" },
     });
     const note = screen.getByTestId("model-warning");
     expect(note.textContent).toBe(CONTRIBUTOR_WARNING_EN);
@@ -70,11 +70,11 @@ describe("ChatModelSelector contributor warning", () => {
         project_id="warn-2"
         catalog={metaCatalog()}
         states={metaConnected()}
-        warnings={{ "meta/model-1": CONTRIBUTOR_WARNING_EN }}
+        warnings={{ "meta/warn-model": CONTRIBUTOR_WARNING_EN }}
       />,
     );
     fireEvent.change(screen.getByLabelText("Chat model"), {
-      target: { value: "meta/model-1" },
+      target: { value: "meta/warn-model" },
     });
     const note = screen.getByTestId("model-warning");
     const select = screen.getByLabelText("Chat model");
@@ -90,12 +90,12 @@ describe("ChatModelSelector contributor warning", () => {
         project_id="warn-3"
         catalog={metaCatalog()}
         states={metaConnected()}
-        warnings={{ "meta/model-1": CONTRIBUTOR_WARNING_UK }}
+        warnings={{ "meta/warn-model": CONTRIBUTOR_WARNING_UK }}
         lang="uk"
       />,
     );
     fireEvent.change(screen.getByLabelText("Chat model"), {
-      target: { value: "meta/model-1" },
+      target: { value: "meta/warn-model" },
     });
     expect(screen.getByTestId("model-warning").textContent).toBe(
       "Тариф Contributor: запити та відповіді можуть використовуватися Meta для навчання майбутніх моделей (https://dev.meta.ai/docs/pricing-rate-limits).",
@@ -118,13 +118,13 @@ describe("ChatModelSelector contributor warning", () => {
         catalog={metaCatalog()}
         states={metaConnected()}
         warnings={{
-          "meta/model-1":
+          "meta/warn-model":
             "Contributor tier: prompts may be reused for training.",
         }}
       />,
     );
     fireEvent.change(screen.getByLabelText("Chat model"), {
-      target: { value: "meta/model-1" },
+      target: { value: "meta/warn-model" },
     });
     expect(screen.getByTestId("model-warning").textContent).toBe(
       "Contributor tier: prompts may be reused for training.",

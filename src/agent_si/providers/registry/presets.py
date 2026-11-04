@@ -22,6 +22,7 @@ META_CATALOGUE = ("meta/muse-spark-1.3-contributor",)
 PRESETS: dict[str, dict[str, Any]] = {
     "meta": {
         "provider_id": "meta",
+        "label": "Meta",
         "provider_type": "meta",
         "transport": TRANSPORT_OPENAI_COMPATIBLE,
         "base_url": "https://api.meta.ai/v1",
@@ -30,6 +31,7 @@ PRESETS: dict[str, dict[str, Any]] = {
     },
     "openai": {
         "provider_id": "openai",
+        "label": "OpenAI",
         "provider_type": "openai",
         "transport": TRANSPORT_OPENAI_COMPATIBLE,
         "base_url": "https://api.openai.com/v1",
@@ -38,6 +40,7 @@ PRESETS: dict[str, dict[str, Any]] = {
     },
     "anthropic": {
         "provider_id": "anthropic",
+        "label": "Anthropic",
         "provider_type": "anthropic",
         "transport": TRANSPORT_LITELLM_BACKED,
         "base_url": "https://api.anthropic.com",
@@ -46,6 +49,7 @@ PRESETS: dict[str, dict[str, Any]] = {
     },
     "any-openai-compatible": {
         "provider_id": "any-openai-compatible",
+        "label": "OpenAI-compatible",
         "provider_type": "openai_compatible",
         "transport": TRANSPORT_OPENAI_COMPATIBLE,
         "base_url": "",
@@ -54,6 +58,7 @@ PRESETS: dict[str, dict[str, Any]] = {
     },
     "ollama": {
         "provider_id": "ollama",
+        "label": "Ollama",
         "provider_type": "ollama",
         "transport": TRANSPORT_LOCAL,
         "base_url": "http://localhost:11434",
@@ -62,6 +67,7 @@ PRESETS: dict[str, dict[str, Any]] = {
     },
     "lm-studio": {
         "provider_id": "lm-studio",
+        "label": "LM Studio",
         "provider_type": "lm_studio",
         "transport": TRANSPORT_LOCAL,
         "base_url": "http://localhost:1234/v1",
@@ -70,6 +76,7 @@ PRESETS: dict[str, dict[str, Any]] = {
     },
     "claude": {
         "provider_id": "claude",
+        "label": "Claude",
         "provider_type": "claude",
         "transport": TRANSPORT_LITELLM_BACKED,
         "base_url": "https://api.anthropic.com",
@@ -78,6 +85,7 @@ PRESETS: dict[str, dict[str, Any]] = {
     },
     "gemini": {
         "provider_id": "gemini",
+        "label": "Gemini",
         "provider_type": "gemini",
         "transport": TRANSPORT_OPENAI_COMPATIBLE,
         "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
@@ -86,6 +94,7 @@ PRESETS: dict[str, dict[str, Any]] = {
     },
     "mistral": {
         "provider_id": "mistral",
+        "label": "Mistral",
         "provider_type": "mistral",
         "transport": TRANSPORT_OPENAI_COMPATIBLE,
         "base_url": "https://api.mistral.ai/v1",
@@ -94,6 +103,7 @@ PRESETS: dict[str, dict[str, Any]] = {
     },
     "groq": {
         "provider_id": "groq",
+        "label": "Groq",
         "provider_type": "groq",
         "transport": TRANSPORT_OPENAI_COMPATIBLE,
         "base_url": "https://api.groq.com/openai/v1",
@@ -102,6 +112,7 @@ PRESETS: dict[str, dict[str, Any]] = {
     },
     "openrouter": {
         "provider_id": "openrouter",
+        "label": "OpenRouter",
         "provider_type": "openrouter",
         "transport": TRANSPORT_OPENAI_COMPATIBLE,
         "base_url": "https://openrouter.ai/api/v1",
@@ -110,6 +121,7 @@ PRESETS: dict[str, dict[str, Any]] = {
     },
     "deepseek": {
         "provider_id": "deepseek",
+        "label": "DeepSeek",
         "provider_type": "deepseek",
         "transport": TRANSPORT_OPENAI_COMPATIBLE,
         "base_url": "https://api.deepseek.com/v1",
@@ -118,6 +130,7 @@ PRESETS: dict[str, dict[str, Any]] = {
     },
     "xai": {
         "provider_id": "xai",
+        "label": "xAI",
         "provider_type": "xai",
         "transport": TRANSPORT_OPENAI_COMPATIBLE,
         "base_url": "https://api.x.ai/v1",
@@ -137,6 +150,7 @@ def get_preset(key: str) -> dict[str, Any]:
     return {
         "key": key,
         "provider_id": preset["provider_id"],
+        "label": preset.get("label", preset["provider_id"]),
         "provider_type": preset["provider_type"],
         "transport": preset["transport"],
         "base_url": preset["base_url"],

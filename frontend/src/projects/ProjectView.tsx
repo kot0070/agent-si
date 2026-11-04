@@ -73,6 +73,7 @@ import { HealthView } from "./observe/HealthView";
 import { MatrixView } from "./observe/MatrixView";
 import { VerifierView } from "./observe/VerifierView";
 import { AttachControl } from "../kb/AttachControl";
+import { DetachControl } from "../kb/DetachControl";
 
 export type { ProjectViewName };
 export { PROJECT_VIEWS };
@@ -674,13 +675,14 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
     };
   }, [client, props.projectId, props.view, nonce]);
 
-  // FXVIEWS: optional telemetry enrichment for the tokens, audits and
-  // routing-decisions tabs. A missing doc reads null and the tabs stay
-  // honestly empty.
+  // FXVIEWS: optional telemetry enrichment for the tokens, audits,
+  // ai-usage and routing-decisions tabs. A missing doc reads null and
+  // the tabs stay honestly empty.
   useEffect(() => {
     if (
       props.view !== "tokens" &&
       props.view !== "audits" &&
+      props.view !== "ai-usage" &&
       props.view !== "routing-decisions"
     ) {
       setTelemetry(null);
@@ -924,6 +926,7 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
               <LocalTestsSwitch projectId={props.projectId} />
             </LimitsSectionBoundary>
             <AttachControl projectId={props.projectId} />
+            <DetachControl projectId={props.projectId} />
           </div>
         );
       }
@@ -1059,6 +1062,35 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
       }
       case "ai-usage": {
         const sums = ledger === null ? null : sumLedger(ledger);
+        // R7: real tokens and cost from the ledger (telemetry run
+        // store, the same doc as the rail), by model and by provider
+        // from the same ledger. A section with no served data is
+        // hidden, never an unavailable paragraph.
+        const tokensTotal =
+          telemetry?.project?.tokens !== undefined &&
+          typeof telemetry.project.tokens === "number"
+            ? telemetry.project.tokens
+            : null;
+        const usageModels = (telemetry?.models ?? []).filter(
+          (row) =>
+            typeof row.tokens === "number" ||
+            typeof row.cost === "number",
+        );
+        const usageProviders = (telemetry?.providers ?? []).filter(
+          (row) =>
+            typeof row.tokens === "number" ||
+            typeof row.cost === "number",
+        );
+        const costBasis =
+          usageModels.length > 0 ? usageModels : usageProviders;
+        const costValues = costBasis
+          .map((row) => row.cost)
+          .filter((value): value is number => typeof value === "number");
+        const costTotal =
+          costValues.length > 0
+            ? costValues.reduce((left, right) => left + right, 0)
+            : null;
+        const unknown = t("shell.common.unknown");
         // XOR: an empty ledger reads as one empty state, never zero rows
         // plus another empty state; an empty live list reads as a note.
         if (ledgerError === null && sums !== null && ledger?.length === 0) {
@@ -1096,6 +1128,78 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
                   value={sums.wall}
                 />
               </>
+            )}
+            {tokensTotal === null && costTotal === null ? null : (
+              <>
+                {tokensTotal === null ? null : (
+                  <Fact
+                    testId="usage-tokens-total"
+                    labelKey="telemetry.tokens"
+                    value={formatNumber(tokensTotal, locale)}
+                  />
+                )}
+                {costTotal === null ? null : (
+                  <Fact
+                    testId="usage-cost-total"
+                    labelKey="telemetry.cost"
+                    value={String(costTotal)}
+                  />
+                )}
+              </>
+            )}
+            {usageModels.length === 0 ? null : (
+              <div data-testid="usage-models">
+                <p>{t("telemetry.perModel")}</p>
+                {usageModels.map((row, index) => (
+                  <div
+                    key={`${row.model}-${index}`}
+                    data-testid={`usage-model-row-${index}`}
+                    className="fxpv-row"
+                  >
+                    <span>{row.model}</span>
+                    <span>
+                      {t("telemetry.calls")}: {row.calls}
+                    </span>
+                    <span>
+                      {t("telemetry.tokens")}:{" "}
+                      {typeof row.tokens === "number"
+                        ? formatNumber(row.tokens, locale)
+                        : unknown}
+                    </span>
+                    <span>
+                      {t("telemetry.cost")}:{" "}
+                      {typeof row.cost === "number" ? String(row.cost) : unknown}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {usageProviders.length === 0 ? null : (
+              <div data-testid="usage-providers">
+                <p>{t("telemetry.perProvider")}</p>
+                {usageProviders.map((row, index) => (
+                  <div
+                    key={`${row.provider}-${index}`}
+                    data-testid={`usage-provider-row-${index}`}
+                    className="fxpv-row"
+                  >
+                    <span>{row.provider}</span>
+                    <span>
+                      {t("telemetry.calls")}: {row.calls}
+                    </span>
+                    <span>
+                      {t("telemetry.tokens")}:{" "}
+                      {typeof row.tokens === "number"
+                        ? formatNumber(row.tokens, locale)
+                        : unknown}
+                    </span>
+                    <span>
+                      {t("telemetry.cost")}:{" "}
+                      {typeof row.cost === "number" ? String(row.cost) : unknown}
+                    </span>
+                  </div>
+                ))}
+              </div>
             )}
             {liveError !== null ? (
               panelError(liveError)

@@ -280,6 +280,42 @@ def fetch_live_models(base_url: str, key_value: str, *,
     return parse_live_models(body)
 
 
+def fetch_local_models(base_url: str, *,
+                       provider_id: str, transport: Any = None,
+                       http_get: Any = None,
+                       timeout_s: float = MODELS_TIMEOUT_S) -> List[str]:
+    """Fetch real model ids off an attached local runtime (keyless).
+
+    Same OpenAI-compatible ``/v1/models`` shape as
+    :func:`fetch_live_models`, but no key is ever needed or sent: the
+    loopback runtime the owner attached answers without auth. Only
+    loopback http(s) endpoints are read; anything else raises
+    :class:`LiveModelsError`. Every failure is the generic keyless
+    error, never the body.
+    """
+    from urllib.parse import urlparse as _urlparse
+    try:
+        parts = _urlparse(str(base_url or ""))
+    except Exception:
+        raise LiveModelsError(GENERIC_ERROR) from None
+    if (parts.scheme or "").lower() not in ("http", "https"):
+        raise LiveModelsError(GENERIC_ERROR)
+    if str(parts.hostname or "").lower() not in (
+            "localhost", "127.0.0.1", "::1"):
+        raise LiveModelsError(GENERIC_ERROR)
+    url = models_url(base_url)
+    headers = {"Accept": "application/json"}
+    headers.update(extra_headers(provider_id, transport))
+    getter = http_get if callable(http_get) else _default_http_get
+    try:
+        body = getter(url, headers, timeout_s)
+    except LiveModelsError:
+        raise
+    except Exception:
+        raise LiveModelsError(GENERIC_ERROR) from None
+    return parse_live_models(body)
+
+
 # --- merge -------------------------------------------------------------------------
 
 def price_of_kb_row(row: Mapping[str, Any]) -> Optional[float]:
@@ -523,6 +559,7 @@ __all__ = [
     "enabled_map",
     "extra_headers",
     "fetch_live_models",
+    "fetch_local_models",
     "load_enabled",
     "load_state",
     "merge_model_rows",

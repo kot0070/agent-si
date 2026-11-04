@@ -15,9 +15,24 @@ from typing import Any
 
 
 class RoleUnbound(RuntimeError):
-    """One role names no provider; the run ends naming the role."""
+    """One role names no provider; the run ends naming the role.
+
+    Structured fields let the engine stop with the exact reason as
+    the main line: ``kind`` is "no_model" when the profile pins a
+    provider but names no model, else "no_provider". ``provider`` is
+    the pinned provider id when known (never a secret).
+    """
 
     code: str = "DEVRUN_ROLE_UNBOUND"
+
+    def __init__(self, message: str = "", *, role: Any = None,
+                 provider: Any = None,
+                 kind: str = "no_provider") -> None:
+        super().__init__(message)
+        self.role = role
+        self.provider = provider
+        self.kind = kind if kind in ("no_provider", "no_model") \
+            else "no_provider"
 
 
 class _BudgetOut(RuntimeError):
@@ -606,7 +621,7 @@ def _auto_pick(
                     }
         raise RoleUnbound(
             "role %r has no provider: AUTO pick failed: %s"
-            % (role, exc)) from None
+            % (role, exc), role=role, kind="no_provider") from None
     return {
         "role": role, "mode": "AUTO",
         "provider": str(pick["manager"]),
@@ -629,13 +644,14 @@ def resolve_role(
     factory = _factory(app)
     if table is None:
         raise RoleUnbound(
-            "role %r has no provider: no role table" % (role,))
+            "role %r has no provider: no role table" % (role,),
+            role=role, kind="no_provider")
     try:
         profile = table.get_profile(project_id, role)
     except Exception as exc:
         raise RoleUnbound(
             "role %r has no provider: role table failed: %s"
-            % (role, exc)) from None
+            % (role, exc), role=role, kind="no_provider") from None
     if profile is not None:
         mode = str(getattr(profile, "mode", "") or "")
         if mode == "PINNED":
@@ -648,15 +664,19 @@ def resolve_role(
                             "provider": str(provider),
                             "model": str(model)},
                 }
+            pinned_provider = getattr(profile, "provider", None)
+            if not isinstance(pinned_provider, str) or not pinned_provider:
+                pinned_provider = None
             raise RoleUnbound(
                 "role %r has no provider: PINNED names no model"
-                % (role,))
+                % (role,), role=role, provider=pinned_provider,
+                kind="no_model")
         if mode == "pool":
             picked = _pool_pick(app, factory, project_id, role)
             if picked is None:
                 raise RoleUnbound(
                     "role %r has no provider: pool has no usable profile"
-                    % (role,))
+                    % (role,), role=role, kind="no_provider")
             return {
                 "role": role, "mode": "pool",
                 "provider": str(picked[0]), "model": str(picked[1]),
@@ -667,8 +687,47 @@ def resolve_role(
         if mode != "AUTO":
             raise RoleUnbound(
                 "role %r has no provider: unknown mode %r"
-                % (role, mode))
+                % (role, mode), role=role, kind="no_provider")
     return _auto_pick(app, factory, role)
+
+
+#: Local provider ids (registry preset ids) served off the attached
+#: local runtime, mapped to their adapter leg ids.
+_LOCAL_LEG_IDS = {
+    "ollama": "ollama",
+    "lm-studio": "lm_studio",
+    "any-openai-compatible": "openai_compatible",
+}
+
+
+def _attached_local_base_url(provider: str) -> Any:
+    """Attached runtime URL when it matches this local provider, else None.
+
+    The match is exact on the preset base URL (the connect flow stores
+    that verbatim as the runtime ref), so a run never reaches a
+    foreign endpoint. Never raises.
+    """
+    if provider not in _LOCAL_LEG_IDS:
+        return None
+    try:
+        from agent_si.backend import local_connect as _local_connect
+        from agent_si.providers.registry import presets as _presets
+    except Exception:
+        return None
+    try:
+        with _local_connect._STATE_LOCK:
+            attached = _local_connect._ATTACHED_RUNTIME
+    except Exception:
+        return None
+    if not attached or not isinstance(attached, str):
+        return None
+    try:
+        base_url = _presets.get_preset(provider).get("base_url", "")
+    except Exception:
+        return None
+    if attached.rstrip("/") != str(base_url or "").rstrip("/"):
+        return None
+    return attached
 
 
 def build_adapter(app: Any, resolution: dict[str, Any]) -> Any:
@@ -676,7 +735,9 @@ def build_adapter(app: Any, resolution: dict[str, Any]) -> Any:
 
     The factory seam builds per-role instances (tests); otherwise a
     real leg is built for the resolved pair the way the chat bind
-    does (never a mock outside the factory seam).
+    does (never a mock outside the factory seam). A role bound to a
+    local provider the facade never registered still reaches the
+    attached local runtime (R8: a bound local model really runs).
     """
     factory = _factory(app)
     if factory is not None:
@@ -697,9 +758,44 @@ def build_adapter(app: Any, resolution: dict[str, Any]) -> Any:
             chosen = view
             break
     if chosen is None:
+        # R8(a): a role pinned to a local model runs on the attached
+        # local runtime even though the facade never registered the
+        # provider. Anything else keeps the plain connect line.
+        attached = _attached_local_base_url(provider)
+        if attached is not None:
+            try:
+                from agent_si.backend import chat_stream as _chat
+                from agent_si.providers.adapters.base import (
+                    make_secret_ref as _make_secret_ref)
+                from agent_si.providers.adapters.legs import build_leg
+                leg_id = _LOCAL_LEG_IDS[provider]
+                # Id-only local ref: no key exists for a loopback
+                # runtime, and the keyless transport never reads one.
+                local_ref = _make_secret_ref(
+                    "local:%s" % leg_id, leg_id,
+                    type="local-key", scope="providers",
+                    source="local-runtime", created_at="",
+                    last_rotated_at=None)
+                transport = _chat._gateway_transport(
+                    attached, getattr(ctx, "credential_store", None),
+                    dict(local_ref))
+                return build_leg(leg_id, model, dict(local_ref),
+                                 transport=transport,
+                                 instance_id="local",
+                                 base_url=attached or None)
+            except RoleUnbound:
+                raise
+            except Exception as exc:
+                raise RoleUnbound(
+                    "role %r has no provider: cannot build %r/%r: %s"
+                    % (resolution["role"], provider, model, exc),
+                    role=resolution.get("role"), provider=provider,
+                    kind="no_provider") from None
         raise RoleUnbound(
             "role %r has no provider: %r is not connected"
-            % (resolution["role"], provider))
+            % (resolution["role"], provider),
+            role=resolution.get("role"), provider=provider,
+            kind="no_provider")
     try:
         secret_ref = getattr(chosen, "secret_ref", None)
         secret_mapping: dict[str, Any] = {}
@@ -734,7 +830,9 @@ def build_adapter(app: Any, resolution: dict[str, Any]) -> Any:
     except Exception as exc:
         raise RoleUnbound(
             "role %r has no provider: cannot build %r/%r: %s"
-            % (resolution["role"], provider, model, exc)) from None
+            % (resolution["role"], provider, model, exc),
+            role=resolution.get("role"), provider=provider,
+            kind="no_provider") from None
 
 
 def _over_cap(

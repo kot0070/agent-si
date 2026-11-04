@@ -77,6 +77,19 @@ function readHeaders(init?: RequestInit): Record<string, string> {
   return {};
 }
 
+type ServedRow = { id: string; name: string; kb_known: boolean };
+
+const MODEL_ROWS: Record<string, ServedRow[]> = {
+  anthropic: [
+    { id: "anthropic/claude-haiku-4-5", name: "claude-haiku-4-5", kb_known: true },
+    { id: "anthropic/claude-haiku-5-5", name: "claude-haiku-5-5", kb_known: true },
+  ],
+  openai: [
+    { id: "openai/gpt-4o-mini", name: "gpt-4o-mini", kb_known: true },
+    { id: "openai/gpt-4o", name: "gpt-4o", kb_known: true },
+  ],
+};
+
 function stubBoundary(): void {
   vi.stubGlobal("fetch", async (input: unknown, init?: RequestInit) => {
     const url = String(input);
@@ -116,6 +129,17 @@ function stubBoundary(): void {
       }
       profiles[role] = next;
       return jsonBody({ ok: true, profile: profilePayload(role, next) });
+    }
+    const modelsMatch = url.match(/^\/api\/v1\/providers\/([^/]+)\/models$/);
+    if (modelsMatch !== null && method === "GET") {
+      const id = modelsMatch[1] as string;
+      const rows = MODEL_ROWS[id] ?? [];
+      return jsonBody({
+        provider_id: id,
+        models: rows,
+        source: "provider",
+        enabled: rows.map((row) => row.id),
+      });
     }
     throw new Error(`unexpected fetch ${method} ${url}`);
   });
@@ -205,8 +229,10 @@ describe("fxroles chat hierarchy rows", () => {
   it("Manager to Anthropic sends the Settings PUT with the session token", async () => {
     renderChat();
     await expandRows();
-    const select = await screen.findByTestId("hierarchy-select-manager");
-    fireEvent.change(select, { target: { value: "anthropic" } });
+    const target = screen.getByTestId("hierarchy-select-manager");
+    fireEvent.change(target, {
+      target: { value: "anthropic/claude-haiku-4-5" },
+    });
     await waitFor(() => {
       expect(puts.length).toBeGreaterThanOrEqual(1);
     });
@@ -223,7 +249,7 @@ describe("fxroles chat hierarchy rows", () => {
     await waitFor(() => {
       expect(
         (screen.getByTestId("hierarchy-select-manager") as HTMLSelectElement).value,
-      ).toBe("anthropic");
+      ).toBe("anthropic/claude-haiku-4-5");
     });
   });
 
@@ -237,7 +263,7 @@ describe("fxroles chat hierarchy rows", () => {
     renderChat();
     await expandRows();
     fireEvent.change(await screen.findByTestId("hierarchy-select-agents"), {
-      target: { value: "openai" },
+      target: { value: "openai/gpt-4o-mini" },
     });
     await waitFor(() => {
       expect(puts.length).toBeGreaterThanOrEqual(2);

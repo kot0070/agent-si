@@ -552,6 +552,16 @@ def _enabled_allows(ctx: RoutingCtx, provider: Any,
     pid = str(provider)
     enabled = _model_lists.load_enabled(state_dir, pid)
     if enabled is None:
+        if pid in _provider_routes.LOCAL_PROVIDER_IDS:
+            names = _local_model_names(pid)
+            if names is None:
+                return None
+            wanted = {_model_lists.canonical_model_id(pid, i)
+                      for i in names}
+            if _model_lists.canonical_model_id(pid, model) in wanted:
+                return None
+            return ("model %r is not served by the attached local "
+                    "runtime (connect it first)" % (model,))
         return None
     wanted = {_model_lists.canonical_model_id(pid, i) for i in enabled}
     if _model_lists.canonical_model_id(pid, model) in wanted:
@@ -592,6 +602,20 @@ def _chat_model_allowed(ctx: RoutingCtx, model_id: str) -> Optional[str]:
     for pid in candidates:
         enabled = _model_lists.load_enabled(state_dir, pid)
         if enabled is None:
+            # R2: no stored ticks for a local provider id means the
+            # attached runtime is the truth: a served real name is
+            # allowed, anything else keeps looking (the final refusal
+            # names the reason).
+            if pid in _provider_routes.LOCAL_PROVIDER_IDS:
+                names = _local_model_names(pid)
+                if names is None:
+                    continue
+                saw_state = True
+                wanted = {_model_lists.canonical_model_id(pid, i)
+                          for i in names}
+                if _model_lists.canonical_model_id(pid, model_id) \
+                        in wanted:
+                    return None
             continue
         saw_state = True
         wanted = {_model_lists.canonical_model_id(pid, i)
@@ -1594,6 +1618,45 @@ def _served_kb_rows() -> list:
     return out
 
 
+def _local_model_names(provider_id):
+    """Real model names off the attached local runtime for one local id.
+
+    None when nothing is attached for this id (or the local lane is
+    unavailable): the model routes keep the legacy 404 and the allow
+    checks keep the legacy allow. A list (possibly empty) means the
+    runtime answered: routes serve it and the allow checks enforce it.
+    """
+    if provider_id not in _provider_routes.LOCAL_PROVIDER_IDS:
+        return None
+    try:
+        from agent_si.backend import local_connect as _lc
+        from agent_si.providers.registry import presets as _presets
+    except Exception:
+        return None
+    try:
+        with _lc._STATE_LOCK:
+            attached = _lc._ATTACHED_RUNTIME
+    except Exception:
+        return None
+    if not attached or not isinstance(attached, str):
+        return None
+    try:
+        base_url = _presets.get_preset(provider_id).get("base_url", "")
+    except Exception:
+        return None
+    if attached.rstrip("/") != str(base_url or "").rstrip("/"):
+        return None
+    try:
+        transport = _presets.get_preset(provider_id).get("transport")
+    except Exception:
+        transport = None
+    try:
+        return _model_lists.fetch_local_models(
+            attached, provider_id=provider_id, transport=transport)
+    except Exception:
+        return []
+
+
 def _provider_served(name, fn, *, write):
     """Serve a provider-lane handler on the pools-routes host ctx.
 
@@ -1613,6 +1676,8 @@ def _provider_served(name, fn, *, write):
             facade=facade, models=_provider_models(ctx),
             credential_store=getattr(ctx, "credential_store", None),
             model_state_dir=getattr(ctx, "model_state_dir", None),
+            http_get=getattr(ctx, "http_get", None),
+            local_models=_local_model_names,
             kb_rows=_served_kb_rows())
         return fn(pctx, query or {}, body)
     wrapper.__name__ = "served_" + name
