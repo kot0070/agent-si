@@ -8,7 +8,9 @@ K3: roles._auto_pick with no KB row for a connected provider falls back
     any other block stays a RoleUnbound run-failed line.
 K4: fresh seed + only meta connected -> all 4 roles resolve to
     meta/muse-spark-1.3-contributor; fake-provider run reaches Director;
-    unknown price -> cost UNKNOWN, no crash, no cap false stop.
+    priced preset -> numeric cost on a fake-usage charge, no crash, no cap
+    false stop (FXFACTS F1: the shipped seed price). Unpriced models stay
+    UNKNOWN and never crash nor cap-stop.
 """
 import copy
 import os
@@ -38,11 +40,23 @@ def test_seed_holds_meta_and_anthropic_rows():
 
 
 def test_seed_rows_are_honest_unknown():
+    # FXFACTS F1 (owner-ordered): the meta contributor row carries the
+    # shipped sourced price (currency + in/out per 1M) so the first run
+    # charges; every other seed field stays honestly UNKNOWN.
     wanted = {("meta", "muse-spark-1.3-contributor"),
               ("anthropic", "claude-haiku-4-5")}
+    priced = {"currency": "USD", "input_token_price": 0.1,
+              "output_token_price": 0.2}
     for row in kb.SEED_CATALOG["models"]:
-        if (row.get("provider_id"), row.get("model_id")) in wanted:
-            for name, field in row["fields"].items():
+        if (row.get("provider_id"), row.get("model_id")) not in wanted:
+            continue
+        for name, field in row["fields"].items():
+            if (row.get("model_id") == "muse-spark-1.3-contributor"
+                    and name in priced):
+                assert field["value"] == priced[name], (row, name)
+                assert field["source"] == \
+                    "https://dev.meta.ai/docs/pricing-rate-limits", (row, name)
+            else:
                 assert field == {"value": "UNKNOWN", "source": "UNKNOWN",
                                  "retrieved_at": "UNKNOWN"}, (row, name)
     assert kb.validate_catalog(kb.SEED_CATALOG) == []
@@ -167,6 +181,9 @@ def test_other_blocks_stay_run_failed():
 
 
 def test_unknown_price_never_crashes_nor_cap_stops():
+    # FXFACTS F1 (owner-ordered): the priced preset charges numerically;
+    # a model with no priced row stays UNKNOWN and never crashes nor
+    # cap-stops.
     from agent_si.model_kb import kb as _kb
     from agent_si.backend import routing_auto as _auto
     from agent_si.runtime.devrun import roles as _roles
@@ -179,14 +196,16 @@ def test_unknown_price_never_crashes_nor_cap_stops():
         assert ranked, "seed candidates rank without crashing"
         inp, outp = _manager._kb_price_for_manager(
             "meta", "muse-spark-1.3-contributor")
-        assert (inp, outp) == (None, None)
-        facade = _Facade({"meta": {"default": "muse-spark-1.3-contributor"}})
+        assert (inp, outp) == (0.1, 0.2), (inp, outp)
+        assert _manager._kb_price_for_manager(
+            "ghost", "ghost-model") == (None, None)
+        facade = _Facade({"fakep": {"default": "fakep-model"}})
         app = _app(facade)
         assert _roles._over_cap(
-            app, "p-fresh", "meta", "muse-spark-1.3-contributor",
+            app, "p-fresh", "fakep", "fakep-model",
             {"input_tokens": 1000000,
              "output_tokens": 1000000}) is False
         assert _roles._cap_block(
-            app, "p-fresh", "meta") is None
+            app, "p-fresh", "fakep") is None
     finally:
         _kb._BOUND_CATALOG = previous

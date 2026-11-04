@@ -152,10 +152,13 @@ function postedTo(url: string): Array<{ url: string; method: string; body: strin
 }
 
 describe("fxgaps F06 watcher control", () => {
-  it("opens the watcher tab from the TopBar label and fetches status", async () => {
+  it("opens the watcher tab from the rail Watcher card and fetches status", async () => {
     renderAppAt("/");
     expect(await screen.findByTestId("chat-prompt")).toBeTruthy();
-    fireEvent.click(screen.getByTestId("topbar-watcher"));
+    // FXFACTS F15: the top bar carries no watcher link; the rail Watcher
+    // card holds the Open link.
+    fireEvent.click(await screen.findByTestId("rail-toggle-watcher"));
+    fireEvent.click(await screen.findByTestId("watcher-open"));
     expect(await screen.findByTestId("watcher-tab")).toBeTruthy();
     expect(screen.getByTestId("watcher-project").textContent).toBe("p-1");
     expect(
@@ -165,7 +168,7 @@ describe("fxgaps F06 watcher control", () => {
     ).toBe(true);
   });
 
-  it("opens the watcher tab from the TopBar link while the sidebar keeps four entries", async () => {
+  it("opens the watcher tab from the rail card while the sidebar keeps four entries", async () => {
     renderAppAt("/");
     expect(await screen.findByTestId("chat-prompt")).toBeTruthy();
     const sidebar = screen.getByTestId("sidebar");
@@ -176,7 +179,10 @@ describe("fxgaps F06 watcher control", () => {
       ["menu-new-task", "menu-projects", "menu-results", "menu-settings"].sort(),
     );
     expect(screen.queryByTestId("menu-watcher")).toBeNull();
-    fireEvent.click(screen.getByTestId("topbar-watcher"));
+    // FXFACTS F15: the top bar carries no watcher link; the rail Watcher
+    // card holds the Open link.
+    fireEvent.click(await screen.findByTestId("rail-toggle-watcher"));
+    fireEvent.click(await screen.findByTestId("watcher-open"));
     expect(await screen.findByTestId("watcher-tab")).toBeTruthy();
   });
 });

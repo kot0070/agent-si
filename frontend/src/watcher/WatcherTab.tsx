@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
+import type { ReactElement } from "react";
 import { formatScreenTime, pluralUnit, t } from "../locale/index";
 import { ApiError, apiErrorLocaleKey, parseErrorBody } from "../api/errors";
 import { ErrorPanel } from "../ui/ErrorPanel";
 import { WatcherSections } from "./WatcherSections";
+import { humanRunRef } from "../projects/viewsApi";
 import {
   RULE_CARDS,
   RULE_CARD_MODELS,
@@ -10,8 +12,12 @@ import {
   setCardModel,
 } from "./ruleCards";
 import {
+  MAX_HANG_MINUTES,
+  MIN_HANG_MINUTES,
   WATCHER_MODELS,
+  loadCardHangMinutes,
   loadWatcherSettings,
+  saveCardHangMinutes,
   saveWatcherSettings,
   type WatcherSettings,
 } from "./watcherSettings";
@@ -43,6 +49,10 @@ export interface WatcherJournalEntry {
   entry_id: string;
   timestamp: string;
   hash: string;
+  kind: string;
+  source: string;
+  summary: string;
+  refs: Array<string>;
 }
 
 /** Fetch the stored watcher status verbatim; never computes values. */
@@ -157,10 +167,17 @@ export async function fetchWatcherJournal(
   const rows: unknown[] = Array.isArray(body) ? body : [];
   return rows.map((row) => {
     const record = row as Record<string, unknown>;
+    const refs = Array.isArray(record["refs"])
+      ? (record["refs"] as Array<unknown>).map((ref) => String(ref))
+      : [];
     return {
       entry_id: String(record["entry_id"] ?? ""),
       timestamp: String(record["timestamp"] ?? ""),
       hash: String(record["hash"] ?? ""),
+      kind: String(record["kind"] ?? ""),
+      source: String(record["source"] ?? ""),
+      summary: String(record["summary"] ?? ""),
+      refs,
     };
   });
 }
@@ -172,6 +189,15 @@ function readCardModels(projectId: string): Record<string, string> {
     models[card.cardId] = cardModel(card.cardId, projectId);
   }
   return models;
+}
+
+/** Read every rule card's stored hang window for one render. */
+function readCardHangs(projectId: string): Record<string, number> {
+  const hangs: Record<string, number> = {};
+  for (const card of RULE_CARDS) {
+    hangs[card.cardId] = loadCardHangMinutes(card.cardId, projectId);
+  }
+  return hangs;
 }
 
 /** Hang guard: the frozen GET routes answer fast; a slower backend (the
@@ -192,6 +218,160 @@ export function watcherModelName(model: WatcherSettings["model"]): string {
   return t("watcher.tab.modelOff");
 }
 
+/** Plain kind label for one stored journal kind; never the raw code. */
+export function journalKindLabel(kind: string): string {
+  try {
+    const label = t(`watcher.tab.kind.${kind}`);
+    if (typeof label === "string" && label.length > 0) {
+      return label;
+    }
+  } catch {
+    // Missing key reads not-known, never a throw on screen.
+  }
+  return notKnown();
+}
+
+const RUNISH = /(^|\s)(fxdevrun:[^\s]*|artifact:[^\s]*|plan-[0-9a-zA-Z-]+|localtests-[0-9a-zA-Z-]+|r-[0-9a-zA-Z-]+|[0-9a-f]{20,})(?=\s|$)/g;
+
+/** Plain one-line summary: raw JSON reads as a plain sentence, raw run
+ * ids and long hashes read shortened, never a bare code on screen. */
+export function plainJournalSummary(summary: string, kind: string): string {
+  const text = summary.trim();
+  if (text === "") {
+    return notKnown();
+  }
+  if (text.startsWith("{") || text.startsWith("[")) {
+    try {
+      JSON.parse(text);
+      return `${journalKindLabel(kind)}: ${t("watcher.tab.structuredNote")}`;
+    } catch {
+      // Not JSON after all: fall through to the token pass.
+    }
+  }
+  return text.replace(RUNISH, (match, head: string, ref: string) => {
+    const short = humanRunRef(ref);
+    if (short.text !== ref) {
+      return `${head}${short.text}`;
+    }
+    if (ref.length > 16) {
+      return `${head}${ref.slice(0, 8)}…`;
+    }
+    return match;
+  });
+}
+
+/** One journal row in the F6a form: local time, plain kind plus the
+ * short summary; the full text with the receipt rides alongside. */
+export interface JournalLine {
+  time: string;
+  kind: string;
+  short: string;
+  full: string;
+  entryId: string;
+  hash: string;
+}
+
+export function describeJournalEntry(entry: WatcherJournalEntry): JournalLine {
+  return {
+    time: formatScreenTime(entry.timestamp),
+    kind: journalKindLabel(entry.kind),
+    short: plainJournalSummary(entry.summary, entry.kind),
+    full: entry.summary,
+    entryId: entry.entry_id,
+    hash: entry.hash,
+  };
+}
+
+/** Stored project name for the journal header (id fallback, never a guess). */
+export async function fetchProjectName(projectId: string): Promise<string> {
+  try {
+    const response = await fetch("/api/v1/projects");
+    if (!response.ok) {
+      return projectId;
+    }
+    const body = (await response.json()) as unknown;
+    const rows =
+      typeof body === "object" && body !== null
+        ? ((body as Record<string, unknown>)["projects"] as unknown)
+        : null;
+    if (!Array.isArray(rows)) {
+      return projectId;
+    }
+    for (const row of rows) {
+      if (
+        typeof row === "object" &&
+        row !== null &&
+        (row as Record<string, unknown>)["project_id"] === projectId
+      ) {
+        const name = (row as Record<string, unknown>)["name"];
+        if (typeof name === "string" && name !== "") {
+          return name;
+        }
+      }
+    }
+  } catch {
+    // Unreachable list reads as the id, never a failed header.
+  }
+  return projectId;
+}
+
+/** Journal rows newest first with a folding long text and receipt details.
+ * Shared by the Watcher tab and the rail Watcher card (F6a form). */
+export function WatcherJournalList(props: {
+  entries: Array<WatcherJournalEntry>;
+  initialLimit?: number;
+  showMore?: boolean;
+}): ReactElement {
+  const [expanded, setExpanded] = useState(false);
+  const limit = props.initialLimit ?? 5;
+  const ordered = [...props.entries].reverse();
+  const shown = expanded ? ordered : ordered.slice(0, limit);
+  if (ordered.length === 0) {
+    return <p data-testid="watcher-journal-empty">{t("watcher.tab.journalEmpty")}</p>;
+  }
+  return (
+    <>
+      <ul data-testid="watcher-journal">
+        {shown.map((entry) => {
+          const line = describeJournalEntry(entry);
+          const folds = line.full !== line.short;
+          return (
+            <li
+              key={entry.entry_id}
+              data-testid={`journal-row-${entry.entry_id}`}
+            >
+              <span>{line.time}</span> <span>{line.kind}</span>{" "}
+              <span>{line.short}</span>
+              <details>
+                <summary>{t("ui.disclosure.more")}</summary>
+                {folds ? <p>{line.full}</p> : null}
+                <p>
+                  {entry.entry_id} · {entry.hash}
+                </p>
+              </details>
+            </li>
+          );
+        })}
+      </ul>
+      {props.showMore === false || ordered.length <= limit ? null : (
+        <button
+          type="button"
+          data-testid="journal-show-more"
+          className="fx-btn-quiet fx-show-more"
+          aria-expanded={expanded}
+          onClick={() => {
+            setExpanded(!expanded);
+          }}
+        >
+          <span>
+            {expanded ? t("shell.cards.showLess") : t("shell.cards.showMore")}
+          </span>
+        </button>
+      )}
+    </>
+  );
+}
+
 /** Watcher tab: live status plus journal head, settings, and rule cards. */
 export function WatcherTab({ projectId }: { projectId: string }) {
   const [status, setStatus] = useState<WatcherStatusData | null>(null);
@@ -207,10 +387,28 @@ export function WatcherTab({ projectId }: { projectId: string }) {
   const [models, setModels] = useState<Record<string, string>>(() =>
     readCardModels(projectId),
   );
+  const [hangs, setHangs] = useState<Record<string, number>>(() =>
+    readCardHangs(projectId),
+  );
+  const [projectName, setProjectName] = useState<string | null>(null);
 
   useEffect(() => {
     setSettings(loadWatcherSettings(projectId));
     setModels(readCardModels(projectId));
+    setHangs(readCardHangs(projectId));
+    setProjectName(null);
+  }, [projectId]);
+
+  useEffect(() => {
+    let live = true;
+    void fetchProjectName(projectId).then((name) => {
+      if (live) {
+        setProjectName(name);
+      }
+    });
+    return () => {
+      live = false;
+    };
   }, [projectId]);
 
   useEffect(() => {
@@ -279,7 +477,14 @@ export function WatcherTab({ projectId }: { projectId: string }) {
 
   return (
     <section data-testid="watcher-tab">
-      <h2 data-testid="watcher-project">{status.project_id}</h2>
+      <h2 data-testid="watcher-project">{projectName ?? projectId}</h2>
+      <p data-testid="watcher-last-event">
+        {t("watcher.tab.lastEvent")}:{" "}
+        {journal.length === 0
+          ? notKnown()
+          : formatScreenTime(journal[journal.length - 1]?.timestamp ?? "")}
+      </p>
+      <p data-testid="watcher-journal-scope">{t("watcher.tab.sinceStart")}</p>
       <p data-testid="watcher-integrity">
         {status.integrity_ok ? t("watcher.tab.ok") : t("watcher.tab.failed")}
       </p>
@@ -413,21 +618,30 @@ export function WatcherTab({ projectId }: { projectId: string }) {
                 ))}
               </select>
             </label>
-            <p data-testid={`rule-card-${card.cardId}-hang`}>
-              {card.hangMinutes} min
-            </p>
+            <label>
+              {t("watcher.tab.minutes")}
+              <input
+                type="number"
+                data-testid={`rule-card-${card.cardId}-hang`}
+                min={MIN_HANG_MINUTES}
+                max={MAX_HANG_MINUTES}
+                value={hangs[card.cardId] ?? card.hangMinutes}
+                onChange={(event) => {
+                  const next = saveCardHangMinutes(
+                    card.cardId,
+                    event.target.value,
+                    projectId,
+                  );
+                  setHangs((prev) => ({ ...prev, [card.cardId]: next }));
+                }}
+              />
+            </label>
           </section>
           );
         })}
       </div>
       <h3 data-testid="watcher-journal-title">{t("watcher.tab.journalTitle")}</h3>
-      <ul data-testid="watcher-journal">
-        {journal.map((entry) => (
-          <li key={entry.entry_id}>
-            {entry.entry_id} {entry.timestamp}
-          </li>
-        ))}
-      </ul>
+      <WatcherJournalList entries={journal} />
       {/* FXWATCHUI: page sections (cards, presets, alerts, apps); they
           fetch only on explicit buttons, never on mount. */}
       <WatcherSections projectId={status.project_id} />

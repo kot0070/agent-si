@@ -137,12 +137,68 @@ span[data-testid="kit-collapsed-line"] {
   height: 8px;
   border-right: 2px solid currentColor;
   border-bottom: 2px solid currentColor;
-  transform: rotate(45deg);
+  /* FXFACTS F10: closed points right, open points down, everywhere. */
+  transform: rotate(-45deg);
   vertical-align: middle;
 }
 
 .fx-kit-toggle[aria-expanded="true"]::after {
-  transform: rotate(-135deg);
+  transform: rotate(45deg);
+}
+
+/* FXFACTS F10/F10b: rail one-line headers. Icon column, title, right
+   value, toggle chevron in a fixed right column; nothing moves on open,
+   close or width change. Lengths only, no colours. */
+.fx-kit-toggle.fx-rail-head {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) 16px;
+  align-items: center;
+  column-gap: 8px;
+  width: 100%;
+  height: auto;
+  min-height: 32px;
+  max-height: 40px;
+  padding: 4px 4px 4px 4px;
+  overflow: hidden;
+}
+
+.fx-rail-head.fx-rail-static {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) 16px;
+  align-items: center;
+  column-gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  max-height: 40px;
+  padding: 4px 4px 4px 4px;
+  overflow: hidden;
+  cursor: default;
+}
+
+.fx-kit-toggle.fx-rail-head::after {
+  justify-self: end;
+}
+
+.fx-rail-titlevalue {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 8px;
+  min-width: 0;
+}
+
+.fx-rail-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  font-weight: 600;
+  min-width: 0;
+}
+
+.fx-rail-value {
+  text-align: right;
+  white-space: nowrap;
 }
 
 /* The panels button only matters on narrow viewports. */
@@ -175,25 +231,39 @@ div[data-testid^="inspector-card-"] > p[data-testid$="-sub"] {
   font-size: 12px;
 }
 
-/* Narrower desktops: keep three columns with slimmer side tracks and no
-   page horizontal scroll. Lengths only, no colours. */
-@media (max-width: 1100px) {
-  div[data-testid="app-shell"]:has(> nav[data-testid="sidebar"]) {
-    grid-template-columns: 200px minmax(0, 1fr) 260px;
-    column-gap: 12px;
-  }
-
-  nav[data-testid="sidebar"] {
-    padding-right: 12px;
-  }
+/* The inspector toggle only matters where the rail is a drawer. */
+.fx-inspector-btn {
+  display: none;
 }
 
-/* FXDESIGN5 S1: at 1000px the three columns persist with slimmer side
-    tracks and no page horizontal scroll; each column keeps its own
-    overflow (row 861). Lengths only, no colours. */
-@media (max-width: 1000px) {
+/* The drawer close control sits at the panel top, drawer only. */
+.fx-inspector-close {
+  display: none;
+}
+
+/* FXFACTS F10: card bodies are definition lists; no browser figure
+   margins inside the rail. Lengths only, no colours. */
+aside[data-testid="inspector"] dl {
+  margin: 0;
+  padding: 0;
+}
+
+aside[data-testid="inspector"] dl dd {
+  margin: 0;
+  padding: 0;
+}
+
+/* FXFACTS F8: below 1200px the rail is an overlay drawer, never a
+   squeezed column. The main column takes the full width; a labelled
+   toggle stays visible; the aside carries data-open plus a hidden class;
+   Esc and the close control shut it. This replaces the 800px
+   fx-panels-open path for the rail. Lengths only, no colours. */
+@media (max-width: 1199px) {
   div[data-testid="app-shell"]:has(> nav[data-testid="sidebar"]) {
-    grid-template-columns: 200px minmax(0, 1fr) 240px;
+    grid-template-columns: 200px minmax(0, 1fr);
+    grid-template-areas:
+      "topbar topbar"
+      "sidebar main";
     column-gap: 12px;
     overflow-x: clip;
   }
@@ -201,35 +271,43 @@ div[data-testid^="inspector-card-"] > p[data-testid$="-sub"] {
   nav[data-testid="sidebar"] {
     padding-right: 12px;
   }
-}
 
-/* Small screens: the main column goes full width; nav and cards collapse
-   behind the top-bar panels button and open as stacked sections. */
-@media (max-width: 800px) {
-  div[data-testid="app-shell"]:has(> nav[data-testid="sidebar"]) {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-areas:
-      "topbar"
-      "sidebar"
-      "main"
-      "inspector";
-  }
-
-  .fx-panels-btn {
+  .fx-inspector-btn {
     display: inline-block;
   }
 
-  nav[data-testid="sidebar"],
-  aside[data-testid="inspector"] {
-    display: none;
-    max-height: none;
-    border-right: none;
-    padding-right: 0;
+  .fx-inspector-close {
+    display: inline-block;
   }
 
-  div[data-testid="app-shell"].fx-panels-open > nav[data-testid="sidebar"],
-  div[data-testid="app-shell"].fx-panels-open > aside[data-testid="inspector"] {
-    display: block;
+  aside[data-testid="inspector"] {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(360px, 92vw);
+    z-index: 60;
+    background-color: var(--agent-si-surface);
+    border-left: 1px solid var(--fx-card-border);
+    padding: 12px;
+    overflow-y: auto;
+    visibility: hidden;
+    transform: translateX(105%);
+    transition:
+      transform 0.15s ease-out,
+      visibility 0.15s ease-out;
+  }
+
+  aside[data-testid="inspector"][data-open="true"] {
+    visibility: visible;
+    transform: none;
+  }
+
+  /* The hidden class carries the same closed state as the data-open
+     attribute; both ride the same boolean. */
+  aside[data-testid="inspector"].fx-drawer-hidden {
+    visibility: hidden;
+    transform: translateX(105%);
   }
 
   main[data-testid="app-main"] input {
@@ -238,6 +316,46 @@ div[data-testid^="inspector-card-"] > p[data-testid$="-sub"] {
     box-sizing: border-box;
   }
 }
+
+@media (prefers-reduced-motion: reduce) {
+  aside[data-testid="inspector"] {
+    transition: none;
+  }
+}
+
+/* Small screens: the sidebar collapses behind the top-bar panels
+   button and opens as a stacked section. The rail stays a drawer. */
+@media (max-width: 800px) {
+  div[data-testid="app-shell"]:has(> nav[data-testid="sidebar"]) {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "topbar"
+      "sidebar"
+      "main";
+  }
+
+  .fx-panels-btn {
+    display: inline-block;
+  }
+
+  nav[data-testid="sidebar"] {
+    display: none;
+    max-height: none;
+    border-right: none;
+    padding-right: 0;
+  }
+
+  div[data-testid="app-shell"].fx-panels-open > nav[data-testid="sidebar"] {
+    display: block;
+  }
+}
+/* FXFACTS F12/F15: the quiet stop status fades on its own. */
+.fx-fade-note {
+  opacity: 0.8;
+  font-size: 12px;
+  transition: opacity 0.6s ease-out;
+}
+
 /* FXDESIGN1 S2: top-bar rhythm — brand, watcher pairing label and badge. */
 .fx-topbar > [data-testid="topbar-brand"] {
   margin-right: 4px;
@@ -978,6 +1096,16 @@ ul[data-testid="ctx-legend"].fx-legend {
   opacity: 0.75;
 }
 
+/* FXDESIGN9 D8: test counts read pass green, fail red (theme tokens,
+   calm in both themes); the label stays low-contrast, the value readable.
+   Lengths only, no colour names beyond the token pair. */
+.fx-pass {
+  color: var(--agent-si-chart-b);
+}
+.fx-fail {
+  color: var(--fx-danger);
+}
+
 /* Results / background: compact icon + name rows, quiet show-more. */
 .fx-result-list,
 .fx-bg-list {
@@ -1279,22 +1407,94 @@ div[data-testid="app-shell"]:has(> nav[data-testid="sidebar"]) {
   grid-template-columns: 240px minmax(280px, 1fr) 320px;
 }
 
-@media (max-width: 1100px) {
-  div[data-testid="app-shell"]:has(> nav[data-testid="sidebar"]) {
-    grid-template-columns: 200px minmax(280px, 1fr) 260px;
-  }
+/* FXFACTS F14 rail density (owner board compactness, tokens only, no new
+   colours): small type, tight rows, numbers right-aligned in tabular
+   figures, a thin line between groups. Lengths only, no colours. */
+aside[data-testid="inspector"] {
+  font-size: 13px;
+  line-height: 1.3;
 }
 
-/* FXDESIGN7 item 19: at or below 1024px the right rail collapses to
-   one-line rows (ref 7 pattern); content re-opens at wider widths. */
-@media (max-width: 1024px) {
-  div[data-testid="app-shell"]:has(> nav[data-testid="sidebar"]) {
-    grid-template-columns: 200px minmax(0, 1fr) 240px;
-  }
+aside[data-testid="inspector"] section {
+  padding: 8px 4px;
+}
 
-  aside[data-testid="inspector"] section[data-testid^="inspector-card-"] > *:not(:first-child) {
-    display: none;
-  }
+aside[data-testid="inspector"] .fx-rail-head {
+  min-height: 24px;
+  max-height: 40px;
+}
+
+aside[data-testid="inspector"] .fx-rail-titlevalue {
+  font-size: 13px;
+}
+
+aside[data-testid="inspector"] .fx-quiet,
+aside[data-testid="inspector"] .fx-quiet-line,
+aside[data-testid="inspector"] .fx-notset {
+  font-size: 11px;
+}
+
+aside[data-testid="inspector"] p {
+  margin: 2px 0;
+}
+
+aside[data-testid="inspector"] dl {
+  margin: 2px 0;
+}
+
+aside[data-testid="inspector"] dl > div {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 22px;
+}
+
+aside[data-testid="inspector"] dl dt {
+  flex: none;
+  opacity: 0.75;
+  font-size: 11px;
+}
+
+aside[data-testid="inspector"] dl dd {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+aside[data-testid="inspector"] .fx-rail-value,
+aside[data-testid="inspector"] .fx-legend-tokens,
+aside[data-testid="inspector"] .fx-legend-pct {
+  font-variant-numeric: tabular-nums;
+}
+
+aside[data-testid="inspector"] ul {
+  margin: 2px 0;
+}
+
+aside[data-testid="inspector"] .fx-team-field,
+aside[data-testid="inspector"] .fx-result-row,
+aside[data-testid="inspector"] .fx-bg-row,
+aside[data-testid="inspector"] .fx-legend-row {
+  font-size: 12px;
+}
+
+/* FXFACTS F14: a Team row is one line (role, short model, status, middle
+   dots in CSS so no separator is a text node); details open below. */
+.fx-team-line {
+  flex-wrap: nowrap;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.fx-team-line > span + span::before {
+  content: "\00B7";
+  margin: 0 6px;
+  opacity: 0.65;
+}
+
+.fx-team-line .fx-truncate {
+  max-width: 16ch;
 }
 
 /* CRAWL-3 + J10: provider model rows wrap safely at narrow widths.
@@ -1479,9 +1679,11 @@ details[data-testid^="team-detail-"] > summary::-webkit-details-marker {
 
 .fx-team-line {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: baseline;
   gap: 4px 12px;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 .fx-team-detail {

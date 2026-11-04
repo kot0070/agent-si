@@ -93,9 +93,8 @@ function stopPosts(): Array<{ url: string; method: string; body: string }> {
 }
 
 async function armAndConfirmStopAll(): Promise<void> {
+  // FXFACTS F12: one click stops at once, no confirmation dialog.
   fireEvent.click(await screen.findByTestId("topbar-stop-all"));
-  await screen.findByText(t("shell.closing.confirm"));
-  fireEvent.click(screen.getByTestId("topbar-stop-all"));
   expect(await screen.findByTestId("stop-all-result")).toBeTruthy();
 }
 

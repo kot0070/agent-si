@@ -87,9 +87,10 @@ describe("top bar", () => {
       </ApiClientProvider>,
     );
     expect(await screen.findByTestId("topbar-project")).toBeTruthy();
-    expect(screen.getByTestId("topbar-watcher").textContent).toBe(
-      t("shell.topbar.watcher"),
-    );
+    // FXFACTS F15: the top bar carries no watcher word; the placement
+    // badge stays.
+    expect(screen.queryByTestId("topbar-watcher")).toBeNull();
+    expect(screen.getByTestId("pairing-badge")).toBeTruthy();
     expect(screen.getByTestId("topbar-stop-all").textContent).toBe(
       t("shell.topbar.stop_all"),
     );
@@ -200,6 +201,9 @@ describe("inspector", () => {
       expect(await screen.findByTestId(card)).toBeTruthy();
     }
     expect(await screen.findByTestId("live-probe")).toBeTruthy();
+    // FXFACTS F10: Tokens, Tests, Providers, Local AI and Apps live in
+    // the More disclosure; Budget stays a direct card.
+    fireEvent.click(await screen.findByTestId("rail-more-toggle"));
     for (const card of [
       "fx-tokens",
       "fx-tests",

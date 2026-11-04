@@ -285,7 +285,24 @@
       "verdict": "Verdict",
       "verdictPass": "passed",
       "verdictPending": "pending",
-      "wall": "Wall time (s)"
+      "wall": "Wall time (s)",
+      "tokensLabel": "Tokens",
+      "costLabel": "Cost",
+      "teamTitle": "Team",
+      "manager": {
+        "one": "Manager",
+        "few": "Managers",
+        "many": "Managers",
+        "other": "Managers"
+      },
+      "parts": {
+        "one": "part",
+        "few": "parts",
+        "many": "parts",
+        "other": "parts"
+      },
+      "allPassed": "All {count} {unit} passed",
+      "keyMissing": "The key for '{provider}' is not available. Connect it again."
     },
     "tabs": {
       "scrollNext": "Show later tabs",
@@ -295,7 +312,25 @@
     "time": {
       "package": "Package",
       "run": "Run",
-      "seconds": "Seconds"
+      "seconds": "Seconds",
+      "second": {
+        "one": "s",
+        "few": "s",
+        "many": "s",
+        "other": "s"
+      },
+      "minute": {
+        "one": "min",
+        "few": "min",
+        "many": "min",
+        "other": "min"
+      },
+      "hour": {
+        "one": "h",
+        "few": "h",
+        "many": "h",
+        "other": "h"
+      }
     },
     "tokens": {
       "calls": "Calls",
@@ -303,7 +338,8 @@
       "explainer": "Tokens used per role and model, from served records only. No money here.",
       "model": "Model",
       "role": "Role",
-      "used": "Tokens used"
+      "used": "Tokens used",
+      "otherCalls": "Other calls"
     }
   },
   "projects": {
@@ -403,7 +439,8 @@
         "title": "Local tests"
       },
       "showOutput": "Show output",
-      "title": "Tests"
+      "title": "Tests",
+      "autoLine": "Nothing to paste: tests run by themselves after the agents' work. Code tests run by script, no AI; AI tests by a model; human tests ask you. Your own base can be added in Settings."
     },
     "time": {
       "title": "Time"
@@ -810,6 +847,9 @@
     },
     "group": {
       "watcherAutomations": "Watcher and automations"
+    },
+    "nav": {
+      "label": "Settings sections"
     }
   },
   "shell": {
@@ -889,7 +929,12 @@
         "emptyLine": "No test runs yet",
         "subtitle": "Project test results.",
         "title": "Tests",
-        "total": "Recorded test results"
+        "total": "Recorded test results",
+        "planOne": "1 plan",
+        "rowCode": "Code",
+        "rowAi": "AI",
+        "rowHuman": "Human",
+        "notRun": "Not run yet"
       },
       "tokens": {
         "subtitle": "Token usage by kind.",
@@ -910,7 +955,7 @@
         "lastCheck": "Last check",
         "notKnown": "not known",
         "ok": "Watching",
-        "open": "Open watcher",
+        "open": "Open journal",
         "runs": {
           "few": "runs",
           "many": "runs",
@@ -920,7 +965,12 @@
         "state": "State",
         "subtitle": "Watcher state and last action.",
         "title": "Watcher",
-        "watches": "Watches"
+        "watches": "Watches",
+        "online": "Online",
+        "offline": "Offline"
+      },
+      "more": {
+        "title": "More"
       }
     },
     "closing": {
@@ -957,7 +1007,16 @@
       "stop_all_idle": "No runs active",
       "stop_clear": "Clear",
       "stop_result": "{status}",
-      "watcher": "Watcher"
+      "watcher": "Watcher",
+      "inspector": "Panel",
+      "inspectorClose": "Close panel",
+      "stoppedLine": "Stopped {count} {unit}",
+      "stoppedAgents": {
+        "one": "agent",
+        "few": "agents",
+        "many": "agents",
+        "other": "agents"
+      }
     }
   },
   "tasks": {
@@ -1047,7 +1106,33 @@
       "rulesTitle": "Rules",
       "settings": "Watcher settings",
       "subtitle": "Independent watch over agents: state, journal and rules.",
-      "watches": "Watches now"
+      "watches": "Watches now",
+      "lastEvent": "Last event",
+      "sinceStart": "Journal since this start",
+      "minutes": "Minutes",
+      "journalEmpty": "No journal rows yet",
+      "structuredNote": "structured detail",
+      "kind": {
+        "WATCH_DECISION": "Decision",
+        "TAMPER_ATTEMPT": "Tamper attempt",
+        "GUARD_BLOCK": "Guard block",
+        "STOP_ALL": "Stop all",
+        "SERVICE_STATE": "Heartbeat",
+        "AUTOMATION_RUN": "Automation run",
+        "CONTEXT_CHECKPOINT": "Checkpoint",
+        "CONTEXT_RECOVERY": "Recovery",
+        "OUTAGE_SIGNAL": "Outage",
+        "DEVRUN_PLAN": "Run plan",
+        "DEVRUN_PART": "Run part",
+        "DEVRUN_AUDIT": "Run audit",
+        "DEVRUN_END": "Run end"
+      },
+      "minutesValue": "{count} min",
+      "area": {
+        "hang": "Hang",
+        "guard": "Guard",
+        "tamper": "Tamper"
+      }
     },
     "page": {
       "rulesTitle": "Rule cards",

@@ -41,13 +41,17 @@ import {
   humanDuration,
   humanRunRef,
   isFinishedStatus,
+  latestRunRows,
   partVerdictText,
   readRuns,
   readTelemetrySummary,
   runStatusText,
+  runStatusWord,
   runWallS,
   sumRunsWall,
   sumTokenRows,
+  translateRoleName,
+  RUN_WORD_DONE,
 } from "./viewsApi";
 import type { DevrunRun, TelemetrySummary } from "./viewsApi";
 import { RunId } from "./RunId";
@@ -138,7 +142,9 @@ function AgentPlacementRow(props: {
       <span className="fxpv-place-cell">
         <span className="fxpv-place-label">{t("projectView.live.role")}</span>
         {": "}
-        {props.role ?? t("shell.common.unknown")}
+        {translateRoleName(props.role) ??
+          props.role ??
+          t("shell.common.unknown")}
       </span>
       <span className="fxpv-place-cell">
         <span className="fxpv-place-label">{t("projectView.live.model")}</span>
@@ -155,7 +161,9 @@ function AgentPlacementRow(props: {
       <span className="fxpv-place-cell">
         <span className="fxpv-place-label">{t("projectView.live.cost")}</span>
         {": "}
-        {props.costText ?? t("projectView.cost.notKnown")}
+        {props.costText === null || props.costText === "UNAVAILABLE"
+          ? t("projectView.cost.notKnown")
+          : props.costText}
       </span>
       {props.attempts > 1 ? (
         <span>{t("projectView.attempts", { count: props.attempts })}</span>
@@ -446,6 +454,10 @@ const RUNS_VIEWS: ReadonlySet<string> = new Set([
   "audits",
   // FXTABS T7: the errors tab reads the run record for the row's reason.
   "errors",
+  // FXFACTS F2/F3: the live tabs filter to the latest run's rows.
+  "cloud-ai",
+  "local-ai",
+  "models",
 ]);
 
 export function ProjectView(props: ProjectViewProps): ReactElement {
@@ -683,7 +695,8 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
       props.view !== "tokens" &&
       props.view !== "audits" &&
       props.view !== "ai-usage" &&
-      props.view !== "routing-decisions"
+      props.view !== "routing-decisions" &&
+      props.view !== "models"
     ) {
       setTelemetry(null);
       return;
@@ -1047,13 +1060,19 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
             {ledger === null ? (
               <LoadingState loadingKey="ui.loading.more" />
             ) : (
+              // FXFACTS F4: the total sums the listed run walls; the
+              // package ledger total only fills in with no runs listed.
               <Fact
                 testId="time-wall-total"
                 labelKey="projects.time.title"
                 value={
-                  ledger.length === 0
-                    ? unknown
-                    : (humanDuration(sumLedger(ledger).wall) ?? unknown)
+                  runs !== null && runs.length > 0
+                    ? (sumRunsWall(runs) === null
+                        ? unknown
+                        : (humanDuration(sumRunsWall(runs)) ?? unknown))
+                    : ledger.length === 0
+                      ? unknown
+                      : (humanDuration(sumLedger(ledger).wall) ?? unknown)
                 }
               />
             )}
@@ -1264,7 +1283,11 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
                   data-testid={`tokens-row-${index}`}
                   className="fxpv-row"
                 >
-                  <span>{row.role ?? "Other calls"}</span>
+                  <span>
+                    {row.role === undefined
+                      ? t("projectView.tokens.otherCalls")
+                      : (translateRoleName(row.role) ?? row.role)}
+                  </span>
                   <span>{row.model ?? unknown}</span>
                   <span>
                     {row.tokens === null
@@ -1347,6 +1370,8 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
       // FXVIEWS V5: one row per agent plus role plus model with served
       // tokens; repeated attempts fold into one row with a count; passed
       // rows say finished; blocked ends carry the served reason note.
+      // FXFACTS F2: rows of the LATEST run only, so an earlier failed run
+      // never marks current state.
       case "local-ai":
       case "cloud-ai": {
         if (liveError !== null) {
@@ -1356,7 +1381,8 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
           return <LoadingState loadingKey="ui.loading.more" />;
         }
         const wanted = props.view === "local-ai" ? "LOCAL" : "CLOUD";
-        const rows = dedupeLiveRows(live).filter(
+        const current = latestRunRows(live, runs);
+        const rows = dedupeLiveRows(current).filter(
           (row) => row.placement === wanted,
         );
         if (rows.length === 0) {
@@ -1396,11 +1422,11 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
                 attempts={row.attempts}
                 status={row.status}
                 statusHuman={readStatusHuman(
-                  live.find(
+                  current.find(
                     (candidate) =>
                       candidate.agent === row.agent &&
                       candidate.status === row.status,
-                  ) ?? live[0],
+                  ) ?? current[0],
                 )}
                 placementLabel={t(placementKey(wanted))}
               />
@@ -1423,9 +1449,39 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
         const liveModels =
           live === null
             ? []
-            : dedupeLiveRows(live).filter(
+            : dedupeLiveRows(latestRunRows(live, runs)).filter(
                 (row) => row.role !== undefined || row.model !== undefined,
               );
+        // FXFACTS F3: the third cell is a served ledger value
+        // (telemetry calls plus tokens for that role and model) or the
+        // row is gone; role names read through the locale.
+        const roleFacts = telemetry?.roles ?? [];
+        function ledgerCells(row: {
+          role?: string;
+          model?: string;
+          tokensTotal: number | null;
+        }): { tokens: number | null; calls: number | null } {
+          const fact = roleFacts.find(
+            (candidate) =>
+              (candidate.role === "" ? undefined : candidate.role) ===
+                row.role &&
+              (candidate.model ?? "") === (row.model ?? ""),
+          );
+          const tokens =
+            fact !== undefined && typeof fact.tokens === "number"
+              ? fact.tokens
+              : row.tokensTotal;
+          const calls =
+            fact !== undefined && typeof fact.calls === "number"
+              ? fact.calls
+              : null;
+          return { tokens, calls };
+        }
+        const shownModels = liveModels
+          .map((row) => ({ row, ...ledgerCells(row) }))
+          .filter(
+            (entry) => entry.tokens !== null || entry.calls !== null,
+          );
         if (why === null && liveModels.length === 0) {
           return (
             <EmptyState
@@ -1444,30 +1500,38 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
                   <div key={index} data-testid={`model-row-${index}`}>
                     <span>
                       {assignment.provider_id}/{assignment.model}{" "}
-                      {assignment.role}
+                      {translateRoleName(assignment.role) ??
+                        assignment.role}
                     </span>
                   </div>
                 ))}
               </div>
             )}
-            {liveModels.length === 0 ? null : (
+            {shownModels.length === 0 ? null : (
               <div>
                 <p data-testid="models-live-title">
                   {t("projectView.models.liveTitle")}
                 </p>
-                {liveModels.map((row, index) => (
+                {shownModels.map(({ row, tokens, calls }, index) => (
                   <div
                     key={`${row.agent}-${row.role ?? ""}-${row.model ?? ""}-${index}`}
                     data-testid={`model-live-${index}`}
                     className="fxpv-row"
                   >
-                    <span>{row.role ?? unknown}</span>
+                    <span>
+                      {translateRoleName(row.role) ?? row.role ?? unknown}
+                    </span>
                     <span>{row.model ?? unknown}</span>
                     <span>
-                      {row.tokensTotal === null
+                      {tokens === null
                         ? unknown
-                        : formatNumber(row.tokensTotal, locale)}
+                        : formatNumber(tokens, locale)}
                     </span>
+                    {calls === null ? null : (
+                      <span>
+                        {t("projectView.tokens.calls")}: {calls}
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1508,7 +1572,12 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
                   data-testid={`routing-role-${index}`}
                   className="fxpv-row"
                 >
-                  <span>{row.role ?? unknown}:</span>
+                  <span>
+                    {row.role === undefined
+                      ? t("projectView.tokens.otherCalls")
+                      : (translateRoleName(row.role) ?? row.role)}
+                    :
+                  </span>
                   <span>{row.model ?? unknown}</span>
                   {row.tokens === null ? null : (
                     <span>{formatNumber(row.tokens, locale)}</span>
@@ -1738,7 +1807,7 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
         if (tasks === null || live === null || runs === null) {
           return <LoadingState loadingKey="ui.loading.more" />;
         }
-        const blocked = dedupeLiveRows(live).filter(
+        const blocked = dedupeLiveRows(latestRunRows(live, runs)).filter(
           (row) => row.status === "BLOCKED",
         );
         const failedTasks = tasks.filter(
@@ -1759,15 +1828,23 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
         // jargon, and no pointer back at this tab.
         // FXCARDS C1: served runs are newest-first, so the latest run is
         // runs[0], never runs[length-1] (length-1 is the oldest run).
+        // FXFACTS F2b: only real failures of the latest state. A passing
+        // reason of a successful latest run (e.g. "checks green") never
+        // reads as an error reason; each blocked row prefers its own
+        // served errors first.
         const latestRun =
           runs.length === 0 ? null : (runs[0] ?? null);
+        const latestFailed =
+          latestRun !== null && runStatusWord(latestRun) !== RUN_WORD_DONE
+            ? latestRun
+            : null;
         const runReason =
-          latestRun === null
+          latestFailed === null
             ? null
-            : (latestRun.parts
+            : (latestFailed.parts
                 .map((part) => part.reason)
                 .find((item) => item !== undefined && item !== "") ??
-              (latestRun.summary !== "" ? latestRun.summary : null));
+              (latestFailed.summary !== "" ? latestFailed.summary : null));
         const blockedReason =
           runReason ?? t("projectView.errors.stoppedAtEnd");
         return (
@@ -1780,7 +1857,11 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
               >
                 <span>{t("projectView.errors.blockedAgents")}:</span>
                 <span title={row.agent}>{row.agent}</span>
-                <span className="fxpv-note">{blockedReason}</span>
+                <span className="fxpv-note">
+                  {row.errors.length > 0
+                    ? row.errors.join("; ")
+                    : blockedReason}
+                </span>
               </div>
             ))}
             {failedTasks.map((task) => (

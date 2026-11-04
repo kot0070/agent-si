@@ -13,7 +13,7 @@ import type {
 } from "../api/iface";
 import { ApiError, apiErrorLocaleKey } from "../api/errors";
 import { useApiClient } from "../app/ApiClientProvider";
-import { formatNumber, t, useLocale } from "../locale/index";
+import { formatNumber, pluralUnit, t, useLocale } from "../locale/index";
 import { EmptyState } from "../ui/EmptyState";
 import { ErrorPanel } from "../ui/ErrorPanel";
 import { LoadingState } from "../ui/LoadingState";
@@ -133,16 +133,38 @@ export function RunHistory(props: RunHistoryProps): ReactElement {
             const wall = runWallS(run);
             const duration = humanDuration(wall);
             // FXTABS T6: the header names what failed: the served duration
-            // when known, else the run summary or the first part reason,
-            // never a bare "not known" next to "failed".
+            // when known, else the run summary or the first part reason.
+            // FXFACTS F5: known server sentences map through the locale;
+            // a lone unknown outcome is removed (status plus time already
+            // name the row).
             const firstReason = run.parts
               .map((part) => part.reason)
               .find(
                 (reason) => reason !== undefined && reason !== "",
               );
+            const passCount = /^run success: all (\d+) parts PASS$/.exec(
+              run.summary,
+            );
+            const keyProvider = /The key for '([^']+)' is not available/.exec(
+              run.summary,
+            );
+            const plainSummary =
+              passCount !== null
+                ? t("projectView.runs.allPassed", {
+                    count: passCount[1] ?? "0",
+                    unit: pluralUnit(
+                      "projectView.runs.parts",
+                      Number(passCount[1] ?? "0"),
+                    ),
+                  })
+                : keyProvider !== null
+                  ? t("projectView.runs.keyMissing", {
+                      provider: keyProvider[1] ?? "",
+                    })
+                  : run.summary;
             const outcome =
               duration ??
-              (run.summary !== "" ? run.summary : (firstReason ?? null));
+              (plainSummary !== "" ? plainSummary : (firstReason ?? null));
             return (
               <div
                 key={run.run_id}
@@ -151,7 +173,7 @@ export function RunHistory(props: RunHistoryProps): ReactElement {
               >
                 <div>
                   {runStatusText(run)} · {formatRunMoment(run.start, locale)} ·{" "}
-                  {outcome ?? t("shell.common.unknown")}
+                  {outcome}
                 </div>
                 <div>
                   {run.parts.length === 0
@@ -167,21 +189,22 @@ export function RunHistory(props: RunHistoryProps): ReactElement {
                         .join(", ")}
                 </div>
                 <div>
-                  Tokens{" "}
+                  {t("projectView.runs.tokensLabel")}{" "}
                   {run.tokens === "UNKNOWN"
-                    ? "not known"
+                    ? t("projectView.cost.notKnown")
                     : formatNumber(run.tokens, locale)}{" "}·{" "}
                   {/* FXBTN: the unknown-price phrase renders once, never
                       "Cost cost ..."; the priced path keeps its label. */}
+                  {t("projectView.runs.costLabel")}{" "}
                   {run.cost === "UNKNOWN"
                     ? t("projectView.cost.notKnown")
-                    : `Cost ${run.cost}`}
+                    : run.cost}
                 </div>
                 {run.manager_why == null || run.manager_why === "" ? null : (
                   <div>
                     {run.manager_count != null && run.manager_count > 1
-                      ? `Managers: ${run.manager_count} (${run.manager_why})`
-                      : `Manager: ${run.manager_why}`}
+                      ? `${pluralUnit("projectView.runs.manager", run.manager_count)} ${run.manager_count}: ${run.manager_why}`
+                      : `${pluralUnit("projectView.runs.manager", 1)}: ${run.manager_why}`}
                     {run.managers != null && run.managers.length > 1
                       ? ` · ${run.managers
                           .map(
@@ -201,7 +224,7 @@ export function RunHistory(props: RunHistoryProps): ReactElement {
                     {run.folder}
                   </div>
                 ) : null}
-                {run.summary === "" ? null : <div>{run.summary}</div>}
+                {plainSummary === "" ? null : <div>{plainSummary}</div>}
                 {run.files.length === 0 ? null : (
                   <ul>
                     {run.files.map((file) => (
@@ -237,7 +260,7 @@ export function RunHistory(props: RunHistoryProps): ReactElement {
             );
           })}
           <div>
-            <p>Team</p>
+            <p>{t("projectView.runs.teamTitle")}</p>
             {(() => {
               // FXTABS T6: one row per agent with its last status (the fold
               // lives in dedupeLiveRows); when the latest run ended, a stale

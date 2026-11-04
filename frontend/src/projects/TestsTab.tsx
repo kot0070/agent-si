@@ -27,6 +27,7 @@ import {
   readTestsView,
 } from "./projectsApi";
 import type { TestBase, TestsView } from "./projectsApi";
+import { LocalTestsSwitch } from "./ProjectView";
 
 export interface TestsTabProps {
   projectId: string;
@@ -222,6 +223,12 @@ export function TestsTab(props: TestsTabProps): ReactElement {
   return (
     <section data-testid="tests-tab">
       <h2>{t("projects.tests.title")}</h2>
+      {/* ORDER 61: one plain line saying how tests run, with the
+          local-tests switch beside it (the overview keeps its own). */}
+      <div data-testid="tests-auto-row" className="fx-tests-auto">
+        <p data-testid="tests-auto-line">{t("projects.tests.autoLine")}</p>
+        <LocalTestsSwitch projectId={props.projectId} />
+      </div>
       <p data-testid="tests-explainer">{t("projects.tests.explainer")}</p>
       {headerBases !== null ? (
         <p data-testid="tests-bases">

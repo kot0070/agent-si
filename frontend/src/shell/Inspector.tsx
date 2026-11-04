@@ -19,7 +19,7 @@ import { useApiClient } from "../app/ApiClientProvider";
 import { useLiveRows } from "../agents/liveStore";
 import { readLedgerWithRuns } from "../api/projectsApi";
 import type { RunLedgerRow } from "../api/projectsApi";
-import { dedupeLiveRows, readLiveExtras } from "../projects/viewsApi";
+import { dedupeLiveRows, humanRunRef, readLiveExtras } from "../projects/viewsApi";
 import { readProjectTelemetry } from "../k07next2/k07next2Api";
 import type { ProjectTelemetry } from "../k07next2/k07next2Api";
 import { ApiError, requestResponse } from "../api/errors";
@@ -32,9 +32,15 @@ import {
   statusHumanKey,
 } from "../agents/agentsApi";
 import { Icon } from "../ui/icons";
+import { Spinner } from "../ui/Spinner";
 import { remainingBudget } from "../projects/projectsApi";
+import {
+  readLatestPlan,
+  readLatestRun,
+  readTestsView,
+} from "../projects/projectsApi";
+import type { TestStatusRow } from "../projects/projectsApi";
 import { MetricCard } from "../ui/MetricCard";
-import { useKitExpanded } from "../ui/Card";
 import { fetchAppsCard } from "../watcher/AppsCard";
 import type { AppsCardData } from "../watcher/AppsCard";
 import { backoffForFailures, isHiddenTick, onVisible } from "../api/polling";
@@ -42,13 +48,23 @@ import {
   describeLastAction,
   fetchWatcherJournal,
   fetchWatcherStatus,
+  WatcherJournalList,
 } from "../watcher/WatcherTab";
+import { RULE_CARDS } from "../watcher/ruleCards";
+import { loadCardHangMinutes } from "../watcher/watcherSettings";
 import { WATCHER_JOURNAL_ROUTE } from "../watcher/WatcherTab";
 import type {
   WatcherJournalEntry,
   WatcherStatusData,
 } from "../watcher/WatcherTab";
 import { useCollapsedCard } from "./collapsed";
+import { RailHead } from "./RailCard";
+import {
+  INSPECTOR_TOGGLE_EVENT,
+  inspectorEventOpen,
+  readInspectorOpen,
+  setInspectorOpen,
+} from "./inspectorDrawer";
 
 export interface InspectorProps extends InspectorBaseProps {
   live: ReactNode;
@@ -156,6 +172,16 @@ function prettifyAgentId(agent: string): string {
     .join(" ");
 }
 
+// FXDESIGN8 short model name: the registry tail after the last slash or
+// colon (provider prefixes never render in the one-line row).
+function shortModelName(value: string): string {
+  const afterSlash = value.split("/");
+  const tail = afterSlash[afterSlash.length - 1] ?? value;
+  const afterColon = tail.split(":");
+  const head = afterColon[afterColon.length - 1] ?? tail;
+  return head === "" ? value : head;
+}
+
 function readTaskStatus(status: string): string {
   if (status === "RUNNING") {
     return t("tasks.status.running");
@@ -197,7 +223,14 @@ export function Inspector(props: InspectorProps): ReactElement {
   const [watcherStatus, setWatcherStatus] =
     useState<WatcherStatusData | null>(null);
   const [providers, setProviders] = useState<string[] | null>(null);
-  const [testRuns, setTestRuns] = useState<string | null>(null);
+  // FXDESIGN9: per-kind test counts of the last served plan (pass/fail
+  // per CODE/AI/HUMAN row; BLOCKED counts as fail, in-flight rows as
+  // neither). Null reads the short not-run line, never a raw plan id.
+  const [testKindCounts, setTestKindCounts] = useState<{
+    code: { pass: number; fail: number };
+    ai: { pass: number; fail: number };
+    human: { pass: number; fail: number };
+  } | null>(null);
   const [localModels, setLocalModels] = useState<string[] | null>(null);
   const [watchDecided, setWatchDecided] = useState<boolean | null>(null);
   const [journal, setJournal] = useState<WatcherJournalEntry[] | null>(null);
@@ -220,6 +253,54 @@ export function Inspector(props: InspectorProps): ReactElement {
     true,
   );
   const [appsCollapsed, onAppsToggle] = useCollapsedCard("fx-apps", true);
+  const [moreCollapsed, onMoreToggle] = useCollapsedCard("fx-more", true);
+  // FXFACTS F8: drawer open state mirrors the shell class through the
+  // shared drawer event; Esc closes the drawer.
+  const [drawerOpen, setDrawerOpen] = useState<boolean>(() =>
+    readInspectorOpen(),
+  );
+  useEffect(() => {
+    function onDrawerToggle(event: Event): void {
+      setDrawerOpen(inspectorEventOpen(event));
+    }
+    window.addEventListener(INSPECTOR_TOGGLE_EVENT, onDrawerToggle);
+    return () => {
+      window.removeEventListener(INSPECTOR_TOGGLE_EVENT, onDrawerToggle);
+    };
+  }, []);
+  useEffect(() => {
+    if (!drawerOpen) {
+      return;
+    }
+    function onKeyDown(event: KeyboardEvent): void {
+      if (event.key === "Escape") {
+        setInspectorOpen(false);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [drawerOpen]);
+  // FXFACTS F10: big cards collapse like metric cards. Fresh profile:
+  // Team now open, the others closed; a live run keeps Team now open.
+  const [teamCollapsed, onTeamToggle] = useCollapsedCard("fx-team", false);
+  const [resultsCollapsed, onResultsToggle] = useCollapsedCard(
+    "fx-results",
+    true,
+  );
+  const [backgroundCollapsed, onBackgroundToggle] = useCollapsedCard(
+    "fx-background",
+    true,
+  );
+  const [watcherCollapsed, onWatcherToggle] = useCollapsedCard(
+    "fx-watcher",
+    true,
+  );
+  const [contextCollapsed, onContextToggle] = useCollapsedCard(
+    "fx-context",
+    true,
+  );
 
   // FXDESIGN8: the live snapshot comes from the shared store above.
 
@@ -376,36 +457,43 @@ export function Inspector(props: InspectorProps): ReactElement {
         // FXCARDS C2: keep last good providers on a failed refresh.
       }
       try {
-        const planResponse = await fetch(
-          `/api/v1/teststage/plans/latest?project_id=${encodeURIComponent(target)}`,
-        );
-        if (!planResponse.ok) {
-          throw new Error(`no test plan: ${planResponse.status}`);
+        // FXDESIGN9: the Tests card counts the last plan by kind (CODE,
+        // AI, HUMAN) through the validated teststage readers: plans/latest,
+        // then runs/latest, then the tests-view rows. Pass is PASS; fail
+        // is FAIL or BLOCKED; any other row state counts as neither. A
+        // missing plan, run or view reads null (the short not-run line);
+        // a failed refresh keeps the last good counts. No plan or run id
+        // ever renders.
+        const plan = await readLatestPlan(target);
+        const run = await readLatestRun(target);
+        const view = await readTestsView(plan.plan_id, run.run_id);
+        const counts = {
+          code: { pass: 0, fail: 0 },
+          ai: { pass: 0, fail: 0 },
+          human: { pass: 0, fail: 0 },
+        };
+        const slots: Record<string, { pass: number; fail: number }> = {
+          CODE: counts.code,
+          AI: counts.ai,
+          HUMAN: counts.human,
+        };
+        for (const row of view.rows as TestStatusRow[]) {
+          const slot =
+            typeof row.kind === "string" ? slots[row.kind] : undefined;
+          if (slot === undefined) {
+            continue;
+          }
+          if (row.status === "PASS") {
+            slot.pass += 1;
+          } else if (row.status === "FAIL" || row.status === "BLOCKED") {
+            slot.fail += 1;
+          }
         }
-        const planBody = (await planResponse.json()) as Record<string, unknown>;
-        const planId = planBody["plan_id"];
-        const runResponse = await fetch(
-          `/api/v1/teststage/runs/latest?project_id=${encodeURIComponent(target)}`,
-        );
-        if (!runResponse.ok) {
-          throw new Error(`no test run: ${runResponse.status}`);
-        }
-        const runBody = (await runResponse.json()) as Record<string, unknown>;
-        const runId = runBody["run_id"];
         if (alive) {
-          setTestRuns(
-            typeof planId === "string" &&
-              planId !== "" &&
-              typeof runId === "string" &&
-              runId !== ""
-              ? `${planId} / ${runId}`
-              : typeof runId === "string" && runId !== ""
-                ? runId
-                : null,
-          );
+          setTestKindCounts(counts);
         }
       } catch {
-        // FXCARDS C2: keep last good test runs on a failed refresh.
+        // FXCARDS C2: keep last good test counts on a failed refresh.
       }
       try {
         const response = await fetch("/api/v1/local/models");
@@ -443,7 +531,7 @@ export function Inspector(props: InspectorProps): ReactElement {
       setApps(null);
       setAppsFailed(false);
       setProviders(null);
-      setTestRuns(null);
+      setTestKindCounts(null);
       setLocalModels(null);
       return () => {
         alive = false;
@@ -805,13 +893,15 @@ export function Inspector(props: InspectorProps): ReactElement {
   // total (the same doc the project Tokens tab reads, so the numbers are
   // one). Fallback to the runs-key sum only when telemetry has no row.
   // The runs-key (chat answers) sum renders as its own quiet line only
-  // when it differs from the telemetry total.
+  // when it differs from the telemetry total — and never as a repeat of
+  // the last-run row (FXDESIGN9: one fact once only).
   const projectTotal =
     modelTotal > 0 ? modelTotal : (projectRunsTotal ?? null);
   const chatDiffers =
     projectRunsTotal !== null &&
     projectTotal !== null &&
-    projectRunsTotal !== projectTotal;
+    projectRunsTotal !== projectTotal &&
+    (lastRunTokens === null || projectRunsTotal !== lastRunTokens);
   const tokenTotal = runLive ? liveTokenTotal : (projectTotal ?? liveTokenTotal);
   const tokensKnown =
     liveRows === null
@@ -850,6 +940,14 @@ export function Inspector(props: InspectorProps): ReactElement {
             return null;
           })
           .filter((text): text is string => text !== null);
+  // FXFACTS F10: the Results closed value is the run title (or verdict
+  // word); the raw id rides tooltips and details only.
+  const lastRunTitle =
+    lastRun !== null &&
+    typeof lastRun.title === "string" &&
+    lastRun.title.trim() !== ""
+      ? lastRun.title.trim()
+      : null;
   const lastRunFiles = lastRun?.files ?? [];
   const activeTasks = (tasks ?? []).filter(
     (task) => task.status === "RUNNING" || task.status === "QUEUED",
@@ -883,10 +981,15 @@ export function Inspector(props: InspectorProps): ReactElement {
       ? unknown
       : `${formatNumber(spent)} / ${formatNumber(hard)}${currency === "" ? "" : ` ${currency}`}`;
 
-  const [budgetExpanded, onBudgetToggleInner] = useKitExpanded(
-    budgetCollapsed || budget === null,
-    onBudgetToggle,
-  );
+  // FXFACTS F10: every card opens through its own collapsed flag; Team now
+  // stays open on a fresh profile and while a run is live; with no
+  // project every card stays closed.
+  const teamOpen = projectId !== null && (runLive || !teamCollapsed);
+  const resultsCardOpen = !resultsCollapsed;
+  const backgroundCardOpen = !backgroundCollapsed;
+  const watcherOpen = !watcherCollapsed;
+  const contextOpen = tokensKnown && !contextCollapsed;
+  const budgetOpen = budget !== null && !budgetCollapsed;
   // FXTELEM: providers name the connected ids from GET /api/v1/providers;
   // with none served the card reads one quiet line, never Unknown.
   const providersTotal =
@@ -895,7 +998,25 @@ export function Inspector(props: InspectorProps): ReactElement {
       : providers.length === 0
         ? t("shell.cards.providers.emptyLine")
         : providers.join(", ");
-  const testsTotal = testRuns ?? t("shell.cards.tests.emptyLine");
+  // FXDESIGN9: closed one-liner totals across kinds (pass green, fail
+  // red); the open body holds the per-kind rows. Null counts read the
+  // short not-run line through testsHasData below.
+  const testsPassTotal =
+    testKindCounts === null
+      ? 0
+      : testKindCounts.code.pass +
+        testKindCounts.ai.pass +
+        testKindCounts.human.pass;
+  const testsFailTotal =
+    testKindCounts === null
+      ? 0
+      : testKindCounts.code.fail +
+        testKindCounts.ai.fail +
+        testKindCounts.human.fail;
+  const testsTotal =
+    testKindCounts === null
+      ? t("shell.cards.tests.emptyLine")
+      : `${formatNumber(testsPassTotal)} ✓ ${formatNumber(testsFailTotal)} ✗`;
   const localAiTotal =
     localModels === null
       ? unknown
@@ -913,27 +1034,85 @@ export function Inspector(props: InspectorProps): ReactElement {
   // (flex order below); an empty card collapses to one line. Numbers are
   // untouched: only order plus the collapsed flag change here.
   const tokensHasData = tokensKnown;
-  const testsHasData = testRuns !== null;
+  const testsHasData = testKindCounts !== null;
   const budgetHasData = budget !== null;
   const providersHasData = (providers ?? []).length > 0;
   const localAiHasData = (localModels ?? []).length > 0;
   const appsHasData = appsCount > 0;
+  // FXFACTS F10: token extras render only with the open card; the More
+  // summary counts the metric cards holding data.
+  const tokensOpen = tokensKnown && tokensHasData && !tokensCollapsed;
+  // FXDESIGN9: the Tests card opens through its own persisted flag, like
+  // the other metric cards.
+  const testsOpen = testsHasData && !testsCollapsed;
+  const testKindRows =
+    testKindCounts === null
+      ? []
+      : [
+          {
+            kind: "CODE",
+            labelKey: "shell.cards.tests.rowCode",
+            pass: testKindCounts.code.pass,
+            fail: testKindCounts.code.fail,
+          },
+          {
+            kind: "AI",
+            labelKey: "shell.cards.tests.rowAi",
+            pass: testKindCounts.ai.pass,
+            fail: testKindCounts.ai.fail,
+          },
+          {
+            kind: "HUMAN",
+            labelKey: "shell.cards.tests.rowHuman",
+            pass: testKindCounts.human.pass,
+            fail: testKindCounts.human.fail,
+          },
+        ];
+  const moreDataCount = [
+    tokensHasData,
+    testsHasData,
+    providersHasData,
+    localAiHasData,
+    appsHasData,
+  ].filter((has) => has).length;
+  const moreOpen = !moreCollapsed;
 
   return (
     <aside
       data-testid="inspector"
+      id="inspector"
+      data-open={drawerOpen ? "true" : "false"}
+      className={drawerOpen ? undefined : "fx-drawer-hidden"}
       aria-label={t("shell.inspector.live_agents")}
       data-project={projectId ?? ""}
     >
+      <button
+        type="button"
+        data-testid="inspector-close"
+        className="fx-inspector-close"
+        aria-label={t("shell.topbar.inspectorClose")}
+        onClick={() => {
+          setInspectorOpen(false);
+        }}
+      >
+        {t("shell.topbar.inspectorClose")}
+      </button>
       <div data-testid="inspector-scroll" style={{ overflowY: "auto" }}>
         <section
           data-testid="inspector-card-team"
           aria-label={t("shell.cards.team.title")}
         >
-          <h2 className="fx-section-title">
-            <Icon name="play" />
-            <span>{t("shell.cards.team.title")}</span>
-          </h2>
+          <RailHead
+            testId={rows.length === 0 ? undefined : "rail-toggle-team"}
+            icon="play"
+            title={t("shell.cards.team.title")}
+            value={rows.length === 0 ? <>&mdash;</> : formatNumber(rows.length)}
+            expanded={teamOpen}
+            onToggle={() => onTeamToggle(!teamOpen)}
+            staticRow={rows.length === 0}
+          />
+          {teamOpen && rows.length > 0 ? (
+          <>
           {warnings.length === 0 ? null : (
             <div data-testid="team-warnings">
               <span>{t("shell.cards.team.warnings")}</span>
@@ -971,6 +1150,10 @@ export function Inspector(props: InspectorProps): ReactElement {
                 const roleKnown =
                   typeof roleRaw === "string" && roleRaw !== "";
                 const modelRaw = readExtra(row, "model");
+                const modelShort =
+                  typeof modelRaw === "string" && modelRaw !== ""
+                    ? shortModelName(modelRaw)
+                    : null;
                 // FXLOOK D5: the full model id rides the summary
                 // tooltip (title) and the details row below.
                 const stepRaw = readExtra(row, "step");
@@ -985,12 +1168,15 @@ export function Inspector(props: InspectorProps): ReactElement {
                     className="fx-team-row"
                   >
                     <details data-testid={`team-detail-${row.agent}`}>
+                      {/* FXFACTS F14: one line (role, short model,
+                          status, middle dots in CSS); the rest opens. */}
                       <summary
                         data-testid={`team-line-${row.agent}`}
                         className="fx-team-line"
-                        // FXLOOK D5: the summary reads human — role plus
-                        // live status, never the raw agent id or the full
-                        // model id (the full model rides the tooltip).
+                        // FXLOOK D5 + FXFACTS F14: the summary reads human —
+                        // role plus live status and the short model; never
+                        // the raw agent id or the full model id (the full
+                        // model rides the tooltip).
                         title={
                           typeof modelRaw === "string" && modelRaw !== ""
                             ? modelRaw
@@ -1008,12 +1194,25 @@ export function Inspector(props: InspectorProps): ReactElement {
                             locale,
                           )}
                         </span>
+                        {modelShort === null ? null : (
+                          <span
+                            className="fx-team-field fx-truncate"
+                            title={
+                              modelShort === String(modelRaw)
+                                ? undefined
+                                : String(modelRaw)
+                            }
+                          >
+                            {modelShort}
+                          </span>
+                        )}
                         <span
                           data-testid={`team-status-${row.agent}`}
-                          className="fx-status-chip"
+                          className="fx-team-field"
                         >
                           {t(statusHumanKey(row.status))}
                         </span>
+                        {item.running ? <Spinner /> : null}
                         {stepKnown ? (
                           <span className="fx-team-field">
                             {t("shell.cards.team.step")}{": "}
@@ -1045,6 +1244,14 @@ export function Inspector(props: InspectorProps): ReactElement {
                         <span className="fx-team-field">
                           {t("agents.row.agent")}{": "}
                           <span className="fx-team-value">{row.agent}</span>
+                        </span>
+                        <span className="fx-team-field">
+                          <span
+                            className="fx-team-value fx-truncate"
+                            title={row.agent}
+                          >
+                            {row.agent}
+                          </span>
                         </span>
                         <span className="fx-team-field">
                           {t("agents.row.scope")}{": "}
@@ -1107,6 +1314,24 @@ export function Inspector(props: InspectorProps): ReactElement {
                           {t("shell.cards.team.waiting")}{": "}
                           {readWaiting(readExtra(row, "waits"))}
                         </span>
+                        {entry.attempts > 1 ? (
+                          <span
+                            data-testid={`team-attempts-${row.agent}`}
+                            className="fx-team-field"
+                          >
+                            {t("projectView.attempts", {
+                              count: entry.attempts,
+                            })}
+                          </span>
+                        ) : null}
+                        {place === "UNKNOWN" ? null : (
+                          <span
+                            data-testid={`team-place-${row.agent}`}
+                            className="fx-place-badge"
+                          >
+                            {t(placementKey(place))}
+                          </span>
+                        )}
                       </div>
                     </details>
                   </li>
@@ -1132,16 +1357,27 @@ export function Inspector(props: InspectorProps): ReactElement {
           <Link data-testid="team-open-agents" to="/agents/live">
             {t("shell.cards.team.openAgents")}
           </Link>
+          </>
+          ) : null}
         </section>
 
         <section
           data-testid="inspector-card-context"
           aria-label={t("shell.cards.context.title")}
         >
-          <h2 className="fx-section-title">
-            <Icon name="chart" />
-            <span>{t("shell.cards.context.title")}</span>
-          </h2>
+          <RailHead
+            testId={tokensKnown ? "rail-toggle-context" : undefined}
+            icon="chart"
+            title={t("shell.cards.context.title")}
+            value={
+              tokensKnown ? formatNumber(tokenTotal) : <>&mdash;</>
+            }
+            expanded={contextOpen}
+            onToggle={() => onContextToggle(!contextOpen)}
+            staticRow={!tokensKnown}
+          />
+          {contextOpen ? (
+          <>
           {liveRows === null ? (
             <p data-testid="context-empty">{t("empty.generic")}</p>
           ) : runLive ? (
@@ -1266,22 +1502,25 @@ export function Inspector(props: InspectorProps): ReactElement {
             // the project-scoped telemetry total. No window is served idle,
             // so no percent is rendered.
             <>
-              <p data-testid="ctx-used" className="fx-quiet">
-                {t("shell.cards.context.projectTotal")}:{" "}
-                {formatNumber(projectTotal)}
-              </p>
+              {/* FXFACTS F10: idle figures read as dl rows. */}
+              <dl data-testid="ctx-facts">
+              <div data-testid="ctx-used">
+                <dt>{t("shell.cards.context.projectTotal")}</dt>
+                <dd>{formatNumber(projectTotal)}</dd>
+              </div>
               {lastRunTokens !== null && lastRunTokens !== projectTotal ? (
-                <p data-testid="ctx-last-run" className="fx-quiet">
-                  {t("shell.cards.context.lastRun")}:{" "}
-                  {formatNumber(lastRunTokens)}
-                </p>
+                <div data-testid="ctx-last-run">
+                  <dt>{t("shell.cards.context.lastRun")}</dt>
+                  <dd>{formatNumber(lastRunTokens)}</dd>
+                </div>
               ) : null}
               {chatDiffers ? (
-                <p data-testid="ctx-chat" className="fx-quiet">
-                  {t("shell.cards.context.chatAnswers")}:{" "}
-                  {formatNumber(projectRunsTotal ?? 0)}
-                </p>
+                <div data-testid="ctx-chat">
+                  <dt>{t("shell.cards.context.chatAnswers")}</dt>
+                  <dd>{formatNumber(projectRunsTotal ?? 0)}</dd>
+                </div>
               ) : null}
+              </dl>
               {modelTotal > 0 ? (
                 <ul data-testid="ctx-legend" className="fx-legend">
                   {modelSlices.map((slice, index) => (
@@ -1316,16 +1555,43 @@ export function Inspector(props: InspectorProps): ReactElement {
               ) : null}
             </>
           )}
+          </>
+          ) : null}
         </section>
 
         <section
           data-testid="inspector-card-results"
           aria-label={t("shell.cards.results.title")}
         >
-          <h2 className="fx-section-title">
-            <Icon name="file" />
-            <span>{t("shell.cards.results.title")}</span>
-          </h2>
+          <RailHead
+            testId={
+              lastRun === null && lastPackages.length === 0
+                ? undefined
+                : "rail-toggle-results"
+            }
+            icon="file"
+            title={t("shell.cards.results.title")}
+            value={
+              lastRun === null && lastPackages.length === 0 ? (
+                <>&mdash;</>
+              ) : (
+                lastRunTitle ??
+                (lastRun === null
+                  ? formatNumber(lastPackages.length)
+                  : lastRun.success === true
+                    ? t("projectView.runs.done")
+                    : lastRun.success === false
+                      ? t("projectView.runs.failed")
+                      : (<>&mdash;</>))
+              )
+            }
+            expanded={resultsCardOpen}
+            onToggle={() => onResultsToggle(!resultsCardOpen)}
+            staticRow={lastRun === null && lastPackages.length === 0}
+          />
+          {resultsCardOpen &&
+          !(lastRun === null && lastPackages.length === 0) ? (
+          <>
           {/* FXTELEM: the last run's verdict plus files read the runs key,
               so a real run shows even when no package rows were recorded.
               Only with neither a run nor packages is the tab honestly empty. */}
@@ -1434,7 +1700,12 @@ export function Inspector(props: InspectorProps): ReactElement {
                       className="fx-result-row"
                     >
                       <Icon name="file" />
-                      <span className="fx-truncate">{entry.package_id}</span>
+                      <span
+                        className="fx-truncate"
+                        title={humanRunRef(entry.package_id).title}
+                      >
+                        {humanRunRef(entry.package_id).text}
+                      </span>
                       <Link
                         data-testid={`result-open-${entry.package_id}`}
                         to={reportsHref}
@@ -1466,19 +1737,35 @@ export function Inspector(props: InspectorProps): ReactElement {
               ) : null}
             </>
           )}
+          </>
+          ) : null}
         </section>
 
         <section
           data-testid="inspector-card-background"
           aria-label={t("shell.cards.background.title")}
         >
-          <h2 className="fx-section-title">
-            <Icon name="play" />
-            <span>{t("shell.cards.background.title")}</span>
-            <span data-testid="background-count" className="fx-count">
-              {formatNumber(activeTasks.length)}
-            </span>
-          </h2>
+          <RailHead
+            testId={
+              activeTasks.length === 0 ? undefined : "rail-toggle-background"
+            }
+            icon="play"
+            title={t("shell.cards.background.title")}
+            value={
+              activeTasks.length === 0 ? (
+                <>&mdash;</>
+              ) : (
+                <span data-testid="background-count">
+                  {formatNumber(activeTasks.length)}
+                </span>
+              )
+            }
+            expanded={backgroundCardOpen}
+            onToggle={() => onBackgroundToggle(!backgroundCardOpen)}
+            staticRow={activeTasks.length === 0}
+          />
+          {backgroundCardOpen && activeTasks.length > 0 ? (
+          <>
           {projectId === null ||
           tasks === null ||
           activeTasks.length === 0 ? (
@@ -1523,39 +1810,71 @@ export function Inspector(props: InspectorProps): ReactElement {
               ) : null}
             </>
           )}
+          </>
+          ) : null}
         </section>
 
         <section
           data-testid="inspector-card-watcher"
           aria-label={t("shell.cards.watcher.title")}
         >
-          <h2 className="fx-section-title">
-            <Icon name="watch" />
-            <span>{t("shell.cards.watcher.title")}</span>
-          </h2>
+          <RailHead
+            testId={
+              projectId === null || watcherFailed || watcherStatus === null
+                ? undefined
+                : "rail-toggle-watcher"
+            }
+            icon="watch"
+            title={t("shell.cards.watcher.title")}
+            value={
+              watcherStatus === null || watcherFailed ? (
+                <>&mdash;</>
+              ) : watcherStatus.integrity_ok ? (
+                t("shell.cards.watcher.online")
+              ) : (
+                t("shell.cards.watcher.offline")
+              )
+            }
+            expanded={watcherOpen}
+            onToggle={() => onWatcherToggle(!watcherOpen)}
+            staticRow={
+              projectId === null || watcherFailed || watcherStatus === null
+            }
+          />
+          {watcherOpen &&
+          !(projectId === null || watcherFailed || watcherStatus === null) ? (
+          <>
           {projectId === null ||
           watcherFailed ||
           watcherStatus === null ? (
             <p data-testid="watcher-empty">{t("empty.generic")}</p>
           ) : (
             <>
-              <p data-testid="watcher-state">
-                {t("shell.cards.watcher.state")}{": "}
+              {/* FXFACTS F10: the open body is a dl holding only figures
+                  the one-line summary lacks. */}
+              <dl data-testid="watcher-facts">
+              <div data-testid="watcher-state">
+                <dt>{t("shell.cards.watcher.state")}</dt>
+                <dd>
                 {watcherStatus.integrity_ok
                   ? t("shell.cards.watcher.ok")
                   : t("shell.cards.watcher.failed")}
-              </p>
-              <p data-testid="watcher-watches">
-                {t("shell.cards.watcher.watches")}{": "}
+                </dd>
+              </div>
+              <div data-testid="watcher-watches">
+                <dt>{t("shell.cards.watcher.watches")}</dt>
+                <dd>
                 {typeof watcherStatus.watched_runs === "number"
                   ? `${formatNumber(watcherStatus.watched_runs)} ${pluralUnit("shell.cards.watcher.runs", watcherStatus.watched_runs)}`
                   : t("watcher.tab.notKnown")}{" · "}
                 {typeof watcherStatus.watched_agents === "number"
                   ? `${formatNumber(watcherStatus.watched_agents)} ${pluralUnit("shell.cards.watcher.agents", watcherStatus.watched_agents)}`
                   : t("watcher.tab.notKnown")}
-              </p>
-              <p data-testid="watcher-checks">
-                {t("shell.cards.watcher.checks")}{": "}
+                </dd>
+              </div>
+              <div data-testid="watcher-checks">
+                <dt>{t("shell.cards.watcher.checks")}</dt>
+                <dd>
                 {typeof watcherStatus.checks_done === "number"
                   ? formatNumber(watcherStatus.checks_done)
                   : t("watcher.tab.notKnown")}{" "}
@@ -1567,12 +1886,14 @@ export function Inspector(props: InspectorProps): ReactElement {
                 {watcherStatus.last_check_at
                   ? formatScreenTime(watcherStatus.last_check_at)
                   : t("watcher.tab.noChecksYet")}
-              </p>
-              {/* FXZERO R4 extra gate: the model names the exact served
-                  watcher model (the one that answered); with no answering
-                  model it reads plain "not used yet", never UNAVAILABLE. */}
-              <p data-testid="watcher-model">
-                {t("watcher.tab.model")}:{" "}
+                </dd>
+              </div>
+              {/* FXFACTS F13: model names the served answering model with
+                  a link to where it is set; check minutes read the same
+                  stored settings as the Watcher tab inputs. */}
+              <div data-testid="watcher-model">
+                <dt>{t("watcher.tab.model")}</dt>
+                <dd>
                 {typeof watcherStatus.watcher_calls === "number" &&
                 watcherStatus.watcher_calls > 0 &&
                 typeof watcherStatus.watcher_model === "string" &&
@@ -1589,14 +1910,43 @@ export function Inspector(props: InspectorProps): ReactElement {
                   ? formatNumber(watcherStatus.watcher_tokens)
                   : t("watcher.tab.notKnown")}{" "}
                 tokens
-              </p>
+                {" · "}
+                <Link
+                  data-testid="watcher-model-settings"
+                  to="/watcher"
+                  className="fx-why-quiet"
+                >
+                  {t("watcher.tab.settings")}
+                </Link>
+                </dd>
+              </div>
+              <div data-testid="rail-watcher-minutes">
+                <dt>{t("watcher.tab.minutes")}</dt>
+                <dd>
+                  {RULE_CARDS.map((card) => (
+                    <span
+                      key={card.cardId}
+                      data-testid={`rail-watcher-minutes-${card.cardId}`}
+                    >
+                      {t(`watcher.tab.area.${card.area}`)}:{" "}
+                      {t("watcher.tab.minutesValue", {
+                        count: formatNumber(
+                          loadCardHangMinutes(card.cardId, projectId),
+                        ),
+                      })}
+                      {" · "}
+                    </span>
+                  ))}
+                </dd>
+              </div>
               {/* FXTABS T9: the last action reads as plain words plus the
                   local time; the raw journal id rides the tooltip only. */}
-              <p
+              <div
                 data-testid="watcher-action"
                 title={watcherActionId === DASH ? undefined : watcherActionId}
               >
-                {t("shell.cards.team.lastAction")}:{" "}
+                <dt>{t("shell.cards.team.lastAction")}</dt>
+                <dd>
                 {describeLastAction(watcherStatus.last_action)}
                 {watcherActionAt === "" ? null : (
                   <>
@@ -1604,25 +1954,121 @@ export function Inspector(props: InspectorProps): ReactElement {
                     {formatScreenTime(watcherActionAt)}
                   </>
                 )}
-              </p>
+                </dd>
+              </div>
+              </dl>
+              {/* FXFACTS F13: the last journal rows in the F6a form. */}
+              <WatcherJournalList
+                entries={(journal ?? []).slice(-3)}
+                initialLimit={3}
+                showMore={false}
+              />
               <Link data-testid="watcher-open" to="/watcher">
                 {t("shell.cards.watcher.open")}
               </Link>
             </>
           )}
+          </>
+          ) : null}
         </section>
 
         {/* FXTABS J7: metric cards with data render first (flex order);
-            empty ones collapse to one line. Team above never collapses. */}
+            empty ones collapse to one line. Team above never collapses.
+            FXFACTS F10: Tokens, Tests, Providers, Local LLM and Apps live
+            inside one quiet More disclosure at the bottom, closed by
+            default; their cards and testids exist when it is open. */}
+        <div style={{ order: budgetHasData ? 0 : 1 }}>
+        {/* FXTELEM: one budget block only: limit, spent, reserved and
+            remaining as a single spaced list, never legend plus a repeated
+            list, never glued. Spent reads the unknown-price line when no
+            served cost number exists. */}
+        <section
+          data-testid="kit-metric-fx-budget"
+          aria-label={t("shell.cards.budget.title")}
+          style={{
+            backgroundColor: "var(--agent-si-surface)",
+            color: "var(--agent-si-ink)",
+            borderColor: "var(--agent-si-card-border)",
+          }}
+        >
+          <RailHead
+            testId={budget === null ? undefined : "kit-toggle-fx-budget"}
+            icon="settings"
+            title={t("shell.cards.budget.title")}
+            hint={t("shell.cards.budget.subtitle")}
+            value={
+              budget === null ? <>&mdash;</> : budgetTotal
+            }
+            expanded={budgetOpen}
+            onToggle={() => onBudgetToggle(!budgetOpen)}
+            lineTestId={budgetOpen ? undefined : "kit-collapsed-line"}
+            staticRow={budget === null}
+          />
+          {budgetOpen ? (
+            budget === null ? (
+              <p data-testid="budget-unknown" className="fx-quiet-line">
+                {unknown}
+              </p>
+            ) : (
+              <>
+              {/* FXFACTS F10: the open body is a dl holding only figures
+                  the one-line summary lacks. The purpose sentence rides
+                  the title tooltip only (FXDESIGN9: never rendered text). */}
+              <dl
+                data-testid="budget-facts"
+                className="fx-budget-facts"
+                style={{
+                  display: "flex",
+                  gap: "1rem",
+                  flexWrap: "wrap",
+                  listStyle: "none",
+                  padding: 0,
+                }}
+              >
+                <div data-testid="budget-row-limit">
+                  <dt>{t("projectView.cost.limit")}</dt>
+                  <dd>{limitText}</dd>
+                </div>
+                <div data-testid="budget-row-spent">
+                  <dt>{t("shell.cards.budget.spent")}</dt>
+                  <dd>{spentText}</dd>
+                </div>
+                <div data-testid="budget-row-reserved">
+                  <dt>{t("shell.cards.budget.reserved")}</dt>
+                  <dd>{reservedText}</dd>
+                </div>
+                <div data-testid="budget-row-remaining">
+                  <dt>{t("shell.cards.budget.remaining")}</dt>
+                  <dd>{remainingText}</dd>
+                </div>
+              </dl>
+              </>
+            )
+          ) : null}
+        </section>
+        </div>
+        <div data-testid="rail-more">
+        <RailHead
+          testId="rail-more-toggle"
+          icon="add"
+          title={t("shell.cards.more.title")}
+          value={`${formatNumber(moreDataCount)} / 5`}
+          expanded={moreOpen}
+          onToggle={() => onMoreToggle(!moreOpen)}
+        />
+        {moreOpen ? (
+        <>
         <div style={{ order: tokensHasData ? 0 : 1 }}>
         {tokensKnown ? (
           <>
             <MetricCard
               cardId="fx-tokens"
+              icon="chart"
               titleKey="shell.cards.tokens.title"
               subtitleKey="shell.cards.tokens.subtitle"
               totalKey="shell.cards.tokens.total"
               totalText={formatNumber(tokenTotal)}
+              hasData={tokensHasData}
               segments={
                 runLive
                   ? [
@@ -1648,7 +2094,7 @@ export function Inspector(props: InspectorProps): ReactElement {
               collapsed={tokensCollapsed || !tokensHasData}
               onToggle={onTokensToggle}
             />
-            {runLive || modelSlices.length === 0 ? null : (
+            {tokensOpen && !runLive && modelSlices.length > 0 ? (
               <ul data-testid="tokens-extra-kinds" className="fx-legend">
                 {modelSlices.map((slice) => (
                   <li key={slice.model} data-testid={`tokens-kind-${slice.model}`}>
@@ -1659,37 +2105,38 @@ export function Inspector(props: InspectorProps): ReactElement {
                   </li>
                 ))}
               </ul>
-            )}
+            ) : null}
             {/* FXTELEM: idle totals are named: the last run's tokens and
                 this project's runs-key sum. The per-model rows above add up
                 to the project-scoped telemetry total. */}
-            {runLive ? null : (
-              <>
+            {runLive || !tokensOpen ? null : (
+              <dl data-testid="tokens-facts">
                 {lastRunTokens !== null ? (
-                  <p data-testid="tokens-last-run" className="fx-quiet">
-                    {t("shell.cards.context.lastRun")}:{" "}
-                    {formatNumber(lastRunTokens)}
-                  </p>
+                  <div data-testid="tokens-last-run">
+                    <dt>{t("shell.cards.context.lastRun")}</dt>
+                    <dd>{formatNumber(lastRunTokens)}</dd>
+                  </div>
                 ) : null}
                 {projectTotal !== null && projectTotal !== lastRunTokens ? (
-                  <p data-testid="tokens-project" className="fx-quiet">
-                    {t("shell.cards.context.projectTotal")}:{" "}
-                    {formatNumber(projectTotal)}
-                  </p>
+                  <div data-testid="tokens-project">
+                    <dt>{t("shell.cards.context.projectTotal")}</dt>
+                    <dd>{formatNumber(projectTotal)}</dd>
+                  </div>
                 ) : null}
                 {chatDiffers ? (
-                  <p data-testid="tokens-chat" className="fx-quiet">
-                    {t("shell.cards.context.chatAnswers")}:{" "}
-                    {formatNumber(projectRunsTotal ?? 0)}
-                  </p>
+                  <div data-testid="tokens-chat">
+                    <dt>{t("shell.cards.context.chatAnswers")}</dt>
+                    <dd>{formatNumber(projectRunsTotal ?? 0)}</dd>
+                  </div>
                 ) : null}
-              </>
+              </dl>
             )}
           </>
         ) : (
           <>
             <MetricCard
               cardId="fx-tokens"
+              icon="chart"
               titleKey="shell.cards.tokens.title"
               subtitleKey="shell.cards.tokens.subtitle"
               totalKey="shell.cards.tokens.total"
@@ -1697,6 +2144,7 @@ export function Inspector(props: InspectorProps): ReactElement {
               segments={[]}
               collapsed={tokensCollapsed || !tokensHasData}
               onToggle={onTokensToggle}
+              hasData={false}
             />
             <p data-testid="tokens-unknown" className="fx-quiet-line">
               {t("shell.cards.context.noUsage")}
@@ -1705,79 +2153,52 @@ export function Inspector(props: InspectorProps): ReactElement {
         )}
         </div>
         <div style={{ order: testsHasData ? 0 : 1 }}>
-        <MetricCard
-          cardId="fx-tests"
-          titleKey="shell.cards.tests.title"
-          subtitleKey="shell.cards.tests.subtitle"
-          totalKey="shell.cards.tests.total"
-          totalText={testsTotal}
-          segments={[]}
-          collapsed={testsCollapsed || !testsHasData}
-          onToggle={onTestsToggle}
-        />
-        </div>
-        <div style={{ order: budgetHasData ? 0 : 1 }}>
-        {/* FXTELEM: one budget block only: limit, spent, reserved and
-            remaining as a single spaced list, never legend plus a repeated
-            list, never glued. Spent reads the unknown-price line when no
-            served cost number exists. */}
+        {/* FXDESIGN9: one row per served kind (pass green, fail red);
+            the closed one-liner carries the totals; nothing run yet reads
+            the short not-run line. No plan or run id ever renders. */}
         <section
-          data-testid="kit-metric-fx-budget"
-          aria-label={t("shell.cards.budget.title")}
+          data-testid="kit-metric-fx-tests"
+          aria-label={t("shell.cards.tests.title")}
           style={{
             backgroundColor: "var(--agent-si-surface)",
             color: "var(--agent-si-ink)",
             borderColor: "var(--agent-si-card-border)",
           }}
         >
-          <h2>{t("shell.cards.budget.title")}</h2>
-          <button
-            type="button"
-            data-testid="kit-toggle-fx-budget"
-            aria-label={t("ui.card.toggle")}
-            aria-expanded={budgetExpanded}
-            className="fx-kit-toggle"
-            onClick={onBudgetToggleInner}
+          <RailHead
+            testId={testsHasData ? "kit-toggle-fx-tests" : undefined}
+            icon="file"
+            title={t("shell.cards.tests.title")}
+            hint={t("shell.cards.tests.title")}
+            value={testsHasData ? testsTotal : <>&mdash;</>}
+            expanded={testsOpen}
+            onToggle={() => onTestsToggle(!testsOpen)}
+            lineTestId={testsOpen ? undefined : "kit-collapsed-line"}
+            staticRow={!testsHasData}
           />
-          <p data-testid="kit-sub-fx-budget">
-            {t("shell.cards.budget.subtitle")}
-          </p>
-          {budgetExpanded ? (
-            budget === null ? (
-              <p data-testid="budget-unknown" className="fx-quiet-line">
-                {unknown}
-              </p>
-            ) : (
-              <ul
-                data-testid="budget-facts"
-                className="fx-budget-facts"
-                style={{
-                  display: "flex",
-                  gap: "1rem",
-                  flexWrap: "wrap",
-                  listStyle: "none",
-                  padding: 0,
-                }}
-              >
-                <li data-testid="budget-row-limit">
-                  {t("projectView.cost.limit")}: {limitText}
-                </li>
-                <li data-testid="budget-row-spent">
-                  {t("shell.cards.budget.spent")}: {spentText}
-                </li>
-                <li data-testid="budget-row-reserved">
-                  {t("shell.cards.budget.reserved")}: {reservedText}
-                </li>
-                <li data-testid="budget-row-remaining">
-                  {t("shell.cards.budget.remaining")}: {remainingText}
-                </li>
-              </ul>
-            )
-          ) : (
-            <span data-testid="kit-collapsed-line">
-              <span>{t("shell.cards.budget.title")}</span>
-              <span>{budgetTotal}</span>
-            </span>
+          {testsOpen ? (
+            <dl data-testid="tests-facts">
+              {testKindRows.map((row) => (
+                <div key={row.kind} data-testid={`tests-kind-${row.kind}`}>
+                  <dt>{t(row.labelKey)}</dt>
+                  <dd>
+                    {formatNumber(row.pass)}{" "}
+                    <span className="fx-pass" aria-hidden="true">
+                      ✓
+                    </span>{" "}
+                    {formatNumber(row.fail)}{" "}
+                    <span className="fx-fail" aria-hidden="true">
+                      ✗
+                    </span>
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          ) : null}
+          {testsHasData ? null : (
+            <p data-testid="tests-not-run" className="fx-quiet-line">
+              {t("shell.cards.tests.notRun")}
+            </p>
           )}
         </section>
         </div>
@@ -1785,37 +2206,43 @@ export function Inspector(props: InspectorProps): ReactElement {
         <MetricCard
           cardId="fx-providers"
           titleKey="shell.cards.providers.title"
-          subtitleKey="shell.cards.providers.subtitle"
           totalKey="shell.cards.providers.total"
           totalText={providersTotal}
           segments={[]}
           collapsed={providersCollapsed || !providersHasData}
           onToggle={onProvidersToggle}
+          icon="play"
+          hasData={providersHasData}
         />
         </div>
         <div style={{ order: localAiHasData ? 0 : 1 }}>
         <MetricCard
           cardId="fx-localai"
           titleKey="shell.cards.localai.title"
-          subtitleKey="shell.cards.localai.subtitle"
           totalKey="shell.cards.localai.total"
           totalText={localAiTotal}
           segments={[]}
           collapsed={localAiCollapsed || !localAiHasData}
           onToggle={onLocalAiToggle}
+          icon="mic"
+          hasData={localAiHasData}
         />
         </div>
         <div style={{ order: appsHasData ? 0 : 1 }}>
         <MetricCard
           cardId="fx-apps"
           titleKey="shell.cards.apps.title"
-          subtitleKey="shell.cards.apps.subtitle"
           totalKey="shell.cards.apps.total"
           totalText={appsTotal}
           segments={[]}
           collapsed={appsCollapsed || !appsHasData}
           onToggle={onAppsToggle}
+          icon="folder"
+          hasData={appsHasData}
         />
+        </div>
+        </>
+        ) : null}
         </div>
       </div>
     </aside>

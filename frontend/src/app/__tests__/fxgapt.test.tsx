@@ -353,7 +353,10 @@ describe("fxgapt F06 watcher tab on the real page", () => {
     fireEvent.change(screen.getByTestId("topbar-project"), {
       target: { value: "p1" },
     });
-    fireEvent.click(screen.getByTestId("topbar-watcher"));
+    // FXFACTS F15: the top bar carries no watcher link; the rail Watcher
+    // card holds the Open link.
+    fireEvent.click(await screen.findByTestId("rail-toggle-watcher"));
+    fireEvent.click(await screen.findByTestId("watcher-open"));
     expect(await screen.findByTestId("watcher-tab")).toBeTruthy();
     expect(screen.getByTestId("watcher-project").textContent).toBe("p1");
     expect(await screen.findByTestId("watcher-rule-cards")).toBeTruthy();
