@@ -2373,10 +2373,7 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
             for part in parts:
                 yield _run_event(
                     "delta", turn, task_id,
-                    "Part %s: %s [files: %s]"
-                    % (part["part_id"], part["goal"],
-                       ", ".join(_existing_plan_files(
-                           folder, part.get("files")))),
+                    _plan_part_line(part, folder),
                     {"run_id": run_id,
                      "part_id": part["part_id"]})
                 turn += 1
@@ -4629,6 +4626,23 @@ def _existing_plan_files(folder: Any, files: Any) -> list[str]:
         return kept
     except Exception:
         return []
+
+
+def _plan_part_line(part: Any, folder: Any) -> str:
+    """One plan line per part for the stream.
+
+    The ``[files: ...]`` marker keeps listing only files that exist (A5).
+    A part whose files are all still to be written names them as
+    ``planned: a, b`` outside that marker, so the plan never reads empty.
+    """
+    existing = _existing_plan_files(folder, part.get("files"))
+    head = "Part %s: %s" % (part["part_id"], part["goal"])
+    if existing:
+        return "%s [files: %s]" % (head, ", ".join(existing))
+    planned = [str(item) for item in (part.get("files") or []) if item]
+    if planned:
+        return "%s (planned: %s)" % (head, ", ".join(planned))
+    return "%s [files: ]" % (head,)
 
 
 def _deny_tool_id(project: Any, argv: Any) -> str:
