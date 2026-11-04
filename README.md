@@ -3,8 +3,92 @@
 ![Agent SI mark](src/agent_si/assets/mark_256.png)
 
 Agent SI is a desktop app that takes one task in plain words and returns a checked result with evidence.
-You describe the goal, the app plans the work, runs the checks, and a fresh audit gives the final verdict.
-It uses connected model providers for the work and keeps every run, decision, and audit record with the project.
+You describe the goal; the app plans the work with a team of model agents, runs the checks, and a fresh auditor gives the verdict.
+Every run, decision and audit record stays with the project in a local data folder.
+
+## Quick start (Windows, from source)
+
+This checkout runs the whole app. You need: Windows 10 or 11, 64-bit; Python 3.13 or newer (the
+`requires-python` floor in `pyproject.toml`); Node.js with npm (the web UI build scripts in
+`frontend/package.json`); and the Microsoft Edge WebView2 runtime for the native window (without it the
+app opens in your default browser instead).
+
+In PowerShell, in the checkout root:
+
+```powershell
+py -3.13 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\python.exe -m pip install uvicorn
+npm --prefix frontend install
+npm --prefix frontend run build
+$env:AGENT_SI_DATA_DIR = "$PWD\data"
+.\.venv\Scripts\python.exe -m agent_si.sidecar
+```
+
+Each step is checked against this repo:
+
+- `npm --prefix frontend run build` is the `build` script of `frontend/package.json`; it writes the web
+  UI to `frontend/dist`, which the sidecar serves. Without that build the window answers
+  "Agent SI web UI is not staged: the web tree holds no index.html".
+- `uvicorn` is a separate install on purpose: `src/agent_si/sidecar.py` imports it when it starts, and
+  `pyproject.toml` does not list it as a dependency yet.
+- `AGENT_SI_DATA_DIR` is the data folder. A source checkout has no default data folder (only the
+  packaged exe falls back to a `data` folder beside itself), and a blank value fails loudly instead of
+  falling back silently.
+- Start the app with `python -m agent_si.sidecar`, not with the `agent-si` console script: that script
+  points at the app factory `agent_si.backend.app:create_app`, which builds the app object and exits.
+
+The app serves on loopback (`http://127.0.0.1:<port>/`) and opens its window, or your default browser
+when no window is available. Closing the window stops the app. On a fresh profile the first screen is
+the guided first run at `/firstrun`.
+
+Optional checks, also from this repo:
+
+```powershell
+npm --prefix frontend run check
+npm --prefix frontend test
+```
+
+The backend suite runs with pytest (settings in `pytest.ini`, including the 120 s per-test timeout).
+pytest is not among the runtime dependencies in `pyproject.toml`, so install it in the same venv first:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install pytest pytest-timeout
+.\.venv\Scripts\python.exe -m pytest
+```
+
+## Two ways to run a model
+
+The app does the work with a model you connect. There are two real options; either one is enough.
+
+### Option A: hosted Meta API key (Muse Spark)
+
+1. Open Settings -> Models and press Connect on the Meta row.
+2. Paste your Meta API key (the dialog hint reads "Key from your Meta dashboard."), press Check, then
+   Save. Only a checked key is stored; a refused key stores nothing and keeps the old working key.
+3. This build's Meta catalogue holds `meta/muse-spark-1.3-contributor`, with a 1,048,576-token context
+   window in the shipped model knowledge base. Only ticked models reach Auto, the role pools and the
+   chat picker.
+
+### Option B: fully local with Ollama and Meta's open model Muse Glimmer
+
+1. Install Ollama for Windows from ollama.com (an outside download; nothing in this repo installs it).
+2. Pull the model in PowerShell:
+
+   ```powershell
+   ollama pull muse-glimmer:30b
+   ```
+
+3. Start the app and open Settings -> Local LLM. The Ollama row shows `http://localhost:11434`; press
+   Connect there. Local rows need no key ("Local server: usually no key is needed."); once connected
+   the row reads "Connected Ollama, N models."
+4. Pick `muse-glimmer:30b` under Local models and press Use for agents: the app pins the worker role to
+   that model, so routing, checks and audit work exactly as with a cloud model.
+5. Real need: about 18 GB of free disk for the 30B model. On 8 GB of video memory it runs split with
+   the CPU and is slow; a smaller local model or the hosted key is the fast path.
+
+The same Local LLM page also lists LM Studio (`http://localhost:1234/v1`), and Settings -> Models can
+connect any OpenAI-compatible server: that dialog asks for the server's Base URL.
 
 ## Requirements
 
@@ -71,11 +155,11 @@ hashes match.
 The app opens a first-run guide with four steps. The guide reads its state from the server, never from local guesses. A step counts as done only when the server confirms it.
 
 1. Connect a provider. The guide shows the provider rows and a Connect button for each. The Next button stays disabled until the server reports at least one connected provider. A Skip control moves on without connecting: the guide still finishes, but the chat waits for a provider (it shows "No model bound yet." with a link to Settings -> Models, and the status reads Blocked until you connect).
-2. One-click team. Enter a team name and save. The app creates or reuses a project and saves Automatic for every role. Next moves on with or without saving.
-3. Project and folder. Enter a folder value, optionally use Choose folder to pick it with the system dialog, then Create. The app creates the project through the real project service.
-4. First task. Enter a task title and Create. The app creates the task through the real task service and shows the created task. The Continue control finishes the guide and opens the chat with the task title ready.
+2. Create your team in one click. Enter a team name and save. The app creates or reuses a project and saves Automatic for every role. Next moves on with or without saving.
+3. Choose a project folder. Enter a folder value, optionally use Choose folder to pick it with the system dialog, then Create. The app creates the project through the real project service.
+4. Run your first task. Enter a task title and Create. The app creates the task through the real task service and shows the created task. The Continue control finishes the guide and opens the chat with the task title ready.
 
-The last step also shows an optional quiet list: local LLM, watcher preset, automations, and knowledge bases. Each can be skipped.
+The last step also shows an optional quiet list: Local LLM, Watcher preset, Automations, and Knowledge bases. Each can be skipped.
 
 To open the guide again, go to `/firstrun`.
 
@@ -89,11 +173,12 @@ Go to Settings -> Models, or use the Setup wizard on the first-run screen.
 
 Search filters the list by provider or model name. Model checkboxes are enabled only when the provider is connected. An optional setup wizard, role pools, and a chat-model picker are on the same page.
 
-The connect dialog shows the expected key format, and a key that does not fit shows "This key does not match the expected format." before you save (a warning only). Connecting itself is two steps: paste the key, press Check, then Save. Check tries the key against the live provider without storing anything: a good key answers "Key checked. Save to connect." and enables Save (local providers check at once, with no network). A wrong key answers "The provider refused this key. Paste the full key again." and nothing is stored — a failed replace keeps the old working key; an unreachable provider answers "Could not reach the provider.". Save stores the checked key (the server checks once more first) and only then reports "Connected {label}. Reference saved."; the local reference copy is written only after the server answers.
+The connect dialog shows the expected key format, and a key that does not fit shows "This key does not match the expected format." before you save (a warning only). Connecting itself is two steps: paste the key, press Check, then Save. Check tries the key against the live provider without storing anything: a good key answers "Key checked. Save to connect." and enables Save (local providers check at once, with no network). A wrong key answers "The provider refused this key. Paste the full key again." and nothing is stored — a failed replace keeps the old working key; an unreachable provider answers "The provider is slow or unreachable. Your key is saved. Press Connect again.". Save stores the checked key (the server checks once more first) and only then reports "Connected {label}."; the local reference copy is written only after the server answers.
 
 Model checkboxes switch models on and off for the team: only ticked models reach Auto, the role pools, and the chat picker. A fresh connect ticks only the default model. On the project Models route a team quick-fix card can apply the routing's suggested binding (Accept) or drop it (Dismiss).
 
-Supported providers include a hosted Meta option, OpenAI, Anthropic, and local servers for local models.
+Supported providers include hosted Meta (Muse Spark 1.3), OpenAI, Anthropic, and local servers for
+local models (Ollama, LM Studio, any OpenAI-compatible server).
 
 ## Keys: Windows credential store only
 
@@ -126,7 +211,7 @@ Stop: the top bar has Stop all. Stopping is a two-step control and also answers 
 - Unsigned build: SmartScreen warns. Verify hashes first.
 - WebView2 is required for the desktop window. Without it the app shows the download notice and falls back to the browser.
 - The folder picker needs a native window. Where no native dialog exists, the Choose control hides itself instead of failing.
-- Local models need a running local server on the loopback address: Ollama at localhost:11434, LM Studio at localhost:1234/v1, any OpenAI-compatible server at localhost:8080/v1. If none answers, local checks report not configured.
+- Local models need a running local server on the loopback address: Ollama at localhost:11434, LM Studio at localhost:1234/v1, and any OpenAI-compatible server at the Base URL you give it. Settings -> Local LLM says "Local server is not running. Start Ollama first, then Check again." when nothing answers, and local checks elsewhere report not configured.
 - Budget starts at USD 5.00 per project with a soft limit of 4.00 and a hard limit of 5.00. When the budget is exhausted, new work is blocked with a plain message.
 - Some screens show empty or unknown states until the server has records. The app never invents numbers.
 
