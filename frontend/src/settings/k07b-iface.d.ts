@@ -101,6 +101,7 @@ export type LocaleKey =
   | 'chat.run.noModelLine'
   | 'chat.run.noProviderLine'
   | 'chat.run.stopped'
+  | 'chat.run.stoppedByUser'
   | 'chat.stream.offline'
   | 'chat.stream.spinner'
   | 'chat.stream.timestamp'

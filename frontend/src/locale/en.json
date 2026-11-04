@@ -117,7 +117,8 @@
       "emptyPlanExample": "Add a contact page with a test.",
       "noModelLine": "{provider} has no model chosen",
       "noProviderLine": "Connect a provider first",
-      "stopped": "Stopped."
+      "stopped": "Stopped.",
+      "stoppedByUser": "Stopped by you. Files written so far are kept."
     },
     "stream": {
       "offline": "Connection lost. Reconnecting.",

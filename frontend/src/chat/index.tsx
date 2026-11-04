@@ -744,6 +744,9 @@ export function planChangedLine(text: string): string | null {
   );
 }
 
+/** Z5: the engine summary line of a run the user stopped (Stop all). */
+export const RUN_STOPPED_MARKER = "run stopped: user stop";
+
 /** FXANSWER: the server marker for a run that ended as a plain answer
 (no parts, no build). The visible reply is the answer text itself. */
 export const PLAIN_ANSWER_MARKER = "run answered: plain answer, no parts";
@@ -1053,7 +1056,12 @@ export function EngineTurnView(props: {
   const costNote = costKnown(props.text) ? "" : ", cost not known";
   // FXANSWER item 4: a stopped run says Stopped, never Failed, never a
   // parts verdict. The Details disclosure below stays as it is.
-  const stoppedLine = pt("chat.run.stopped", "Stopped.");
+  const stoppedLine = props.text.includes(RUN_STOPPED_MARKER)
+    ? pt(
+        "chat.run.stoppedByUser",
+        "Stopped by you. Files written so far are kept.",
+      )
+    : pt("chat.run.stopped", "Stopped.");
   // FXDENYLINE: a stopped run that was denied keeps the real reason
   // (what was refused), not the bare Stopped line.
   const verdict =
@@ -1749,6 +1757,21 @@ function startChatRun(
         if (ranEngine) {
           engineTurnStatus.set(assistantId, "stopped");
         }
+        void recordTurnBestEffort(projectId, text, answer, {
+          status: "stopped",
+          run_id: runId,
+          error_code: "STOPPED",
+          executed: ranEngine,
+        });
+      } else if (answer.includes(RUN_STOPPED_MARKER)) {
+        // Z5: Stop all ends the run with the engine line "run stopped:
+        // user stop" and a cancelled event (no client abort). It is a
+        // stop by the user: stored stopped, never the no-parts line,
+        // never the generic error.
+        patchChatMessage(key, assistantId, { final: false });
+        stoppedAssistants.add(assistantId);
+        engineTurnStatus.set(assistantId, "stopped");
+        setChatHealth(key, "ok");
         void recordTurnBestEffort(projectId, text, answer, {
           status: "stopped",
           run_id: runId,
