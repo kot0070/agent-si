@@ -920,14 +920,9 @@ export function engineVerdictLine(
   summary: EngineSummary,
   costNote = "",
 ): string {
-  // FXASK A7: a held run waits, never Done, never a 0-parts line.
-  if (summary.held !== null) {
-    return pt(
-      "chat.permission.waitingHold",
-      "Waiting for your permission to run {command}.",
-      { command: summary.held },
-    );
-  }
+  // FXDENYLINE: a denied run reads its REAL end state (Stopped), never a
+  // stale Waiting line: the deny epilogue lands on text that still holds
+  // the earlier hold line, so denied wins over held.
   // FXASK A3: a denied install closes Stopped with what was refused
   // and why (nothing was installed), never Done, never 0-parts.
   if (summary.denied !== null) {
@@ -935,6 +930,14 @@ export function engineVerdictLine(
       "chat.permission.deniedRun",
       "Stopped: you denied {command}. Nothing was installed.",
       { command: summary.denied },
+    );
+  }
+  // FXASK A7: a held run waits, never Done, never a 0-parts line.
+  if (summary.held !== null) {
+    return pt(
+      "chat.permission.waitingHold",
+      "Waiting for your permission to run {command}.",
+      { command: summary.held },
     );
   }
   if (summary.answer !== null && summary.answer !== "") {
@@ -1005,8 +1008,10 @@ export function EngineTurnView(props: {
   // FXANSWER item 4: a stopped run says Stopped, never Failed, never a
   // parts verdict. The Details disclosure below stays as it is.
   const stoppedLine = pt("chat.run.stopped", "Stopped.");
+  // FXDENYLINE: a stopped run that was denied keeps the real reason
+  // (what was refused), not the bare Stopped line.
   const verdict =
-    props.status === "stopped"
+    props.status === "stopped" && summary.denied === null
       ? stoppedLine
       : engineVerdictLine(summary, costNote);
   // R05: the disclosure collapses only recognised engine logs. Plain
