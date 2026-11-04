@@ -9,8 +9,19 @@ Copies of the real proof files from the build, with local paths, machine names a
 | [team-on-team-off-results.md](team-on-team-off-results.md) | The log lines with the Team On and Team Off results on the local model (24 min 13 s and 17 min 50 s, both success), a later Team On run with the token split per role, and two runs in a row (11.2 and 8.6 minutes). |
 | [clean-install.md](clean-install.md) | The README Quick start run on a fresh clone: every step exited 0, the app answered 200 on `/firstrun`, every README link resolved. The first-run screen was not checked by eye in that test. |
 | [release-hashes.md](release-hashes.md) | Sizes and SHA-256 hashes of the installer and the portable zip, the commit they were built from, the smoke checks, and the zip content scan. |
-| [final-gate-summary.md](final-gate-summary.md) | The full gate on the integration build: backend tests (370 files), type check, frontend tests (1,343 passed), web build. It also shows what failed: the stub scan reported 2 rows, and one function has no code-level test. Kept as written. |
+| [final-gate-summary.md](final-gate-summary.md) | The full gate on the integration build: backend tests (370 files), type check, frontend tests (1,343 passed), web build. It also shows two flagged lines: the stub scan reported 2 rows, and one function is listed as having no code-level test. Kept as written, and [explained below](#reading-the-two-flagged-lines). |
 
 How to read them: each file was written during the build, not after it. Where a test could not be run, the file says so.
+
+## Reading the two flagged lines
+
+The gate summary is kept as the gate wrote it. Two of its lines look worse than they are, so here is what each one means.
+
+**Stub scan: FAIL, 2 rows.** Both rows are still in the release code. Neither changes what the app does, and the same line reports 0 reachable stubs. I left them because fixing them would mean a new build of the released app with no change in behaviour.
+
+- `frontend/src/kb/DetachControl.tsx:4`: the scan matched the word "fake" in a code comment.
+- `src/agent_si/backend/app.py:4998`: an unused import of a file that only holds interface shapes. Nothing calls it.
+
+**F08: no code-level test.** This is a limit of the checker, not a missing test. F08 is the provider catalog: connect with the key only. The check only looks for the literal label `F08`, and it only reads the first 400 test files ([`all_test_paths[:400]`](../../tools/build_ops/int_gate.py)), while the build has about 650. The one test file with that label, `fxmodal.test.tsx`, sits past that limit. The tests for this function carry other names, for example `fxconnect.test.tsx`, `ProvidersPage.test.tsx` and `firstrun_served.test.tsx`, and the same gate ran them with no red. This check never fails the gate on its own.
 
 More about how the app was built: [../HOW_IT_WAS_BUILT.md](../HOW_IT_WAS_BUILT.md). Screenshots with captions: [../EVIDENCE.md](../EVIDENCE.md).

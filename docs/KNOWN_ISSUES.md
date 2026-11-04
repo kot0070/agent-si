@@ -4,7 +4,7 @@ The current picture on November 4, 2026. The defect ledger in [How this was buil
 
 ## What was checked on the release code
 
-- Full test gate: 370 Python test files with no red, plus the frontend tests, type check and build, on the commit just before the small packaging and README fix in this release.
+- Full test gate: 370 Python test files with no red, plus the frontend tests, type check and build, on the commit just before the small packaging and README fix in this release. The same gate shows FAIL on its stub scan (2 rows) and one listed coverage gap. Neither is a fault in how the app works: [what they mean](evidence/README.md#reading-the-two-flagged-lines).
 - Clean install from the README, on an empty folder.
 - Installer and portable zip: installed, started, first screen answered.
 - A Team On run on Muse Glimmer with only loopback network connections seen.
