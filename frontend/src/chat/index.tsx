@@ -814,9 +814,13 @@ export function summarizeEngineTurn(
     if (part !== null && part[1] !== undefined && part[2] !== undefined) {
       verdicts.set(part[1].trim(), part[2].toUpperCase() === "PASS");
     }
-    for (const filesMatch of line.matchAll(
-      /\[files:\s*([^\]]+)\]/gi,
-    )) {
+    // PLANB V2f: a part whose files do not exist yet is announced as
+    // "(planned: a, b)" (L5); those names count as the run's files too.
+    const planned = /^Part\s+[^:]+:.*\(planned:\s*([^)]+)\)/i.exec(line);
+    for (const filesMatch of [
+      ...line.matchAll(/\[files:\s*([^\]]+)\]/gi),
+      ...(planned === null ? [] : [planned]),
+    ]) {
       const listed = filesMatch[1];
       if (listed === undefined) {
         continue;
