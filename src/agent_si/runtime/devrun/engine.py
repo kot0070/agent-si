@@ -3009,8 +3009,14 @@ def _director_prompt(message: str, history: str = "",
         "Use the project's own test command when it exists (package.json "
         "scripts, the listed test files); never invent wrapper scripts. "
         "Every check must be able to FAIL when the goal is not met: a "
-        "word search in a file is no check. A small fix is one part, "
-        "and that part runs the tests. When the task needs packages "
+        "word search in a file is no check. A check runs the project's "
+        "tests or program and reads the real result; never search a file "
+        "for an implementation detail (for example module.exports: the "
+        "project's package.json may use ES modules, so a correct file "
+        "would fail that search), and never weaken a check that a "
+        "behaviour test needs. Plan ONE part unless the task names "
+        "separate deliverables that need separate steps. A small fix is "
+        "one part, and that part runs the tests. When the task needs packages "
         "installed, plan an install part whose check reads the real "
         "result (for example a check that runs the installed tool or "
         "reads the real lock file), never a placeholder.%s" % (
@@ -4467,6 +4473,13 @@ def _worker_prompt(spec: dict, message: str, attempt: int,
                  "Auditor reasons: %s. Fix the part." % (
                      " | ".join(failing) or "no output",
                      " | ".join(reasons) or "no reason"))
+        try:
+            quoted = str(last_fail or "").strip()
+        except Exception:
+            quoted = ""
+        if quoted:
+            head += (" Failing check and its exact output: %s. Make "
+                     "that check pass." % (quoted[:2000],))
         try:
             known = [str(path) for path in (prior_files or [])
                      if str(path or "").strip()]
