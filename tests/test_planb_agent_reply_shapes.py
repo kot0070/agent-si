@@ -47,3 +47,20 @@ def test_proper_shape_unchanged():
 def test_unknown_or_ambiguous_shapes_still_refused(bad):
     with pytest.raises(protocol.AgentError):
         protocol.parse_agent_reply(_reply([bad]))
+
+
+def test_type_key_instead_of_action_is_repaired():
+    out = protocol.parse_agent_reply(_reply(
+        [{"type": "write_file", "path": "add.js", "content": "x"},
+         {"type": "run", "argv": ["npm", "test"]}]))
+    assert out["actions"] == [
+        {"action": "write_file", "path": "add.js", "content": "x"},
+        {"action": "run", "argv": ["npm", "test"]}]
+
+
+def test_type_key_with_unknown_name_or_with_action_still_refused():
+    with pytest.raises(protocol.AgentError):
+        protocol.parse_agent_reply(_reply([{"type": "delete_file", "path": "a"}]))
+    out = protocol.parse_agent_reply(_reply(
+        [{"action": "read_file", "type": "x", "path": "a"}]))
+    assert out["actions"][0]["action"] == "read_file"

@@ -401,6 +401,10 @@ def _flatten_wrapped_action(action: dict[str, Any]) -> dict[str, Any]:
     of words for "run" becomes argv, a string value becomes the path).
     Anything else is returned unchanged and fails the normal check.
     """
+    if "action" not in action and action.get("type") in _AGENT_ACTION_NAMES:
+        fixed = {key: val for key, val in action.items() if key != "type"}
+        fixed["action"] = action["type"]
+        return fixed
     if "action" in action or len(action) != 1:
         return action
     name, value = next(iter(action.items()))
