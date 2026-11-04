@@ -156,7 +156,8 @@ describe("FXVIEWS tokens tab", () => {
       </ApiClientProvider>,
     );
     const row = await screen.findByTestId("tokens-row-0");
-    expect(row.textContent).toContain("worker");
+    // FXFACTS F3: role names read through the locale.
+    expect(row.textContent).toContain("Worker");
     expect(row.textContent).toContain("mod-w");
     expect(row.textContent).toContain("42");
     expect(row.textContent).not.toContain("fxdevrun:");

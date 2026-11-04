@@ -327,7 +327,8 @@ describe("fxwalk1 screens over the real app", () => {
         ],
       }),
     );
-    renderAppAt("/settings/models");
+    // FXFACTS F7: the chat model select lives on the routing tab.
+    renderAppAt("/settings/routing");
     const picker = await screen.findByTestId("chat-model-selector");
     await waitFor(() => {
       expect(
@@ -412,6 +413,8 @@ describe("fxwalk1 screens over the real app", () => {
   it("W19: the inspector apps metric renders the served card facts", async () => {
     renderAppAt("/");
     expect(await screen.findByTestId("chat-prompt")).toBeTruthy();
+    // FXFACTS F10: the apps card lives in More.
+    fireEvent.click(await screen.findByTestId("rail-more-toggle"));
     const metric = await screen.findByTestId("kit-metric-fx-apps");
     await waitFor(() => {
       expect(metric.textContent).toContain("2");
@@ -426,7 +429,9 @@ describe("fxwalk1 screens over the real app", () => {
   });
 
   it("W20: the providers surface renders over the facade-backed endpoint", async () => {
-    renderAppAt("/settings/models");
+    // FXFACTS F7: the chat model select lives on the routing tab; the
+    // providers surface still reads the facade endpoint there.
+    renderAppAt("/settings/routing");
     expect(await screen.findByTestId("chat-model-selector")).toBeTruthy();
     expect(
       calls.some(

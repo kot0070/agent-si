@@ -160,6 +160,16 @@ function readStatusHuman(row: PartRow): unknown {
   return (row as unknown as Record<string, unknown>).status_human;
 }
 
+// FXDESIGN8 short model name: the registry tail after the last slash or
+// colon (provider prefixes never render in the one-line row).
+function shortModelName(value: string): string {
+  const afterSlash = value.split("/");
+  const tail = afterSlash[afterSlash.length - 1] ?? value;
+  const afterColon = tail.split(":");
+  const head = afterColon[afterColon.length - 1] ?? tail;
+  return head === "" ? value : head;
+}
+
 // FXLOOK D5: a human name for a served agent id when no role rides the
 // row (raw ids never reach the summary line).
 function prettifyAgentId(agent: string): string {
@@ -170,16 +180,6 @@ function prettifyAgentId(agent: string): string {
   return words
     .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
     .join(" ");
-}
-
-// FXDESIGN8 short model name: the registry tail after the last slash or
-// colon (provider prefixes never render in the one-line row).
-function shortModelName(value: string): string {
-  const afterSlash = value.split("/");
-  const tail = afterSlash[afterSlash.length - 1] ?? value;
-  const afterColon = tail.split(":");
-  const head = afterColon[afterColon.length - 1] ?? tail;
-  return head === "" ? value : head;
 }
 
 function readTaskStatus(status: string): string {
@@ -1155,7 +1155,8 @@ export function Inspector(props: InspectorProps): ReactElement {
                     ? shortModelName(modelRaw)
                     : null;
                 // FXLOOK D5: the full model id rides the summary
-                // tooltip (title) and the details row below.
+                // tooltip (title) and the details row below; FXFACTS F14
+                // also shows the short name in the line.
                 const stepRaw = readExtra(row, "step");
                 const stepKnown =
                   typeof stepRaw === "number" &&
@@ -1173,10 +1174,6 @@ export function Inspector(props: InspectorProps): ReactElement {
                       <summary
                         data-testid={`team-line-${row.agent}`}
                         className="fx-team-line"
-                        // FXLOOK D5 + FXFACTS F14: the summary reads human —
-                        // role plus live status and the short model; never
-                        // the raw agent id or the full model id (the full
-                        // model rides the tooltip).
                         title={
                           typeof modelRaw === "string" && modelRaw !== ""
                             ? modelRaw
@@ -1187,12 +1184,6 @@ export function Inspector(props: InspectorProps): ReactElement {
                           {roleKnown
                             ? readRoleText(roleRaw)
                             : prettifyAgentId(row.agent)}
-                          {", "}
-                          {resolveStatusHuman(
-                            readStatusHuman(row),
-                            row.status,
-                            locale,
-                          )}
                         </span>
                         {modelShort === null ? null : (
                           <span
@@ -1210,33 +1201,15 @@ export function Inspector(props: InspectorProps): ReactElement {
                           data-testid={`team-status-${row.agent}`}
                           className="fx-team-field"
                         >
-                          {t(statusHumanKey(row.status))}
+                          {readStatusHuman(row) === undefined
+                            ? t(statusHumanKey(row.status))
+                            : resolveStatusHuman(
+                                readStatusHuman(row),
+                                row.status,
+                                locale,
+                              )}
                         </span>
                         {item.running ? <Spinner /> : null}
-                        {stepKnown ? (
-                          <span className="fx-team-field">
-                            {t("shell.cards.team.step")}{": "}
-                            {String(stepRaw)}
-                          </span>
-                        ) : null}
-                        {entry.attempts > 1 ? (
-                          <span
-                            data-testid={`team-attempts-${row.agent}`}
-                            className="fx-team-field"
-                          >
-                            {t("projectView.attempts", {
-                              count: entry.attempts,
-                            })}
-                          </span>
-                        ) : null}
-                        {place === "UNKNOWN" ? null : (
-                          <span
-                            data-testid={`team-place-${row.agent}`}
-                            className="fx-place-badge"
-                          >
-                            {t(placementKey(place))}
-                          </span>
-                        )}
                       </summary>
                       <div className="fx-team-detail">
                         {/* FXLOOK D5: the raw agent id lives here in the

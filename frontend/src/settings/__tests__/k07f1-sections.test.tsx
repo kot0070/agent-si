@@ -34,7 +34,7 @@ function renderAppAt(route: string): void {
   );
 }
 
-describe.each(["models", "routing", "optimization"])(
+describe.each(["models", "optimization"])(
   "settings %s section mounts ProvidersPage",
   (section) => {
     it("renders provider cards plus the search box inside the section body", async () => {
@@ -49,6 +49,22 @@ describe.each(["models", "routing", "optimization"])(
     });
   },
 );
+
+describe("settings routing section mounts ProvidersPage in routing mode", () => {
+  it("renders role routing without provider cards or the search box", async () => {
+    // FXFACTS F7: routing is who is used for what; provider cards live
+    // on the models tab only.
+    renderAppAt("/settings/routing");
+    const body = await screen.findByTestId("settings-section-body");
+    expect(body).toBeTruthy();
+    const pickers = await screen.findAllByTestId("role-pool-picker");
+    expect(pickers.length).toBeGreaterThan(0);
+    expect(screen.queryByTestId("provider-card")).toBeNull();
+    expect(
+      screen.queryByPlaceholderText("Search providers or models"),
+    ).toBeNull();
+  });
+});
 
 describe("settings localbench section mounts LocalBenchTab", () => {
   it("renders the idle bench tab inside the section body", async () => {

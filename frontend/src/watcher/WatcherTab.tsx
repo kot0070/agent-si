@@ -3,8 +3,8 @@ import type { ReactElement } from "react";
 import { formatScreenTime, pluralUnit, t } from "../locale/index";
 import { ApiError, apiErrorLocaleKey, parseErrorBody } from "../api/errors";
 import { ErrorPanel } from "../ui/ErrorPanel";
-import { WatcherSections } from "./WatcherSections";
 import { humanRunRef } from "../projects/viewsApi";
+import { WatcherSections } from "./WatcherSections";
 import {
   RULE_CARDS,
   RULE_CARD_MODELS,

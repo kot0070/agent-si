@@ -124,9 +124,9 @@ describe("fxdesign1 stop status", () => {
         ),
     );
     renderApp(new FakeApiClient({ projects: [PROJECT], liveRows: liveRows() }));
+    // FXFACTS F12/F15: one click, one quiet locale status line.
     fireEvent.click(await screen.findByTestId("topbar-stop-all"));
-    fireEvent.click(screen.getByTestId("topbar-stop-all"));
-    expect((await screen.findByTestId("stop-all-result")).textContent).toBe(
+    expect((await screen.findByTestId("stop-all-result")).textContent).toContain(
       "Stopped 3",
     );
   });

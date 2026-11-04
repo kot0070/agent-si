@@ -68,6 +68,20 @@ afterEach(() => {
 });
 
 describe("fxpanel agents live compact fields", () => {
+  it("shows a spinner on the running row, none on ended rows", async () => {
+    // FXFACTS F9: one shared spinner while the row runs; gone at any end
+    // state. The fixture row above is RUNNING.
+    render(
+      <ApiClientProvider client={new HttpApiClient()}>
+        <AgentsLive projectId="p-1" />
+      </ApiClientProvider>,
+    );
+    const row = await screen.findByTestId("agent-row-fxp-1");
+    expect(
+      row.querySelector('[data-testid="agent-row-spin-fxp-1"]'),
+    ).not.toBeNull();
+  });
+
   it("shows every live field compactly with no slop styling", async () => {
     render(
       <ApiClientProvider client={new HttpApiClient()}>

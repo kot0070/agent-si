@@ -183,19 +183,20 @@ describe("fxdesign2 S2 kb facts table", () => {
 });
 
 describe("fxdesign2 S3 context card and project form locales", () => {
-  it("renders dedicated context lines with real locale strings, never garble keys", async () => {
+  it("renders a quiet dash for unknown counts, never garble keys", async () => {
     liveAgents = LIVE_UNKNOWN_COUNTS;
     renderAppAt("/projects");
-    const unknown = await screen.findByTestId("ctx-unknown");
-    expect(unknown.getAttribute("title")).toBe(t("shell.common.unknown"));
+    // FXFACTS F10: with no served token count the Context card stays
+    // closed on its quiet dash; nothing else renders.
+    const card = await screen.findByTestId("inspector-card-context");
+    expect(card.textContent).toContain("\u2014");
+    expect(card.textContent).not.toContain(t("shell.common.unknown"));
+    expect(card.textContent).not.toContain("Used");
+    expect(card.textContent).not.toContain("shell.cards");
+    expect(card.textContent).not.toContain("shell.common");
+    expect(screen.queryByTestId("rail-toggle-context")).toBeNull();
     expect(screen.queryByTestId("ctx-percent")).toBeNull();
     expect(screen.queryByTestId("ctx-window")).toBeNull();
-    const text = unknown.textContent ?? "";
-    expect(text).not.toContain(t("shell.common.unknown"));
-    expect(text).not.toContain("Used");
-    expect(text).not.toContain("/");
-    expect(text).not.toContain("shell.cards");
-    expect(text).not.toContain("shell.common");
     expect(t("shell.cards.context.percentValue", { value: "v" })).toContain("v");
     expect(t("shell.cards.context.windowValue", { value: "v" })).toContain("v");
   });
@@ -214,16 +215,16 @@ describe("fxdesign2 S3 context card and project form locales", () => {
     expect(formText).toContain("Обрати теку");
     expect(formText).not.toContain("Project name");
     expect(formText).not.toContain("Choose folder");
-    const unknown = await screen.findByTestId("ctx-unknown");
-    expect(unknown.getAttribute("title")).toBe(t("shell.common.unknown"));
-    expect(unknown.getAttribute("title")).toContain("НЕВІДОМО");
+    // FXFACTS F10: with no served token count the Context card stays
+    // closed on its quiet dash; nothing else renders.
+    const card = await screen.findByTestId("inspector-card-context");
+    expect(card.textContent).toContain("\u2014");
+    expect(card.textContent).not.toContain("НЕВІДОМО");
+    expect(card.textContent).not.toContain("Used");
+    expect(/[A-Za-z]/.test(card.textContent ?? "")).toBe(false);
+    expect(screen.queryByTestId("rail-toggle-context")).toBeNull();
     expect(screen.queryByTestId("ctx-percent")).toBeNull();
     expect(screen.queryByTestId("ctx-window")).toBeNull();
-    const text = unknown.textContent ?? "";
-    expect(text).not.toContain("НЕВІДОМО");
-    expect(text).not.toContain("Used");
-    expect(text).not.toContain("/");
-    expect(/[A-Za-z]/.test(text)).toBe(false);
   });
 });
 

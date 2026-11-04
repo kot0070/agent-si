@@ -301,7 +301,10 @@ describe('LocalBenchTab on the real settings page', () => {
 
 describe('localbench locale parity', () => {
   it('adds the same real-text keys in en and uk', () => {
-    expect(NEW_KEYS).toHaveLength(38);
+    // FXFACTS F11: five more keys (choose folder, scan hint, choose
+    // line, empty-with-folder line, scan error sentence).
+    // PLANB merge: R5 (FXROLEPICK) and F11 (FXFACTS) each added real-text keys.
+    expect(NEW_KEYS).toHaveLength(43);
     expect(Object.keys(UK_LOCALBENCH).sort()).toEqual(
       Object.keys(EN_LOCALBENCH).sort(),
     );

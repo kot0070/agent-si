@@ -148,7 +148,8 @@ describe("FXLOOK D5 team summary reads human", () => {
     expect(line.textContent).toContain("Director");
     expect(line.textContent).toContain("Running");
     expect(line.textContent).not.toContain("director-plan");
-    expect(line.textContent).not.toContain("muse-spark-1.3-contributor");
+    // FXFACTS F14: the line shows the short model name (this id has no prefix).
+    expect(line.textContent).toContain("muse-spark-1.3-contributor");
     expect(line.getAttribute("title")).toBe("muse-spark-1.3-contributor");
     const detail = await screen.findByTestId("team-detail-director-plan");
     expect(detail.textContent).toContain("director-plan");
@@ -160,6 +161,8 @@ describe("FXLOOK D5 watcher rail without a model", () => {
   it("reads plain not used yet, never UNAVAILABLE", async () => {
     stubServed(0);
     renderAppAt("/");
+    // FXFACTS F10: the watcher card is collapsed by default; open it.
+    fireEvent.click(await screen.findByTestId("rail-toggle-watcher"));
     const model = await screen.findByTestId("watcher-model");
     expect(model.textContent).toContain(t("watcher.tab.notUsedYet"));
     expect(model.textContent).not.toContain("UNAVAILABLE");

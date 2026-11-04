@@ -153,6 +153,17 @@ function renderChat(): void {
 }
 
 describe("fxask install-permission-asked-once dialog", () => {
+  it("waiting for a permission click shows the waiting line with no spin", async () => {
+    // FXFACTS F9: while the run waits on the permission click the chat
+    // shows "Waiting for your answer" and no spinner; the stop stays.
+    renderChat();
+    promptAndSend("please install the helper");
+    const dialog = await screen.findByTestId("permission-dialog");
+    expect(dialog).toBeTruthy();
+    expect(await screen.findByTestId("chat-waiting")).toBeTruthy();
+    expect(screen.queryByTestId("chat-spinner")).toBeNull();
+  });
+
   it("pending ask shows a dialog with the event tool id", async () => {
     renderChat();
     promptAndSend("please install the helper");

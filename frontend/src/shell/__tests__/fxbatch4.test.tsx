@@ -138,7 +138,8 @@ describe("fxbatch4 stop-all request body over the real App", () => {
       ).toBe(HEX_ID);
     });
     await armAndConfirmStopAll();
-    expect(screen.getByTestId("stop-all-result").textContent).toBe(
+    // FXFACTS F12/F15: one quiet locale status line (unit included).
+    expect(screen.getByTestId("stop-all-result").textContent).toContain(
       "Stopped 0",
     );
     expect(stopPosts()).toHaveLength(1);
@@ -152,7 +153,8 @@ describe("fxbatch4 stop-all request body over the real App", () => {
     renderApp(new FakeApiClient({ projects: [] }));
     expect(await screen.findByTestId("chat-prompt")).toBeTruthy();
     await armAndConfirmStopAll();
-    expect(screen.getByTestId("stop-all-result").textContent).toBe(
+    // FXFACTS F12/F15: one quiet locale status line (unit included).
+    expect(screen.getByTestId("stop-all-result").textContent).toContain(
       "Stopped 0",
     );
     expect(stopPosts()).toHaveLength(1);

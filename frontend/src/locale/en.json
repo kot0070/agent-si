@@ -109,7 +109,8 @@
       "deny": "Deny",
       "title": "Install permission",
       "waitingHold": "Waiting for your permission to run {command}.",
-      "why": "It installs packages the task needs to continue."
+      "why": "It installs packages the task needs to continue.",
+      "waiting": "Waiting for your answer"
     },
     "run": {
       "emptyPlan": "Nothing was built — the plan had no parts. Say what you want built, for example: “{example}”",
@@ -756,8 +757,8 @@
       "modelsEmpty": "No local models found in this folder yet.",
       "modelsTitle": "Local models",
       "needItNow": "Only to compare local models before a long run.",
-      "pathHint": "Folder with the benchmark cases.",
-      "pathLabel": "Benchmark folder",
+      "pathHint": "One directory level is listed.",
+      "pathLabel": "Folder with local models",
       "purpose": "Measure local models on this PC before using them.",
       "resultsEmpty": "No benchmark results yet.",
       "resultsTitle": "Results per model",
@@ -772,7 +773,12 @@
       "sourceRuntime": "Connected runtime: {label}",
       "statusComplete": "Done",
       "statusFailed": "Failed",
-      "title": "Local benchmark"
+      "title": "Local benchmark",
+      "chooseFolder": "Choose folder",
+      "scanHint": "Choose a folder first, then scan.",
+      "modelsChoose": "Choose a folder to list local models.",
+      "modelsEmptyPath": "No models in {path}: the scan lists one directory level.",
+      "scanError": "Scan failed: {reason}."
     },
     "models": {
       "needItNow": "Only to review or change the model list.",

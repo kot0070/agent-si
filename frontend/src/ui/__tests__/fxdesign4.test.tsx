@@ -191,6 +191,7 @@ describe("fxdesign4 top badge truth", () => {
 
 describe("fxdesign4 stop-all carries actor user with a human result", () => {
   it("posts actor user and shows the stopped count", async () => {
+    // FXFACTS F12: one click stops at once, no confirmation dialog.
     stubFetch({
       accepted: true,
       stopped_count: 2,
@@ -198,7 +199,6 @@ describe("fxdesign4 stop-all carries actor user with a human result", () => {
     });
     renderTopBar(new FakeApiClient({}));
     fireEvent.click(await screen.findByTestId("topbar-stop-all"));
-    fireEvent.click(screen.getByTestId("topbar-stop-all"));
     const result = await screen.findByTestId("stop-all-result");
     expect(result.textContent).toContain("Stopped 2");
     expect(result.textContent).not.toContain("200");
@@ -210,7 +210,6 @@ describe("fxdesign4 stop-all carries actor user with a human result", () => {
     stubFetch({ accepted: false, stopped_count: 0, reason: "actor refused" });
     renderTopBar(new FakeApiClient({}));
     fireEvent.click(await screen.findByTestId("topbar-stop-all"));
-    fireEvent.click(screen.getByTestId("topbar-stop-all"));
     const result = await screen.findByTestId("stop-all-result");
     expect(result.textContent).toContain("Refused");
     expect(result.textContent).toContain("actor refused");

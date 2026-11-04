@@ -3,7 +3,7 @@
 // under prefers-reduced-motion.
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 // @ts-expect-error node types are unavailable in the frontend tsconfig
 import { readFileSync } from 'node:fs';
@@ -137,6 +137,8 @@ describe('J12 contrast, dot labels, reduced motion', () => {
         <RouterProvider router={router} />
       </ApiClientProvider>,
     );
+    // FXFACTS F10: Context renders closed; open it first.
+    fireEvent.click(await screen.findByTestId('rail-toggle-context'));
     const legend = await screen.findByTestId('ctx-legend');
     const dots = legend.querySelectorAll('.fx-legend-dot');
     expect(dots.length).toBeGreaterThan(0);

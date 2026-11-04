@@ -401,14 +401,17 @@ describe("fxdesign7 inspector deferred", () => {
     await router.navigate("/projects/p-1/overview");
   }
 
-  it("no live rows render one quiet no-usage line, never Unknown repeats", async () => {
+  it("no live rows render one quiet dash with no toggle, never Unknown repeats", async () => {
     stubInspector({ agents: [] });
     renderInspectorAt();
-    const empty = await screen.findByTestId("context-empty");
-    expect(empty.textContent).toBe(t("shell.cards.context.noUsage"));
-    expect(empty.textContent).not.toContain(
+    // FXFACTS F10: cards with no data stay closed with a quiet dash.
+    const card = await screen.findByTestId("inspector-card-context");
+    expect(card.textContent).toContain("—");
+    expect(card.textContent).not.toContain(
       t("shell.common.unknown"),
     );
+    expect(screen.queryByTestId("rail-toggle-context")).toBeNull();
+    expect(screen.queryByTestId("context-empty")).toBeNull();
     expect(screen.queryByTestId("ctx-bar")).toBeNull();
     expect(screen.queryByTestId("ctx-legend")).toBeNull();
   });
@@ -427,8 +430,11 @@ describe("fxdesign7 inspector deferred", () => {
   it("unknown counts collapse to one quiet line, legend only from data", async () => {
     stubInspector(LIVE_UNKNOWN);
     renderInspectorAt();
-    const unknown = await screen.findByTestId("ctx-unknown");
-    expect(unknown.textContent?.length).toBeGreaterThan(0);
+    // FXFACTS F10: with no served token count the card stays closed on
+    // its quiet dash; nothing else renders.
+    const card = await screen.findByTestId("inspector-card-context");
+    expect(card.textContent).toContain("—");
+    expect(screen.queryByTestId("rail-toggle-context")).toBeNull();
     expect(screen.queryByTestId("ctx-percent")).toBeNull();
   });
 
@@ -436,6 +442,8 @@ describe("fxdesign7 inspector deferred", () => {
     stubInspector(LIVE_KNOWN);
     const { router } = renderInspectorAt();
     await openProject(router);
+    // FXFACTS F10: the Watcher card renders closed; open it first.
+    fireEvent.click(await screen.findByTestId("rail-toggle-watcher"));
     const model = await screen.findByTestId("watcher-model");
     // FXZERO R4 extra gate: the rail names the exact served watcher
     // model (the one that answered), never a setting label.
@@ -459,6 +467,8 @@ describe("fxdesign7 inspector deferred", () => {
   it("metric cards keep a heading toggle", async () => {
     stubInspector(LIVE_KNOWN);
     renderInspectorAt();
+    // FXFACTS F10: metric cards live in More.
+    fireEvent.click(await screen.findByTestId("rail-more-toggle"));
     const toggle = await screen.findByTestId("kit-toggle-fx-tokens");
     expect(toggle.getAttribute("aria-expanded")).not.toBeNull();
   });

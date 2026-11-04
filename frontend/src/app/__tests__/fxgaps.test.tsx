@@ -156,11 +156,11 @@ describe("fxgaps F06 watcher control", () => {
     renderAppAt("/");
     expect(await screen.findByTestId("chat-prompt")).toBeTruthy();
     // FXFACTS F15: the top bar carries no watcher link; the rail Watcher
-    // card holds the Open link.
+    // card holds the Open link. FXFACTS F6a: the header names the project.
     fireEvent.click(await screen.findByTestId("rail-toggle-watcher"));
     fireEvent.click(await screen.findByTestId("watcher-open"));
     expect(await screen.findByTestId("watcher-tab")).toBeTruthy();
-    expect(screen.getByTestId("watcher-project").textContent).toBe("p-1");
+    expect(screen.getByTestId("watcher-project").textContent).toBe("n-1");
     expect(
       SEEN.some(
         (entry) => entry.url === "/api/v1/watcher/status?project_id=p-1",

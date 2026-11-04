@@ -256,12 +256,23 @@ describe("fxdesign3 S6 kb facts never show a bare enum", () => {
 
 describe("fxdesign3 S7 every option control has its label", () => {
   it("labels providers, role-pool and chat-model controls", async () => {
+    // FXFACTS F7: provider cards live on models; role-pool and chat-model
+    // controls live on routing. Both tabs keep every control labelled.
     renderAppAt("/settings/models");
     const cards = await screen.findAllByTestId("provider-card");
     expect(cards.length).toBeGreaterThan(0);
+    const modelControls = Array.from(
+      document.querySelectorAll('[data-testid="provider-card"] input'),
+    );
+    expect(modelControls.length).toBeGreaterThan(0);
+    for (const control of modelControls) {
+      expect(labelled(control)).toBe(true);
+    }
+    cleanup();
+    renderAppAt("/settings/routing");
     const pageControls = Array.from(
       document.querySelectorAll(
-        '[data-testid="provider-card"] input, [data-testid="role-pool-picker"] input, [data-testid="role-pool-picker"] select, [data-testid="chat-model-selector"] select',
+        '[data-testid="role-pool-picker"] input, [data-testid="role-pool-picker"] select, [data-testid="chat-model-selector"] select',
       ),
     );
     expect(pageControls.length).toBeGreaterThan(0);

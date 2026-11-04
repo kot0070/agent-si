@@ -114,6 +114,8 @@ describe('H6 results card folder', () => {
   it('shows the run folder path plus produced files and opens it', async () => {
     stub(true);
     renderInspector();
+    // FXFACTS F10: Results renders closed; open it first.
+    fireEvent.click(await screen.findByTestId('rail-toggle-results'));
     const folder = await screen.findByTestId('result-last-folder');
     expect(folder.textContent).toContain('runs');
     expect(folder.getAttribute('title')).toBe(FOLDER);
@@ -127,6 +129,8 @@ describe('H6 results card folder', () => {
   it('hides the Open folder button where the sidecar cannot open', async () => {
     stub(false);
     renderInspector();
+    // FXFACTS F10: Results renders closed; open it first.
+    fireEvent.click(await screen.findByTestId('rail-toggle-results'));
     const open = await screen.findByTestId('result-open-folder');
     fireEvent.click(open);
     await waitFor(() => {

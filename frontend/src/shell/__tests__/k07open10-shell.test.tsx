@@ -44,7 +44,10 @@ async function expectSingleTopBarWithStrip(): Promise<void> {
   const strip = screen.getByTestId("pairing-strip");
   expect(strip.tagName.toLowerCase()).toBe("div");
   expect(topbar.contains(strip)).toBe(true);
-  expect(strip.textContent).toContain(t("shell.topbar.watcher"));
+  // FXFACTS F15: the top bar carries no watcher word; the strip holds
+  // the placement badge only.
+  expect(screen.queryByTestId("topbar-watcher")).toBeNull();
+  expect(screen.queryByTestId("pairing-label")).toBeNull();
   const badge = strip.textContent ?? "";
   const badgeEl = screen.getByTestId("pairing-badge");
   expect(
@@ -67,7 +70,8 @@ describe("k07open10 shell strip M-R-UX-1", () => {
 });
 
 describe.each([
-  { path: "/settings", titleKey: SETTINGS_ROUTES[0]?.titleKey ?? "" },
+  // FXROLEPICK R6: /settings is the grouped index with its own title.
+  { path: "/settings", titleKey: "settings.index.title" },
   ...SETTINGS_ROUTES.map((route) => ({
     path: `/settings/${route.path}`,
     titleKey: route.titleKey,

@@ -22,6 +22,7 @@ import {
   resolveStatusHuman,
   shortenLiveRef,
 } from "./agentsApi";
+import { Spinner } from "../ui/Spinner";
 
 export interface AgentsLiveProps {
   projectId: string;
@@ -206,6 +207,9 @@ export function AgentsLive(props: AgentsLiveProps): ReactElement {
                   </span>
                 </span>
                 <div className="fx-live-status">
+                  {String(row.status).toUpperCase() === "RUNNING" ? (
+                    <Spinner testId={`agent-row-spin-${row.agent}`} />
+                  ) : null}
                   <span>
                     {resolveStatusHuman(readStatusHuman(row), row.status, locale)}
                   </span>

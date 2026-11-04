@@ -80,7 +80,12 @@ describe("fxdesign8 team-now finished rows", () => {
 
   it("shows the team empty line only when no rows are served", async () => {
     renderInspector(new FakeApiClient({ liveRows: [] }));
-    expect(await screen.findByTestId("team-empty")).toBeTruthy();
+    // FXFACTS F10: a row-less Team stays closed on its quiet dash with
+    // no toggle and no empty rows.
+    const card = await screen.findByTestId("inspector-card-team");
+    expect(card.textContent).toContain("—");
+    expect(screen.queryByTestId("rail-toggle-team")).toBeNull();
+    expect(screen.queryByTestId("team-empty")).toBeNull();
     expect(screen.queryByTestId("team-rows")).toBeNull();
   });
 });
