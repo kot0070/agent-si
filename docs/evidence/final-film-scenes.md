@@ -26,4 +26,6 @@ Video: https://youtu.be/Mf_OHejanns, 2:55, in the owner's voice. All 14 main fun
 | F14 Clean install | 2:41-2:48 | A second app window on an empty data folder: welcome screen, no project. | Live |
 | Closing | 2:48-2:55 | The project with its finished run. | Run result |
 
+The F04 run is sped up because Muse Glimmer is slow on my PC. On Muse Spark through the API the same small task took 204 s: [speed numbers](speed-spark-vs-glimmer.md).
+
 The F04 run is the one timed in [video-run-timing.md](video-run-timing.md). That file was written for an earlier 2:57 cut, so its scene times and speed-up factors differ from this table. Open issues seen while filming are in [Known issues](../KNOWN_ISSUES.md).

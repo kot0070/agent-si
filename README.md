@@ -18,9 +18,9 @@ Release page and hashes: https://github.com/kot0070/agent-si/releases/tag/v0.1.0
 ### After submission
 
 - **Submitted:** November 4, 2026, about 3:15 PM Texas time (CST, UTC-6). The deadline was 8 PM Texas time (9 PM ET).
-- **Last documentation update:** November 4, 2026, about 5:35 PM Texas time.
+- **Last documentation update:** November 4, 2026, about 5:52 PM Texas time.
 - **The app did not change after submission.** No later commit touches `src/`, `frontend/` or `packaging/`. The release files were published at 3:08 PM from commit `57295e8` and stay as they were.
-- **What was added:** evidence files and photos of the first passes, the page on controlling about 100 agents with the real build scripts (copied for reading, not part of the app), the requirement list, the video scene by scene, the last two days of the build, the exact record of the delete incident, real hashes in the release notes, and a fuller list of known issues. The old draft folder was removed, and two tests were updated so they no longer need it.
+- **What was added:** evidence files and photos of the first passes, the page on controlling about 100 agents with the real build scripts (copied for reading, not part of the app), the requirement list, the video scene by scene, the last two days of the build, the exact record of the delete incident, speed numbers for both Meta models, a full test report, real hashes in the release notes, and a fuller list of known issues. The old draft folder was removed, and two tests were updated so they no longer need it.
 
 Every change is in the [commit history](https://github.com/kot0070/agent-si/commits/main).
 
@@ -28,6 +28,7 @@ Every change is in the [commit history](https://github.com/kot0070/agent-si/comm
 
 - The app: the installer or the zip (Windows 10 or 11, 64-bit; no Python needed).
 - A model: a Meta Model API key, or Ollama with `muse-glimmer:30b` on your PC.
+- Speed: the same small task took 204 s on Muse Spark 1.3 through the API and 9 to 24 minutes on Muse Glimmer on my PC, which has 8 GB of video memory. The demo runs locally only because my bank blocked the Meta Model API billing on November 2: [speed numbers](docs/evidence/speed-spark-vs-glimmer.md).
 - Without either you can open the app and its screens only; it cannot run a task.
 
 ### What it looks like
@@ -186,7 +187,7 @@ pytest is not among the runtime dependencies in `pyproject.toml`, so install it 
 .\.venv\Scripts\python.exe -m pytest
 ```
 
-This also runs older test files in subfolders of `tests/`, and 11 of those tests currently fail: see [Known issues](docs/KNOWN_ISSUES.md).
+This runs every test in one process, including older test files in subfolders of `tests/`. On November 4 it gave 4,416 passed and 50 reds. None of the 50 is a confirmed defect in the app: 7 are outdated tests, 4 are not proven either way, and 39 pass when their file runs alone. Each one is listed in [the full test run](docs/evidence/full-test-run.md).
 
 ## Two ways to run a model
 
