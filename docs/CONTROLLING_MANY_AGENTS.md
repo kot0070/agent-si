@@ -1,6 +1,6 @@
 # How one person controlled this many agents
 
-I built Agent SI with many agents running at the same time. During those days I felt like the head of a big company with about a hundred staff, and it was stressful. At the measured peak, 101 Muse agents were live at once ([stress page](MUSE_CODE_STRESS_TEST.md)). This page is how I kept that under control, what held, and what failed. The numbers come from [How this was built](HOW_IT_WAS_BUILT.md) and the [stress page](MUSE_CODE_STRESS_TEST.md); I added none.
+I built Agent SI with many agents running at the same time. During those days I felt like the head of a big company with about a hundred staff, and it was stressful. When you run a hundred agents, you have no time for code or for tracking details by hand. You only control. The checking goes to other agents and to scripts, and what is left for you is to try the real app yourself. At the measured peak, 101 Muse agents were live at once ([stress page](MUSE_CODE_STRESS_TEST.md)). This page is how I kept that under control, what held, and what failed. The numbers come from [How this was built](HOW_IT_WAS_BUILT.md) and the [stress page](MUSE_CODE_STRESS_TEST.md); I added none.
 
 ## 1. The owner board: one screen for all agents
 
