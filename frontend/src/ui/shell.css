@@ -1096,6 +1096,16 @@ ul[data-testid="ctx-legend"].fx-legend {
   opacity: 0.75;
 }
 
+/* FXDESIGN9 D8: test counts read pass green, fail red (theme tokens,
+   calm in both themes); the label stays low-contrast, the value readable.
+   Lengths only, no colour names beyond the token pair. */
+.fx-pass {
+  color: var(--agent-si-chart-b);
+}
+.fx-fail {
+  color: var(--fx-danger);
+}
+
 /* Results / background: compact icon + name rows, quiet show-more. */
 .fx-result-list,
 .fx-bg-list {

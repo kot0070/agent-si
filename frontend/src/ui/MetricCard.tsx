@@ -90,7 +90,9 @@ export function MetricCard(
       />
       {expanded ? (
         <div>
-          <span>{total}</span>
+          {/* FXDESIGN9: one fact once only — the closed one-liner
+              already carries the total, so the open body holds just the
+              breakdown (subtitle, bar, legend, list). */}
           {subtitle === null ? null : (
             <p data-testid={`kit-sub-${props.cardId}`}>{subtitle}</p>
           )}

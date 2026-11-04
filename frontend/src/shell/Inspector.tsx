@@ -34,6 +34,12 @@ import {
 import { Icon } from "../ui/icons";
 import { Spinner } from "../ui/Spinner";
 import { remainingBudget } from "../projects/projectsApi";
+import {
+  readLatestPlan,
+  readLatestRun,
+  readTestsView,
+} from "../projects/projectsApi";
+import type { TestStatusRow } from "../projects/projectsApi";
 import { MetricCard } from "../ui/MetricCard";
 import { fetchAppsCard } from "../watcher/AppsCard";
 import type { AppsCardData } from "../watcher/AppsCard";
@@ -217,7 +223,14 @@ export function Inspector(props: InspectorProps): ReactElement {
   const [watcherStatus, setWatcherStatus] =
     useState<WatcherStatusData | null>(null);
   const [providers, setProviders] = useState<string[] | null>(null);
-  const [testRuns, setTestRuns] = useState<string | null>(null);
+  // FXDESIGN9: per-kind test counts of the last served plan (pass/fail
+  // per CODE/AI/HUMAN row; BLOCKED counts as fail, in-flight rows as
+  // neither). Null reads the short not-run line, never a raw plan id.
+  const [testKindCounts, setTestKindCounts] = useState<{
+    code: { pass: number; fail: number };
+    ai: { pass: number; fail: number };
+    human: { pass: number; fail: number };
+  } | null>(null);
   const [localModels, setLocalModels] = useState<string[] | null>(null);
   const [watchDecided, setWatchDecided] = useState<boolean | null>(null);
   const [journal, setJournal] = useState<WatcherJournalEntry[] | null>(null);
@@ -444,36 +457,43 @@ export function Inspector(props: InspectorProps): ReactElement {
         // FXCARDS C2: keep last good providers on a failed refresh.
       }
       try {
-        const planResponse = await fetch(
-          `/api/v1/teststage/plans/latest?project_id=${encodeURIComponent(target)}`,
-        );
-        if (!planResponse.ok) {
-          throw new Error(`no test plan: ${planResponse.status}`);
+        // FXDESIGN9: the Tests card counts the last plan by kind (CODE,
+        // AI, HUMAN) through the validated teststage readers: plans/latest,
+        // then runs/latest, then the tests-view rows. Pass is PASS; fail
+        // is FAIL or BLOCKED; any other row state counts as neither. A
+        // missing plan, run or view reads null (the short not-run line);
+        // a failed refresh keeps the last good counts. No plan or run id
+        // ever renders.
+        const plan = await readLatestPlan(target);
+        const run = await readLatestRun(target);
+        const view = await readTestsView(plan.plan_id, run.run_id);
+        const counts = {
+          code: { pass: 0, fail: 0 },
+          ai: { pass: 0, fail: 0 },
+          human: { pass: 0, fail: 0 },
+        };
+        const slots: Record<string, { pass: number; fail: number }> = {
+          CODE: counts.code,
+          AI: counts.ai,
+          HUMAN: counts.human,
+        };
+        for (const row of view.rows as TestStatusRow[]) {
+          const slot =
+            typeof row.kind === "string" ? slots[row.kind] : undefined;
+          if (slot === undefined) {
+            continue;
+          }
+          if (row.status === "PASS") {
+            slot.pass += 1;
+          } else if (row.status === "FAIL" || row.status === "BLOCKED") {
+            slot.fail += 1;
+          }
         }
-        const planBody = (await planResponse.json()) as Record<string, unknown>;
-        const planId = planBody["plan_id"];
-        const runResponse = await fetch(
-          `/api/v1/teststage/runs/latest?project_id=${encodeURIComponent(target)}`,
-        );
-        if (!runResponse.ok) {
-          throw new Error(`no test run: ${runResponse.status}`);
-        }
-        const runBody = (await runResponse.json()) as Record<string, unknown>;
-        const runId = runBody["run_id"];
         if (alive) {
-          setTestRuns(
-            typeof planId === "string" &&
-              planId !== "" &&
-              typeof runId === "string" &&
-              runId !== ""
-              ? `${planId} / ${runId}`
-              : typeof runId === "string" && runId !== ""
-                ? runId
-                : null,
-          );
+          setTestKindCounts(counts);
         }
       } catch {
-        // FXCARDS C2: keep last good test runs on a failed refresh.
+        // FXCARDS C2: keep last good test counts on a failed refresh.
       }
       try {
         const response = await fetch("/api/v1/local/models");
@@ -511,7 +531,7 @@ export function Inspector(props: InspectorProps): ReactElement {
       setApps(null);
       setAppsFailed(false);
       setProviders(null);
-      setTestRuns(null);
+      setTestKindCounts(null);
       setLocalModels(null);
       return () => {
         alive = false;
@@ -873,13 +893,15 @@ export function Inspector(props: InspectorProps): ReactElement {
   // total (the same doc the project Tokens tab reads, so the numbers are
   // one). Fallback to the runs-key sum only when telemetry has no row.
   // The runs-key (chat answers) sum renders as its own quiet line only
-  // when it differs from the telemetry total.
+  // when it differs from the telemetry total — and never as a repeat of
+  // the last-run row (FXDESIGN9: one fact once only).
   const projectTotal =
     modelTotal > 0 ? modelTotal : (projectRunsTotal ?? null);
   const chatDiffers =
     projectRunsTotal !== null &&
     projectTotal !== null &&
-    projectRunsTotal !== projectTotal;
+    projectRunsTotal !== projectTotal &&
+    (lastRunTokens === null || projectRunsTotal !== lastRunTokens);
   const tokenTotal = runLive ? liveTokenTotal : (projectTotal ?? liveTokenTotal);
   const tokensKnown =
     liveRows === null
@@ -976,7 +998,25 @@ export function Inspector(props: InspectorProps): ReactElement {
       : providers.length === 0
         ? t("shell.cards.providers.emptyLine")
         : providers.join(", ");
-  const testsTotal = testRuns ?? t("shell.cards.tests.emptyLine");
+  // FXDESIGN9: closed one-liner totals across kinds (pass green, fail
+  // red); the open body holds the per-kind rows. Null counts read the
+  // short not-run line through testsHasData below.
+  const testsPassTotal =
+    testKindCounts === null
+      ? 0
+      : testKindCounts.code.pass +
+        testKindCounts.ai.pass +
+        testKindCounts.human.pass;
+  const testsFailTotal =
+    testKindCounts === null
+      ? 0
+      : testKindCounts.code.fail +
+        testKindCounts.ai.fail +
+        testKindCounts.human.fail;
+  const testsTotal =
+    testKindCounts === null
+      ? t("shell.cards.tests.emptyLine")
+      : `${formatNumber(testsPassTotal)} ✓ ${formatNumber(testsFailTotal)} ✗`;
   const localAiTotal =
     localModels === null
       ? unknown
@@ -994,7 +1034,7 @@ export function Inspector(props: InspectorProps): ReactElement {
   // (flex order below); an empty card collapses to one line. Numbers are
   // untouched: only order plus the collapsed flag change here.
   const tokensHasData = tokensKnown;
-  const testsHasData = testRuns !== null;
+  const testsHasData = testKindCounts !== null;
   const budgetHasData = budget !== null;
   const providersHasData = (providers ?? []).length > 0;
   const localAiHasData = (localModels ?? []).length > 0;
@@ -1002,6 +1042,32 @@ export function Inspector(props: InspectorProps): ReactElement {
   // FXFACTS F10: token extras render only with the open card; the More
   // summary counts the metric cards holding data.
   const tokensOpen = tokensKnown && tokensHasData && !tokensCollapsed;
+  // FXDESIGN9: the Tests card opens through its own persisted flag, like
+  // the other metric cards.
+  const testsOpen = testsHasData && !testsCollapsed;
+  const testKindRows =
+    testKindCounts === null
+      ? []
+      : [
+          {
+            kind: "CODE",
+            labelKey: "shell.cards.tests.rowCode",
+            pass: testKindCounts.code.pass,
+            fail: testKindCounts.code.fail,
+          },
+          {
+            kind: "AI",
+            labelKey: "shell.cards.tests.rowAi",
+            pass: testKindCounts.ai.pass,
+            fail: testKindCounts.ai.fail,
+          },
+          {
+            kind: "HUMAN",
+            labelKey: "shell.cards.tests.rowHuman",
+            pass: testKindCounts.human.pass,
+            fail: testKindCounts.human.fail,
+          },
+        ];
   const moreDataCount = [
     tokensHasData,
     testsHasData,
@@ -1945,11 +2011,9 @@ export function Inspector(props: InspectorProps): ReactElement {
               </p>
             ) : (
               <>
-              <p data-testid="kit-sub-fx-budget">
-                {t("shell.cards.budget.subtitle")}
-              </p>
               {/* FXFACTS F10: the open body is a dl holding only figures
-                  the one-line summary lacks. */}
+                  the one-line summary lacks. The purpose sentence rides
+                  the title tooltip only (FXDESIGN9: never rendered text). */}
               <dl
                 data-testid="budget-facts"
                 className="fx-budget-facts"
@@ -2089,25 +2153,59 @@ export function Inspector(props: InspectorProps): ReactElement {
         )}
         </div>
         <div style={{ order: testsHasData ? 0 : 1 }}>
-        <MetricCard
-          cardId="fx-tests"
-          icon="file"
-          titleKey="shell.cards.tests.title"
-          subtitleKey="shell.cards.tests.subtitle"
-          totalKey="shell.cards.tests.total"
-          totalText={testsTotal}
-          closedValue={t("shell.cards.tests.planOne")}
-          segments={[]}
-          collapsed={testsCollapsed || !testsHasData}
-          onToggle={onTestsToggle}
-          hasData={testsHasData}
-        />
+        {/* FXDESIGN9: one row per served kind (pass green, fail red);
+            the closed one-liner carries the totals; nothing run yet reads
+            the short not-run line. No plan or run id ever renders. */}
+        <section
+          data-testid="kit-metric-fx-tests"
+          aria-label={t("shell.cards.tests.title")}
+          style={{
+            backgroundColor: "var(--agent-si-surface)",
+            color: "var(--agent-si-ink)",
+            borderColor: "var(--agent-si-card-border)",
+          }}
+        >
+          <RailHead
+            testId={testsHasData ? "kit-toggle-fx-tests" : undefined}
+            icon="file"
+            title={t("shell.cards.tests.title")}
+            hint={t("shell.cards.tests.title")}
+            value={testsHasData ? testsTotal : <>&mdash;</>}
+            expanded={testsOpen}
+            onToggle={() => onTestsToggle(!testsOpen)}
+            lineTestId={testsOpen ? undefined : "kit-collapsed-line"}
+            staticRow={!testsHasData}
+          />
+          {testsOpen ? (
+            <dl data-testid="tests-facts">
+              {testKindRows.map((row) => (
+                <div key={row.kind} data-testid={`tests-kind-${row.kind}`}>
+                  <dt>{t(row.labelKey)}</dt>
+                  <dd>
+                    {formatNumber(row.pass)}{" "}
+                    <span className="fx-pass" aria-hidden="true">
+                      ✓
+                    </span>{" "}
+                    {formatNumber(row.fail)}{" "}
+                    <span className="fx-fail" aria-hidden="true">
+                      ✗
+                    </span>
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          ) : null}
+          {testsHasData ? null : (
+            <p data-testid="tests-not-run" className="fx-quiet-line">
+              {t("shell.cards.tests.notRun")}
+            </p>
+          )}
+        </section>
         </div>
         <div style={{ order: providersHasData ? 0 : 1 }}>
         <MetricCard
           cardId="fx-providers"
           titleKey="shell.cards.providers.title"
-          subtitleKey="shell.cards.providers.subtitle"
           totalKey="shell.cards.providers.total"
           totalText={providersTotal}
           segments={[]}
@@ -2121,7 +2219,6 @@ export function Inspector(props: InspectorProps): ReactElement {
         <MetricCard
           cardId="fx-localai"
           titleKey="shell.cards.localai.title"
-          subtitleKey="shell.cards.localai.subtitle"
           totalKey="shell.cards.localai.total"
           totalText={localAiTotal}
           segments={[]}
@@ -2135,7 +2232,6 @@ export function Inspector(props: InspectorProps): ReactElement {
         <MetricCard
           cardId="fx-apps"
           titleKey="shell.cards.apps.title"
-          subtitleKey="shell.cards.apps.subtitle"
           totalKey="shell.cards.apps.total"
           totalText={appsTotal}
           segments={[]}

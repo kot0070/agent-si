@@ -408,6 +408,9 @@
       "limits": "Limits",
       "measure": "Measure",
       "modelsProviders": "Models and providers"
+    },
+    "nav": {
+      "label": "Settings sections"
     }
   },
   "diagnostics": {
@@ -661,7 +664,11 @@
         "subtitle": "Project test results.",
         "total": "Recorded test results",
         "emptyLine": "No test runs yet",
-        "planOne": "1 plan"
+        "planOne": "1 plan",
+        "rowCode": "Code",
+        "rowAi": "AI",
+        "rowHuman": "Human",
+        "notRun": "Not run yet"
       },
       "budget": {
         "title": "Budget",
@@ -846,6 +853,7 @@
     "tests": {
       "title": "Tests",
       "explainer": "Runs = agent work; code tests = the project's own test suite; local tests = catalog tests the app runs locally. This tab shows the latest run: served counters and one row per test. It never changes settings.",
+      "autoLine": "Nothing to paste: tests run by themselves after the agents' work. Code tests run by script, no AI; AI tests by a model; human tests ask you. Your own base can be added in Settings.",
       "emptyHow": "No test run has started for this project yet. Start a run for the latest plan, then this tab shows counters and one row per test.",
       "counter": {
         "active": "active",
