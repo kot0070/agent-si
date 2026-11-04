@@ -13,7 +13,7 @@ The current picture on November 4, 2026. The defect ledger in [How this was buil
 
 | Area | Issue |
 |---|---|
-| Local model | Muse Glimmer on a home PC is slow and can fail. Measured on my PC: the same small task took about 9 to 24 minutes. Earlier versions failed some runs; the last 3 runs passed, a small sample. Each model's plan size varies from run to run. |
+| Local model | Muse Glimmer on a home PC is slow and can fail. Measured on my PC: the same small task took about 9 to 24 minutes. Earlier versions failed some runs; the last 3 runs passed, a small sample. The Director's plan size varies from run to run. |
 | Provider key | One lost key was seen in development. The error now names the provider, but the cause is unknown. |
 | Watcher | The Watcher calls its model only on an abnormal event, so a healthy project shows no model call. False guard or tamper alerts are not proven fixed. |
 | Watcher settings | The minute window can be set; the refresh interval cannot. |
