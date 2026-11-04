@@ -124,6 +124,7 @@ connect any OpenAI-compatible server: that dialog asks for the server's Base URL
 
 ## Download and verify
 
+Releases are published at https://github.com/kot0070/agent-si/releases/tag/v0.1.0.
 Each release publishes an installer (`AgentSI-setup-0.1.0.exe`), a portable
 zip (`AgentSI-portable-0.1.0.zip`), and a `SHA256SUMS.txt` index (one
 `<sha256>  <filename>` line per file). Download the index together with
