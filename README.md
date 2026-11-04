@@ -94,6 +94,8 @@ The app does the work with a model you connect. There are two real options; eith
    small Node task "node-add" took 24 min with Team On (Director, Worker, Auditor) and 18 min with Team
    Off on that PC; a smaller local model or the hosted key is the fast path. Local model calls wait up to
    60 minutes each; slow is not stuck.
+   Last test of this build: the node-add task ran 2 times in a row (Team On, muse-glimmer:30b, fresh data each
+   time, same PC): 2 of 2 passed, in 11.2 and 8.6 minutes.
 
 ### Which Meta model runs each role
 
