@@ -256,6 +256,11 @@ export function RolePoolPicker({ role, project_id = "local", options, onChange }
     if (next.mode === "pool" && next.poolKeys.length === 0) {
       return;
     }
+    // PLANB X2: Pinned with no model never saves (the PUT would 400 and
+    // show "Save failed"); the model pick saves it.
+    if (next.mode === "PINNED" && next.pinnedKey === "") {
+      return;
+    }
     onChange?.(next);
   }
 

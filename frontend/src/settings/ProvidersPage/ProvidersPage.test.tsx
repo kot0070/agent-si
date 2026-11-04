@@ -601,6 +601,25 @@ describe("ProvidersPage role pools wiring (page-level)", () => {
     expect(autoBody["model"]).toBeUndefined();
   });
 
+  it("PLANB X2: choosing Pinned with no model saves nothing and shows no Save failed line", async () => {
+    const fetchMock = await connectOpenaiAndEnableStandard();
+    const worker = roleCard("worker");
+    fetchMock.mockClear();
+    fireEvent.click(within(worker).getByLabelText("Pinned model"));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const puts = (fetchMock.mock.calls as unknown as Array<[string, { method?: string }]>).filter(
+      (call) => call[0] === "/api/v1/roles/pools" && call[1]?.method === "PUT",
+    );
+    expect(puts).toHaveLength(0);
+    expect(screen.queryByText(/Save failed/)).toBeNull();
+    const select = within(worker).getByLabelText("Worker pinned model") as HTMLSelectElement;
+    const target = Array.from(select.options).find((option) =>
+      (option.textContent ?? "").includes("OpenAI"),
+    );
+    fireEvent.change(select, { target: { value: (target as HTMLOptionElement).value } });
+    expect(await screen.findByText("Saved Worker.")).toBeTruthy();
+  });
+
   it("pool members save with provider/model entries and a plain-language strategy", async () => {
     const fetchMock = await connectOpenaiAndEnableStandard();
     const worker = roleCard("worker");

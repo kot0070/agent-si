@@ -164,6 +164,8 @@ describe("R1 connected models in wizard and role pools", () => {
     const select = within(director).getByLabelText(
       "Director pinned model",
     ) as HTMLSelectElement;
+    // PLANB X2: the radio alone no longer saves; the model pick does.
+    await waitFor(() => expect(select.options.length).toBeGreaterThan(1));
     fireEvent.change(select, { target: { value: select.options[1]?.value ?? "" } });
     await waitFor(() => {
       const text = screen.getByRole("status").textContent ?? "";
