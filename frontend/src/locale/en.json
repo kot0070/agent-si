@@ -216,6 +216,7 @@
     "cost": {
       "limit": "Budget limit (total)",
       "limitExplainer": "Total N is the budget limit: spending stops when it is reached.",
+      "localFree": "free: a local model costs nothing",
       "notKnown": "cost not known (no price)",
       "remaining": "Money left to spend",
       "reserved": "Money reserved",

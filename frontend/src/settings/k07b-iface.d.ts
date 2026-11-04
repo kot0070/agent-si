@@ -166,6 +166,7 @@ export type LocaleKey =
   | 'projects.errors.title'
   | 'projects.folder.choose'
   | 'projects.folder.missing'
+  | 'projectView.cost.localFree'
   | 'projectView.cost.notKnown'
   | 'projectView.cost.remaining'
   | 'projects.kbAttach.kbId'

@@ -129,6 +129,7 @@ function AgentPlacementRow(props: {
   model?: string;
   tokensTotal: number | null;
   costText: string | null;
+  local?: boolean;
   attempts: number;
   status: PartRow["status"];
   statusHuman: unknown;
@@ -161,9 +162,16 @@ function AgentPlacementRow(props: {
       <span className="fxpv-place-cell">
         <span className="fxpv-place-label">{t("projectView.live.cost")}</span>
         {": "}
-        {props.costText === null || props.costText === "UNAVAILABLE"
-          ? t("projectView.cost.notKnown")
-          : props.costText}
+        {props.local === true &&
+        (props.costText === null ||
+          props.costText === "UNAVAILABLE" ||
+          props.costText === "UNKNOWN")
+          ? t("projectView.cost.localFree")
+          : props.costText === null ||
+              props.costText === "UNAVAILABLE" ||
+              props.costText === "UNKNOWN"
+            ? t("projectView.cost.notKnown")
+            : props.costText}
       </span>
       {props.attempts > 1 ? (
         <span>{t("projectView.attempts", { count: props.attempts })}</span>
@@ -696,7 +704,9 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
       props.view !== "audits" &&
       props.view !== "ai-usage" &&
       props.view !== "routing-decisions" &&
-      props.view !== "models"
+      props.view !== "models" &&
+      props.view !== "local-ai" &&
+      props.view !== "cloud-ai"
     ) {
       setTelemetry(null);
       return;
@@ -1399,6 +1409,25 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
           agentCounts.set(row.agent, (agentCounts.get(row.agent) ?? 0) + 1);
         }
         const hasBlocked = rows.some((row) => row.status === "BLOCKED");
+        // PLANB W3: a row with no live token cell takes the served ledger
+        // count of the same role + model (the Tokens tab numbers).
+        const ledgerTokens = buildTokenRows(live, telemetry);
+        const rowTokens = (row: {
+          role?: string;
+          model?: string;
+          tokensTotal: number | null;
+        }): number | null => {
+          if (row.tokensTotal !== null) {
+            return row.tokensTotal;
+          }
+          const fact = ledgerTokens.find(
+            (item) =>
+              item.role === row.role &&
+              (item.model ?? "") === (row.model ?? "") &&
+              item.tokens !== null,
+          );
+          return fact === undefined ? null : fact.tokens;
+        };
         return (
           <div>
             {hasBlocked ? (
@@ -1417,8 +1446,9 @@ export function ProjectView(props: ProjectViewProps): ReactElement {
                 agent={row.agent}
                 role={row.role}
                 model={row.model}
-                tokensTotal={row.tokensTotal}
+                tokensTotal={rowTokens(row)}
                 costText={row.costText}
+                local={wanted === "LOCAL"}
                 attempts={row.attempts}
                 status={row.status}
                 statusHuman={readStatusHuman(
