@@ -15,6 +15,15 @@ Release page and hashes: https://github.com/kot0070/agent-si/releases/tag/v0.1.0
 
 **Read more:** [Muse Code stress test](docs/MUSE_CODE_STRESS_TEST.md) | [How this was built](docs/HOW_IT_WAS_BUILT.md) | [Controlling about 100 agents](docs/CONTROLLING_MANY_AGENTS.md) | [Evidence files](docs/evidence/README.md) | [User guide](docs/USER_GUIDE.md) | [All documentation](#all-documentation)
 
+### After submission
+
+- **Submitted:** November 4, 2026, about 3:15 PM Texas time (CST, UTC-6). The deadline was 8 PM Texas time (9 PM ET).
+- **Last documentation update:** November 4, 2026, about 5:35 PM Texas time.
+- **The app did not change after submission.** No later commit touches `src/`, `frontend/` or `packaging/`. The release files were published at 3:08 PM from commit `57295e8` and stay as they were.
+- **What was added:** evidence files and photos of the first passes, the page on controlling about 100 agents with the real build scripts (copied for reading, not part of the app), the requirement list, the video scene by scene, the last two days of the build, the exact record of the delete incident, real hashes in the release notes, and a fuller list of known issues. The old draft folder was removed, and two tests were updated so they no longer need it.
+
+Every change is in the [commit history](https://github.com/kot0070/agent-si/commits/main).
+
 ### What you need
 
 - The app: the installer or the zip (Windows 10 or 11, 64-bit; no Python needed).
