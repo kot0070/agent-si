@@ -1513,8 +1513,16 @@ aside[data-testid="inspector"] .fx-legend-row {
   opacity: 0.65;
 }
 
+/* PLANB X6a: the model name takes the free room of the row and only
+   ellipsises when the row is really full (was a fixed 16ch cut). */
+.fx-team-line > span {
+  flex: 0 0 auto;
+}
+
 .fx-team-line .fx-truncate {
-  max-width: 16ch;
+  max-width: none;
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 /* CRAWL-3 + J10: provider model rows wrap safely at narrow widths.
