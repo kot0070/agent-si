@@ -1,4 +1,4 @@
-> Newer pages: [Muse Code under stress](MUSE_CODE_STRESS_TEST.md) (the cleaned-up field report) and [How one person controlled this many agents](CONTROLLING_MANY_AGENTS.md). This page is the earlier, longer version.
+> Newer page: [Muse Code under stress](MUSE_CODE_STRESS_TEST.md), the cleaned-up field report. This page is the earlier, longer version.
 
 # How this build stress-tested Muse Code multi-agent work
 
