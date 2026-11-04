@@ -325,3 +325,10 @@ Current open issues: [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md).
 ## Development notes
 
 - Muse Code stress test: what broke at high concurrency, the fixes, and what we would ask the Muse Code team: [docs/MUSE_CODE_STRESS_TEST.md](docs/MUSE_CODE_STRESS_TEST.md).
+- How one person controlled this many agents, with the owner board and photos: [docs/CONTROLLING_MANY_AGENTS.md](docs/CONTROLLING_MANY_AGENTS.md).
+- Build operations tools, shown as written (not part of the app): [tools/build_ops/README.md](tools/build_ops/README.md).
+- Evidence files (timing, network proof, clean install, release hashes, gate summary): [docs/evidence/README.md](docs/evidence/README.md).
+- Screenshots and photos with captions: [docs/EVIDENCE.md](docs/EVIDENCE.md).
+- How the project uses Meta's models: [HACKATHON_CONTRIBUTIONS.md](HACKATHON_CONTRIBUTIONS.md).
+- Earlier field report on the stress test: [docs/MUSE_STRESS_STORY.md](docs/MUSE_STRESS_STORY.md).
+- Known issues: [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md).
