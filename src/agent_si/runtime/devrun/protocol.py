@@ -390,6 +390,31 @@ class AgentError(ValueError):
     code: str = "DEVRUN_AGENT_INVALID"
 
 
+_AGENT_ACTION_NAMES = ("read_file", "list_dir", "write_file", "run")
+
+
+def _flatten_wrapped_action(action: dict[str, Any]) -> dict[str, Any]:
+    """Small-model shape repair: {"write_file": {...}} -> {"action": ...}.
+
+    Only an object with no "action" key and exactly one key naming a
+    known action is rewritten (an object value is merged, a list value
+    of words for "run" becomes argv, a string value becomes the path).
+    Anything else is returned unchanged and fails the normal check.
+    """
+    if "action" in action or len(action) != 1:
+        return action
+    name, value = next(iter(action.items()))
+    if name not in _AGENT_ACTION_NAMES:
+        return action
+    if isinstance(value, dict):
+        return {**value, "action": name}
+    if name == "run" and isinstance(value, list):
+        return {"action": name, "argv": list(value)}
+    if name != "run" and isinstance(value, str):
+        return {"action": name, "path": value}
+    return action
+
+
 def parse_agent_reply(text: str) -> dict[str, Any]:
     """Parse one worker reply into {"actions", "done"}.
 
@@ -408,6 +433,7 @@ def parse_agent_reply(text: str) -> dict[str, Any]:
     for action in actions:
         if not isinstance(action, dict):
             raise AgentError("agent action must be an object")
+        action = _flatten_wrapped_action(action)
         name = action.get("action")
         if name not in ("read_file", "list_dir", "write_file", "run"):
             raise AgentError("unknown agent action %r" % (name,))
