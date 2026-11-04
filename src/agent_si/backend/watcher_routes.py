@@ -524,10 +524,24 @@ async def route_post_evaluate(id: str, request: Request) -> Any:
         pass
     # A bound watcher model makes a real (slow, local) call: keep it off
     # the event loop so the app stays responsive while it runs.
-    return await run_in_threadpool(
+    result = await run_in_threadpool(
         _call, "evaluate_rule", str(data.get("project_id", "")), id,
         session_token=token,
     )
+    # Z6: one Evaluate is one check (the engine tick records its own).
+    try:
+        from agent_si.watcher import rules as _rule_cards
+        from agent_si.watcher import stats as _stats_home
+
+        project = str(data.get("project_id", ""))
+        entry = str(result.get("journal_entry_id", "") or "")
+        decided = str(result.get("decided_at", "") or "")
+        _stats_home.record_tick(
+            project, decided,
+            ((str(id), entry, bool(_rule_cards.last_was_repeat(project, id))),))
+    except Exception:
+        pass
+    return result
 
 
 @router.post("/api/v1/stop-all")

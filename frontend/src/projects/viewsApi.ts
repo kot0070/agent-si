@@ -187,6 +187,20 @@ export function latestRunRows(
   });
 }
 
+// Z6: live rows are served for every project. A row attributed to a run
+// that is not one of this project's runs belongs to another project and
+// drops out; unattributed rows stay (only evidence filters, as in F2).
+export function projectRunRows(
+  live: PartRow[],
+  runs: Array<{ run_id: string }>,
+): PartRow[] {
+  const mine = new Set(runs.map((run) => run.run_id));
+  return live.filter((row) => {
+    const runId = liveRowRunId(row);
+    return runId === null || mine.has(runId);
+  });
+}
+
 // FXFACTS F3: served role names read through the locale, never raw.
 // Unknown role strings read null (UNKNOWN in the view).
 export function translateRoleName(role: unknown): string | null {

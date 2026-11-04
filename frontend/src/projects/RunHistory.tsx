@@ -18,7 +18,12 @@ import { EmptyState } from "../ui/EmptyState";
 import { ErrorPanel } from "../ui/ErrorPanel";
 import { LoadingState } from "../ui/LoadingState";
 import { placementKey, resolveStatusHuman } from "../agents/agentsApi";
-import { humanRunRef, buildRunRecords, dedupeLiveRows } from "./viewsApi";
+import {
+  humanRunRef,
+  buildRunRecords,
+  dedupeLiveRows,
+  projectRunRows,
+} from "./viewsApi";
 import {
   formatRunMoment,
   humanDuration,
@@ -269,20 +274,23 @@ export function RunHistory(props: RunHistoryProps): ReactElement {
                 runs.length === 0 ? null : (runs[0] ?? null);
               const latestEnded =
                 latest !== null && runWallS(latest) !== null;
-              return dedupeLiveRows(parts).map((row) => {
+              // Z6: the live rows are served for every project; only
+              // rows of this project's runs belong to its team.
+              const teamParts = projectRunRows(parts, runs);
+              return dedupeLiveRows(teamParts).map((row) => {
                 const source =
-                  parts.find(
+                  teamParts.find(
                     (candidate) =>
                       candidate.agent === row.agent &&
                       candidate.status === row.status &&
                       readStatusHuman(candidate) !== undefined,
                   ) ??
-                  parts.find(
+                  teamParts.find(
                     (candidate) =>
                       candidate.agent === row.agent &&
                       candidate.status === row.status,
                   ) ??
-                  parts.find((candidate) => candidate.agent === row.agent);
+                  teamParts.find((candidate) => candidate.agent === row.agent);
                 const stale =
                   latestEnded && row.status === "RUNNING" && latest !== null;
                 // FXTABS U5c: the team row names the served role (or the
