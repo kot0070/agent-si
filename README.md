@@ -7,6 +7,64 @@ You describe the goal; the app plans the work with a team of model agents, runs 
 Every run, decision and audit record stays with the project in a local data folder.
 After the first start you connect a model in Settings -> Models. The proof of how it was built is in `docs/HOW_IT_WAS_BUILT.md`; the screenshots with captions are in `docs/EVIDENCE.md`. It ships under the MIT licence, see `LICENSE`.
 
+[![Watch the demo video: Agent SI, a team of AI agents that has to prove its work](docs/screenshots/video-thumbnail.jpg)](https://youtu.be/Mf_OHejanns)
+
+**[Download installer](https://github.com/kot0070/agent-si/releases/download/v0.1.0/AgentSI-setup-0.1.0.exe)** | **[Download zip](https://github.com/kot0070/agent-si/releases/download/v0.1.0/AgentSI-portable-0.1.0.zip)** | **[Watch the demo](https://youtu.be/Mf_OHejanns)** | **[Known issues](docs/KNOWN_ISSUES.md)**
+
+Release page and hashes: https://github.com/kot0070/agent-si/releases/tag/v0.1.0 (steps to check the hash are under "Download and verify" below).
+
+### What you need
+
+- The app: the installer or the zip (Windows 10 or 11, 64-bit; no Python needed).
+- A model: a Meta Model API key, or Ollama with `muse-glimmer:30b` on your PC.
+- Without either you can open the app and its screens only; it cannot run a task.
+
+### What it looks like
+
+| First start | Meta models | A finished run |
+|---|---|---|
+| ![First-run welcome page with four provider cards](docs/screenshots/firstrun-welcome.jpg) | ![Meta model list with muse-spark-1.3-contributor ticked](docs/screenshots/meta-model-list.jpg) | ![Photo of a screen: a run ends with checks green, auditor PASS and run success](docs/screenshots/muse-spark-first-pass-3.jpg) |
+| The guided first run, nothing connected yet. | The Meta model list, one model ticked. | Photo of a screen, Nov 2, 2026: a run on Muse Spark ends with "checks green, auditor PASS". |
+
+More captions and photos: [docs/EVIDENCE.md](docs/EVIDENCE.md).
+
+### What makes it different
+
+- **A fresh auditor gives the verdict, not the agent that wrote the code.** In the demo run the app ran the checks itself (all exit 0) and the auditor said PASS: [docs/evidence/video-run-timing.md](docs/evidence/video-run-timing.md).
+- **It can run fully on a local Meta model.** With every role on Muse Glimmer, the app talked only to this PC (no address outside loopback, no new DNS names): [docs/evidence/network-proof.md](docs/evidence/network-proof.md).
+- **Keys and records stay on your machine.** Keys live only in the Windows Credential Manager; runs, decisions and audits stay in a local data folder: [docs/SECURITY.md](docs/SECURITY.md).
+- **It shows "not known" instead of a made-up number.** The Tokens tab prints what it knows per role and model and says so when it does not: [docs/EVIDENCE.md](docs/EVIDENCE.md).
+- **It was built with about a hundred agents, steered from one board.** The owner board shows every lane, how old its newest file is, silent agents, queue, scripts and gates on one screen: [docs/CONTROLLING_MANY_AGENTS.md](docs/CONTROLLING_MANY_AGENTS.md) and [tools/build_ops/owner_board.py](tools/build_ops/owner_board.py).
+
+### Where things are
+
+| Folder or name | In plain words |
+|---|---|
+| `src/agent_si/` | The app's Python code: the local service, the team of agents, providers, routing, budget, watcher, knowledge bases. |
+| `frontend/` | The web interface shown in the app window. Its tests sit in `__tests__` folders. |
+| `tests/` | The Python tests. |
+| `packaging/` | Builds the installer and the portable zip. |
+| `iface/` | Interface files frozen by hash, with the contract tests that hold the code to them. |
+| `tools/` | Development tools: a knowledge-base validator, a demo drive, and `tools/build_ops/` (the board, merge train, gates, watchers). Not part of the app. |
+| `docs/` | Guides, evidence, screenshots, the build story and the known issues. `docs/evidence/` holds the sanitized proof files. |
+| `docs/reports/` | One report per work package (K01 to K13). |
+| `licenses/`, `LICENSE` | The MIT licence. |
+| K01 | Day 0: contracts and who owns which module. |
+| K02 | Hierarchy and orchestration: Director, Managers, workers. |
+| K03 | Assurance, the QA catalog and the test stage: the fresh auditor and the checks. |
+| K04 | Providers, routing, model knowledge and the budget. |
+| K05 | Local AI (Ollama and other local servers). |
+| K06 | The tool belt, permissions and services. |
+| K07 | The shell, UX, cards and languages. |
+| K08 | The watcher, automations and context. |
+| K09 | Knowledge bases. |
+| K10 | The installer, proofs and acceptance. |
+| K11 | Follow-up, plan only. |
+| K12 | Presentation and demo. |
+| K13 | The run core: contracts and state machines. |
+
+Meaning of K01 to K13 comes from the module ownership map in [docs/reports/K01.md](docs/reports/K01.md).
+
 ## Quick start (Windows, from source)
 
 This checkout runs the whole app. You need: Windows 10 or 11, 64-bit; Python 3.13 or newer (the
