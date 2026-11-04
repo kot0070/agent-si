@@ -82,9 +82,14 @@ The app does the work with a model you connect. There are two real options; eith
    Connect there. Local rows need no key ("Local server: usually no key is needed."); once connected
    the row reads "Connected Ollama, N models."
 4. Pick `muse-glimmer:30b` under Local models and press Use for agents: the app pins the worker role to
-   that model, so routing, checks and audit work exactly as with a cloud model.
+   that model, so routing, checks and audit work exactly as with a cloud model. For a Team On run pin the
+   Director, Manager and Auditor roles to `ollama/muse-glimmer:30b` too (Settings -> Roles); a role left on
+   AUTO has no other model to pick.
 5. Real need: about 18 GB of free disk for the 30B model. On 8 GB of video memory it runs split with
-   the CPU and is slow; a smaller local model or the hosted key is the fast path.
+   the CPU and is slow (measured on an RTX 3070 8 GB + 32 GB RAM: about 2.6 tokens per second). The
+   small Node task "node-add" took 24 min with Team On (Director, Worker, Auditor) and 18 min with Team
+   Off on that PC; a smaller local model or the hosted key is the fast path. Local model calls wait up to
+   60 minutes each; slow is not stuck.
 
 The same Local LLM page also lists LM Studio (`http://localhost:1234/v1`), and Settings -> Models can
 connect any OpenAI-compatible server: that dialog asks for the server's Base URL.

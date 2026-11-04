@@ -308,3 +308,25 @@ describe("fxdesign9 D7 settings section nav", () => {
     ).toBeTruthy();
   });
 });
+
+describe("fxdesign9 D7 nav behaviour (PLANB)", () => {
+  it("names every settings group, keeps ten tab links, select moves to a section", async () => {
+    stubServed();
+    renderAppAt("/settings/models");
+    const nav = await screen.findByTestId("settings-nav");
+    for (const group of ["Models and providers", "Limits", "App", "Measure"]) {
+      expect(nav.textContent).toContain(group);
+    }
+    const tabs = await screen.findByTestId("settings-tabs");
+    expect(
+      tabs.querySelectorAll('a[data-testid^="settings-link-"]').length,
+    ).toBe(11);
+    const select = (await screen.findByTestId(
+      "settings-nav-select",
+    )) as HTMLSelectElement;
+    expect(select.value).toBe("models");
+    fireEvent.change(select, { target: { value: "routing" } });
+    const active = await screen.findByTestId("settings-link-routing");
+    expect(active.getAttribute("aria-current")).toBe("page");
+  });
+});
