@@ -196,7 +196,7 @@ notes to all lanes.
 | Product commits | 990 | git commit count on the product branch (tip ddf00be) |
 | Gate records | 32 | count of gate run records |
 | Merge-train tests | 38 passed | merge train test suite |
-| Defect ledger | 573 (49 fixed-in-ship, 18 on-lane, 225 in-work, 4 dropped, 277 no-owner) | ledger file + recompute script |
+| Defect ledger, snapshot of Nov 2, not recounted since: see [Known issues](KNOWN_ISSUES.md) | 573 (49 fixed-in-ship, 18 on-lane, 225 in-work, 4 dropped, 277 no-owner) | ledger file + recompute script |
 | Coverage | 443 rows: 5 UI-live, 438 pre-check, 0 not-started | checklist script on a copy |
 
 Scope of the run and cost totals (545 runs, $19.4343): recorded main runs only, one script total. The paid spend in FORM_ANSWERS.md is a different scope.

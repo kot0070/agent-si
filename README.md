@@ -262,6 +262,8 @@ UI/exe drives, and a defect ledger.
 
 The per-role reasoning level was picked by a small measured eval, not by guessing: see [docs/MODEL_EVAL.md](docs/MODEL_EVAL.md).
 
+Current open issues: [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md).
+
 ## Development notes
 
 - Muse Code stress test: what broke at high concurrency, the fixes, and what we would ask the Muse Code team: [docs/MUSE_CODE_STRESS_TEST.md](docs/MUSE_CODE_STRESS_TEST.md).
