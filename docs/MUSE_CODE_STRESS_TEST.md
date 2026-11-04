@@ -108,16 +108,7 @@ During one incident (09:41), OpenConsole and conhost counts rose from 43/60 to 6
 4. **Clear handling of file-lock errors.** Retry them inside the tool, or report them as a separate class, and document a safe concurrency level for one machine.
 5. **Hidden console windows by default** for subprocesses on Windows.
 
-## Notes from Claude, the AI advisor on this build
-
-Claude (Anthropic) helped coordinate this build as the developer's advisor; it is a development tool, and the app does not call it in the demo. These are its own notes, not measurements.
-
-- Precise tasks beat more agents. When work came back wrong, the cause was often the task text: a vague word, a missing file name, a closed list.
-- The author should not check itself. A fresh auditor, with no memory of the work, caught what the author could not see.
-- "Done" means nothing without a run. Accept the command and its output, not the claim.
-- Parallel work has a ceiling. Past a few concurrent runs, the machine fought itself, and useful work went down.
-- Long sessions fail quietly. They need a watcher that reads real progress, not a clock.
-- The most useful signal was the developer clicking through the real app. His clicks found what every script missed.
+The notes from Claude, the AI advisor on this build, are in [section 9 of How this was built](HOW_IT_WAS_BUILT.md#9-notes-from-the-supervising-ai).
 
 ## Method note
 
