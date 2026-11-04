@@ -244,3 +244,7 @@ Agent SI ships under the MIT licence. Copyright (c) 2026 Ivan Soprun. See `LICEN
 ## How this was built
 
 The stress points found while building Agent SI are recorded in a field report (owner-observed: over 100 agents at once; measured in the records: 1060 sessions, 545 recorded runs, peak 16 concurrent sessions). See [docs/MUSE_STRESS_STORY.md](docs/MUSE_STRESS_STORY.md). The per-role reasoning level was picked by a small measured eval, not by guessing: see [docs/MODEL_EVAL.md](docs/MODEL_EVAL.md). Development screenshots with captions: [docs/EVIDENCE.md](docs/EVIDENCE.md).
+
+## Development notes
+
+- Muse Code stress test: what broke at high concurrency, the fixes, and what we would ask the Muse Code team: [docs/MUSE_CODE_STRESS_TEST.md](docs/MUSE_CODE_STRESS_TEST.md).
