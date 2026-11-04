@@ -182,8 +182,9 @@ def test_no_saved_model_deterministic_choice(tmp_path, monkeypatch):
     reason = str(decision.get("reason", ""))
     assert "routing prefers task fit over alphabet" in reason, decision
     assert "unknown price loses" in reason, decision
-    # first-connected (openai) wins over alphabetical (meta first)
-    assert decision.get("provider_id") == "openai", decision
+    # FXFACTS F1 seeds a price for the meta model and none for gpt-4o-mini;
+    # unknown price loses, so meta is the deterministic choice
+    assert decision.get("provider_id") == "meta", decision
 
 
 def test_chat_models_include_meta(tmp_path, monkeypatch):

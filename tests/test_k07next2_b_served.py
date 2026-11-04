@@ -90,10 +90,11 @@ def _get(base, path):
         return (err.code, json.loads(err.read().decode("utf-8")))
 
 
-def _check_wiring(screen_file, suite_file, route_path, quote_token):
+def _check_wiring(screen_file, suite_file, route_path, quote_token,
+                  api_marker="k07next2Api"):
     screen = _read(os.path.join(FRONT, screen_file))
     suite = _read(os.path.join(SUITES, suite_file))
-    assert "k07next2Api" in screen
+    assert api_marker in screen
     assert "../../api/client" in suite
     assert "ApiClientProvider" in suite
     assert "fakeApiClient" not in screen.lower()
@@ -133,7 +134,8 @@ def test_row_mrux6_local_models_served(served):
 def test_row_mrux8_telemetry_served(served):
     _check_wiring("TelemetrySummary.tsx",
                  "k07next2-mrux8-telemetry.test.tsx",
-                 "/api/v1/analytics/telemetry", "metric_records")
+                 "/api/v1/analytics/telemetry", "providers",
+                 api_marker="requestJson")
     status, payload = _get(served, "/api/v1/analytics/telemetry")
     assert status == 200, payload
     assert payload == {

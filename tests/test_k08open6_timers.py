@@ -112,7 +112,10 @@ def test_r335_tick_decide_served_interface():
     decision = decide(PROJ_TICK, CARD, "scripts/tamper_check.py", ("--x",))
     assert isinstance(decision, rule_cards.WatchDecision)
     assert decision.rule_id == CARD
-    assert decision.journal_entry_id != ""
+    # One condition, one alert (FXZERO item 4): the tick above already
+    # journaled this BLOCK, so the identical decide adds no second row.
+    assert decision.journal_entry_id == ""
+    assert len(journal_store.stored_rows(PROJ_TICK, "WATCH_DECISION")) == 1
     assert engine_home.last_choice(PROJ_TICK) == (
         CARD, "scripts/tamper_check.py", ("--x",),
     )

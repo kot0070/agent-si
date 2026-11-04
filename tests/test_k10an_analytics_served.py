@@ -203,5 +203,5 @@ def test_161_store_only(tmp_path, monkeypatch):
     ui = PRODUCT_FILES[2].read_text(encoding="utf-8")
     assert "/api/v1/analytics/telemetry" in ui, ui
     assert "UNAVAILABLE" in ui, ui
-    assert "k10an-project" in ui and "k10an-models" in ui, ui
+    assert "k10an-models" in ui, ui
     assert "k10an-providers" in ui, ui

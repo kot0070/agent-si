@@ -2,7 +2,7 @@
 // PLANB X4 (DEFECT-25) + X6b (DEFECT-24): real App at /settings/localAI with a
 // connected Ollama that lists models; fake only at the network boundary.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { HttpApiClient } from "../../api/client";
 import { ApiClientProvider } from "../../app/ApiClientProvider";
@@ -83,8 +83,12 @@ describe("PLANB X4 local models note", () => {
     renderLocalAi();
     const card = await screen.findByTestId("local-preset-ollama");
     await within(card).findByTestId("local-models-ollama");
-    expect(screen.queryByText(/No local models found in this folder/)).toBeNull();
-    expect(screen.queryByTestId("localai-models-empty")).toBeNull();
+    // The panel gets the runtime count from the card via an effect one tick
+    // after the list renders; settle first (pool timing), then assert gone.
+    await waitFor(() => {
+      expect(screen.queryByText(/No local models found in this folder/)).toBeNull();
+      expect(screen.queryByTestId("localai-models-empty")).toBeNull();
+    });
   });
 
   it("nothing connected keeps the honest empty note", async () => {

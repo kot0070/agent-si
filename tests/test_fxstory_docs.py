@@ -6,8 +6,8 @@ STORY = ROOT / "docs" / "MUSE_STRESS_STORY.md"
 README = ROOT / "README.md"
 LINK = "[docs/MUSE_STRESS_STORY.md](docs/MUSE_STRESS_STORY.md)"
 CLAUSE = (
-    "owner-observed: over 100 agents at once; measured in the records: "
-    "1060 sessions, 545 recorded runs, peak 16 concurrent sessions"
+    "Owner-observed: over 100 agents at once. In the surviving records "
+    "(id-clock recount): 101 Muse live at 10-26 19:49 (104 combined)"
 )
 BANNED = (
     "DIRECTOR",

@@ -19,6 +19,7 @@ This file lists every third-party component shipped with the release. Versions c
 | fastapi | 0.162.0 | MIT | pyproject.toml |
 | openai-agents | 0.20.0 | MIT | pyproject.toml |
 | pywebview | 6.2.1 | BSD 3-Clause | pyproject.toml |
+| uvicorn | 0.54.0 | BSD 3-Clause | pyproject.toml |
 
 ## Desktop bundle sidecar
 

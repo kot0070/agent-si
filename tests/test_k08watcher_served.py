@@ -139,11 +139,11 @@ def test_r325_local_ai_script_params_served_evaluate():
                        json={"project_id": pid}, headers=_auth())
     assert resp.status_code == 200, resp.text
     # No SERVICE_STATE heartbeat on this project (resolve_action records
-    # AUTOMATION_RUN only), so the hang detector honestly escalates.
-    assert resp.json()["verdict"] == "ESCALATE"
-    decisions = _served_journal(client, pid, "WATCH_DECISION")
-    assert any(row["entry_id"] == resp.json()["journal_entry_id"]
-               for row in decisions)
+    # AUTOMATION_RUN only): no beats is no evidence of staleness (FXFACTS
+    # F6b), so the verdict is ALLOW and a normal verdict journals nothing.
+    assert resp.json()["verdict"] == "ALLOW"
+    assert resp.json()["journal_entry_id"] == ""
+    assert _served_journal(client, pid, "WATCH_DECISION") == []
     runs = _served_journal(client, pid, "AUTOMATION_RUN")
     assert len(runs) == 1
     assert any(row.entry_id == runs[0]["entry_id"]

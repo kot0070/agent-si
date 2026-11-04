@@ -29,6 +29,7 @@ EXPECTED_LICENCES = {
     "fastapi": "MIT",
     "openai-agents": "MIT",
     "pywebview": "BSD 3-Clause",
+    "uvicorn": "BSD 3-Clause",
     "react": "MIT",
     "react-router-dom": "MIT",
     "zod": "MIT",

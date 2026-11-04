@@ -203,7 +203,7 @@ def test_r336_model_default_fallback_off_served(tmp_path):
     )
     assert journal_resp.status_code == 200, journal_resp.text
 
-    def _eval():
+    def _eval(pid=pid):
         resp = client.post(
             "/api/v1/watcher/rules/rule-tamper/evaluate",
             json={"project_id": pid, "session_token": TOKEN},
@@ -216,8 +216,16 @@ def test_r336_model_default_fallback_off_served(tmp_path):
     card = rules.describe("rule-tamper")
     try:
         rules.RULES["rule-tamper"] = dataclasses.replace(card, model="API")
+        # One condition, one alert (FXZERO item 4): an identical repeat on
+        # the same project adds no row, so the API row is read on a fresh one.
         assert _eval()["verdict"] == "BLOCK"
-        rows = journal.stored_rows(pid, "WATCH_DECISION")
+        assert len(journal.stored_rows(pid, "WATCH_DECISION")) == 1
+        pid2 = pid + "-api"
+        journal.append_event(
+            pid2, "agent-x", "TAMPER_ATTEMPT", "escape probe", ("evil-path",),
+        )
+        assert _eval(pid2)["verdict"] == "BLOCK"
+        rows = journal.stored_rows(pid2, "WATCH_DECISION")
         assert "API->local" in rows[-1].summary
         rules.RULES["rule-tamper"] = dataclasses.replace(card, model="OFF")
         assert _eval()["verdict"] == "ALLOW"
@@ -225,4 +233,4 @@ def test_r336_model_default_fallback_off_served(tmp_path):
         assert "OFF" in rows[-1].summary
     finally:
         rules.RULES["rule-tamper"] = card
-    assert len(_served_journal(client, pid, "WATCH_DECISION")) == 3
+    assert len(_served_journal(client, pid, "WATCH_DECISION")) == 2

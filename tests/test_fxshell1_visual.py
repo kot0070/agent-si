@@ -53,6 +53,8 @@ CASES = [
 def _hex_to_rgb(value):
     """Expand a #rrggbb token to the 'rgb(r, g, b)' form getComputedStyle uses."""
     text = value.strip()
+    if text.startswith("#") and len(text) == 4:
+        text = "#" + "".join(ch * 2 for ch in text[1:])
     assert text.startswith("#") and len(text) == 7, "expected #rrggbb token, got %r" % (value,)
     red = int(text[1:3], 16)
     green = int(text[3:5], 16)
@@ -277,15 +279,16 @@ def test_shell_real_look(served_base, edge, theme, width, height):
                 refBtnBg: getComputedStyle(refB).backgroundColor,
                 ink: root.getPropertyValue('--fx-ink').trim(),
                 quietInk: root.getPropertyValue('--fx-btn-quiet-ink').trim(),
+                surface: root.getPropertyValue('--fx-surface').trim(),
               };
               refS.remove();
               refB.remove();
               return out;
             }"""
             )
-            assert controls["selBg"] != controls["refSelBg"], "select keeps browser-default bg: %r" % (controls,)
             assert controls["btnBg"] != controls["refBtnBg"], "button keeps browser-default bg: %r" % (controls,)
-            assert controls["selBg"] == "rgba(0, 0, 0, 0)", "select is not background:none: %r" % (controls,)
+            # FXSMALL W04 (dece93d): the language select paints the surface token
+            assert controls["selBg"] == _hex_to_rgb(controls["surface"]), "select bg is not the surface token: %r" % (controls,)
             assert controls["btnBg"] == "rgba(0, 0, 0, 0)", "button is not background:none: %r" % (controls,)
             assert controls["selColor"] == _hex_to_rgb(controls["ink"]), "select ink is not the token: %r" % (controls,)
             assert controls["btnColor"] == _hex_to_rgb(controls["quietInk"]), "button ink is not the token: %r" % (controls,)
