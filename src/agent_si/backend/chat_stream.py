@@ -1268,8 +1268,10 @@ def _manager_event_payload(
         payload["text"] = str(text)
     # FXASK2: the held tool's id rides the same payload so the window
     # answers the ask per tool; forwarded only when the run names one.
+    # FXASK A8: the parked install ask rides tool_id plus the exact
+    # argv so the card names the real command, never the raw key.
     for key in ("output_ref", "mock", "executed", "approval_requested",
-                "reason", "finish_reason", "tool_id"):
+                "reason", "finish_reason", "tool_id", "argv"):
         value = data.get(key, None)
         if value is not None:
             payload[key] = value
@@ -1519,6 +1521,17 @@ def _gateway_transport(base_url: str, credential_store: Any,
         if isinstance(max_tokens, int) and not isinstance(max_tokens, bool):
             if max_tokens > 0:
                 body_out["max_tokens"] = max_tokens
+        # FXRUNSPEED S1: per-role reasoning effort, muse wire models
+        # only. Any other provider never gets the field; nothing else
+        # is added here (no max_tokens invented).
+        try:
+            _params = request.get("params") or {}
+            _effort = _params.get("reasoning_effort")
+        except Exception:
+            _effort = None
+        if (isinstance(_effort, str) and _effort
+                and wire_model.startswith("muse-spark")):
+            body_out["reasoning_effort"] = _effort
         payload = _json.dumps(body_out).encode("utf-8")
         http_request = _urlrequest.Request(
             url, data=payload,

@@ -4,6 +4,7 @@ import { formatScreenTime, pluralUnit, t } from "../locale/index";
 import { ApiError, apiErrorLocaleKey, parseErrorBody } from "../api/errors";
 import { ErrorPanel } from "../ui/ErrorPanel";
 import { humanRunRef } from "../projects/viewsApi";
+import { WatcherSections } from "./WatcherSections";
 import {
   RULE_CARDS,
   RULE_CARD_MODELS,
@@ -641,6 +642,9 @@ export function WatcherTab({ projectId }: { projectId: string }) {
       </div>
       <h3 data-testid="watcher-journal-title">{t("watcher.tab.journalTitle")}</h3>
       <WatcherJournalList entries={journal} />
+      {/* FXWATCHUI: page sections (cards, presets, alerts, apps); they
+          fetch only on explicit buttons, never on mount. */}
+      <WatcherSections projectId={status.project_id} />
     </section>
   );
 }

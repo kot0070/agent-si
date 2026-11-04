@@ -235,21 +235,25 @@ afterEach(() => {
 });
 
 describe("fxdesign8 team one-liner", () => {
-  it("shows role, short model and status on one line; step in details", async () => {
+  it("shows role, short model and status on one line; step in details; full model in the tooltip", async () => {
     stubFx8();
     renderInspector();
     const row = await screen.findByTestId("team-row-agent-1");
     const line = await screen.findByTestId("team-line-agent-1");
+    // FXLOOK D5: human summary (role, status), never the raw agent id
+    // or the full model id in the line text.
     expect(line.textContent).toContain(t("providers.role.manager"));
-    // Short model name only: the registry tail, never the full id.
-    expect(line.textContent).toContain("long-model-name-70b");
-    expect(line.textContent).not.toContain("meta-llama/long-model-name-70b");
     expect(line.textContent).toContain(t("tasks.status.running"));
     // FXFACTS F14: the one-line row is role, short model, status; the
     // step, attempts and placement moved into the details.
+    expect(line.textContent).not.toContain("agent-1");
+    expect(line.textContent).not.toContain("meta-llama/long-model-name-70b");
+    expect(line.getAttribute("title")).toBe("meta-llama/long-model-name-70b");
     expect(line.textContent).not.toContain("2");
-    // The rest lives under the row disclosure, still row-visible.
+    // The raw id and the full model live under the row disclosure.
     const detail = await screen.findByTestId("team-detail-agent-1");
+    expect(detail.textContent).toContain("agent-1");
+    expect(detail.textContent).toContain("meta-llama/long-model-name-70b");
     expect(detail.textContent).toContain("scope-1");
     expect(detail.textContent).toContain("edited hello");
     expect(detail.textContent).toContain("2");

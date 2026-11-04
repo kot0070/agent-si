@@ -23,9 +23,9 @@ import { dedupeLiveRows, humanRunRef, readLiveExtras } from "../projects/viewsAp
 import { readProjectTelemetry } from "../k07next2/k07next2Api";
 import type { ProjectTelemetry } from "../k07next2/k07next2Api";
 import { ApiError, requestResponse } from "../api/errors";
-import { formatNumber, pluralUnit, t } from "../locale/index";
+import { formatNumber, pluralUnit, t, useLocale } from "../locale/index";
 import { formatScreenTime } from "../locale/index";
-import { shortenLiveRef } from "../agents/agentsApi";
+import { resolveStatusHuman, shortenLiveRef } from "../agents/agentsApi";
 import {
   placementForRow,
   placementKey,
@@ -148,6 +148,12 @@ function readRef(value: unknown): RefText {
   return text.length > 40 ? { text, title: text } : { text };
 }
 
+// FXLOOK D5: served human status for a live row (uk/en pair wins,
+// else the status code maps through tasks.status.*).
+function readStatusHuman(row: PartRow): unknown {
+  return (row as unknown as Record<string, unknown>).status_human;
+}
+
 // FXDESIGN8 short model name: the registry tail after the last slash or
 // colon (provider prefixes never render in the one-line row).
 function shortModelName(value: string): string {
@@ -156,6 +162,18 @@ function shortModelName(value: string): string {
   const afterColon = tail.split(":");
   const head = afterColon[afterColon.length - 1] ?? tail;
   return head === "" ? value : head;
+}
+
+// FXLOOK D5: a human name for a served agent id when no role rides the
+// row (raw ids never reach the summary line).
+function prettifyAgentId(agent: string): string {
+  const words = agent.split(/[-_]+/).filter((part) => part !== "");
+  if (words.length === 0) {
+    return agent;
+  }
+  return words
+    .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function readTaskStatus(status: string): string {
@@ -184,6 +202,7 @@ function fractionOf(value: number, total: number): number {
 
 export function Inspector(props: InspectorProps): ReactElement {
   const client = useApiClient();
+  const { locale } = useLocale();
   const projectId = props.projectId;
   // FXDESIGN8: the shared agents-live store owns the single poller;
   // the rail only subscribes.
@@ -1056,13 +1075,18 @@ export function Inspector(props: InspectorProps): ReactElement {
                 const scopeRef = shortenLiveRef(row.scope);
                 const deliverableRef = shortenLiveRef(row.deliverable);
                 const place = placementForRow(row);
-                // FXDESIGN8 one-liner: role, short model name, status chip,
-                // step. The rest rides under the row disclosure. Unevidenced
-                // values render nothing: real state or none, never Unknown.
+                // FXLOOK D5 one-liner: role plus live status ("Director,
+                // Running"), the status chip, step. The raw agent id and
+                // the full model id ride the tooltip + disclosure below.
+                // Unevidenced values render nothing: real state or none,
+                // never Unknown.
                 const roleRaw = readExtra(row, "role");
                 const roleKnown =
                   typeof roleRaw === "string" && roleRaw !== "";
                 const modelRaw = readExtra(row, "model");
+                // FXLOOK D5: the full model id rides the summary
+                // tooltip (title) and the details row below; FXFACTS F14
+                // also shows the short name in the line.
                 const modelShort =
                   typeof modelRaw === "string" && modelRaw !== ""
                     ? shortModelName(modelRaw)
@@ -1084,10 +1108,16 @@ export function Inspector(props: InspectorProps): ReactElement {
                       <summary
                         data-testid={`team-line-${row.agent}`}
                         className="fx-team-line"
-                        title={row.agent}
+                        title={
+                          typeof modelRaw === "string" && modelRaw !== ""
+                            ? modelRaw
+                            : undefined
+                        }
                       >
                         <span className="fx-team-field">
-                          {roleKnown ? readRoleText(roleRaw) : row.agent}
+                          {roleKnown
+                            ? readRoleText(roleRaw)
+                            : prettifyAgentId(row.agent)}
                         </span>
                         {modelShort === null ? null : (
                           <span
@@ -1105,11 +1135,23 @@ export function Inspector(props: InspectorProps): ReactElement {
                           data-testid={`team-status-${row.agent}`}
                           className="fx-team-field"
                         >
-                          {t(statusHumanKey(row.status))}
+                          {readStatusHuman(row) === undefined
+                            ? t(statusHumanKey(row.status))
+                            : resolveStatusHuman(
+                                readStatusHuman(row),
+                                row.status,
+                                locale,
+                              )}
                         </span>
                         {item.running ? <Spinner /> : null}
                       </summary>
                       <div className="fx-team-detail">
+                        {/* FXLOOK D5: the raw agent id lives here in the
+                            details, never in the summary line above. */}
+                        <span className="fx-team-field">
+                          {t("agents.row.agent")}{": "}
+                          <span className="fx-team-value">{row.agent}</span>
+                        </span>
                         <span className="fx-team-field">
                           <span
                             className="fx-team-value fx-truncate"
@@ -1764,7 +1806,7 @@ export function Inspector(props: InspectorProps): ReactElement {
                 typeof watcherStatus.watcher_model === "string" &&
                 watcherStatus.watcher_model !== ""
                   ? watcherStatus.watcher_model
-                  : t("telemetry.unavailable")}
+                  : t("watcher.tab.notUsedYet")}
                 {" \u00b7 "}
                 {t("shell.cards.watcher.calls")}{": "}
                 {typeof watcherStatus.watcher_calls === "number"

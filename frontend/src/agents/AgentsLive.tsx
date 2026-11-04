@@ -6,12 +6,12 @@
 
 import { useEffect, useState } from "react";
 import type { ReactElement } from "react";
+import { Link } from "react-router-dom";
 import type { PartRow } from "../api/iface";
 import { apiErrorLocaleKey } from "../api/errors";
 import { useApiClient } from "../app/ApiClientProvider";
 import { refreshLive, useLiveRows } from "./liveStore";
 import { t, useLocale } from "../locale/index";
-import { EmptyState } from "../ui/EmptyState";
 import { ErrorPanel } from "../ui/ErrorPanel";
 import { LoadingState } from "../ui/LoadingState";
 import {
@@ -159,11 +159,17 @@ export function AgentsLive(props: AgentsLiveProps): ReactElement {
       ) : rows === null ? (
         <LoadingState loadingKey="ui.loading.more" />
       ) : live.length === 0 ? (
-        <EmptyState
-          stateKey="agents.live.empty"
-          actionKey={null}
-          onAction={null}
-        />
+        // FXLOOK D5: one line pointing at Chat instead of a bare empty
+        // sentence (the kit-empty-state testid stays for contracts).
+        <p data-testid="kit-empty-state">
+          {t("agents.live.empty")}{" "}
+          <Link
+            data-testid="agents-live-open-chat"
+            to={`/projects/${props.projectId}/chat`}
+          >
+            {t("agents.live.openChat")}
+          </Link>
+        </p>
       ) : (
         <div
           data-testid="agents-live-rows"

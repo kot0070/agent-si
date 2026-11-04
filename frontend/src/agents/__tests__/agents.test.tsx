@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { ApiClientProvider } from "../../app/ApiClientProvider";
 import { FakeApiClient } from "../../api/__tests__/fakeApiClient";
 import {
@@ -105,10 +106,17 @@ describe("agents live panel", () => {
   it("shows the empty state when no agents run", async () => {
     const client = new FakeApiClient({ liveRows: [] });
     render(
-      <ApiClientProvider client={client}>
-        <AgentsLive projectId="p-1" />
-      </ApiClientProvider>,
+      <MemoryRouter initialEntries={["/agents/live"]}>
+        <ApiClientProvider client={client}>
+          <AgentsLive projectId="p-1" />
+        </ApiClientProvider>
+      </MemoryRouter>,
     );
-    expect(await screen.findByText(en.agents.live.empty)).toBeTruthy();
+    const empty = await screen.findByTestId("kit-empty-state");
+    expect(empty.textContent).toContain(en.agents.live.empty);
+    // FXLOOK D5: one line pointing at Chat.
+    const link = within(empty).getByTestId("agents-live-open-chat");
+    expect(link.textContent).toBe(en.agents.live.openChat);
+    expect(link.getAttribute("href")).toBe("/projects/p-1/chat");
   });
 });

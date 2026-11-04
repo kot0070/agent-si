@@ -296,6 +296,9 @@ const LatestRunSchema = z.object({
   project_id: z.string().min(1),
   plan_id: z.string().min(1),
   run_id: z.string().min(1),
+  // FXQACAT (additive, optional): served start time when the stage recorded
+  // one; older entries read back without it, so the tab shows no time line.
+  started_at: z.string().optional(),
 });
 
 export type LatestRun = z.infer<typeof LatestRunSchema>;
@@ -414,6 +417,149 @@ export async function readResultOutput(ref: string): Promise<ResultOutput> {
     resultOutputPath(ref),
     { method: "GET", kind: "read" },
     ResultOutputSchema,
+  );
+}
+
+// FXQACAT Settings Test-catalog wire (read-only except base attach; never
+// edited shapes above). Paths and served shapes mirror read_routes.py
+// FXQACAT block plus the test_runners test_bases lane verbatim.
+export const CATALOG_SUMMARY_PATH = "/api/v1/teststage/catalog/summary";
+export const CATALOG_TESTS_PATH = "/api/v1/teststage/catalog/tests";
+export const CATALOG_HISTORY_PATH = "/api/v1/teststage/catalog/history";
+export const TEST_BASES_PATH = "/api/v1/teststage/bases";
+export const TEST_BASES_ATTACH_PATH = "/api/v1/teststage/bases/attach";
+export const RUNNER_CONTRACT_PATH = "/api/v1/teststage/runner-contract";
+
+const CatalogSummarySchema = z.object({
+  catalog_ref: z.string().min(1),
+  version: z.number().int().min(1),
+  version_sha_short: z.string().min(1),
+  bases: z.number().int().min(0),
+  tests_total: z.number().int().min(0),
+  kinds: z.object({
+    CODE: z.number().int().min(0),
+    AI: z.number().int().min(0),
+    HUMAN: z.number().int().min(0),
+  }),
+});
+
+export type CatalogSummary = z.infer<typeof CatalogSummarySchema>;
+
+const CatalogTestRowSchema = z.object({
+  id: z.string().min(1),
+  group: z.string().min(1),
+  intent: z.string().min(1),
+  kind: z.string().min(1),
+  priority: z.string().min(1),
+  runner: z.string().nullable(),
+});
+
+export type CatalogTestRow = z.infer<typeof CatalogTestRowSchema>;
+
+const CatalogTestsSchema = z.object({
+  catalog_ref: z.string().min(1),
+  version: z.number().int().min(1),
+  total: z.number().int().min(0),
+  tests: z.array(CatalogTestRowSchema),
+});
+
+export type CatalogTests = z.infer<typeof CatalogTestsSchema>;
+
+const CatalogHistorySchema = z.object({
+  catalog_ref: z.string().min(1),
+  active: z.object({
+    version: z.number().int().min(1),
+    sha_short: z.string().min(1),
+    created_at: z.string(),
+  }),
+  versions: z.array(
+    z.object({
+      version: z.number().int().min(1),
+      sha_short: z.string().min(1),
+      active: z.boolean(),
+    }),
+  ),
+  changelog: z.array(
+    z.object({
+      version: z.number().int().min(1),
+      change: z.string(),
+      changed_at: z.string(),
+      changed_by: z.string(),
+    }),
+  ),
+});
+
+export type CatalogHistory = z.infer<typeof CatalogHistorySchema>;
+
+const TestBaseSchema = z.object({
+  base_id: z.string().min(1),
+  kind: z.string().min(1),
+  origin: z.string().min(1),
+});
+
+export type TestBase = z.infer<typeof TestBaseSchema>;
+
+const TestBasesSchema = z.object({
+  bases: z.array(TestBaseSchema),
+});
+
+export type TestBases = z.infer<typeof TestBasesSchema>;
+
+const RunnerContractSchema = z.object({
+  contract_version: z.string().min(1),
+  policy: z.string().min(1),
+});
+
+export type RunnerContract = z.infer<typeof RunnerContractSchema>;
+
+export async function readCatalogSummary(): Promise<CatalogSummary> {
+  return requestJson(
+    CATALOG_SUMMARY_PATH,
+    { method: "GET", kind: "read" },
+    CatalogSummarySchema,
+  );
+}
+
+export async function readCatalogTests(): Promise<CatalogTests> {
+  return requestJson(
+    CATALOG_TESTS_PATH,
+    { method: "GET", kind: "read" },
+    CatalogTestsSchema,
+  );
+}
+
+export async function readCatalogHistory(): Promise<CatalogHistory> {
+  return requestJson(
+    CATALOG_HISTORY_PATH,
+    { method: "GET", kind: "read" },
+    CatalogHistorySchema,
+  );
+}
+
+export async function readTestBases(): Promise<TestBases> {
+  return requestJson(
+    TEST_BASES_PATH,
+    { method: "GET", kind: "read" },
+    TestBasesSchema,
+  );
+}
+
+export async function readRunnerContract(): Promise<RunnerContract> {
+  return requestJson(
+    RUNNER_CONTRACT_PATH,
+    { method: "GET", kind: "read" },
+    RunnerContractSchema,
+  );
+}
+
+export async function attachTestBase(
+  baseId: string,
+  kind: string,
+): Promise<TestBase> {
+  return requestJson(
+    TEST_BASES_ATTACH_PATH,
+    { method: "POST", kind: "write", body: { base_id: baseId, kind } },
+    TestBaseSchema,
   );
 }
 

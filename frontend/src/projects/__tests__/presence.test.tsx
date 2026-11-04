@@ -181,7 +181,9 @@ describe("ARCH-686 presence guard", () => {
     expect(
       checkPresenceBreach({
         must: [...NAMED_MENU_TEST_IDS],
-        present: [...NAMED_MENU_TEST_IDS, "project-report-derived-split"],
+        // FXLOOK D5: the derived-split section no longer renders, so it
+        // is not in the present set (the builder keeps its unit test).
+        present: [...NAMED_MENU_TEST_IDS],
       }),
     ).toEqual([]);
     expect(buildDerivedSplit({ ledger: LEDGER, budget: BUDGET })).toHaveLength(

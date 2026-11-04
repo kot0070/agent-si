@@ -59,6 +59,9 @@ def _stub_models_ok(monkeypatch):
 
 
 def test_os_served_audit_persists_across_restart(tmp_path, monkeypatch):
+    # S4: asserts the real OS default, so it opts out of the
+    # conftest memory default for this test only.
+    monkeypatch.delenv("AGENT_SI_SECRET_STORE", raising=False)
     _stub_models_ok(monkeypatch)
     settings = _settings(tmp_path)
     app = create_app(settings)
@@ -110,6 +113,9 @@ def test_os_served_audit_persists_across_restart(tmp_path, monkeypatch):
 
 
 def test_os_build_failure_starts_app_and_503_no_memory(monkeypatch, tmp_path):
+    # S4: asserts the real OS default, so it opts out of the
+    # conftest memory default for this test only.
+    monkeypatch.delenv("AGENT_SI_SECRET_STORE", raising=False)
     reason = "simulated-OS-down-K04WIRE1"
 
     def _boom(**kwargs):
@@ -163,6 +169,10 @@ def test_memory_setting_keeps_memory_stack(tmp_path, monkeypatch):
 
 
 def test_no_env_or_runner_detection():
+    # S4: the single sanctioned product setting (env.example)
+    # AGENT_SI_SECRET_STORE may be read in the wired path (settings
+    # win, the env decides only when settings stay silent); every
+    # other env read and all runner detection stay banned.
     for mod_path in (
         os.path.join(_SRC, "agent_si", "backend", "app.py"),
         os.path.join(_SRC, "agent_si", "providers", "registry",
@@ -170,7 +180,11 @@ def test_no_env_or_runner_detection():
     ):
         with open(mod_path, "r", encoding="utf-8") as fh:
             text = fh.read()
-        for marker in ("os.environ", "os.getenv", "getenv(",
-                       "environ.get", "GITHUB_ACTIONS", "PYTEST_CURRENT_TEST",
+        for marker in ("GITHUB_ACTIONS", "PYTEST_CURRENT_TEST",
                        "RUNNER", "CI_"):
             assert marker not in text, (mod_path, marker)
+        for i, line in enumerate(text.splitlines(), 1):
+            if ("os.environ" in line or "os.getenv" in line
+                    or "getenv(" in line or "environ.get" in line):
+                assert "AGENT_SI_SECRET_STORE" in line, (
+                    mod_path, i, line.strip()[:160])

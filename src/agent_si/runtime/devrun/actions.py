@@ -422,12 +422,18 @@ def _run_script_name(head: str, words: list[str]) -> str:
     npm runs scripts via run/run-script plus the test/start shorthands;
     yarn/pnpm/bun run a bare script name (their run verb included).
     Anything else (flags, install verbs, unknown shapes) is empty.
+    Manager path flags (`--prefix`, `--cwd`, `--dir`, `-C`) plus their
+    values are skipped first, so a subfolder run still resolves its
+    script name.
     """
-    if not words:
+    from agent_si.toolguard import guard as _verb_guard
+
+    verbs = _verb_guard._skip_manager_path_flags([str(word) for word in words])
+    if not verbs:
         return ""
-    first = str(words[0])
+    first = verbs[0]
     if first in ("run", "run-script"):
-        return str(words[1]) if len(words) > 1 else ""
+        return str(verbs[1]) if len(verbs) > 1 else ""
     if head == "npm" and first in ("test", "start"):
         return first
     if head in ("yarn", "pnpm", "bun"):
@@ -504,8 +510,11 @@ def classify_argv(argv: list[str]) -> str:
             effective = module.strip().lower().rsplit("/", 1)[-1]
     if effective in _ALWAYS_INSTALL_HEADS:
         return "install"
-    if effective in ("yarn", "pnpm", "npm") and words[:1] \
-            and words[0].lower() in _FETCH_VERBS:
+    from agent_si.toolguard import guard as _class_guard
+
+    _verb_words = _class_guard._skip_manager_path_flags(words)
+    if effective in ("yarn", "pnpm", "npm") and _verb_words \
+            and _verb_words[0].lower() in _FETCH_VERBS:
         return "install"
     if effective in _INSTALL_PROGRAMS and any(
             word.lower() in _INSTALL_VERBS for word in words):
@@ -965,25 +974,47 @@ def spawn_checked(
                 _ask_permissions.record_install_request(
                     tool_id=_ask_tool_id,
                     argv=list(words),
-                    project_id=str(project_id))
+                    project_id=str(project_id),
+                    run_id=_ask_scope)
             raise InstallAskNeeded(
                 _ask_tool_id,
                 f"refused: install-class command {_ask_name!r} needs "
                 "install permission (ungranted runs continue without "
                 "the install)")
         if not _ask_project_grant and _ask_decision == "deny":
-            raise PermissionError(
-                f"refused: install-class command {_ask_name!r} needs "
-                "install permission (ungranted runs continue without "
-                "the install)")
-        if not _ask_project_grant and not _ask_run_allow:
-            # FXR4A D4: the once-allow is spent by an earlier run; the
-            # next run asks again, never silently refuses.
+            if _ask_permissions.decision_denies_run(
+                    tool_id=_ask_tool_id, run_id=_ask_scope):
+                # FXASK A4: the deny covers this run (the run it was
+                # decided in): it closes refused with the plain line.
+                raise PermissionError(
+                    f"refused: install-class command {_ask_name!r} needs "
+                    "install permission (ungranted runs continue without "
+                    "the install)")
+            # FXASK A4: a previous run's deny never refuses this run:
+            # drop the stale decision, pin this run's words, ask again.
             with contextlib.suppress(Exception):
-                _ask_permissions.record_install_request(
+                _ask_permissions.reset_decision_for_run(
                     tool_id=_ask_tool_id,
                     argv=list(words),
-                    project_id=str(project_id))
+                    project_id=str(project_id),
+                    run_id=_ask_scope)
+            raise InstallAskNeeded(
+                _ask_tool_id,
+                f"refused: install-class command {_ask_name!r} needs "
+                "install permission (an earlier run denied it; "
+                "ungranted runs continue without the install)")
+        if not _ask_project_grant and not _ask_run_allow:
+            # FXR4A D4: the once-allow is spent by an earlier run; the
+            # next run asks again, never silently refuses. The pin is
+            # re-pointed at this run (a spent allow's pin would route a
+            # later deny at the wrong run), so a fresh ask covers this
+            # run's exact words.
+            with contextlib.suppress(Exception):
+                _ask_permissions.reset_decision_for_run(
+                    tool_id=_ask_tool_id,
+                    argv=list(words),
+                    project_id=str(project_id),
+                    run_id=_ask_scope)
             raise InstallAskNeeded(
                 _ask_tool_id,
                 f"refused: install-class command {words[0]!r} needs "
@@ -1049,16 +1080,24 @@ def spawn_checked(
         "task": "devrun:%s" % (str(run_id),),
         "scopes": ["tools:exec"],
     }
-    if kind == "install" and _ask_decision == "allow":
-        # The user allowed this installer in the decision ledger: carry
-        # that exact approval to the guard so the installer-name denial
-        # lifts for these exact words only. The carried argv comes from
-        # the ledger pin (ask-time request, or the first allowed spawn),
-        # never rebuilt from the current words, so the guard exact-match
-        # stays live on this path too. Shell-fragment, widening and
-        # path checks still run; nothing else changes.
-        _ask_carry = (_ask_approved if _ask_approved is not None
-                      else list(words))
+    if kind == "install" and (_ask_decision == "allow"
+                               or _ask_project_grant):
+        # The user allowed this installer (once-allow in the decision
+        # ledger, or a project grant for this head and subcommand):
+        # carry that exact approval to the guard so the installer-name
+        # denial lifts for these exact words only. The carried argv
+        # comes from the ledger pin (ask-time request, or the first
+        # allowed spawn) on the allow path and from the current words
+        # on the grant path (a grant covers the head, not exact words),
+        # so the guard exact-match stays live on both paths.
+        # Shell-fragment, widening and path checks still run; nothing
+        # else changes. FXASK A8: without this carry a granted install
+        # dies at the guard and the worker loop never goes on.
+        if _ask_project_grant and _ask_decision != "allow":
+            _ask_carry = list(words)
+        else:
+            _ask_carry = (_ask_approved if _ask_approved is not None
+                          else list(words))
         auth["install_approved"] = True
         auth["install_argv"] = [str(word) for word in _ask_carry]
     result = guarded_dispatch(

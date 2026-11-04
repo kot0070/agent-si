@@ -125,6 +125,7 @@ export const SETTINGS_ROUTES: SettingsRoute[] = [
   { path: 'capabilityDB', titleKey: 'settings.capabilityDb.title', purposeKey: 'settings.capabilityDb.purpose', needItNowKey: 'settings.capabilityDb.needItNow' },
   { path: 'project', titleKey: 'settings.project.title', purposeKey: 'settings.project.purpose', needItNowKey: 'settings.project.needItNow' },
   { path: 'localbench', titleKey: 'settings.localbench.title', purposeKey: 'settings.localbench.purpose', needItNowKey: 'settings.localbench.needItNow' },
+  { path: 'qacatalog', titleKey: 'settings.qacatalog.title', purposeKey: 'settings.qacatalog.purpose', needItNowKey: 'settings.qacatalog.needItNow' },
 ];
 
 export interface RoleProfileInput {

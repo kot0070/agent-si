@@ -23,6 +23,7 @@ import re
 import shlex
 import sys
 import threading
+import time
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -63,6 +64,238 @@ class _InstallHeld(Exception):
             "run held: waiting for your permission to run %s" % (command,))
         self.tool_id = str(tool_id)
         self.command = str(command)
+
+
+class _AskParked(Exception):
+    """A live install ask parked before any wait or event.
+
+    Raised by the spawn path instead of _InstallHeld when the run waits
+    in place (FXASK A8): the parked call resumes identically (same
+    words, same ledger pin) once the user answers, with no model round
+    trip. Carries everything the remainder needs to re-spawn.
+    """
+
+    code: str = "DEVRUN_INSTALL_ASK_PARKED"
+
+    def __init__(self, *, tool_id: str, argv: list, project: str,
+                 folder: str, scope: str, log_path: str,
+                 log_rel: str, lock: Any = None) -> None:
+        super().__init__("install ask parked for %s" % (" ".join(
+            str(word) for word in (argv or [])),))
+        self.tool_id = str(tool_id)
+        self.argv = [str(word) for word in (argv or [])]
+        self.project = str(project)
+        self.folder = str(folder)
+        self.scope = str(scope)
+        self.log_path = str(log_path)
+        self.log_rel = str(log_rel)
+        self.lock = lock
+
+
+class _AgentAsk(Exception):
+    """A parked install ask climbing to a generator (FXASK A8).
+
+    Enriched at each sync frame: the command frame attaches the full
+    command remainder, the turn frame the turn remainder, the loop
+    frame the worker history to resume from. The catching generator
+    yields the waiting line plus one ask event, blocks on the ledger,
+    then resumes through the envelope — the run stays the same run.
+    """
+
+    code: str = "DEVRUN_INSTALL_ASK_WAIT"
+
+    def __init__(self, park: _AskParked) -> None:
+        super().__init__("install ask waits in place for %s" % (
+            " ".join(park.argv),))
+        self.park = park
+        # Attached by the command frame: () -> note string.
+        self.resume_command: Any = None
+        # Attached by the turn frame: () -> (notes, stop_note).
+        self.resume_turn: Any = None
+        # Attached by the loop frame: parsed reply, raw reply text,
+        # worker history and compaction state to resume from.
+        self.resume_parsed: Any = None
+        self.resume_response_text: Any = None
+        self.resume_history: Any = None
+        self.resume_accum: Any = None
+        self.resume_counts: Any = None
+        self.resume_reply_no: Any = None
+
+
+#: Seconds a parked install ask waits in place before falling back to
+#: today's hold (resend path stays for that case only, FXASK A8).
+_ASK_WAIT_TIMEOUT_S = 900.0
+
+#: Ledger poll cadence while parked: no model call, no token spend.
+_ASK_WAIT_POLL_S = 0.5
+
+#: Monotonic clock for the parked wait; tests inject a jumped clock.
+_ask_wait_clock = time.monotonic
+
+
+def _await_parked_ask(ask: Any, *, turn: int, subtask: str,
+                      run_id: str, stop_seen: Any = None) -> Any:
+    """Yield the waiting line plus one ask event, then block on the ledger.
+
+    A generator: the two events reach the open stream at once, then each
+    ``next()`` polls the install decision (500 ms cadence, no model
+    call, no token spend, no attempt burned). Returns ("proceed", None,
+    next_turn) once an allow or project grant covers the parked words,
+    ("denied", line, next_turn) on a deny of this run. Raises
+    _InstallHeld after 15 min without an answer (or on an answer the
+    wait cannot use: today's hold and its resend path stay for that
+    case only) and _Stopped when the run stops.
+    """
+    from agent_si.toolguard import permissions as _wait_perm
+
+    command = " ".join(str(word) for word in ask.park.argv)
+    waiting = "Waiting for your permission to run %s." % (command,)
+    yield _run_event("delta", turn, subtask, waiting,
+                     {"run_id": run_id})
+    yield _run_event(
+        "ask", turn + 1, subtask, waiting,
+        {"run_id": run_id, "tool_id": ask.park.tool_id,
+         "argv": [str(word) for word in ask.park.argv]})
+    next_turn = turn + 2
+    try:
+        start = _ask_wait_clock()
+    except Exception:
+        start = 0.0
+    while True:
+        try:
+            if stop_seen is not None and bool(stop_seen()):
+                raise _Stopped()
+        except _Stopped:
+            raise
+        except Exception:
+            pass
+        try:
+            grant = bool(_wait_perm.install_grant_allows(
+                ask.park.project, list(ask.park.argv)))
+        except Exception:
+            grant = False
+        decision = None
+        try:
+            decision = _wait_perm.get_decision(
+                tool_id=ask.park.tool_id)
+        except Exception:
+            decision = None
+        if grant or decision == "allow":
+            if grant:
+                return ("proceed", None, next_turn)
+            # FXR4A D4 mirrors the spawn ladder: a once-allow consumed
+            # by another run does NOT cover this parked wait (proceeding
+            # would re-park forever); the wait holds for a fresh answer.
+            try:
+                covers = bool(_wait_perm.decision_allows_run(
+                    tool_id=ask.park.tool_id, run_id=ask.park.scope))
+            except Exception:
+                covers = False
+            if not covers:
+                pass
+            else:
+                try:
+                    approved = _wait_perm.get_install_argv(
+                        tool_id=ask.park.tool_id)
+                except Exception:
+                    approved = None
+                if approved is None:
+                    try:
+                        approved = _wait_perm.pin_install_argv(
+                            tool_id=ask.park.tool_id,
+                            argv=list(ask.park.argv),
+                            project_id=ask.park.project)
+                    except Exception:
+                        approved = None
+                if (approved is not None
+                        and [str(word) for word in approved] != [
+                            str(word) for word in ask.park.argv]):
+                    # The pin moved under the wait (another run
+                    # re-asked): keep waiting for this run's own answer,
+                    # never run words the user was not asked about.
+                    pass
+                else:
+                    # The once-allow is consumed by this run; the next
+                    # run asks again (same rule as the spawn ladder).
+                    with contextlib.suppress(Exception):
+                        _wait_perm.note_decision_consumed(
+                            tool_id=ask.park.tool_id,
+                            run_id=ask.park.scope)
+                    return ("proceed", None, next_turn)
+        elif decision == "deny":
+            try:
+                ours = bool(_wait_perm.decision_denies_run(
+                    tool_id=ask.park.tool_id, run_id=ask.park.scope))
+            except Exception:
+                ours = True
+            if ours:
+                return ("denied",
+                        "install permission denied for %s" % (command,),
+                        next_turn)
+            # Another run's deny: not ours; keep waiting for our answer.
+        try:
+            elapsed = _ask_wait_clock() - start
+        except Exception:
+            elapsed = 0.0
+        if elapsed > _ASK_WAIT_TIMEOUT_S:
+            # No answer in 15 min (or the clock jumped past it): fall
+            # back to today's hold; the resend path stays for that case
+            # only.
+            raise _InstallHeld(ask.park.tool_id, command)
+        time.sleep(_ASK_WAIT_POLL_S)
+
+
+def _drive_parked_ask(first_ask: Any, *, turn: int, subtask: str,
+                      run_id: str, stop_seen: Any = None,
+                      proceed: Any = None,
+                      fail_denied: Any = None) -> Any:
+    """Drive parked install asks to an outcome (FXASK A8).
+
+    A generator: waits on each ask in turn (the stream stays open, one
+    card per tool), resumes through the envelope on allow/grant, and
+    closes through fail_denied on deny. proceed(ask, turn) runs the parked
+    remainder and returns its outcome; fail_denied(line, turn) yields
+    the FAILED close and returns its outcome. A fresh _AgentAsk raised
+    while resuming waits again instead of failing the run.
+    """
+    pending = first_ask
+    while True:
+        kind, line, turn = yield from _await_parked_ask(
+            pending, turn=turn, subtask=subtask, run_id=run_id,
+            stop_seen=stop_seen)
+        if kind == "denied":
+            outcome = yield from fail_denied(line, turn)
+            return outcome
+        try:
+            outcome = proceed(pending, turn)
+        except _AgentAsk as _parked_next:
+            pending = _parked_next
+            continue
+        return outcome
+
+
+def _fail_install_denied_part(*, row: Any, part_id: str, reason: str,
+                              turn: int, task_id: str, run_id: str,
+                              project: str, journal_event: Any,
+                              publish: Any) -> Any:
+    """Close one part FAILED on a denied install (shared D6 epilogue).
+
+    A generator: the plain FAILED delta, the journal row and the
+    publish, then ("FAIL", next_turn). The worker attempt gate and the
+    parked-ask deny path share it, so both close identically.
+    """
+    row["verdict"] = "FAIL"
+    row["reason"] = str(reason)
+    turn += 1
+    yield _run_event(
+        "delta", turn, part_id,
+        "Part %s: FAILED (%s)" % (part_id, row["reason"]),
+        {"run_id": run_id, "part_id": part_id})
+    journal_event(
+        project, "DEVRUN_PART",
+        "part %s: FAIL (%s)" % (part_id, row["reason"]))
+    publish()
+    return "FAIL", turn
 
 
 #: Extra worker attempts after the first, per F-VERDICT.
@@ -1589,14 +1822,38 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                             continue
                 except Exception:
                     pass
-                _notes, _stop_note = _apply_actions(
-                    record=record, row=solo_row, folder=folder,
-                    project=project, run_id=run_id, part_id="solo",
-                    attempt=1, actions=_parsed_solo.get("actions", []),
-                    spec=solo_spec, state=state, procs=procs, live=_live,
-                    worker_spec=solo_worker, check_stop=_check_stop,
-                    attached=attached, stop_seen=_stop_seen,
-                    lock=run_lock)
+                try:
+                    _notes, _stop_note = _apply_actions(
+                        record=record, row=solo_row, folder=folder,
+                        project=project, run_id=run_id, part_id="solo",
+                        attempt=1, actions=_parsed_solo.get("actions", []),
+                        spec=solo_spec, state=state, procs=procs, live=_live,
+                        worker_spec=solo_worker, check_stop=_check_stop,
+                        attached=attached, stop_seen=_stop_seen,
+                        lock=run_lock)
+                except _AgentAsk as _sask:
+                    # FXASK A8: parked install ask on the solo path: wait
+                    # in place, then resume the turn identically. Deny
+                    # fails the run with the plain line.
+                    _pending_solo: Any = _sask
+                    while True:
+                        _kind_s, _line_s, turn = yield from (
+                            _await_parked_ask(
+                                _pending_solo, turn=turn, subtask="solo",
+                                run_id=run_id, stop_seen=_stop_seen))
+                        if _kind_s == "denied":
+                            _notes = "run %s: %s" % (
+                                " ".join(_pending_solo.park.argv),
+                                _line_s)
+                            _stop_note = "refused: %s" % (_line_s,)
+                            break
+                        try:
+                            _notes, _stop_note = (
+                                _pending_solo.resume_turn())
+                        except _AgentAsk as _sask_next:
+                            _pending_solo = _sask_next
+                            continue
+                        break
                 solo_history.append({
                     "role": "assistant",
                     "content": _solo_text})
@@ -1787,6 +2044,10 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
             parsed = _protocol.parse_director_reply(
                 director_text.output_text or "")
         except _protocol.PlanError as exc:
+            # FXRUNSPEED S2: one journal line with the re-ask reason
+            # only (never the model text).
+            _journal("DEVRUN_PLAN",
+                     "director plan re-ask (parse): %s" % (exc,))
             _check_stop()
             try:
                 repair = _call(
@@ -1839,6 +2100,11 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
             # built: re-ask once for parts. A second answer is shown,
             # but the run is not a success ("Nothing was built.").
             _check_stop()
+            # FXRUNSPEED S2: one journal line with the re-ask reason
+            # only (never the model text).
+            _journal("DEVRUN_PLAN",
+                     "director plan re-ask (build-answer): "
+                     "answer on a build task needs parts")
             try:
                 _retry_text = _call(
                     "director", director, director_adapter,
@@ -1882,6 +2148,11 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                 _check_stop()
                 _names = "; ".join(
                     "%s (part %s)" % (cell, pid) for pid, cell in _missing)
+                # FXRUNSPEED S2: one journal line with the re-ask
+                # reason only (never the model text).
+                _journal("DEVRUN_PLAN",
+                         "director plan re-ask (missing-check): %s"
+                         % (_names,))
                 try:
                     _mrepair = _call(
                         "director", director, director_adapter,
@@ -2057,7 +2328,8 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
                     "delta", turn, task_id,
                     "Part %s: %s [files: %s]"
                     % (part["part_id"], part["goal"],
-                       ", ".join(part["files"])),
+                       ", ".join(_existing_plan_files(
+                           folder, part.get("files")))),
                     {"run_id": run_id,
                      "part_id": part["part_id"]})
                 turn += 1
@@ -2295,9 +2567,13 @@ def run_dev_task(request: Any, *, provider_adapter: Any = None,
     except _InstallHeld as exc:
         record["success"] = False
         record["held"] = True
-        record["summary"] = ("run held: install permission needed for %s"
-                             % (exc.tool_id,))
+        # FXASK A6: the held text is the same plain words as the
+        # _InstallHeld message (engine.py:63); the raw tool id rides
+        # its own field, never the summary or hold reason.
+        record["summary"] = ("run held: waiting for your permission to "
+                             "run %s" % (exc.command,))
         record["hold_reason"] = record["summary"]
+        record["hold_tool_id"] = str(exc.tool_id)
         _finish_task()
         _publish()
         if not record.get("stopped"):
@@ -3097,16 +3373,58 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
         worker_adapter = _roles.build_adapter(app, worker_spec)
         producer_ref = "%s-a%d" % (producer_base, attempt)
         turn += 1
-        outcome = _agent_loop(
-            record=record, app=app, spec=spec, row=row,
-            adapter=worker_adapter, worker_spec=worker_spec,
-            folder=folder, project=project,
-            run_id=run_id, part_id=part_id, attempt=attempt,
-            turn=turn, turn_cap=turn_cap, state=state, procs=procs,
-            failing=failing, reasons=reasons, message=message,
-            publish=publish, check_stop=check_stop, live=live,
-            call=call, attached=attached, stop_seen=stop_seen,
-            lock=lock, prior_files=prior_files, last_fail=last_fail)
+        try:
+            outcome = _agent_loop(
+                record=record, app=app, spec=spec, row=row,
+                adapter=worker_adapter, worker_spec=worker_spec,
+                folder=folder, project=project,
+                run_id=run_id, part_id=part_id, attempt=attempt,
+                turn=turn, turn_cap=turn_cap, state=state, procs=procs,
+                failing=failing, reasons=reasons, message=message,
+                publish=publish, check_stop=check_stop, live=live,
+                call=call, attached=attached, stop_seen=stop_seen,
+                lock=lock, prior_files=prior_files, last_fail=last_fail)
+        except _AgentAsk as _ask0:
+            # FXASK A8: parked install ask: yield the waiting line plus
+            # one ask event, block on the ledger, then resume this
+            # attempt identically (no new model call for the parked
+            # turn). Deny closes the part FAILED with the plain line.
+            def _proceed_part_wait(_ask: Any, _turn: int) -> Any:
+                _p_notes, _p_stop = _ask.resume_turn()
+                return _agent_loop(
+                    record=record, app=app, spec=spec, row=row,
+                    adapter=worker_adapter, worker_spec=worker_spec,
+                    folder=folder, project=project,
+                    run_id=run_id, part_id=part_id, attempt=attempt,
+                    turn=_turn, turn_cap=turn_cap, state=state,
+                    procs=procs, failing=failing, reasons=reasons,
+                    message=message, publish=publish,
+                    check_stop=check_stop, live=live, call=call,
+                    attached=attached, stop_seen=stop_seen,
+                    lock=lock, prior_files=prior_files,
+                    last_fail=last_fail,
+                    _resume=(_ask.resume_parsed,
+                             _ask.resume_response_text, _p_notes,
+                             _p_stop, _ask.resume_history,
+                             _ask.resume_accum, _ask.resume_counts,
+                             _ask.resume_reply_no))
+
+            def _fail_part_wait(_line: Any, _turn: int) -> Any:
+                row["install_denied"] = str(_line)
+                failed = yield from _fail_install_denied_part(
+                    row=row, part_id=part_id, reason=str(_line),
+                    turn=_turn, task_id=task_id, run_id=run_id,
+                    project=project, journal_event=_journal_event,
+                    publish=publish)
+                return failed
+
+            outcome = yield from _drive_parked_ask(
+                _ask0, turn=turn, subtask=part_id, run_id=run_id,
+                stop_seen=stop_seen, proceed=_proceed_part_wait,
+                fail_denied=_fail_part_wait)
+            if (isinstance(outcome, tuple) and len(outcome) == 2
+                    and outcome[0] == "FAIL"):
+                return outcome
         turn, attempt_ok, stop_note = outcome
         if stop_note is not None:
             turn += 1
@@ -3119,18 +3437,11 @@ def _run_part(*, record: Any, app: Any, spec: dict, row: dict,
             # the part FAILED with the plain line (no retry, no
             # checks-green swallow). Check/audit verdict gates below
             # stay untouched.
-            row["verdict"] = "FAIL"
-            row["reason"] = str(row["install_denied"])
-            turn += 1
-            yield _run_event(
-                "delta", turn, part_id,
-                "Part %s: FAILED (%s)" % (part_id, row["reason"]),
-                {"run_id": run_id, "part_id": part_id})
-            _journal_event(
-                project, "DEVRUN_PART",
-                "part %s: FAIL (%s)" % (part_id, row["reason"]))
-            publish()
-            return "FAIL", turn
+            return (yield from _fail_install_denied_part(
+                row=row, part_id=part_id,
+                reason=str(row["install_denied"]), turn=turn,
+                task_id=task_id, run_id=run_id, project=project,
+                journal_event=_journal_event, publish=publish))
         if not attempt_ok:
             failing.append("agent loop failed")
         checks = _run_checks(
@@ -3758,7 +4069,8 @@ def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
                 message: str, publish: Any, check_stop: Any, live: Any,
                 call: Any, attached: Any = None,
                 stop_seen: Any = None, lock: Any = None,
-                prior_files: Any = None, last_fail: str = "") -> Any:
+                prior_files: Any = None, last_fail: str = "",
+                _resume: Any = None) -> Any:
     """Worker turn loop; return (next turn, attempt usable, stop line).
 
     The stop line is set only when one identical failing run call hit
@@ -3785,6 +4097,53 @@ def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
     repeat_counts: dict[str, int] = {}
     overflowed = False
     accum: list = [[], [], []]
+    # FXASK A8: re-entry after a parked install ask. The resumed turn
+    # completes below without a new model call; anything else runs the
+    # normal turn loop. History/accum ride the envelope so the resumed
+    # context matches the parked one.
+    _resumed_turn: Any = None
+    _reply_no_resume: Any = None
+    if _resume is not None:
+        try:
+            (_resumed_parsed, _resumed_text, _resumed_notes,
+             _resumed_stop, _resumed_history,
+             _resumed_accum, _resumed_counts,
+             _resumed_reply_no) = _resume
+        except (TypeError, ValueError):
+            _resumed_turn = None
+        else:
+            _resumed_turn = (_resumed_parsed, _resumed_text,
+                             _resumed_notes, _resumed_stop)
+            history = list(_resumed_history or [])
+            if isinstance(_resumed_accum, list) and len(
+                    _resumed_accum) == 3:
+                accum = _resumed_accum
+            if isinstance(_resumed_counts, dict):
+                repeat_counts = _resumed_counts
+            _reply_no_resume: Any = None
+            try:
+                _reply_no_resume = int(_resumed_reply_no)
+            except (TypeError, ValueError):
+                pass
+
+    def _finish_resumed_turn(_pending: Any) -> Any:
+        # Complete the parked turn without a new model call: the
+        # assistant reply and the waited outcome join the history,
+        # then the normal stop/done rules apply. None means the loop
+        # continues with a fresh model call.
+        try:
+            _p_parsed, _p_text, _p_notes, _p_stop = _pending
+        except (TypeError, ValueError):
+            return None
+        history.append({"role": "assistant",
+                        "content": _cap_reply_text(_p_text)})
+        history.append({"role": "user", "content": _p_notes})
+        if _p_stop is not None:
+            row["reason"] = _p_stop
+            return (turn, False, _p_stop)
+        if isinstance(_p_parsed, dict) and _p_parsed.get("done"):
+            return (turn, True, None)
+        return None
 
     def _timed_out_note(exc: BaseException) -> dict[str, str]:
         return {"role": "user", "content": (
@@ -3800,6 +4159,11 @@ def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
     except OSError:
         pass
     reply_no = 0
+    if _reply_no_resume is not None:
+        try:
+            reply_no = int(_reply_no_resume)
+        except (TypeError, ValueError):
+            pass
 
     def _log_reply(kind: str, reply_text: Any) -> None:
         try:
@@ -3814,6 +4178,14 @@ def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
 
     for _ in range(max(1, int(turn_cap))):
         check_stop()
+        if _resumed_turn is not None:
+            # FXASK A8: the parked turn completes without a new model
+            # call; a None finish means the loop continues normally.
+            _pending_resume, _resumed_turn = _resumed_turn, None
+            _finished = _finish_resumed_turn(_pending_resume)
+            if _finished is not None:
+                return _finished
+            continue
         history = _compact_history(history, cap_chars, accum)
         try:
             response = call("worker", worker_spec, adapter, history,
@@ -3926,14 +4298,29 @@ def _agent_loop(*, record: Any, app: Any, spec: dict, row: dict,
                         return turn, False, _call_roles.CONTEXT_PLAIN
                 reply_no += 1
                 _log_reply("repair-retry", response.output_text)
-        notes, stop_note = _apply_actions(
-            record=record, row=row, folder=folder, project=project,
-            run_id=run_id, part_id=part_id, attempt=attempt,
-            actions=parsed["actions"],
-            spec=spec, state=state, procs=procs, live=live,
-            worker_spec=worker_spec, check_stop=check_stop,
-            attached=attached, stop_seen=stop_seen,
-            repeat_counts=repeat_counts, lock=lock)
+        try:
+            notes, stop_note = _apply_actions(
+                record=record, row=row, folder=folder, project=project,
+                run_id=run_id, part_id=part_id, attempt=attempt,
+                actions=parsed["actions"],
+                spec=spec, state=state, procs=procs, live=live,
+                worker_spec=worker_spec, check_stop=check_stop,
+                attached=attached, stop_seen=stop_seen,
+                repeat_counts=repeat_counts, lock=lock)
+        except _AgentAsk as _ask3:
+            # FXASK A8: parked install ask: enrich the envelope with the
+            # worker reply and history to resume from, then let the
+            # catching generator wait on the ledger.
+            if _ask3.resume_turn is None:
+                raise
+            _ask3.resume_parsed = parsed
+            _ask3.resume_response_text = str(
+                getattr(response, "output_text", "") or "")
+            _ask3.resume_history = list(history)
+            _ask3.resume_accum = accum
+            _ask3.resume_counts = repeat_counts
+            _ask3.resume_reply_no = reply_no
+            raise _ask3 from None
         history.append({"role": "assistant",
                         "content": _cap_reply_text(
                             response.output_text or "")})
@@ -4016,21 +4403,28 @@ def _apply_actions(*, record: Any, row: Any, folder: str, project: str,
                    live: Any, worker_spec: dict, check_stop: Any,
                    attached: Any = None, stop_seen: Any = None,
                    repeat_counts: dict | None = None,
-                   lock: Any = None) -> Any:
+                   lock: Any = None,
+                   _notes_prefix: Any = None,
+                   _stop_prefix: Any = None,
+                   _refusals_prefix: Any = None) -> Any:
     """Apply one worker turn; every refusal returns as text.
 
     Returns (notes, stop_note): notes feed the worker's next turn;
     stop_note carries the honest line when one identical failing run
     call hit three times, ending the attempt. Only run actions count
     (read-only calls stay free); different args never collide.
+    The _notes_prefix/_stop_prefix/_refusals_prefix triple resumes a
+    turn parked on an install ask (FXASK A8) with identical text, stop
+    and refusal semantics.
     """
     from agent_si.runtime.devrun import actions as _actions
 
-    notes: list[str] = []
-    refusals: list[str] = []
+    notes: list[str] = list(_notes_prefix or [])
+    refusals: list[str] = list(_refusals_prefix or [])
     counts = repeat_counts if isinstance(repeat_counts, dict) else {}
-    stop_note: str | None = None
-    for action in actions:
+    stop_note: str | None = (
+        str(_stop_prefix) if _stop_prefix is not None else None)
+    for _index, action in enumerate(actions):
         check_stop()
         name = action.get("action")
         try:
@@ -4074,15 +4468,48 @@ def _apply_actions(*, record: Any, row: Any, folder: str, project: str,
                         not isinstance(word, str) for word in argv):
                     notes.append("run: refused: argv must be a word list")
                     continue
-                note = _run_agent_command(
-                    record=record, folder=folder, project=project,
-                    run_id="%s-%s-a%d-agent" % (
-                        run_id, part_id, attempt),
-                    grant_run_id=str(run_id),
-                    raise_denied=True,
-                    argv=[str(word) for word in argv], state=state,
-                    procs=procs, attached=attached,
-                    stop_seen=stop_seen, lock=lock)
+                try:
+                    note = _run_agent_command(
+                        record=record, folder=folder, project=project,
+                        run_id="%s-%s-a%d-agent" % (
+                            run_id, part_id, attempt),
+                        grant_run_id=str(run_id),
+                        raise_denied=True,
+                        argv=[str(word) for word in argv], state=state,
+                        procs=procs, attached=attached,
+                        stop_seen=stop_seen, lock=lock)
+                except _AgentAsk as _ask2:
+                    # FXASK A8: parked install ask: the turn resumes in
+                    # place once the wait decides. Re-drive this turn's
+                    # remaining actions (the parked one first) with the
+                    # notes collected so far as prefix: text and stop
+                    # semantics stay identical to an unparked turn.
+                    if _ask2.resume_command is None:
+                        raise
+                    _tail_actions = list(actions[_index:])
+                    _head_notes: list[str] = list(notes)
+                    _head_stop = stop_note
+
+                    def _resume_turn(
+                            _ask2: Any = _ask2,
+                            _tail_actions: Any = _tail_actions,
+                            _head_notes: Any = _head_notes,
+                            _head_stop: Any = _head_stop) -> Any:
+                        return _apply_actions(
+                            record=record, row=row, folder=folder,
+                            project=project, run_id=run_id,
+                            part_id=part_id, attempt=attempt,
+                            actions=list(_tail_actions),
+                            spec=spec, state=state, procs=procs,
+                            live=live, worker_spec=worker_spec,
+                            check_stop=check_stop, attached=attached,
+                            stop_seen=stop_seen,
+                            repeat_counts=repeat_counts, lock=lock,
+                            _notes_prefix=list(_head_notes),
+                            _stop_prefix=_head_stop)
+
+                    _ask2.resume_turn = _resume_turn
+                    raise _ask2 from None
                 notes.append(note)
                 if re.search(r": exit 0(\n|$)", note) is None:
                     key = json.dumps([str(word) for word in argv],
@@ -4130,6 +4557,33 @@ def _apply_actions(*, record: Any, row: Any, folder: str, project: str,
     return text, stop_note
 
 
+def _existing_plan_files(folder: Any, files: Any) -> list[str]:
+    """Plan files that exist under the project folder (FXASK A5).
+
+    The verdict text parses ``[files: ...]`` markers as evidence, so a
+    marker must never list an absent file (a hallucinated path such as
+    ``node_modules/...`` is dropped, never announced). Only paths that
+    stay inside the folder and exist on disk are kept, in plan order,
+    duplicates dropped. Never raises.
+    """
+    try:
+        base = os.path.realpath(str(folder or ""))
+        if not base or not isinstance(files, (list, tuple)):
+            return []
+        kept: list[str] = []
+        for item in files:
+            name = str(item or "")
+            if not name or name in kept:
+                continue
+            path = os.path.normpath(os.path.join(base, name))
+            if path != base and path.startswith(base + os.sep) \
+                    and os.path.exists(path):
+                kept.append(name)
+        return kept
+    except Exception:
+        return []
+
+
 def _deny_tool_id(project: Any, argv: Any) -> str:
     """Tool id for deny-terminal bookkeeping; never raises."""
     try:
@@ -4143,12 +4597,15 @@ def _deny_tool_id(project: Any, argv: Any) -> str:
         return ""
 
 
-def _install_denied(project: Any, folder: Any, argv: Any) -> str:
+def _install_denied(project: Any, folder: Any, argv: Any,
+                    scope: Any = None) -> str:
     """Plain deny line for denied install words, else empty (FXR4A D6).
 
     Mirrors the spawn ladder: direct install class plus scripts whose
     body invokes an installer, minus project grants, with a recorded
-    deny. Never raises; unreadable state reads as not-denied.
+    deny. FXASK A4: the deny covers that run only — a deny pinned to a
+    different run reads as not-denied, so the next run asks again.
+    Never raises; unreadable state reads as not-denied.
     """
     try:
         from agent_si.runtime.devrun import actions as _deny_actions
@@ -4165,9 +4622,10 @@ def _install_denied(project: Any, folder: Any, argv: Any) -> str:
             return ""
         if _deny_perm.install_grant_allows(str(project), words):
             return ""
-        if _deny_perm.get_decision(
+        if not _deny_perm.decision_denies_run(
                 tool_id=_deny_perm.install_tool_id(
-                    str(project), words[0])) != "deny":
+                    str(project), words[0]),
+                run_id=scope):
             return ""
         return "install permission denied for %s" % (" ".join(words),)
     except Exception:
@@ -4176,13 +4634,17 @@ def _install_denied(project: Any, folder: Any, argv: Any) -> str:
 
 def _spawn_held(*, project: Any, run_id: str, folder: str,
                 argv: list, log_path: str, log_rel: str,
-                lock: Any = None, grant_run_id: str = "") -> Any:
+                lock: Any = None, grant_run_id: str = "",
+                live_wait: bool = False) -> Any:
     """One spawn_checked that never leaks the install ask as a refusal.
 
-    InstallAskNeeded always becomes _InstallHeld (the run holds with a
-    terminal approval event). Every spawn site goes through here, so no
-    present or future path can swallow the ask in a broad
-    PermissionError net (InstallAskNeeded subclasses PermissionError).
+    InstallAskNeeded becomes _InstallHeld (the run holds with a
+    terminal approval event), unless live_wait parks it instead: the
+    caller (the worker command path, FXASK A8) catches _AskParked and
+    waits in place, so the run stays the same run. Every spawn site
+    goes through here, so no present or future path can swallow the ask
+    in a broad PermissionError net (InstallAskNeeded subclasses
+    PermissionError).
     """
     from agent_si.runtime.devrun import actions as _spawn_actions
 
@@ -4205,6 +4667,17 @@ def _spawn_held(*, project: Any, run_id: str, folder: str,
         return _spawn_actions.spawn_checked(
             project, run_id, folder, list(argv), log_path, log_rel)
     except _spawn_actions.InstallAskNeeded as exc:
+        if live_wait:
+            # FXASK A8: park, do not hold: the catching generator
+            # yields one ask event, waits on the ledger, then resumes
+            # this exact call with the same words.
+            raise _AskParked(
+                tool_id=exc.tool_id,
+                argv=[str(word) for word in (argv or [])],
+                project=project, folder=folder,
+                scope=str(grant_run_id or run_id),
+                log_path=log_path, log_rel=log_rel,
+                lock=lock) from None
         raise _InstallHeld(exc.tool_id, " ".join(
             str(word) for word in (argv or []))) from None
 
@@ -4238,15 +4711,94 @@ def _run_agent_command(*, record: Any, folder: str, project: str,
     # worker_tools/dispatcher.py:111-114), never the wait below.
     # _spawn_held converts the ask to _InstallHeld; the InstallAskNeeded
     # except below stays as a backstop for direct spawn_checked calls.
+    def _finish(spawn: Any) -> str:
+        proc = spawn.get("proc")
+        if lock is not None:
+            with lock:
+                procs.append(proc)
+                if attached is not None:
+                    with contextlib.suppress(Exception):
+                        attached.add(run_id)
+        else:
+            procs.append(proc)
+            if attached is not None:
+                with contextlib.suppress(Exception):
+                    attached.add(run_id)
+        if lock is not None and stop_seen is not None:
+            # A3: the id lands only after its child was attached; a stop
+            # seen right after the spawn kills that child at once.
+            seen = False
+            with contextlib.suppress(Exception):
+                seen = bool(stop_seen())
+            if seen:
+                _actions.ensure_dead(proc)
+                raise _Stopped()
+        # FXPARALLEL END spawn-lock.
+
+        def _watcher() -> bool:
+            try:
+                return bool(stop_seen()) if stop_seen is not None else False
+            except Exception:
+                return False
+
+        kind = str(spawn.get("class") or "read-only")
+        outcome = _actions.wait_proc(
+            proc, _actions.class_timeout(kind), stream_state=state,
+            stop_watcher=_watcher)
+        if outcome == "exited" and _watcher():
+            outcome = "stopped"
+        if outcome == "stopped":
+            _actions.ensure_dead(proc)
+        try:
+            exit_code = proc.poll()
+        except Exception:
+            exit_code = None
+        tail = _cap_run_tail(_actions.finalize_log(log_path))
+        if outcome == "stopped":
+            raise _Stopped()
+        if outcome == "timeout":
+            return "run %s: timeout after %ss (exit unknown)\n%s" % (
+                " ".join(argv), _actions.class_timeout(kind), tail)
+        if outcome == "exited" and exit_code == 0 and kind == "install":
+            # A real installer run (exit 0 only): the install record feeds
+            # the auditor and the rerun briefs, never model text. Refusals,
+            # holds and failures leave no record.
+            with contextlib.suppress(Exception):
+                from agent_si.runtime.devrun import records as _records
+
+                _records.record_install_run(record, argv, 0)
+        return "run %s: exit %s\n%s" % (" ".join(argv), exit_code, tail)
+
     try:
         spawn = _spawn_held(
             project=project, run_id=run_id, folder=folder, argv=argv,
             log_path=log_path, log_rel=log_rel, lock=lock,
-            grant_run_id=grant_run_id)
+            grant_run_id=grant_run_id, live_wait=bool(raise_denied))
+        return _finish(spawn)
+    except _AskParked as _parked:
+        # FXASK A8: the live worker ask parks here; the catching
+        # generator waits on the ledger, then resumes this exact
+        # command with the same words (no model round trip).
+        def _resume_command(
+                _parked: Any = _parked,
+                _finish: Any = _finish) -> str:
+            _respawned = _spawn_held(
+                project=project, run_id=run_id, folder=folder,
+                argv=list(_parked.argv),
+                log_path=_parked.log_path, log_rel=_parked.log_rel,
+                lock=_parked.lock, grant_run_id=grant_run_id,
+                live_wait=False)
+            return _finish(_respawned)
+
+        _waiting = _AgentAsk(_parked)
+        _waiting.resume_command = _resume_command
+        raise _waiting from None
     except _actions.InstallAskNeeded as exc:
         raise _InstallHeld(exc.tool_id, " ".join(argv)) from None
     except (PermissionError, ValueError) as exc:
-        _denied_line = _install_denied(project, folder, argv)
+        _denied_line = _install_denied(
+            project, folder, argv,
+            scope=str(grant_run_id or run_id))
         if _denied_line and raise_denied:
             # FXR4A D6: the refusal is raised (never a swallowed note)
             # so the part closes FAILED with the plain line; the note
@@ -4254,62 +4806,6 @@ def _run_agent_command(*, record: Any, folder: str, project: str,
             raise _actions.InstallDenied(
                 _deny_tool_id(project, argv), _denied_line) from None
         return "run %s: %s" % (" ".join(argv), exc)
-    proc = spawn.get("proc")
-    if lock is not None:
-        with lock:
-            procs.append(proc)
-            if attached is not None:
-                with contextlib.suppress(Exception):
-                    attached.add(run_id)
-    else:
-        procs.append(proc)
-        if attached is not None:
-            with contextlib.suppress(Exception):
-                attached.add(run_id)
-    if lock is not None and stop_seen is not None:
-        # A3: the id lands only after its child was attached; a stop
-        # seen right after the spawn kills that child at once.
-        seen = False
-        with contextlib.suppress(Exception):
-            seen = bool(stop_seen())
-        if seen:
-            _actions.ensure_dead(proc)
-            raise _Stopped()
-    # FXPARALLEL END spawn-lock.
-
-    def _watcher() -> bool:
-        try:
-            return bool(stop_seen()) if stop_seen is not None else False
-        except Exception:
-            return False
-
-    kind = str(spawn.get("class") or "read-only")
-    outcome = _actions.wait_proc(
-        proc, _actions.class_timeout(kind), stream_state=state,
-        stop_watcher=_watcher)
-    if outcome == "exited" and _watcher():
-        outcome = "stopped"
-    if outcome == "stopped":
-        _actions.ensure_dead(proc)
-    try:
-        exit_code = proc.poll()
-    except Exception:
-        exit_code = None
-    tail = _cap_run_tail(_actions.finalize_log(log_path))
-    if outcome == "stopped":
-        raise _Stopped()
-    if outcome == "timeout":
-        return "run %s: timeout after %ss (exit unknown)\n%s" % (
-            " ".join(argv), _actions.class_timeout(kind), tail)
-    if outcome == "exited" and exit_code == 0 and kind == "install":
-        # A real installer run (exit 0 only): the install record feeds
-        # the auditor and the rerun briefs, never model text. Refusals,
-        # holds and failures leave no record.
-        with contextlib.suppress(Exception):
-            from agent_si.runtime.devrun import records as _records
-
-            _records.record_install_run(record, argv, 0)
-    return "run %s: exit %s\n%s" % (" ".join(argv), exit_code, tail)
 
 
 def _run_checks(*, record: Any, spec: dict, row: dict, folder: str,

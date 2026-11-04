@@ -75,7 +75,7 @@ The app opens a first-run guide with four steps. The guide reads its state from 
 3. Project and folder. Enter a folder value, optionally use Choose folder to pick it with the system dialog, then Create. The app creates the project through the real project service.
 4. First task. Enter a task title and Create. The app creates the task through the real task service and shows the created task. The Continue control finishes the guide and opens the chat with the task title ready.
 
-The last step also shows an optional quiet list: local AI, watcher preset, automations, and knowledge bases. Each can be skipped.
+The last step also shows an optional quiet list: local LLM, watcher preset, automations, and knowledge bases. Each can be skipped.
 
 To open the guide again, go to `/firstrun`.
 
@@ -136,4 +136,4 @@ Agent SI ships under the MIT licence. Copyright (c) 2026 Ivan Soprun. See `LICEN
 
 ## How this was built
 
-The stress points found while building Agent SI are recorded in a field report (owner-observed: over 100 agents at once; measured in the records: 1060 sessions, 545 recorded runs, peak 16 concurrent sessions). See [docs/MUSE_STRESS_STORY.md](docs/MUSE_STRESS_STORY.md).
+The stress points found while building Agent SI are recorded in a field report (owner-observed: over 100 agents at once; measured in the records: 1060 sessions, 545 recorded runs, peak 16 concurrent sessions). See [docs/MUSE_STRESS_STORY.md](docs/MUSE_STRESS_STORY.md). The per-role reasoning level was picked by a small measured eval, not by guessing: see [docs/MODEL_EVAL.md](docs/MODEL_EVAL.md).

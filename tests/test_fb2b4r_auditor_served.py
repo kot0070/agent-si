@@ -243,8 +243,18 @@ def test_openai_only_no_refs_eligible_with_b1_rows_served(
                            json={"approved_by_user": True},
                            headers=HEADERS)
         assert resp.status_code == 200, resp.text
-        assert resp.json()["applied"] is True, resp.text
-        assert OPENAI_PROVIDER in resp.json()["providers"], resp.text
+        assert resp.json()["staged"] is True, resp.text
+        for staged in resp.json()["proposals"]:
+            done = client.post(
+                "/api/v1/kb/proposals/apply",
+                json={"proposal_id": staged["proposal_id"],
+                      "approved_by_user": True},
+                headers=HEADERS)
+            assert done.status_code == 200, done.text
+        assert done.json()["applied"] is True, done.text
+        assert OPENAI_PROVIDER in [
+            p.get("provider_id")
+            for p in resp.json()["proposals"]], resp.text
         refs = _kbsev.auditor_capability_evidence(
             OPENAI_PROVIDER, OPENAI_MODEL)
         assert len(refs) >= 1, refs

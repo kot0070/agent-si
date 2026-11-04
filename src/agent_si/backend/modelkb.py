@@ -18,10 +18,15 @@ def get_last_update_overall(catalog):
     version = catalog.get("version", {})
     log = version.get("change_log", [])
     last = log[-1] if log else {}
+    total = 0
+    for item in log:
+        total += len(item.get("changes", []))
+        added = item.get("added", [])
+        if isinstance(added, list):
+            total += len(added)
     return {"kb_version": version.get("kb_version"),
             "updated_at": version.get("updated_at"),
-            "total_changes": sum(len(item.get("changes", []))
-                                 for item in log),
+            "total_changes": total,
             "last_source": last.get("source")}
 
 
@@ -78,9 +83,9 @@ def offer_one_click(catalog, connected_provider_ids,
 
 __all__ = ["get_last_update_overall", "get_last_update_per_provider",
            "trigger_update", "apply_update", "offer_one_click",
-           "stage_proposal", "get_kb_status", "get_models",
-           "apply_proposal", "kb_status", "kb_proposal_apply", "ROUTES",
-           "mount"]
+           "stage_proposal", "reject_proposal", "get_kb_status", "get_models",
+           "apply_proposal", "kb_status", "kb_proposal_apply",
+           "kb_proposal_reject", "ROUTES", "mount"]
 
 
 # --- server-side staged-proposal registry (D14-kb) -----------------------------
@@ -189,6 +194,20 @@ def apply_proposal(proposal_id: str,
             "cost_state": result["cost_state"], "metric": result["metric"]}
 
 
+def reject_proposal(proposal_id):
+    """Drop a staged proposal unseen; the catalog never moves.
+
+    Returns True when an entry was dropped, False for an unknown id.
+    Already-applied ids stay recorded (a repeated apply still
+    answers "already applied").
+    """
+    try:
+        del _STAGED_PROPOSALS[proposal_id]
+        return True
+    except KeyError:
+        return False
+
+
 # --- D9-kb HTTP surface (pure handlers plus mount) -----------------------------
 #
 # Same shape as backend.pools_routes: handlers take (ctx, query, body)
@@ -226,6 +245,16 @@ def kb_proposal_apply(ctx, query, body):
         return 404, {"error": "unknown proposal_id: %s" % (
             exc.args[0] if exc.args else exc,),
             "code": "KB_VALIDATION_FAILED"}
+
+
+def kb_proposal_reject(ctx, query, body):
+    """POST /api/v1/kb/proposals/reject: drop a staged proposal unseen."""
+    payload = body or {}
+    proposal_id = payload.get("proposal_id")
+    if isinstance(proposal_id, str) and reject_proposal(proposal_id):
+        return 200, {"proposal_id": proposal_id, "rejected": True}
+    return 404, {"error": "unknown proposal_id: %r" % (proposal_id,),
+                 "code": "KB_VALIDATION_FAILED"}
 
 
 ROUTES = (

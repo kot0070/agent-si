@@ -10,15 +10,15 @@
   },
   "howItWorks": {
     "codeTests": {
-      "body": "Code tests are the project's own test suite.",
+      "body": "code tests = the project's own test suite.",
       "title": "Code tests"
     },
     "localTests": {
-      "body": "Local tests are catalog checks the app runs on this machine.",
+      "body": "local tests = catalog tests the app runs locally.",
       "title": "Local tests"
     },
     "runs": {
-      "body": "A run is one agent working on one task.",
+      "body": "Runs = agent work.",
       "title": "Runs"
     }
   },
@@ -45,7 +45,10 @@
       "noneEnabled": "None enabled — open Manage models to choose.",
       "manageModels": "Manage models",
       "manageModelsCta": "Manage {label} models",
-      "enabledCount": "{count} enabled"
+      "enabledCount": "{count} enabled",
+      "connectedModel": "{label} connected · {model}",
+      "showAllModels": "Show all {count}",
+      "showFewerModels": "Show fewer"
     },
     "role": {
       "director": "Director",
@@ -81,8 +84,7 @@
       "unknownModelsNote": "Some models are not in the capability base.",
       "needOneModel": "Tick at least one model, or Cancel to keep the current list.",
       "refusedKey": "The provider refused this key. Paste the full key again.",
-      "unreachable": "Could not reach the provider.",
-      "conflict": "This provider is already connected with different settings — disconnect it first, then connect again.",
+      "unreachable": "The provider is slow or unreachable. Your key is saved. Press Connect again.",
       "check": "Check",
       "checking": "Checking...",
       "checked": "Key checked. Save to connect.",
@@ -99,7 +101,8 @@
       "done": "Done",
       "priceUnknown": "not known",
       "localFound": "Local server answered: found {count} models. Save to connect.",
-      "localNotRunning": "Local server is not running. Start {label} first, then Check again."
+      "localNotRunning": "Local server is not running. Start {label} first, then Check again.",
+      "conflict": "This provider is already connected with different settings — disconnect it first, then connect again."
     },
     "disconnect": {
       "title": "Disconnect {label}",
@@ -226,7 +229,29 @@
       "purpose": "What each model is evidenced to do.",
       "title": "Capability Database",
       "update": "Update",
-      "result": "Result"
+      "result": "Result",
+      "checkOnline": "Check online",
+      "fromFile": "From file",
+      "apply": "Apply",
+      "reject": "Reject",
+      "upToDate": "Already up to date",
+      "updatedFields": "{count} fields updated for {model}",
+      "versionLine": "Version {version}",
+      "updatedLine": "updated {time}",
+      "changes": "Changes",
+      "changeTo": "to",
+      "proposalsLine": "Proposals",
+      "sourcesLine": "Sources",
+      "stale": "stale",
+      "fresh": "fresh",
+      "skipped": "skipped",
+      "busy": {
+        "update": "updating",
+        "check": "checking online",
+        "file": "reading file",
+        "apply": "applying",
+        "reject": "rejecting"
+      }
     },
     "general": {
       "needItNow": "Open this only when the defaults feel wrong.",
@@ -239,7 +264,8 @@
     "localAi": {
       "needItNow": "Only when you want work to stay on this machine.",
       "purpose": "Run models on this PC.",
-      "title": "Local AI"
+      "title": "Local LLM",
+      "empty": "There are no local presets. Add Ollama or LM Studio to connect on this machine."
     },
     "localbench": {
       "title": "Local benchmark",
@@ -347,6 +373,11 @@
     "hub": {
       "about": "About",
       "howItWorks": "How it works"
+    },
+    "qacatalog": {
+      "needItNow": "Only to inspect which tests the app runs.",
+      "purpose": "Which test catalog the app runs, and its versions.",
+      "title": "Test catalog"
     }
   },
   "diagnostics": {
@@ -412,6 +443,7 @@
       "actionBlocked": "Blocked a problem",
       "actionEscalated": "Escalated for review",
       "actionAllowed": "Checked, all quiet",
+      "notUsedYet": "not used yet",
       "lastEvent": "Last event",
       "sinceStart": "Journal since this start",
       "minutes": "Minutes",
@@ -438,6 +470,61 @@
         "guard": "Guard",
         "tamper": "Tamper"
       }
+    },
+    "page": {
+      "rulesTitle": "Rule cards",
+      "projectOn": "Watcher for this project",
+      "on": "On",
+      "off": "Off",
+      "when": "Fires when",
+      "which": "Standard script",
+      "power": "Allowed power",
+      "whom": "Signal",
+      "powerObserve": "Observe + notify",
+      "powerRestart": "Restart once",
+      "powerPause": "Pause",
+      "powerStop": "Stop",
+      "whomManager": "Manager",
+      "whomDirector": "Director",
+      "whomUser": "User",
+      "approvalNote": "Restart once, pause and stop need your approval before they act.",
+      "approveOne": "I approve this one check",
+      "evaluate": "Evaluate",
+      "evaluateOffNote": "Turn the card on to evaluate.",
+      "noBackendNote": "No backend rule for this card; evaluation runs on the guard and tamper cards.",
+      "journalRow": "Journal row",
+      "presetsTitle": "Presets",
+      "current": "Current",
+      "presetCautious": "Cautious",
+      "presetStandard": "Standard",
+      "presetStrict": "Strict",
+      "presetCautiousLine": "Only the hang card stays on.",
+      "presetStandardLine": "Hang and guard cards on.",
+      "presetStrictLine": "Hang, guard and tamper cards on.",
+      "alertsTitle": "Alerts, timers and integrity",
+      "showAlerts": "Show alerts",
+      "refreshAlerts": "Refresh alerts",
+      "noAlerts": "No alerts.",
+      "timerId": "Timer id",
+      "fireTimer": "Fire timer",
+      "pauseTimer": "Pause timer",
+      "resumeTimer": "Resume timer",
+      "pauseReason": "Pause reason",
+      "checkIntegrity": "Check integrity",
+      "integrityOk": "Integrity OK",
+      "integrityMismatch": "Integrity mismatch",
+      "appsTitle": "Apps and services",
+      "loadApps": "Load apps and services",
+      "inUse": "In use",
+      "idle": "Idle",
+      "safeToClose": "Safe to close",
+      "doNotClose": "Do not close while in use",
+      "stateUp": "UP",
+      "stateDown": "DOWN",
+      "stateDegraded": "DEGRADED",
+      "checkKind": "Check kind",
+      "checkService": "Check",
+      "lastUsedBy": "Last used by"
     }
   },
   "firstrun": {
@@ -454,7 +541,7 @@
       "firstTask": "Run your first task"
     },
     "optional": {
-      "localAI": "Local AI",
+      "localAI": "Local LLM",
       "watcherPreset": "Watcher preset",
       "automations": "Automations",
       "kbs": "Knowledge bases"
@@ -517,7 +604,8 @@
     "closing": {
       "confirm": "Close anyway?",
       "stay": "Stay",
-      "leave": "Leave"
+      "leave": "Leave",
+      "runWorking": "Run still working. Leave this page?"
     },
     "cards": {
       "team": {
@@ -616,7 +704,7 @@
         "emptyLine": "No providers connected"
       },
       "localai": {
-        "title": "Local AI",
+        "title": "Local LLM",
         "subtitle": "On-machine models.",
         "total": "On-machine models",
         "emptyLine": "Not set up"
@@ -690,6 +778,8 @@
       "deny": "Deny",
       "allowed": "Install permission granted for {command}",
       "denied": "Install permission denied for {command}",
+      "deniedRun": "Stopped: you denied {command}. Nothing was installed.",
+      "waitingHold": "Waiting for your permission to run {command}.",
       "waiting": "Waiting for your answer"
     },
     "run": {
@@ -732,7 +822,9 @@
       "empty": "No projects yet.",
       "create": "Create project",
       "created": "Created",
-      "duplicate": "A project with this name already exists."
+      "duplicate": "A project with this name already exists.",
+      "open": "Open",
+      "newProject": "New project"
     },
     "overview": {
       "title": "Overview"
@@ -754,7 +846,7 @@
       "title": "Cost"
     },
     "local_ai": {
-      "title": "Local AI"
+      "title": "Local LLM"
     },
     "cloud_ai": {
       "title": "Cloud AI"
@@ -777,7 +869,7 @@
     },
     "tests": {
       "title": "Tests",
-      "explainer": "A run is one agent working on one task; code tests are the project's own suite; local tests are catalog checks this machine runs before spend. This tab shows the latest run: served counters and one row per test. It never changes settings.",
+      "explainer": "Runs = agent work; code tests = the project's own test suite; local tests = catalog tests the app runs locally. This tab shows the latest run: served counters and one row per test. It never changes settings.",
       "emptyHow": "No test run has started for this project yet. Start a run for the latest plan, then this tab shows counters and one row per test.",
       "counter": {
         "active": "active",
@@ -817,13 +909,21 @@
     "folder": {
       "choose": "Choose folder",
       "missing": "Project folder not found: {path}. Choose another folder in Projects."
+    },
+    "details": {
+      "open": "Project details"
+    },
+    "row": {
+      "stopTitle": "Stop: pause this project here only; the server keeps no record of it",
+      "leaveTitle": "Leave: archive this project and remove it from the list"
     }
   },
   "agents": {
     "live": {
       "title": "Live agents",
       "subtitle": "Who works on what right now, updating live.",
-      "empty": "No agents running right now."
+      "empty": "No agents running right now.",
+      "openChat": "Ask in Chat"
     },
     "badge": {
       "local": "Local",
@@ -833,7 +933,8 @@
     "row": {
       "scope": "Scope",
       "deliverable": "Result",
-      "tokens": "Tokens"
+      "tokens": "Tokens",
+      "agent": "Agent"
     }
   },
   "ui": {
@@ -1029,6 +1130,10 @@
     },
     "routing": {
       "autoWhy": "Auto: cheapest known price among connected providers."
+    },
+    "tabs": {
+      "scrollPrev": "Show earlier tabs",
+      "scrollNext": "Show later tabs"
     }
   }
 }

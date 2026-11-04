@@ -132,6 +132,9 @@ export function ProjectsPage(): ReactElement {
   const [name, setName] = useState("");
   const [folder, setFolder] = useState("");
   const [pickOpen, setPickOpen] = useState(true);
+  // FXLOOK D3: the create form folds behind a New project button once a
+  // project exists; the empty list keeps the open form.
+  const [showForm, setShowForm] = useState(false);
   // U13: block double submit while the create call is in flight; a
   // second click with the same name made a second project.
   const [saving, setSaving] = useState(false);
@@ -245,6 +248,14 @@ export function ProjectsPage(): ReactElement {
     });
   }
 
+  // FXLOOK D3: one open path for the row: select + land on its chat.
+  function openProject(id: string): void {
+    current.select(id);
+    navigate?.(`/projects/${id}/chat`);
+  }
+
+  const formOpen = projects === null || projects.length === 0 || showForm;
+
   return (
     <Card
       cardId="projects-list"
@@ -272,6 +283,9 @@ export function ProjectsPage(): ReactElement {
       ) : (
         <div>
           <p data-testid="projects-list-subtitle">{t("projects.list.subtitle")}</p>
+          {/* FXLOOK D3: with projects on file the create form folds
+              behind New project; the empty list keeps the open form. */}
+          {formOpen ? (
           <form
             data-testid="project-add-form"
             onSubmit={(event) => {
@@ -330,6 +344,17 @@ export function ProjectsPage(): ReactElement {
               {t("projects.list.create")}
             </button>
           </form>
+          ) : (
+            <button
+              type="button"
+              data-testid="project-add-open"
+              onClick={() => {
+                setShowForm(true);
+              }}
+            >
+              {t("projects.list.newProject")}
+            </button>
+          )}
           {projects === null ? (
             <EmptyState
               stateKey="projects.list.empty"
@@ -345,18 +370,48 @@ export function ProjectsPage(): ReactElement {
           ) : (
             <ul>
               {dedupeProjects(projects).map((row) => (
-                <li key={row.project_id} data-testid={`project-row-${row.project_id}`}>
+                <li
+                  key={row.project_id}
+                  data-testid={`project-row-${row.project_id}`}
+                  // FXLOOK D3: the whole row opens the project chat;
+                  // inner controls stop propagation for their own job.
+                  tabIndex={0}
+                  onClick={() => {
+                    openProject(row.project_id);
+                  }}
+                  onKeyDown={(event) => {
+                    if (
+                      (event.key === "Enter" || event.key === " ") &&
+                      event.target === event.currentTarget
+                    ) {
+                      event.preventDefault();
+                      openProject(row.project_id);
+                    }
+                  }}
+                >
                   <button
                     type="button"
                     data-testid={`project-open-${row.project_id}`}
-                    onClick={() => {
+                    onClick={(event) => {
+                      event.stopPropagation();
                       // FXCHATHIST Part 2 (H3): opening a project
                       // selects it and lands on its chat history.
-                      current.select(row.project_id);
-                      navigate?.(`/projects/${row.project_id}/chat`);
+                      openProject(row.project_id);
                     }}
                   >
                     {row.name}
+                  </button>
+                  {/* FXLOOK D3: the visible primary Open per row. */}
+                  <button
+                    type="button"
+                    data-testid={`project-open-primary-${row.project_id}`}
+                    data-variant="primary"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      openProject(row.project_id);
+                    }}
+                  >
+                    {t("projects.list.open")}
                   </button>
                   {/* FXCHATHIST Part 2 (H4): quiet dot while this
                       project's chat holds unseen activity. */}
@@ -379,7 +434,8 @@ export function ProjectsPage(): ReactElement {
                       type="button"
                       data-testid={`project-resume-${row.project_id}`}
                       className="fx-btn-quiet"
-                      onClick={() => {
+                      onClick={(event) => {
+                        event.stopPropagation();
                         resume(row.project_id);
                       }}
                     >
@@ -390,7 +446,9 @@ export function ProjectsPage(): ReactElement {
                       type="button"
                       data-testid={`project-pause-${row.project_id}`}
                       className="fx-btn-quiet"
-                      onClick={() => {
+                      title={t("projects.row.stopTitle")}
+                      onClick={(event) => {
+                        event.stopPropagation();
                         pause(row.project_id);
                       }}
                     >
@@ -401,7 +459,9 @@ export function ProjectsPage(): ReactElement {
                     type="button"
                     data-testid={`project-archive-${row.project_id}`}
                     className="fx-btn-quiet"
-                    onClick={() => {
+                    title={t("projects.row.leaveTitle")}
+                    onClick={(event) => {
+                      event.stopPropagation();
                       void archive(row.project_id);
                     }}
                   >

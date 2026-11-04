@@ -375,8 +375,20 @@ div[data-testid="pairing-strip"] > [data-testid="pairing-badge"] {
   border-radius: 999px;
 }
 
+/* FXLOOK D8: chat route head is one line: project name + quiet
+   Project-details button. */
+.fx-chat-head {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.25rem 0;
+}
+
 /* FXDESIGN1 S1: project tabs read as tabs. */
-nav [data-testid^="project-menu-"] {
+/* FXLOOK D7: the chat tab is a real tab too (same border + fill). */
+nav [data-testid^="project-menu-"],
+nav button[data-testid="project-chat-tab"] {
   display: inline-block;
   padding: 6px 12px;
   margin-right: 4px;
@@ -387,6 +399,18 @@ nav [data-testid^="project-menu-"] {
   border-radius: 8px 8px 0 0;
   text-decoration: none;
   cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* FXLOOK D7: the selected project tab (chat included) reads selected
+   on every route, even where projectview.css never loads. */
+nav button[data-testid="project-chat-tab"].fxpv-tab-selected,
+nav [data-testid^="project-menu-"].fxpv-tab-selected {
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  border-color: var(--fx-accent);
 }
 
 /* FXSMALL W13: one shared hover for every project tab (chat + 15 views).
@@ -614,10 +638,54 @@ div[data-testid="chat-layout"] {
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
+  max-height: calc(100vh - 200px);
   width: 100%;
   max-width: 900px;
   margin-left: auto;
   margin-right: auto;
+}
+
+/* FXLOOK D2: the project chat route is a bounded full-height column —
+   head on top, the stream lane takes the free space and is the ONLY
+   scroller, the composer pins to the column bottom. The page itself
+   never scrolls on this route: the column reserves the shell chrome
+   (top bar, main padding, route head) instead of growing past it. */
+.fx-chat-route {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: calc(100vh - 190px);
+}
+
+.fx-chat-route > section[data-testid="chat-area"] {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.fx-chat-route div[data-testid="chat-layout"] {
+  max-height: none;
+}
+
+.fx-chat-route div[data-testid="chat-composer"] {
+  flex: 0 0 auto;
+}
+
+/* FXLOOK D2: the hierarchy strip folded into the composer tray reads
+   as one line at most; the full text rides the title tooltip. */
+.fx-composer-tray {
+  min-width: 0;
+}
+
+.fx-composer-tray section[data-testid="hierarchy"] {
+  min-width: 0;
+}
+
+.fx-composer-tray button[data-testid="hierarchy-collapsed"] {
+  display: block;
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 div[data-testid="chat-messages"] {
