@@ -160,8 +160,23 @@ const MigrationViewPage = lazy(() =>
 // per-change decision record. Read-only; the bench tab owns the flow that
 // writes the stored state. Every label resolves through the locale; the
 // stored values and the registry string render raw.
-function LocalAiStoredPanel(): ReactElement {
+function LocalAiStoredPanel(props: { runtimeModels?: number } = {}): ReactElement {
   const stored = readStoredLocalBench();
+  // PLANB X4: a connected runtime that lists models is the model source;
+  // the folder-scan "none found" note would contradict it.
+  if (stored.models.length === 0 && (props.runtimeModels ?? 0) > 0) {
+    return (
+      <div data-testid="localai-stored">
+        {stored.path === null ? null : (
+          <p data-testid="localai-path">
+            <span>{t("settings.localbench.pathLabel")}</span>
+            <span>{stored.path}</span>
+          </p>
+        )}
+        <LocalBenchDecisionList decisions={stored.decisions} />
+      </div>
+    );
+  }
   return (
     <div data-testid="localai-stored">
       <h3>{t("settings.localbench.modelsTitle")}</h3>
@@ -477,6 +492,19 @@ function ModelsRoute(props: {
           }}
         />
       ) : null}
+    </>
+  );
+}
+
+function LocalAiSettingsBody(props: { projectId: string }): ReactElement {
+  const [runtimeModels, setRuntimeModels] = useState(0);
+  return (
+    <>
+      <LocalConnectSection
+        projectId={props.projectId}
+        onRuntimeModels={setRuntimeModels}
+      />
+      <LocalAiStoredPanel runtimeModels={runtimeModels} />
     </>
   );
 }
@@ -1007,10 +1035,7 @@ function SettingsSectionRoute(): ReactElement {
           <ThemeToggle />
         </span>
       ) : route.path === "localAI" ? (
-        <>
-          <LocalConnectSection projectId={projectId ?? "local"} />
-          <LocalAiStoredPanel />
-        </>
+        <LocalAiSettingsBody projectId={projectId ?? "local"} />
       ) : route.path === "localbench" ? (
         <span data-testid="settings-section-body">
           <LocalBenchTab client={new HttpLocalBenchClient()} />

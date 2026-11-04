@@ -27,6 +27,9 @@ export interface LocalConnectSectionProps {
   // The project whose roles "Use for agents" pins; Settings with no
   // project selected pins the shared "local" defaults.
   projectId?: string;
+  // PLANB X4: how many models the connected runtimes list, so the page
+  // below can drop its "no models in this folder" note.
+  onRuntimeModels?: (count: number) => void;
 }
 
 export function LocalConnectSection(
@@ -61,6 +64,12 @@ export function LocalConnectSection(
     Record<string, { role: string; model: string }[]>
   >({});
   const [connectId, setConnectId] = useState<string | null>(null);
+  const reportRuntimeModels = props.onRuntimeModels;
+  useEffect(() => {
+    reportRuntimeModels?.(
+      Object.values(modelsByPreset).reduce((sum, rows) => sum + rows.length, 0),
+    );
+  }, [modelsByPreset, reportRuntimeModels]);
   const [disconnectId, setDisconnectId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -289,6 +298,10 @@ export function LocalConnectSection(
                     </p>
                   ) : null;
                 })()}
+                <div
+                  data-testid={`local-actions-${preset.id}`}
+                  style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}
+                >
                 <button
                   type="button"
                   data-testid={`local-use-${preset.id}`}
@@ -302,6 +315,16 @@ export function LocalConnectSection(
                 >
                   {t("settings.localAi.useForAgents")}
                 </button>
+                <button
+                  type="button"
+                  aria-label={t("providers.page.disconnectCta", {
+                    label: preset.label,
+                  })}
+                  onClick={() => setDisconnectId(preset.id)}
+                >
+                  {t("providers.page.disconnectLabel")}
+                </button>
+                </div>
                 {useMessage[preset.id] !== undefined &&
                 useMessage[preset.id] !== "" ? (
                   <p role="status" data-variant="quiet">
@@ -317,15 +340,6 @@ export function LocalConnectSection(
                     ))}
                   </ul>
                 ) : null}
-                <button
-                  type="button"
-                  aria-label={t("providers.page.disconnectCta", {
-                    label: preset.label,
-                  })}
-                  onClick={() => setDisconnectId(preset.id)}
-                >
-                  {t("providers.page.disconnectLabel")}
-                </button>
               </>
             ) : (
               <>
