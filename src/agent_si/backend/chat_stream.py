@@ -923,6 +923,15 @@ class ManagerSdkBridge:
         try:
             for event in events_with_waiting(run_events, state):
                 if state["cancelled"]:
+                    # A1/A2: Stop all flags the stream before the engine's
+                    # own stop line is forwarded; the client reads the
+                    # stop by this line (RUN_STOPPED_MARKER).
+                    stop_line = "run stopped: user stop"
+                    texts.append(stop_line)
+                    yield sse_bytes({"type": "delta",
+                                     "stream_id": stream_id,
+                                     "run_id": run_id,
+                                     "text": stop_line})
                     yield sse_bytes(
                         {"type": "cancelled", "stream_id": stream_id})
                     _close("cancelled", error_code="STOPPED")
