@@ -385,7 +385,17 @@ def _worker_install(n_calls, messages):
         "done": False})
 
 
-def test_p5b_held_run_leaves_no_running_rows(tmp_path):
+def test_p5b_held_run_leaves_no_running_rows(tmp_path, monkeypatch):
+    # FXASK A8: the run waits in place on an install ask; an expired wait
+    # clock ends it held (approval event) so the stream returns.
+    from agent_si.runtime.devrun import engine as _engine
+    tick = [0.0]
+
+    def _expired_clock():
+        tick[0] += 10_000.0
+        return tick[0]
+
+    monkeypatch.setattr(_engine, "_ask_wait_clock", _expired_clock)
     project = "fxrc1-p5b"
     folder = _project_dir(tmp_path, project)
     factory = _FakeFactory({

@@ -387,6 +387,19 @@ def _changed_doc(field, new):
                                    "fields": {field: new}}]})
 
 
+def _age_catalog(stamp):
+    """FXFACTS F1 seeds the shipped price rows with a recent date: age the
+    bound catalog so the connected row is stale (older than 90 days)."""
+    import copy
+    aged = copy.deepcopy(_kb.bound_catalog())
+    for row in aged["models"]:
+        for fld in row["fields"].values():
+            if isinstance(fld, dict) and fld.get("retrieved_at") not in (
+                    None, "UNKNOWN"):
+                fld["retrieved_at"] = stamp
+    _kb.bind_catalog(aged)
+
+
 def test_check_online_stale_fetches_and_stages(tmp_path):
     """K4: stale connected provider fetched through guard, staged only."""
     old = "2001-01-01T00:00:00+00:00"
@@ -394,6 +407,7 @@ def test_check_online_stale_fetches_and_stages(tmp_path):
     pages = {target: _changed_doc("cost_tier", "cheap-fast")}
     app, client, state = _check_online_app(tmp_path, pages)
     try:
+        _age_catalog(old)
         resp = client.post("/api/v1/kb/check-online", json={},
                            headers=HEADERS)
         assert resp.status_code == 200, resp.text
@@ -429,6 +443,7 @@ def test_check_online_denied_host_skipped(tmp_path):
             raise AssertionError("must not fetch %r" % (url,))
 
         app.state.kb_online_fetcher = _never
+        _age_catalog("2001-01-01T00:00:00+00:00")
         import agent_si.model_kb.updater as _u
         prev = list(_u.KB_SOURCE_ALLOWLIST)
         try:

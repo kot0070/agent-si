@@ -394,7 +394,12 @@ def test_local_models_keep_list_without_network(tmp_path, monkeypatch):
     assert conn.status_code == 200, conn.text
     models = client.get("/api/v1/providers/ollama/models", headers=HEADERS)
     assert models.status_code in (200, 404), models.text
-    assert not [u for u in calls if u.rstrip("/").endswith("/models")]
+    # FXROLEPICK R2 (intended): a local provider answers off the attached
+    # runtime's real names via one loopback read. Never a cloud/non-loopback
+    # fetch and never a gateway (key) call.
+    reads = [u for u in calls if u.rstrip("/").endswith("/models")]
+    assert all(u.startswith("http://localhost:11434/") for u in reads), reads
+    assert not [u for u in calls if u.startswith("gateway:")], calls
 
 
 # --- routing: auto compares every connected provider -------------------------------

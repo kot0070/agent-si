@@ -252,8 +252,9 @@ def test_fxproj_return_to_chat(served_base, edge):
 
         # Settings, then return by path 1: the left row.
         page.get_by_test_id("menu-settings").click()
-        expect(page.get_by_test_id("settings-tabs")).to_be_visible(
-            timeout=15000)
+        # R6: /settings is the grouped index (no tab strip); it replaces chat.
+        expect(page).to_have_url(re.compile(r".*/settings/?$"), timeout=15000)
+        expect(page.get_by_test_id("chat-prompt")).to_have_count(0)
         page.get_by_test_id("sidebar-project-p-7").click()
         expect(page).to_have_url(CHAT_URL, timeout=15000)
         expect(page.get_by_test_id(
@@ -272,8 +273,9 @@ def test_fxproj_return_to_chat(served_base, edge):
 
         # Return by path 3: the top picker.
         page.get_by_test_id("menu-settings").click()
-        expect(page.get_by_test_id("settings-tabs")).to_be_visible(
-            timeout=15000)
+        # R6: /settings is the grouped index (no tab strip); it replaces chat.
+        expect(page).to_have_url(re.compile(r".*/settings/?$"), timeout=15000)
+        expect(page.get_by_test_id("chat-prompt")).to_have_count(0)
         page.get_by_test_id("topbar-project").select_option("p-7")
         expect(page.get_by_test_id(
             "chat-assistant-message")).to_have_text(first_history,

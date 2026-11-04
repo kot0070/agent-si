@@ -41,6 +41,13 @@ ALLOWLIST = {
     ("POST", "/api/v1/assurance/runner_contract"):
         "frozen DRF3K03A pins unauthed 200 (test_drf3k03a_assure)",
     ("POST", "/api/v1/automations/pause"): _NO_SESSION,
+    ("POST", "/api/v1/automations/approvals/{approval_id}"): _NO_SESSION,
+    ("POST", "/api/v1/automations/checkpoints/{checkpoint_id}/resume"):
+        _NO_SESSION,
+    ("POST", "/api/v1/automations/pause/project"): _NO_SESSION,
+    ("POST", "/api/v1/automations/rules"): _NO_SESSION,
+    ("PUT", "/api/v1/automations/rules/{rule_id}"): _NO_SESSION,
+    ("POST", "/api/v1/automations/rules/{rule_id}/run"): _NO_SESSION,
     ("POST", "/api/v1/automations/runs"): _NO_SESSION,
     ("POST", "/api/v1/automations/runs/{id}/cancel"): _NO_SESSION,
     ("POST", "/api/v1/automations/runs/{id}/launch"): _NO_SESSION,

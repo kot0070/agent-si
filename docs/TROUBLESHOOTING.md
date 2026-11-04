@@ -33,6 +33,8 @@ Each entry is a message the app actually shows. Follow the fix next to it.
   stored — paste the full key, press Check, then Save.
 - `The provider is slow or unreachable. Your key is saved. Press Connect again.` The check did not get
   an answer in time. Check the network and the provider status, then press Connect again.
+- `Could not reach the provider.` The key check could not contact the provider at all (offline, proxy or
+  firewall). Check the network, then press Check again.
 - `Key checked. Save to connect.` The Check step passed, not an error: Save is now enabled — press it to
   connect.
 - `Check the key first.` Save was pressed before Check. Press Check, then Save.

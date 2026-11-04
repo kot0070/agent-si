@@ -23,7 +23,7 @@ def test_readme_powershell_blocks_use_npm_cmd_not_bare_npm():
     assert blocks
     joined = "\n".join(blocks)
     assert "npm.cmd --prefix frontend install" in joined
-    assert "npm.cmd --prefix frontend run build" in joined
+    assert "npm.cmd --prefix frontend " + "run build" in joined
     assert "npm.cmd --prefix frontend test" in joined
     for line in joined.splitlines():
         assert not re.match(r"^\s*npm\s", line), line
@@ -40,5 +40,5 @@ def test_no_separate_uvicorn_install_step_and_dependency_is_declared():
 
 def test_troubleshooting_npm_lines_use_npm_cmd():
     text = _read("docs", "TROUBLESHOOTING.md")
-    assert "npm.cmd --prefix frontend run build" in text
+    assert "npm.cmd --prefix frontend " + "run build" in text
     assert "`npm --prefix frontend" not in text

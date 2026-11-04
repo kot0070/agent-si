@@ -367,7 +367,16 @@ def test_spent_allow_check_path_asks_again_served(tmp_path):
             assert not check.get("refused"), check
 
 
-def test_spent_allow_action_path_asks_again_served(tmp_path):
+def test_spent_allow_action_path_asks_again_served(tmp_path, monkeypatch):
+    # FXASK A8: the run waits in place on an install ask; an expired wait
+    # clock ends it held (approval event) so the stream returns.
+    tick = [0.0]
+
+    def _expired_clock():
+        tick[0] += 10_000.0
+        return tick[0]
+
+    monkeypatch.setattr(_engine, "_ask_wait_clock", _expired_clock)
     project = "fxr1a-spent-action"
     folder = tmp_path / "proj-spent-action"
     folder.mkdir(parents=True, exist_ok=True)

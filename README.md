@@ -5,6 +5,7 @@
 Agent SI is a desktop app that takes one task in plain words and returns a checked result with evidence.
 You describe the goal; the app plans the work with a team of model agents, runs the checks, and a fresh auditor gives the verdict.
 Every run, decision and audit record stays with the project in a local data folder.
+After the first start you connect a model in Settings -> Models. The proof of how it was built is in `docs/EVIDENCE.md`. It ships under the MIT licence, see `LICENSE`.
 
 ## Quick start (Windows, from source)
 

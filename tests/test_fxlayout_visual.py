@@ -273,7 +273,7 @@ def test_fxlayout_three_columns(served_base, edge, locale, width, height):
                   return el !== null && el.textContent.includes("New task");
                 }"""
             )
-        if width >= 1000:
+        if width >= 1200:
             page.wait_for_selector('[data-testid="inspector"]')
         else:
             page.wait_for_selector('[data-testid="inspector"]', state="attached")
@@ -283,7 +283,7 @@ def test_fxlayout_three_columns(served_base, edge, locale, width, height):
             """() => document.querySelectorAll('nav[data-testid="sidebar"] a').length"""
         )
         assert nav_count == 4, "sidebar holds %d links, want exactly 4" % nav_count
-        card_state = None if width >= 1000 else "attached"
+        card_state = None if width >= 1200 else "attached"
         for card in (
             "inspector-card-team",
             "inspector-card-context",
@@ -297,6 +297,15 @@ def test_fxlayout_three_columns(served_base, edge, locale, width, height):
                 page.wait_for_selector(
                     '[data-testid="%s"]' % card, state=card_state
                 )
+        # FXDESIGN: the metric cards sit in the "More" rail, collapsed by
+        # default; open it the way a user does (click the toggle).
+        page.wait_for_selector('[data-testid="rail-more-toggle"]', state="attached")
+        page.evaluate(
+            """() => {
+              const el = document.querySelector('[data-testid="rail-more-toggle"]');
+              if (el && el.getAttribute('aria-expanded') !== 'true') el.click();
+            }"""
+        )
         for card in (
             "fx-tokens",
             "fx-tests",
@@ -312,7 +321,19 @@ def test_fxlayout_three_columns(served_base, edge, locale, width, height):
                     '[data-testid="kit-metric-%s"]' % card, state=card_state
                 )
 
-        if width >= 1000:
+        if 1000 <= width < 1200:
+            # FXFACTS F8: below 1200px the rail is an overlay drawer, never a
+            # squeezed column; the sidebar stays and main takes the rest.
+            nav = _box(page, '[data-testid="sidebar"]')
+            main = _box(page, '[data-testid="app-main"]')
+            assert nav is not None and nav["width"] > 0, "sidebar missing at %dpx" % width
+            assert main is not None and main["width"] > 0, "main missing at %dpx" % width
+            assert nav["x"] + nav["width"] <= main["x"] + 1, "nav is not left of content"
+            assert main["x"] + main["width"] <= width + 1, "main overflows at %dpx" % width
+            assert page.get_attribute('[data-testid="inspector"]', "data-open") == "false"
+            wide = page.evaluate("document.documentElement.scrollWidth")
+            assert wide <= width, "horizontal page scroll at %dpx: scrollWidth %d" % (width, wide)
+        elif width >= 1200:
             nav = _box(page, '[data-testid="sidebar"]')
             main = _box(page, '[data-testid="app-main"]')
             cards = _box(page, '[data-testid="inspector"]')
