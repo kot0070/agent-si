@@ -74,6 +74,19 @@ describe("WatcherRuleCards (RED: component missing)", () => {
     });
   });
 
+  it("PLANB X3: a resting verdict with no journal row never reads Blocked or Journal row", async () => {
+    const seen: Array<{ url: string; init: unknown }> = [];
+    vi.stubGlobal(
+      "fetch",
+      fakeFetchOk({ ...EVAL_BODY, verdict: "BLOCK", journal_entry_id: "" }, seen),
+    );
+    render(<WatcherRuleCards projectId="proj-r" />);
+    fireEvent.click(screen.getByTestId("watchcard-card-guard-evaluate"));
+    const line = await screen.findByTestId("watchcard-card-guard-result");
+    expect(line.textContent).toContain("Checked: nothing needs attention");
+    expect(line.textContent).not.toMatch(/Blocked|Journal row/);
+  });
+
   it("gives the hang card no evaluate control, only the read-only note", () => {
     render(<WatcherRuleCards projectId="proj-r" />);
     expect(screen.queryByTestId("watchcard-card-hang-evaluate")).toBeNull();

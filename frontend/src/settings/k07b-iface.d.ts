@@ -931,6 +931,7 @@ export type LocaleKey =
   | 'watcher.page.approveOne'
   | 'watcher.page.evaluate'
   | 'watcher.page.evaluateOffNote'
+  | 'watcher.page.evaluateNothing'
   | 'watcher.page.noBackendNote'
   | 'watcher.page.journalRow'
   | 'watcher.page.presetsTitle'

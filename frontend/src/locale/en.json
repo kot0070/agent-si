@@ -1161,6 +1161,7 @@
       "approveOne": "I approve this one check",
       "evaluate": "Evaluate",
       "evaluateOffNote": "Turn the card on to evaluate.",
+      "evaluateNothing": "Checked: nothing needs attention, nothing was written to the journal.",
       "noBackendNote": "No backend rule for this card; evaluation runs on the guard and tamper cards.",
       "journalRow": "Journal row",
       "presetsTitle": "Presets",

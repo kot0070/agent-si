@@ -332,8 +332,11 @@ export function WatcherRuleCards(props: {
             )}
             {result !== null ? (
               <p data-testid={`watchcard-${card.cardId}-result`}>
-                {t(verdictLocaleKey(result.verdict))} ·{" "}
-                {t("watcher.page.journalRow")}: {result.journal_entry_id} ·{" "}
+                {/* PLANB X3: no journal row = the resting verdict, not an event. */}
+                {result.journal_entry_id === ""
+                  ? t("watcher.page.evaluateNothing")
+                  : `${t(verdictLocaleKey(result.verdict))} · ${t("watcher.page.journalRow")}: ${result.journal_entry_id}`}{" "}
+                ·{" "}
                 {result.decided_at !== ""
                   ? formatScreenTime(result.decided_at)
                   : t("watcher.tab.notKnown")}
