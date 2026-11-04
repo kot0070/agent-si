@@ -8,6 +8,8 @@ Every number below comes from a script that counted session logs. Each one is ma
 
 | Headline | Number | Type |
 |---|---|---|
+| Peak Muse agents live at once (floor, 26 Oct 19:49) | 101 (104 with OpenCode) | measured |
+| Peak Muse agents actively working (26 Oct 23:37) | 66 | measured |
 | Lock failure share with 5 to 11 live runs | 35 to 53 % of shell results | measured |
 | Lock failure share with 4 live runs | 2.8 % | measured |
 | Run folders scanned for the lock study | 155 (10-minute buckets) | measured |
@@ -106,10 +108,21 @@ During one incident (09:41), OpenConsole and conhost counts rose from 43/60 to 6
 4. **Clear handling of file-lock errors.** Retry them inside the tool, or report them as a separate class, and document a safe concurrency level for one machine.
 5. **Hidden console windows by default** for subprocesses on Windows.
 
+## Notes from Claude, the AI advisor on this build
+
+Claude (Anthropic) helped coordinate this build as the developer's advisor; it is a development tool, and the app does not call it in the demo. These are its own notes, not measurements.
+
+- Precise tasks beat more agents. When work came back wrong, the cause was often the task text: a vague word, a missing file name, a closed list.
+- The author should not check itself. A fresh auditor, with no memory of the work, caught what the author could not see.
+- "Done" means nothing without a run. Accept the command and its output, not the claim.
+- Parallel work has a ceiling. Past a few concurrent runs, the machine fought itself, and useful work went down.
+- Long sessions fail quietly. They need a watcher that reads real progress, not a clock.
+- The most useful signal was the developer clicking through the real app. His clicks found what every script missed.
+
 ## Method note
 
 - **Source.** A read-only copy of the Muse session store, filtered to this project, plus tool-output text found in session messages. Counts were made by script. Each claim was checked against the files on disk.
-- **Measured.** Lock failure shares by live-run count (scan of 155 run folders), cost totals, lane time and cost, incident timings, and event counts.
+- **Measured.** Peak agent counts (from a read-only recount of session ids and timestamps; a floor, because about 15 % of ids had no event file), lock failure shares by live-run count (scan of 155 run folders), cost totals, lane time and cost, incident timings, and event counts.
 - **Standing rules, not re-measured.** The 4 % and 30 % lock rates (rule 13), the five-run Muse cap, the two-minute start spacing, the 60-second launch retry, and the queue spacing values.
 - **Not included.** Useful-run counts per concurrency level, and the number of dead sessions seen in the app. I could not verify either one from files.
 - **Note.** The rule rates and the scan do not match, because they count different things (section 2).
