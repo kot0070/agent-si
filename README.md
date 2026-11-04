@@ -18,7 +18,6 @@ In PowerShell, in the checkout root:
 ```powershell
 py -3.13 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e .
-.\.venv\Scripts\python.exe -m pip install uvicorn
 npm --prefix frontend install
 npm --prefix frontend run build
 $env:AGENT_SI_DATA_DIR = "$PWD\data"
@@ -30,13 +29,13 @@ Each step is checked against this repo:
 - `npm --prefix frontend run build` is the `build` script of `frontend/package.json`; it writes the web
   UI to `frontend/dist`, which the sidecar serves. Without that build the window answers
   "Agent SI web UI is not staged: the web tree holds no index.html".
-- `uvicorn` is a separate install on purpose: `src/agent_si/sidecar.py` imports it when it starts, and
-  `pyproject.toml` does not list it as a dependency yet.
+- `uvicorn` is a declared dependency in `pyproject.toml` (`src/agent_si/sidecar.py` imports it when it starts), so
+  `pip install -e .` installs it; no separate install is needed.
 - `AGENT_SI_DATA_DIR` is the data folder. A source checkout has no default data folder (only the
   packaged exe falls back to a `data` folder beside itself), and a blank value fails loudly instead of
   falling back silently.
-- Start the app with `python -m agent_si.sidecar`, not with the `agent-si` console script: that script
-  points at the app factory `agent_si.backend.app:create_app`, which builds the app object and exits.
+- Start the app with `python -m agent_si.sidecar` or with the `agent-si` console script: after `pip install -e .`
+  the script points at the same sidecar entry (`agent_si.sidecar:main`) and starts the app and its window.
 
 The app serves on loopback (`http://127.0.0.1:<port>/`) and opens its window, or your default browser
 when no window is available. Closing the window stops the app. On a fresh profile the first screen is
