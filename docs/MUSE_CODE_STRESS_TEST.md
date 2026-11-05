@@ -28,7 +28,7 @@ Every number below comes from a script that counted session logs. Each one is ma
 
 **How 7,079 and 4,770 relate.** They are different units, and the second is not a separate total. 7,079 counts every agent id, roots and subagents. 4,770 counts the ids listed as sessions in the session stores and archives: the 1,617 roots plus 3,153 subagents that also appear there. So the 4,770 sit inside the 7,079. Both include the fresh sessions of 31 Oct and 1 Nov that were not yet archived, and neither counts Muse work on 2 Nov. The raw archives are not in this repository, so these counts cannot be recounted from here.
 
-**A note on the date.** Earlier versions of this page and of the older field report said October 25, and I corrected that on November 4. The archive holds 24 sessions dated 23:22 to 23:59 on October 25 on my Texas clock, which is already October 26 in ET and UTC. The ones that were read were preparing the plan and the build kit, not app code. The first run in the ledger started at 11:58 on October 26, and the first commit in this repository is from 12:15 that day.
+**A note on the date.** Earlier versions of this page and of the older field report said October 25, and I corrected that on November 4. The event started on the morning of October 26. The archive also holds sessions from before that, the first at 23:22 on October 25 on my Texas clock, and they are inside the counts above. The ones that were read were preparing the plan and the build kit, not app code. The first run in the ledger started at 11:58 on October 26, and the first commit in this repository is from 12:15 that day.
 
 ## 1. Sandbox file locks ("os error 32")
 
