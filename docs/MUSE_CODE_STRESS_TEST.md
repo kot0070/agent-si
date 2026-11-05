@@ -27,6 +27,8 @@ Every number below comes from a script that counted session logs. Each one is ma
 
 **What the counts mean.** A run is one launched agent tree with many agents inside it, so the run counts on this page do not show how much agent work there was. The working folders of 155 runs were lost in the delete incident, but the session archives from the first day survived, along with the fresh sessions not yet archived, and the agent counts come from them. Some records have no event file, so these numbers are floors unless marked otherwise.
 
+**How 7,079 and 4,770 relate.** They are different units, and the second is not a separate total. 7,079 counts every agent id, roots and subagents. 4,770 counts the ids listed as sessions in the session stores and archives: the 1,617 roots plus 3,153 subagents that also appear there. The raw archives are not in this repository, so these counts cannot be recounted from here.
+
 ## 1. Sandbox file locks ("os error 32")
 
 **What happened.** Once I ran agents in parallel, Windows file locks became the main failure. Shell calls failed with `os error 32`. Launches were retried and then blocked.
