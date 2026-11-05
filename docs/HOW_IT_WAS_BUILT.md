@@ -1,5 +1,7 @@
 # How this was built
 
+This page holds the numbers and sources. For the same ten days told as a story, read [The story of the build](THE_STORY.md).
+
 ## Contents
 
 1. [Time](#1-time)

@@ -13,14 +13,14 @@ After the first start you connect a model in Settings -> Models. The proof of ho
 
 Release page and hashes: https://github.com/kot0070/agent-si/releases/tag/v0.1.0 (steps to check the hash are under "Download and verify" below).
 
-**Read more:** [Muse Code stress test](docs/MUSE_CODE_STRESS_TEST.md) | [How this was built](docs/HOW_IT_WAS_BUILT.md) | [Controlling about 100 agents](docs/CONTROLLING_MANY_AGENTS.md) | [Evidence files](docs/evidence/README.md) | [User guide](docs/USER_GUIDE.md) | [All documentation](#all-documentation)
+**Read more:** [The story of the build](docs/THE_STORY.md) | [Muse Code stress test](docs/MUSE_CODE_STRESS_TEST.md) | [How this was built](docs/HOW_IT_WAS_BUILT.md) | [Controlling about 100 agents](docs/CONTROLLING_MANY_AGENTS.md) | [Evidence files](docs/evidence/README.md) | [User guide](docs/USER_GUIDE.md) | [All documentation](#all-documentation)
 
 ### After submission
 
 - **Submitted:** November 4, 2026, about 3:15 PM Texas time (CST, UTC-6). The deadline was 8 PM Texas time (9 PM ET).
-- **Last documentation update:** November 4, 2026, about 6:28 PM Texas time.
+- **Last documentation update:** November 4, 2026, about 6:32 PM Texas time.
 - **The app did not change after submission.** No later commit touches `src/`, `frontend/` or `packaging/`. The release files were published at 3:08 PM from commit `57295e8` and stay as they were.
-- **What was added:** evidence files and photos of the first passes, the page on controlling about 100 agents with the real build scripts (copied for reading, not part of the app), the requirement list, the video scene by scene, the last two days of the build, the exact record of the delete incident, speed numbers for both Meta models, session and agent counts, a full test report, real hashes in the release notes, and a fuller list of known issues. The old draft folder was removed, and two tests were updated so they no longer need it.
+- **What was added:** evidence files and photos of the first passes, the page on controlling about 100 agents with the real build scripts (copied for reading, not part of the app), the requirement list, the video scene by scene, the last two days of the build, the exact record of the delete incident, the story of the build, speed numbers for both Meta models, session and agent counts, a full test report, real hashes in the release notes, and a fuller list of known issues. The old draft folder was removed, and two tests were updated so they no longer need it.
 
 Every change is in the [commit history](https://github.com/kot0070/agent-si/commits/main).
 
@@ -87,6 +87,7 @@ The full list from the original build plan, 437 requirement rows: [docs/REQUIREM
 
 | Page | What is in it |
 |---|---|
+| [The story of the build](docs/THE_STORY.md) | Ten days told from start to finish: 101 agents on the first day, the wall, the deleted drive, the blocked card, the local model, Submit. |
 | [Muse Code stress test](docs/MUSE_CODE_STRESS_TEST.md) | What broke with many agents at once, the measurements, the fixes, and what I would ask the Muse Code team. |
 | [How this was built](docs/HOW_IT_WAS_BUILT.md) | The whole story: time, scale, team, custom tools, decisions, what went wrong, notes from the supervising AI, the last two days. |
 | [Controlling about 100 agents](docs/CONTROLLING_MANY_AGENTS.md) | How one person kept control: the owner board with photos, rules, limits, watchers and the merge train. |
