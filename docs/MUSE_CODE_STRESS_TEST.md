@@ -4,6 +4,8 @@ I built Agent SI with Muse Code agents, running several agent trees at the same 
 
 Every number below comes from a script that counted session logs. Each one is marked as **measured** or as a **standing rule**, and the one number I saw myself but could not count from files is marked **owner-observed**.
 
+**Updated on November 4, after submission.** Added: the agent and session counts below, from the session archives and fresh sessions that survived the delete incident, the dead sessions I saw myself, and a note on that incident. No earlier number on this page changed, and no app code changed.
+
 ## At a glance
 
 | Headline | Number | Type |
