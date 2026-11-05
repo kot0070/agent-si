@@ -18,9 +18,9 @@ Release page and hashes: https://github.com/kot0070/agent-si/releases/tag/v0.1.0
 ### After submission
 
 - **Submitted:** November 4, 2026, about 3:15 PM Texas time (CST, UTC-6). The deadline was 8 PM Texas time (9 PM ET).
-- **Last documentation update:** November 4, 2026, about 5:52 PM Texas time.
+- **Last documentation update:** November 4, 2026, about 6:28 PM Texas time.
 - **The app did not change after submission.** No later commit touches `src/`, `frontend/` or `packaging/`. The release files were published at 3:08 PM from commit `57295e8` and stay as they were.
-- **What was added:** evidence files and photos of the first passes, the page on controlling about 100 agents with the real build scripts (copied for reading, not part of the app), the requirement list, the video scene by scene, the last two days of the build, the exact record of the delete incident, speed numbers for both Meta models, a full test report, real hashes in the release notes, and a fuller list of known issues. The old draft folder was removed, and two tests were updated so they no longer need it.
+- **What was added:** evidence files and photos of the first passes, the page on controlling about 100 agents with the real build scripts (copied for reading, not part of the app), the requirement list, the video scene by scene, the last two days of the build, the exact record of the delete incident, speed numbers for both Meta models, session and agent counts, a full test report, real hashes in the release notes, and a fuller list of known issues. The old draft folder was removed, and two tests were updated so they no longer need it.
 
 Every change is in the [commit history](https://github.com/kot0070/agent-si/commits/main).
 
@@ -187,7 +187,7 @@ pytest is not among the runtime dependencies in `pyproject.toml`, so install it 
 .\.venv\Scripts\python.exe -m pytest
 ```
 
-This runs every test in one process, including older test files in subfolders of `tests/`. On November 4 it gave 4,416 passed and 50 reds. None of the 50 is a confirmed defect in the app: 7 are outdated tests, 4 are not proven either way, and 39 pass when their file runs alone. Each one is listed in [the full test run](docs/evidence/full-test-run.md).
+This runs every test in one process, including older test files in subfolders of `tests/`. On November 4 it gave 4,416 passed and 50 reds. None of the 50 is a confirmed defect in the app: 9 are outdated tests, 2 are not proven either way, and 39 come from running all tests in one process and pass when their file runs alone. Each one is listed in [the full test run](docs/evidence/full-test-run.md).
 
 ## Two ways to run a model
 

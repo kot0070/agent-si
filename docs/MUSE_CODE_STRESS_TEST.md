@@ -2,7 +2,7 @@
 
 I built Agent SI with Muse Code agents, running several agent trees at the same time on one Windows machine. Peak load in my scans was 11 live runs at the agent peak (101 agents); some windows had 12 or more runs. This page is my field report for Meta engineers and hackathon judges. Muse carried most of this load. Most of the problems came from running many agents on one desktop, not from the model itself.
 
-Every number below comes from a script that counted session logs. Each one is marked as **measured** or as a **standing rule**.
+Every number below comes from a script that counted session logs. Each one is marked as **measured** or as a **standing rule**, and the one number I saw myself but could not count from files is marked **owner-observed**.
 
 ## At a glance
 
@@ -17,6 +17,13 @@ Every number below comes from a script that counted session logs. Each one is ma
 | Healthy lane, end to end | 6.1 min, $0.031 | measured |
 | Dead coder still polled while the tree looked busy | about 50 min | measured |
 | Orphan console windows in one incident | 43/60 to 62/91 in about 5 min | measured |
+| Distinct Muse agents, 26 to 30 Oct (floor) | 7,079 (1,617 roots, 5,462 subagents) | measured |
+| Fresh Muse session files after that, 31 Oct and 1 Nov, not archived and not in the count above | 670 | measured |
+| Muse sessions in the surviving records (upper bound) | 4,770 | measured |
+| OpenCode sessions on this project, 27 Oct to 4 Nov, not all on Muse | 1,474 | measured |
+| Open dead sessions seen in the app | on the order of 800 to 1,000 | owner-observed |
+
+**What the counts mean.** A run is one launched agent tree with many agents inside it, so the run counts on this page do not show how much agent work there was. The working folders of 155 runs were lost in the delete incident, but the session archives from the first day survived, along with the fresh sessions not yet archived, and the agent counts come from them. Some records have no event file, so these numbers are floors unless marked otherwise.
 
 ## 1. Sandbox file locks ("os error 32")
 
@@ -117,5 +124,5 @@ The notes from Claude, the AI advisor on this build, are in [section 9 of How th
 - **Source.** A read-only copy of the Muse session store, filtered to this project, plus tool-output text found in session messages. Counts were made by script. Each claim was checked against the files on disk.
 - **Measured.** Peak agent counts (from a read-only recount of session ids and timestamps; a floor, because about 15 % of ids had no event file), lock failure shares by live-run count (scan of 155 run folders), cost totals, lane time and cost, incident timings, and event counts.
 - **Standing rules, not re-measured.** The 4 % and 30 % lock rates (rule 13), the five-run Muse cap, the two-minute start spacing, the 60-second launch retry, and the queue spacing values.
-- **Not included.** The 5-run useful-run figure (about 4.0) quoted in section 9 of How this was built, and the number of dead sessions seen in the app. I could not verify either one from files. The 8-run figure (about 3.3) was found in session texts.
+- **Not included.** The 5-run useful-run figure (about 4.0) quoted in section 9 of How this was built, which I could not verify from files. The number of dead sessions seen in the app also could not be counted from files, so it appears above only as owner-observed. The 8-run figure (about 3.3) was found in session texts.
 - **Note.** The rule rates and the scan do not match, because they count different things (section 2).

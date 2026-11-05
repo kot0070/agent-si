@@ -19,7 +19,7 @@ The current picture on November 4, 2026. The defect ledger in [How this was buil
 | Watcher | The Watcher calls its model only on an abnormal event, so a healthy project shows no model call. False guard or tamper alerts are not proven fixed. |
 | Watcher settings | The minute window can be set; the refresh interval cannot. |
 | Watcher journal | The journal is kept in memory, so it is lost when the app restarts. |
-| Tests | The README's `pytest` command shows 50 reds: 0 confirmed defects, 7 outdated tests, 4 not proven either way, and 39 that pass when their file runs alone. Details: [the full test run](evidence/full-test-run.md). |
+| Tests | The README's `pytest` command shows 50 reds: 0 confirmed defects, 9 outdated tests, 2 not proven either way, and 39 caused by running all tests in one process, which pass when their file runs alone. Details: [the full test run](evidence/full-test-run.md). |
 | Worker protocol | The Worker replies in text JSON. Native tool calls are not used. |
 | Windows build | Unsigned: Windows SmartScreen warns on first start. |
 | Layout | Some settings pages still use the top strip. Some screens are less compact than planned. The Reports look is not finished. |
