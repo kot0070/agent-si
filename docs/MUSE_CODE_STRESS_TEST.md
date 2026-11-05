@@ -19,7 +19,7 @@ Every number below comes from a script that counted session logs. Each one is ma
 | Healthy lane, end to end | 6.1 min, $0.031 | measured |
 | Dead coder still polled while the tree looked busy | about 50 min | measured |
 | Orphan console windows in one incident | 43/60 to 62/91 in about 5 min | measured |
-| Distinct Muse agents in the surviving records, up to 1 Nov (floor) | 7,079 (1,617 roots, 5,462 subagents) | measured |
+| Distinct Muse agents in the surviving records, up to 1 Nov (floor, see the note on the date) | 7,079 (1,617 roots, 5,462 subagents) | measured |
 | Muse sessions in the surviving records, up to 1 Nov (upper bound) | 4,770 | measured |
 | OpenCode sessions on this project, 27 Oct to 4 Nov, not all on Muse | 1,474 | measured |
 | Open dead sessions seen in the app | on the order of 800 to 1,000 | owner-observed |
@@ -27,6 +27,8 @@ Every number below comes from a script that counted session logs. Each one is ma
 **What the counts mean.** A run is one launched agent tree with many agents inside it, so the run counts on this page do not show how much agent work there was. The working folders of 155 runs were lost in the delete incident, but the session archives from the first day survived, along with the fresh sessions not yet archived, and the agent counts come from them. Some records have no event file, so these numbers are floors unless marked otherwise.
 
 **How 7,079 and 4,770 relate.** They are different units, and the second is not a separate total. 7,079 counts every agent id, roots and subagents. 4,770 counts the ids listed as sessions in the session stores and archives: the 1,617 roots plus 3,153 subagents that also appear there. So the 4,770 sit inside the 7,079. Both include the fresh sessions of 31 Oct and 1 Nov that were not yet archived, and neither counts Muse work on 2 Nov. The raw archives are not in this repository, so these counts cannot be recounted from here.
+
+**A note on the date.** Earlier versions of this page and of the older field report said October 25, and I corrected that on November 4. The archive holds 24 sessions dated 23:22 to 23:59 on October 25 on my Texas clock, which is already October 26 in ET and UTC. The ones that were read were preparing the plan and the build kit, not app code. The first run in the ledger started at 11:58 on October 26, and the first commit in this repository is from 12:15 that day.
 
 ## 1. Sandbox file locks ("os error 32")
 
