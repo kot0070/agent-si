@@ -2,7 +2,7 @@
 
 # How this build stress-tested Muse Code multi-agent work
 
-A field report from building Agent SI (Oct 25 – Nov 1, 2026) with dozens of
+A field report from building Agent SI (Oct 26 – Nov 1, 2026) with dozens of
 concurrent Muse Code agent trees. Everything below is measured; every number
 names its source. Where we could not verify a figure in files, it is labeled
 as owner-observed.

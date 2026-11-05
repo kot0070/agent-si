@@ -19,8 +19,8 @@ Every number below comes from a script that counted session logs. Each one is ma
 | Healthy lane, end to end | 6.1 min, $0.031 | measured |
 | Dead coder still polled while the tree looked busy | about 50 min | measured |
 | Orphan console windows in one incident | 43/60 to 62/91 in about 5 min | measured |
-| Distinct Muse agents in the surviving records, 25 Oct to 1 Nov (floor) | 7,079 (1,617 roots, 5,462 subagents) | measured |
-| Muse sessions in the surviving records, 25 Oct to 1 Nov (upper bound) | 4,770 | measured |
+| Distinct Muse agents in the surviving records, up to 1 Nov (floor) | 7,079 (1,617 roots, 5,462 subagents) | measured |
+| Muse sessions in the surviving records, up to 1 Nov (upper bound) | 4,770 | measured |
 | OpenCode sessions on this project, 27 Oct to 4 Nov, not all on Muse | 1,474 | measured |
 | Open dead sessions seen in the app | on the order of 800 to 1,000 | owner-observed |
 
