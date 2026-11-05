@@ -92,7 +92,7 @@ It looked like housekeeping. Six days later, archives like this were one reason 
 
 ## The long middle
 
-Then came days of work that make a worse story and a better app: 545 recorded Muse runs in the ledger, at least 7,079 agents through October 30, 43 lanes landed in the merge train's surviving log, and 43.7 % of work accepted on the first try.
+Then came days of work that make a worse story and a better app: 545 recorded Muse runs in the ledger, at least 7,079 agents in the surviving records up to November 1, 43 lanes landed in the merge train's surviving log, and 43.7 % of work accepted on the first try.
 
 When I clicked through the real app myself, I found what all the scripts had missed. In the end I listed 38 findings.
 
