@@ -91,6 +91,8 @@ The two lenses disagree. The scan counts `os error 32` in executed shell results
 
 **What it means for Muse Code users.** A session can be dead while its parent and siblings look busy. Progress signals need to be per session, not per tree.
 
+**Why dead sessions pile up, and what it costs (owner-observed).** Part of the pile comes from a rule that worked. An independent auditor finds more defects than an agent checking its own work, so every round gets a fresh one. Take 100 agents, say 50 workers and 50 auditors: after one round, the 50 auditors are dead sessions that are never used again. From about 800 sessions I saw agents take fewer tasks, and the PC ran like a slide show. Only archiving the sessions and restarting the PC helped. I saw this myself and could not measure it from files.
+
 ## 6. Orphan console windows
 
 During one incident (09:41), OpenConsole and conhost counts rose from 43/60 to 62/91 in about five minutes. Every lane start and hook poll opened a visible console.
